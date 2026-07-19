@@ -417,3 +417,20 @@ def test_the_recursion_limit_covers_every_bounded_retry(config):
     b = worst.budgets
     laps = b.hard_cap + b.polish_cap + b.critique_attempts + b.confirmation_attempts
     assert _recursion_limit(worst) > laps * 4
+
+
+def test_an_evidence_related_span_may_describe_the_source():
+    """The cited passage is not in the artifact by definition — requiring a quote
+    there would fail every honest citation finding, which is what a live run did."""
+    structure = report_mod.parse(REPORT)
+    issue = RawIssue(
+        category=Category.MISREPRESENTED_SOURCE,
+        severity=Severity.MAJOR,
+        locus=StructuralRef(section=1, paragraph=1),
+        claim_span="A claim that is fully supported",
+        related_span="the cited study reports a null result for this population",
+        citation_id="[1]",
+        rationale="r",
+        instruction="i",
+    )
+    triage.validate_issue(Lens.EVIDENCE, issue, structure)  # must not raise

@@ -36,7 +36,7 @@ class Budgets(BaseModel):
     min_ticks: int = Field(default=2, ge=1, le=100)
     hard_cap: int = Field(default=8, ge=2, le=200)
     polish_cap: int = Field(default=1, ge=0, le=20)
-    critique_attempts: int = Field(default=6, ge=0, le=100)
+    critique_attempts: int = Field(default=12, ge=0, le=100)
     confirmation_attempts: int = Field(default=6, ge=0, le=100)
     stagnation_limit: int = Field(default=3, ge=1, le=100)
     cycle_period: int = Field(default=4, ge=1, le=100)

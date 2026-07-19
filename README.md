@@ -84,6 +84,12 @@ Point `proxy.base_url` at any OpenAI-compatible endpoint. If yours needs a key, 
 A known-unacceptable artifact is never labelled `accepted` or `converged_unconfirmed` — that is a
 tested property, not a convention.
 
+**What to expect in practice.** With a strict roster, `accepted` is uncommon: a second reviewer on
+a lens usually finds something the first did not, and each rewrite gives the next round new text to
+object to. Runs that reach the cap ship the *best-scoring* draft, not the last one, with the
+outstanding defects listed in `final.json`. Raise `hard_cap`, or narrow the question, if you want
+more convergence pressure.
+
 **Known limitations (v1).** There is no external retrieval. The evidence lens challenges uncited
 claims, on-its-face misrepresentation, and implausible citations *within* the artifact. Output is
 labelled *consensus-reviewed with in-artifact sourcing* — not fact-checked.

@@ -40,6 +40,12 @@ class LensValidationError(ValueError):
     """An issue violated the closed schema for its lens. Fails the whole lens."""
 
 
+#: Categories whose `related_span` must itself be text from the artifact.
+IN_ARTIFACT_RELATED = frozenset(
+    {Category.CONTRADICTED_CLAIM, Category.INVALID_INFERENCE, Category.OVERSTATED_CLAIM}
+)
+
+
 def _normalize(text: str) -> str:
     """Whitespace- and case-insensitive, with markdown emphasis stripped, so an
     honest quote survives reformatting while an invented one does not."""
@@ -64,15 +70,25 @@ def validate_issue(
         # the offending text"). Anchoring them to the artifact means a critic can
         # only forward words the report already contains.
         paragraph = structure.text_at(issue.locus) or ""
-        _require_quote(issue.claim_span, _normalize(paragraph), "claim_span", issue.locus)
-        if issue.related_span is not None:
-            # `related_span` is the contradicting claim or the cited passage, so it
-            # may live anywhere in the artifact, not only at this locus.
-            _require_quote(issue.related_span, _normalize(structure.full_text), "related_span",
-                           issue.locus)
+        _require_quote(
+            issue.claim_span, _normalize(paragraph), "claim_span", issue.locus, "cited paragraph"
+        )
+        if issue.related_span is not None and issue.category in IN_ARTIFACT_RELATED:
+            # For a contradiction or a bad inference, both halves are in the report,
+            # so the second quote is checked against the whole artifact. For the
+            # evidence categories `related_span` describes the *source* — text that
+            # by definition is not in the artifact — so requiring a quote there
+            # would fail every honest citation finding.
+            _require_quote(
+                issue.related_span,
+                _normalize(structure.full_text),
+                "related_span",
+                issue.locus,
+                "artifact",
+            )
 
 
-def _require_quote(span: str, haystack: str, field: str, locus) -> None:
+def _require_quote(span: str, haystack: str, field: str, locus, scope: str) -> None:
     needle = _normalize(span)
     if not needle:
         # "*" or "``" satisfy the schema's min_length but normalize away, and the
@@ -80,7 +96,7 @@ def _require_quote(span: str, haystack: str, field: str, locus) -> None:
         raise LensValidationError(f"{field} at {locus} contains no quotable text")
     if needle not in haystack:
         raise LensValidationError(
-            f"{field} at {locus} is not a verbatim quote from the artifact"
+            f"{field} at {locus} is not a verbatim quote from the {scope}"
         )
 
 
