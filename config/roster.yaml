@@ -1,0 +1,49 @@
+# Role-structured roster (docs/architecture.md).
+#
+# writers  — models that author reports (round-robin, never the previous author)
+# critics  — per-lens pools; a model may be critic-only (never a writer), which is
+#            the clean way to satisfy author-exclusion. Each lens wants >=2 eligible
+#            NON-AUTHOR models for a strong `accepted`.
+#
+# Aliases are LiteLLM proxy aliases; their resolved provider/model is fetched from
+# the proxy at startup and distinctness is enforced at that level (RA-017).
+
+proxy:
+  base_url: https://llm.featherback-mermaid.ts.net/v1
+  api_key_env: LITELLM_API_KEY
+  api_key_fallback: fake-key
+
+roster:
+  writers:
+    - claude-haiku-4-5
+    - gpt-5.4-mini
+
+  critics:
+    logic:
+      - qwen3.7-max          # critic-only specialist: strong reasoner
+      - gpt-5.4-mini
+      - claude-haiku-4-5
+    evidence:
+      - llama-4-scout        # critic-only specialist: huge context, scans citations
+      - claude-haiku-4-5
+      - gpt-5.4-mini
+    completeness:
+      - gemma4               # critic-only specialist: third family
+      - gpt-5.4-mini
+      - claude-haiku-4-5
+
+budgets:
+  min_ticks: 2
+  hard_cap: 8
+  polish_cap: 1
+  critique_attempts: 12
+  confirmation_attempts: 6
+  stagnation_limit: 3
+  cycle_period: 4
+  repair_retries: 1
+  call_retries: 2
+  timeout_seconds: 300
+  max_concurrency: 3
+
+runs_dir: runs
+retention_days: 14
