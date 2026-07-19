@@ -75,6 +75,13 @@ class RunStore:
     def event(self, kind: str, **fields: Any) -> None:
         self._append("events.jsonl", {"ts": time.time(), "kind": kind, **fields})
 
+    def question(self, question: str, seed: str | None = None) -> None:
+        """Recorded up front so a queued run is identifiable before the graph has
+        produced anything."""
+        self._write(Path("question.txt"), question)
+        if seed:
+            self._write(Path("seed.md"), seed)
+
     def report(self, round_no: int, artifact_hash: str, text: str, author: str) -> None:
         name = f"r{round_no:02d}-{artifact_hash[:12]}.md"
         self._write(Path("reports") / name, f"<!-- author: {author} -->\n\n{text}")

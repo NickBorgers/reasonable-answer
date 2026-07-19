@@ -13,11 +13,19 @@ dependencies = [
     "rich>=13.9.0",
 ]
 
+[project.optional-dependencies]
+web = [
+    "fastapi>=0.115.0",
+    "uvicorn[standard]>=0.32.0",
+    "python-multipart>=0.0.9",
+]
+
 [project.scripts]
 ra = "reasonable_answer.cli:app"
 
 [dependency-groups]
 dev = [
+    "httpx>=0.28.1",
     "pytest>=8.3.0",
     "pytest-cov>=6.0.0",
 ]
@@ -28,6 +36,11 @@ build-backend = "hatchling.build"
 
 [tool.hatch.build.targets.wheel]
 packages = ["src/reasonable_answer"]
+
+# The default roster travels inside the wheel; without it an installed package has
+# no working config and every command fails on a path that only exists in a checkout.
+[tool.hatch.build.targets.wheel.force-include]
+"config/roster.yaml" = "reasonable_answer/_default_roster.yaml"
 
 [tool.pytest.ini_options]
 testpaths = ["tests"]

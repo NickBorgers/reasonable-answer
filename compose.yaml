@@ -1,0 +1,34 @@
+# Assumes the host can already reach the LiteLLM proxy — on this network that means
+# the host is on the tailnet. Nothing here configures that.
+#
+# The app has NO authentication. Keep the published port off any public interface.
+#
+#   docker compose up -d
+
+services:
+  ra:
+    build: .
+    image: reasonable-answer:latest
+    restart: unless-stopped
+    ports:
+      - "127.0.0.1:8080:8080"
+    volumes:
+      # Audit trail + SQLite checkpoints. Without this, runs and resumability die
+      # with the container. A named volume avoids the root-owned bind mount problem.
+      - ra-runs:/data/runs
+      # Edit the roster without rebuilding the image.
+      - ./config/roster.yaml:/etc/ra/roster.yaml:ro
+    environment:
+      # Every concurrent run multiplies load on one proxy; the local models in the
+      # roster are the bottleneck the design is built around.
+      RA_MAX_CONCURRENT_RUNS: "1"
+      # Only needed if the proxy is behind auth.
+      # LITELLM_API_KEY: ${LITELLM_API_KEY}
+    healthcheck:
+      test: ["CMD", "python", "-c", "import urllib.request;urllib.request.urlopen('http://127.0.0.1:8080/healthz',timeout=2)"]
+      interval: 30s
+      timeout: 3s
+      retries: 3
+
+volumes:
+  ra-runs:

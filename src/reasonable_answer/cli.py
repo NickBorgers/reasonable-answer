@@ -92,6 +92,35 @@ def doctor(
 
 
 @app.command()
+def serve(
+    host: str = typer.Option("127.0.0.1", "--host", help="Bind address. Use 0.0.0.0 in a container."),
+    port: int = typer.Option(8080, "--port"),
+    config_path: Path | None = typer.Option(None, "--config", "-c"),
+    concurrent: int = typer.Option(1, "--concurrent", help="Runs executed at once."),
+    verbose: bool = typer.Option(False, "--verbose", "-v"),
+) -> None:
+    """Serve the web interface.
+
+    There is no authentication: the intended posture is tailnet-only, with Tailscale
+    ACLs as the access control. Anyone who can reach this can spend tokens and read
+    every stored run, so do not bind it to a public interface.
+    """
+    _setup_logging(verbose)
+    import uvicorn
+
+    from .web import create_app
+
+    config = Config.load(config_path)
+    if host not in ("127.0.0.1", "localhost", "::1"):
+        console.print(
+            f"[yellow]note:[/yellow] binding {host}:{port} with no authentication — "
+            f"make sure this interface is not publicly reachable"
+        )
+    console.print(f"serving on http://{host}:{port}  (runs dir: {config.runs_dir})")
+    uvicorn.run(create_app(config, max_concurrent=concurrent), host=host, port=port)
+
+
+@app.command()
 def purge(
     run_id: str = typer.Argument(..., help="Run id to purge."),
     content_only: bool = typer.Option(

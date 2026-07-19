@@ -19,7 +19,29 @@ from pydantic import BaseModel, ConfigDict, Field, model_validator
 
 from .taxonomy import LENSES, Lens
 
-DEFAULT_CONFIG_PATH = Path(__file__).resolve().parents[2] / "config" / "roster.yaml"
+#: Shipped inside the wheel (see pyproject force-include), so an installed package
+#: has a working default even with no source tree around it.
+PACKAGED_CONFIG = Path(__file__).resolve().parent / "_default_roster.yaml"
+
+#: Searched in order. The source-tree path keeps `uv run ra ...` working from a
+#: checkout; `RA_CONFIG` and /etc/ra are how a container gets its roster mounted in.
+CONFIG_SEARCH_PATH: tuple[Path, ...] = (
+    Path("config/roster.yaml"),
+    Path("/etc/ra/roster.yaml"),
+    PACKAGED_CONFIG,
+)
+
+
+def default_config_path() -> Path:
+    """First existing candidate, honouring $RA_CONFIG. Never a path that only
+    resolves inside a source checkout — that broke every containerized run."""
+    override = os.environ.get("RA_CONFIG")
+    if override:
+        return Path(override)
+    for candidate in CONFIG_SEARCH_PATH:
+        if candidate.exists():
+            return candidate
+    return PACKAGED_CONFIG
 
 
 class ConfigError(RuntimeError):
@@ -119,9 +141,12 @@ class Config(BaseModel):
 
     @classmethod
     def load(cls, path: str | Path | None = None) -> Config:
-        p = Path(path) if path else DEFAULT_CONFIG_PATH
+        p = Path(path) if path else default_config_path()
         if not p.exists():
-            raise ConfigError(f"config file not found: {p}")
+            raise ConfigError(
+                f"config file not found: {p}\n"
+                f"searched: $RA_CONFIG, {', '.join(str(c) for c in CONFIG_SEARCH_PATH)}"
+            )
         data = yaml.safe_load(p.read_text()) or {}
         return cls.model_validate(data)
 
