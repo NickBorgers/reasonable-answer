@@ -1,0 +1,268 @@
+---
+name: Run an agent prompt in the CI image
+description: >
+  Runs a Claude Code or Codex prompt inside the CI agent image against a checked-out
+  workspace. One composite covers both agents, selected by the `agent` input — the
+  pipeline runs different roles on different models deliberately, so that a blind spot
+  in one model family does not silently clear a whole review.
+
+  The prompt is read from a standalone markdown file and is NEVER inlined into YAML, so
+  editing a reviewer's instructions is a plain markdown diff with no escaping concerns.
+
+  Every container-topology knob lives in this one action: uid mismatch handling, the
+  safe.directory config, --network host for tailnet reachability, and the ownership
+  reset afterwards.
+
+inputs:
+  agent:
+    description: 'Which CLI to run: claude | codex'
+    required: true
+  role:
+    description: 'Role label used in artifact filenames (e.g. "invariant")'
+    required: true
+  prompt_path:
+    description: Repo-relative path to the standalone prompt markdown file
+    required: true
+  image:
+    description: CI agent image reference
+    required: true
+  workspace_folder:
+    description: Workspace folder containing the checkout, relative to $GITHUB_WORKSPACE
+    required: true
+  pr_number:
+    description: PR number being reviewed
+    required: true
+  reviewed_sha:
+    description: Frozen reviewed SHA (40-char hex)
+    required: true
+  base_ref:
+    description: Base branch the PR targets
+    required: false
+    default: main
+  cycle:
+    description: Pipeline cycle number for this run
+    required: true
+  workflow_pat:
+    description: PAT used as GH_TOKEN inside the container
+    required: true
+  llm_proxy_base_url:
+    description: Base URL of the LiteLLM proxy for the Anthropic-compatible path
+    required: false
+    default: ''
+  llm_proxy_openai_base_url:
+    description: Base URL of the LiteLLM proxy for the OpenAI-compatible path
+    required: false
+    default: ''
+  llm_proxy_api_key:
+    description: API key for the proxy (tailnet-ACL'd proxies accept a placeholder)
+    required: false
+    default: 'fake-key'
+  model:
+    description: Model to request from the proxy (defaults to the CLI's own default)
+    required: false
+    default: ''
+  timeout_minutes:
+    description: Hard timeout for the agent invocation
+    required: false
+    default: '30'
+  extra_env:
+    description: 'Additional KEY=VALUE pairs (newline-separated) to forward'
+    required: false
+    default: ''
+
+outputs:
+  output_artifact:
+    description: Host path to the captured agent output log
+    value: ${{ steps.paths.outputs.output_artifact }}
+  result_json:
+    description: Host path to the structured JSON artifact the prompt wrote
+    value: ${{ steps.paths.outputs.result_json }}
+
+runs:
+  using: composite
+  steps:
+    - name: Pre-create output directory
+      shell: bash
+      env:
+        WORKSPACE_FOLDER: ${{ inputs.workspace_folder }}
+      run: |
+        set -euo pipefail
+        # The runner user (typically uid 1001) creates this directory but the container
+        # writes into it as `ci` (uid 1000). Without world-write every agent fails with
+        # a permission error on its own result file, and then improvises around it with
+        # sudo, which mostly makes things worse.
+        OUTPUT_DIR="${GITHUB_WORKSPACE}/${WORKSPACE_FOLDER}/.review-output"
+        mkdir -p "$OUTPUT_DIR"
+        chmod 777 "$OUTPUT_DIR"
+
+    - name: Log in to GHCR
+      shell: bash
+      env:
+        GHCR_USERNAME: ${{ github.actor }}
+        GHCR_TOKEN: ${{ github.token }}
+      run: printf '%s' "$GHCR_TOKEN" | docker login ghcr.io -u "$GHCR_USERNAME" --password-stdin
+
+    - name: Ensure CI image
+      shell: bash
+      run: ./scripts/ensure-ci-image.sh "${{ inputs.image }}"
+
+    - name: Fetch current PR metadata
+      id: pr-meta
+      shell: bash
+      env:
+        GH_TOKEN: ${{ inputs.workflow_pat }}
+        REPO: ${{ github.repository }}
+        PR_NUMBER: ${{ inputs.pr_number }}
+      run: |
+        set -euo pipefail
+        # Read title and body now rather than trusting whatever the triggering event
+        # carried, so a reviewer's scope check sees the PR as it currently reads.
+        PR_JSON=$(gh api "repos/${REPO}/pulls/${PR_NUMBER}")
+        # base64 so newlines in the body survive the env file intact.
+        echo "pr_title_b64=$(echo "$PR_JSON" | jq -r '.title // ""' | base64 -w0)" >> "$GITHUB_OUTPUT"
+        echo "pr_body_b64=$(echo "$PR_JSON" | jq -r '.body // ""' | base64 -w0)" >> "$GITHUB_OUTPUT"
+
+    - name: Stage env file
+      id: stage-env
+      shell: bash
+      env:
+        AGENT: ${{ inputs.agent }}
+        ROLE: ${{ inputs.role }}
+        PROMPT_PATH: ${{ inputs.prompt_path }}
+        PR_NUMBER: ${{ inputs.pr_number }}
+        REVIEWED_SHA: ${{ inputs.reviewed_sha }}
+        BASE_REF: ${{ inputs.base_ref }}
+        CYCLE: ${{ inputs.cycle }}
+        WORKFLOW_PAT: ${{ inputs.workflow_pat }}
+        PROXY_ANTHROPIC: ${{ inputs.llm_proxy_base_url }}
+        PROXY_OPENAI: ${{ inputs.llm_proxy_openai_base_url }}
+        PROXY_KEY: ${{ inputs.llm_proxy_api_key }}
+        MODEL: ${{ inputs.model }}
+        TIMEOUT_MINUTES: ${{ inputs.timeout_minutes }}
+        EXTRA_ENV: ${{ inputs.extra_env }}
+        REPO: ${{ github.repository }}
+        PR_TITLE_B64: ${{ steps.pr-meta.outputs.pr_title_b64 }}
+        PR_BODY_B64: ${{ steps.pr-meta.outputs.pr_body_b64 }}
+      run: |
+        set -euo pipefail
+
+        case "$AGENT" in
+          claude|codex) ;;
+          *) echo "::error::review-agent-run: unknown agent '$AGENT'"; exit 1 ;;
+        esac
+
+        STAGING_DIR="${RUNNER_TEMP:-/tmp}/ci-agent"
+        mkdir -p "$STAGING_DIR"
+        ENV_FILE="$(mktemp "${STAGING_DIR}/env.XXXXXX")"
+
+        # Secrets go in a mode-600 env file rather than on the `docker run` command
+        # line, where they would be visible in the process table.
+        {
+          echo "CI_AGENT=${AGENT}"
+          echo "GH_TOKEN=${WORKFLOW_PAT}"
+          echo "REVIEW_ROLE=${ROLE}"
+          echo "REVIEW_PROMPT_PATH=${PROMPT_PATH}"
+          echo "PR_NUMBER=${PR_NUMBER}"
+          echo "REVIEWED_SHA=${REVIEWED_SHA}"
+          echo "BASE_REF=${BASE_REF}"
+          echo "CYCLE=${CYCLE}"
+          echo "AGENT_TIMEOUT_MINUTES=${TIMEOUT_MINUTES}"
+          echo "AGENT_MODEL=${MODEL}"
+          echo "RESULT_PATH=.review-output/${ROLE}-result.json"
+          echo "OUTPUT_LOG_PATH=.review-output/${ROLE}-output.log"
+          echo "REPO=${REPO}"
+          echo "PR_TITLE_B64=${PR_TITLE_B64}"
+          echo "PR_BODY_B64=${PR_BODY_B64}"
+        } > "$ENV_FILE"
+
+        # Forward only the active agent's credentials. The other agent's variables are
+        # not merely unnecessary — a CLI that finds credentials for a provider it was
+        # not asked to use will sometimes prefer them.
+        if [ "$AGENT" = "claude" ]; then
+          {
+            echo "ANTHROPIC_API_KEY=${PROXY_KEY}"
+            [ -n "$PROXY_ANTHROPIC" ] && echo "ANTHROPIC_BASE_URL=${PROXY_ANTHROPIC}"
+          } >> "$ENV_FILE"
+        else
+          {
+            echo "OPENAI_API_KEY=${PROXY_KEY}"
+            [ -n "$PROXY_OPENAI" ] && echo "OPENAI_BASE_URL=${PROXY_OPENAI}"
+          } >> "$ENV_FILE"
+        fi
+
+        if [ -n "$EXTRA_ENV" ]; then
+          printf '%s\n' "$EXTRA_ENV" | grep -Ev '^\s*(#|$)' >> "$ENV_FILE" || true
+        fi
+
+        chmod 600 "$ENV_FILE"
+        echo "env_file=$ENV_FILE" >> "$GITHUB_OUTPUT"
+
+    - name: Run agent
+      shell: bash
+      env:
+        CI_AGENT_IMAGE: ${{ inputs.image }}
+        CI_AGENT_ENV_FILE: ${{ steps.stage-env.outputs.env_file }}
+        WORKSPACE_FOLDER: ${{ inputs.workspace_folder }}
+      run: |
+        set -euo pipefail
+
+        WORKSPACE_HOST="${GITHUB_WORKSPACE}/${WORKSPACE_FOLDER}"
+        # The runner script comes from the checkout this action lives in, mounted
+        # read-only and separately from the workspace, so a PR cannot alter the script
+        # that runs its own review.
+        CONTAINER_SCRIPT="${GITHUB_WORKSPACE}/.github/actions/review-agent-run/run-in-container.sh"
+
+        # --network host: the container reaches the LiteLLM proxy over the runner's
+        #   tailnet connection. Nothing else grants that reachability.
+        # GIT_CONFIG_*: marks /workspace as a safe.directory without writing a config
+        #   file. The bind-mounted .git is owned by the runner uid while the container
+        #   runs as uid 1000, so without this every `git diff` inside the container
+        #   fails with "detected dubious ownership" and the agent burns turns on it.
+        docker run --rm \
+          --network host \
+          --workdir /workspace \
+          -v "$WORKSPACE_HOST:/workspace" \
+          -v "$CONTAINER_SCRIPT:/run-in-container.sh:ro" \
+          --env-file "$CI_AGENT_ENV_FILE" \
+          -e GIT_CONFIG_COUNT=1 \
+          -e GIT_CONFIG_KEY_0=safe.directory \
+          -e GIT_CONFIG_VALUE_0=/workspace \
+          "$CI_AGENT_IMAGE" \
+          -lc '/run-in-container.sh'
+
+    - name: Reset workspace ownership
+      # The container writes as uid 1000; the runner is a different uid. Those files
+      # persist across jobs, and the next job's checkout then fails on .git/index.lock
+      # with a permission error that has nothing to do with the change being reviewed.
+      # `always()` because a failed agent run leaves exactly the same mess.
+      if: always()
+      shell: bash
+      env:
+        WORKSPACE_FOLDER: ${{ inputs.workspace_folder }}
+      run: |
+        set -euo pipefail
+        WORKSPACE_HOST="${GITHUB_WORKSPACE}/${WORKSPACE_FOLDER}"
+        if [ -d "$WORKSPACE_HOST" ]; then
+          sudo chown -R "$(id -u):$(id -g)" "$WORKSPACE_HOST"
+        fi
+
+    - name: Clean up staged env file
+      if: always()
+      shell: bash
+      env:
+        CI_AGENT_ENV_FILE: ${{ steps.stage-env.outputs.env_file }}
+      run: rm -f "$CI_AGENT_ENV_FILE"
+
+    - name: Echo result paths
+      id: paths
+      shell: bash
+      env:
+        ROLE: ${{ inputs.role }}
+        WORKSPACE_FOLDER: ${{ inputs.workspace_folder }}
+      run: |
+        set -euo pipefail
+        BASE="${GITHUB_WORKSPACE}/${WORKSPACE_FOLDER}/.review-output"
+        {
+          echo "output_artifact=${BASE}/${ROLE}-output.log"
+          echo "result_json=${BASE}/${ROLE}-result.json"
+        } >> "$GITHUB_OUTPUT"

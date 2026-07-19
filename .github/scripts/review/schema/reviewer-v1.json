@@ -1,0 +1,119 @@
+{
+  "$schema": "https://json-schema.org/draft/2020-12/schema",
+  "$id": "https://github.com/NickBorgers/reasonable-answer/.github/scripts/review/schema/reviewer-v1.json",
+  "title": "Reviewer Artifact v1",
+  "description": "Structured output produced by a single reviewer role. This is the contract between reviewers and the read-only judge stage implemented by aggregate.mjs. The judge consumes ONLY these artifacts; it never reads PR comments or PR reviews. A reviewer that wants a human's inline comment to block must ingest it via `gh api` and fold it into blocking_issues[] with source: \"inline_comment\". See docs/ci-pipeline.md.",
+  "type": "object",
+  "additionalProperties": false,
+  "required": [
+    "schema_version",
+    "role",
+    "reviewed_sha",
+    "cycle",
+    "decision",
+    "summary",
+    "blocking_issues",
+    "non_blocking_notes",
+    "fix_suggestions",
+    "followup_issues"
+  ],
+  "properties": {
+    "schema_version": { "const": "1" },
+    "role": {
+      "type": "string",
+      "description": "Adding a role here is a two-step change: reviewer artifacts are validated against main's copy of this schema, so the new value must be merged to main before a PR can emit it.",
+      "enum": ["invariant", "security", "test"]
+    },
+    "reviewed_sha": {
+      "type": "string",
+      "pattern": "^[0-9a-f]{40}$"
+    },
+    "cycle": {
+      "type": "integer",
+      "minimum": 1
+    },
+    "decision": {
+      "type": "string",
+      "enum": ["approve", "request_changes", "comment", "abstain"]
+    },
+    "summary": {
+      "type": "string",
+      "maxLength": 500
+    },
+    "blocking_issues": {
+      "type": "array",
+      "items": {
+        "type": "object",
+        "additionalProperties": false,
+        "required": ["id", "severity", "message"],
+        "properties": {
+          "id": { "type": "string", "minLength": 1 },
+          "severity": { "type": "string", "enum": ["critical", "high", "medium"] },
+          "file": { "type": ["string", "null"] },
+          "line": { "type": ["integer", "null"], "minimum": 1 },
+          "message": { "type": "string", "minLength": 1 },
+          "category": { "type": ["string", "null"] },
+          "decision_ref": {
+            "type": ["string", "null"],
+            "description": "The design-doc decision or finding this blocker cites, e.g. \"D6\" or \"RA-014\". The invariant reviewer is expected to populate this: a blocker that cannot name the contract it violates is usually an opinion."
+          },
+          "source": {
+            "type": "string",
+            "enum": ["reviewer", "inline_comment"],
+            "description": "How this blocker was discovered. `inline_comment` means the reviewer ingested a human's inline PR comment."
+          }
+        }
+      }
+    },
+    "non_blocking_notes": {
+      "type": "array",
+      "items": {
+        "type": "object",
+        "additionalProperties": false,
+        "required": ["message"],
+        "properties": {
+          "file": { "type": ["string", "null"] },
+          "line": { "type": ["integer", "null"], "minimum": 1 },
+          "message": { "type": "string", "minLength": 1 }
+        }
+      }
+    },
+    "fix_suggestions": {
+      "type": "array",
+      "items": {
+        "type": "object",
+        "additionalProperties": false,
+        "required": ["id", "applicable", "patch_hint", "confidence"],
+        "properties": {
+          "id": {
+            "type": "string",
+            "minLength": 1,
+            "description": "Should match the id of a blocking_issues[] or non_blocking_notes[] entry when this suggestion addresses one."
+          },
+          "applicable": { "type": "string", "enum": ["mechanical", "manual"] },
+          "patch_hint": { "type": "string", "minLength": 1 },
+          "confidence": { "type": "number", "minimum": 0, "maximum": 1 }
+        }
+      }
+    },
+    "followup_issues": {
+      "type": "array",
+      "description": "Tightly-scoped follow-up issues a human may choose to open. Loose scoping risks an issue/PR loop.",
+      "items": {
+        "type": "object",
+        "additionalProperties": false,
+        "required": ["title", "body"],
+        "properties": {
+          "title": { "type": "string", "minLength": 1, "maxLength": 80 },
+          "body": { "type": "string", "minLength": 1 },
+          "labels": {
+            "type": "array",
+            "items": { "type": "string", "minLength": 1 }
+          }
+        }
+      }
+    },
+    "tokens_used": { "type": "integer", "minimum": 0 },
+    "duration_seconds": { "type": "integer", "minimum": 0 }
+  }
+}

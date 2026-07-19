@@ -1,0 +1,245 @@
+name: PR Validation
+
+# The fast, secret-free gate on every PR.
+#
+# This repo's test suite is entirely offline — a scriptable fake proxy drives the whole
+# graph, so no network and no API keys are needed. That is why every job here runs on
+# GitHub-hosted `ubuntu-latest` with read-only permissions and zero secrets: nothing in
+# this workflow can leak a credential, because none is present.
+#
+# Security model:
+#   * ubuntu-latest runners are ephemeral, so untrusted PR code is safe to execute.
+#   * Permissions are read-only for the whole workflow.
+#   * Fork PRs are blocked (same-repo-only policy).
+#
+# INVARIANT: every job must either transitively depend on `changes` (which blocks forks)
+# or repeat the fork check in its own `if:`. `validate-all` uses `if: always()`, which
+# bypasses needs-based skipping, so it carries the check inline.
+
+on:
+  pull_request:
+    branches: ['**']
+  workflow_dispatch:
+
+concurrency:
+  group: pr-validation-${{ github.event.pull_request.head.ref || github.ref_name }}-${{ github.event.pull_request.head.sha || github.sha }}
+  cancel-in-progress: true
+
+permissions:
+  contents: read
+  pull-requests: read
+
+env:
+  # Deselects the `live` marker declared in pyproject.toml, for tests that hit the real
+  # LiteLLM proxy on the tailnet — which a GitHub-hosted runner cannot reach.
+  #
+  # No test carries that marker today, so this currently selects everything. It is here
+  # so that the first genuinely live test does not turn the required check red on every
+  # PR; the test reviewer enforces that such a test must be marked.
+  PYTEST_SELECTION: -m "not live"
+
+jobs:
+  changes:
+    name: Detect Changes
+    runs-on: ubuntu-latest
+    if: github.event_name != 'pull_request' || github.event.pull_request.head.repo.full_name == github.repository
+    outputs:
+      python: ${{ steps.filter.outputs.python }}
+      deps: ${{ steps.filter.outputs.deps }}
+      workflows: ${{ steps.filter.outputs.workflows }}
+      docker: ${{ steps.filter.outputs.docker }}
+      review_scripts: ${{ steps.filter.outputs.review_scripts }}
+    steps:
+      - uses: actions/checkout@v4
+
+      - uses: dorny/paths-filter@v3
+        id: filter
+        with:
+          filters: |
+            python:
+              - 'src/**'
+              - 'tests/**'
+              - 'pyproject.toml'
+              - 'uv.lock'
+              - 'config/**'
+            deps:
+              - 'pyproject.toml'
+              - 'uv.lock'
+            workflows:
+              - '.github/**'
+              - 'scripts/**'
+            docker:
+              - 'Dockerfile'
+              - '.dockerignore'
+              - 'compose.yaml'
+              - 'src/**'
+              - 'pyproject.toml'
+              - 'uv.lock'
+              - 'config/**'
+            review_scripts:
+              - '.github/scripts/review/**'
+
+  lint:
+    name: Ruff
+    needs: changes
+    if: needs.changes.outputs.python == 'true'
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+
+      - uses: astral-sh/setup-uv@v5
+        with:
+          enable-cache: true
+          cache-dependency-glob: uv.lock
+
+      - run: uv sync --frozen --extra web --group dev
+
+      - run: uv run ruff check src/ tests/
+
+  tests:
+    name: Tests
+    needs: changes
+    if: needs.changes.outputs.python == 'true'
+    runs-on: ubuntu-latest
+    strategy:
+      fail-fast: false
+      matrix:
+        # 3.11 is the floor declared in requires-python; 3.12 is what the runtime image
+        # ships. Testing exactly the floor and the shipped version is the minimum that
+        # carries meaning.
+        python-version: ['3.11', '3.12']
+    steps:
+      - uses: actions/checkout@v4
+
+      - uses: astral-sh/setup-uv@v5
+        with:
+          enable-cache: true
+          cache-dependency-glob: uv.lock
+
+      - name: Run the offline suite
+        run: uv run --python ${{ matrix.python-version }} --extra web --group dev
+          pytest ${{ env.PYTEST_SELECTION }} --cov=reasonable_answer --cov-report=term-missing
+
+  lockfile:
+    name: Lockfile
+    needs: changes
+    if: needs.changes.outputs.deps == 'true'
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+
+      - uses: astral-sh/setup-uv@v5
+
+      # Everything else installs with --frozen, which silently accepts a stale lock.
+      # This is the one place a pyproject.toml edit that forgot to relock gets caught.
+      - name: Verify uv.lock matches pyproject.toml
+        run: uv lock --check
+
+  workflows:
+    name: Workflow Validation
+    needs: changes
+    if: needs.changes.outputs.workflows == 'true'
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+
+      - name: Install actionlint
+        run: |
+          ACTIONLINT_VERSION=1.7.7
+          ARCHIVE="actionlint_${ACTIONLINT_VERSION}_linux_amd64.tar.gz"
+          CHECKSUMS="actionlint_${ACTIONLINT_VERSION}_checksums.txt"
+          BASE_URL="https://github.com/rhysd/actionlint/releases/download/v${ACTIONLINT_VERSION}"
+          TMP_DIR="$(mktemp -d)"
+          trap 'rm -rf "$TMP_DIR"' EXIT
+
+          curl -fsSL "${BASE_URL}/${ARCHIVE}" -o "${TMP_DIR}/${ARCHIVE}"
+          curl -fsSL "${BASE_URL}/${CHECKSUMS}" -o "${TMP_DIR}/${CHECKSUMS}"
+          (
+            cd "${TMP_DIR}"
+            grep " ${ARCHIVE}$" "${CHECKSUMS}" | sha256sum -c -
+          )
+          sudo tar -xzf "${TMP_DIR}/${ARCHIVE}" -C /usr/local/bin actionlint
+
+      - run: actionlint
+
+      # actionlint does not resolve local `uses: ./...` paths, so a composite that was
+      # renamed or never committed passes lint and then fails at runtime with a
+      # startup_failure and no logs.
+      - run: ./scripts/validate-workflow-refs.sh
+
+  review-scripts:
+    name: Review Script Tests
+    needs: changes
+    if: needs.changes.outputs.review_scripts == 'true'
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+
+      - uses: actions/setup-node@v4
+        with:
+          node-version: '20'
+
+      # The judge's aggregation logic is the one piece of the review pipeline that is
+      # pure, deterministic, and decides whether a PR can merge. It gets unit tests.
+      # Explicit glob rather than a directory argument: passing a directory to
+      # `node --test` resolves it as a module and fails on newer Node.
+      - run: node --test .github/scripts/review/*.test.mjs
+
+  docker-build:
+    name: Docker Build
+    needs: changes
+    if: needs.changes.outputs.docker == 'true'
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+
+      - uses: docker/setup-buildx-action@v3
+
+      # Build only — no push, no registry credentials. Catches `uv sync --frozen`
+      # breaking inside the image before it reaches main.
+      - uses: docker/build-push-action@v6
+        with:
+          context: .
+          push: false
+          load: true
+          tags: reasonable-answer:pr
+          cache-from: type=gha
+          cache-to: type=gha,mode=max
+
+      - name: Smoke-test the built image
+        run: ./scripts/smoke-test-image.sh reasonable-answer:pr
+
+  validate-all:
+    name: PR Validation Required
+    runs-on: ubuntu-latest
+    needs: [changes, lint, tests, lockfile, workflows, review-scripts, docker-build]
+    # `always()` bypasses needs-based skipping, so the fork check is repeated here.
+    if: always() && (github.event_name != 'pull_request' || github.event.pull_request.head.repo.full_name == github.repository)
+    steps:
+      - name: Aggregate results
+        run: |
+          # `skipped` counts as a pass: the jobs above are path-filtered, so a docs-only
+          # PR legitimately skips all of them and must still be mergeable.
+          check() {
+            local name=$1 result=$2
+            printf '  %-24s %s\n' "$name" "$result"
+            [[ "$result" == "success" || "$result" == "skipped" ]]
+          }
+
+          failed=false
+          echo "Job results:"
+          check "Detect Changes"      "${{ needs.changes.result }}"       || failed=true
+          check "Ruff"                "${{ needs.lint.result }}"          || failed=true
+          check "Tests"               "${{ needs.tests.result }}"         || failed=true
+          check "Lockfile"            "${{ needs.lockfile.result }}"      || failed=true
+          check "Workflow Validation" "${{ needs.workflows.result }}"     || failed=true
+          check "Review Scripts"      "${{ needs.review-scripts.result }}" || failed=true
+          check "Docker Build"        "${{ needs.docker-build.result }}"  || failed=true
+
+          if [ "$failed" = true ]; then
+            echo
+            echo "PR validation failed."
+            exit 1
+          fi
+          echo
+          echo "PR validation passed."

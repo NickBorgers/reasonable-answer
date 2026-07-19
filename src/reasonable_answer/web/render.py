@@ -260,7 +260,7 @@ def _lens_row(r: RoundSnapshot, lens: str) -> str:
             f'<span class="verdict bad" title="{esc(snap.failure_reason)}">lens failed</span></div>'
         )
     verdict = (
-        f'<span class="verdict good">clean</span>'
+        '<span class="verdict good">clean</span>'
         if snap.issues == 0
         else f'<span class="verdict">{snap.issues} issue{"s" if snap.issues != 1 else ""}</span>'
     )

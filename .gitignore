@@ -6,3 +6,8 @@ __pycache__/
 htmlcov/
 # run output contains seed material, drafts and critiques — never commit it
 runs/
+
+# scratch directories the CI agents write into the workspace
+.review-output/
+.review-prompt/
+.agent-prompt/

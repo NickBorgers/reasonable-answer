@@ -16,12 +16,13 @@ import logging
 import uuid
 from concurrent.futures import ThreadPoolExecutor
 from dataclasses import dataclass, field
-from typing import Annotated, Any, TypedDict
+from typing import Any, TypedDict
 
 from langgraph.graph import END, START, StateGraph
 from pydantic import ValidationError
 
-from . import prompts, report as report_mod, roles, triage
+from . import prompts, roles, triage
+from . import report as report_mod
 from .config import Config, ConfigError, validate_roster_health
 from .controller import acceptance_state, decide, detect_cycle
 from .llm import LLMClient, MalformedOutputError, ModelCallError
@@ -334,7 +335,7 @@ def _critique_one(
 
 
 def _critique(state: State, rt: Runtime) -> dict:
-    pending = [Lens(v) for v in state.get("pending_lenses") or [l.value for l in LENSES]]
+    pending = [Lens(v) for v in state.get("pending_lenses") or [lens.value for lens in LENSES]]
     question = state["question"]
     report_text = state["report"]
     artifact_hash = state["artifact_hash"]
@@ -588,7 +589,7 @@ def _control(state: State, rt: Runtime) -> dict:
 
     out: dict = {"decision": decision.model_dump(mode="json")}
     if decision.action == "recritique":
-        out["pending_lenses"] = [l.value for l in decision.recritique_lenses]
+        out["pending_lenses"] = [lens.value for lens in decision.recritique_lenses]
         if decision.rule == 2:
             out["critique_attempts_remaining"] = state["critique_attempts_remaining"] - 1
         else:

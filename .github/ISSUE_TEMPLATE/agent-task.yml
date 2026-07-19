@@ -1,0 +1,67 @@
+name: Agent task
+description: A well-scoped change an agent can implement end to end
+labels: [agent-task]
+body:
+  - type: markdown
+    attributes:
+      value: |
+        Comment `/autoresolve` on this issue once it is filed and an agent will open a PR.
+        Add `/autoresolve claude` or `/autoresolve codex` to pick the model.
+
+        **The structure below is load-bearing.** The invariant reviewer performs an
+        alignment check by quoting this issue's named entities and acceptance criteria
+        back against the diff. A vague issue makes that check degenerate into "N/A" and
+        the strongest guard against scope creep is lost.
+
+  - type: textarea
+    id: problem
+    attributes:
+      label: Problem
+      description: What is wrong or missing today, and why it matters. Not the solution.
+    validations:
+      required: true
+
+  - type: textarea
+    id: approach
+    attributes:
+      label: Proposed approach
+      description: >
+        How you expect this to be solved. Name the modules, functions, or config keys
+        involved if you know them. If you genuinely do not know, say so — but expect a
+        wider-ranging PR.
+    validations:
+      required: true
+
+  - type: textarea
+    id: acceptance
+    attributes:
+      label: Acceptance criteria
+      description: A checklist. Each item should be something a reviewer can verify.
+      value: |
+        - [ ]
+        - [ ]
+    validations:
+      required: true
+
+  - type: dropdown
+    id: invariants
+    attributes:
+      label: Does this change a design invariant?
+      description: >
+        Author exclusion, blind-orchestrator isolation, fail-closed lenses, severity
+        floors, termination, or the untrusted-text boundary. If yes, the PR must also
+        update `docs/` and record a decision in `docs/decisions.md`.
+      options:
+        - "No — behavior inside the existing spec"
+        - "Yes — and the spec should change with it"
+        - "Not sure"
+    validations:
+      required: true
+
+  - type: textarea
+    id: out-of-scope
+    attributes:
+      label: Explicitly out of scope
+      description: Anything nearby that the agent should leave alone.
+    validations:
+      required: false

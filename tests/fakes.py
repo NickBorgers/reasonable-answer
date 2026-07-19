@@ -6,8 +6,9 @@ role could *possibly* have seen.
 
 from __future__ import annotations
 
+from collections.abc import Callable
 from dataclasses import dataclass, field
-from typing import Any, Callable
+from typing import Any
 
 from reasonable_answer.llm import Completion
 from reasonable_answer.schemas import CritiqueOutput, OrchestratorRecommendation

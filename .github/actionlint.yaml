@@ -1,0 +1,6 @@
+# actionlint cannot know which self-hosted labels exist, so it flags any it does not
+# recognise. Declaring them here keeps the lint signal meaningful instead of teaching
+# people to ignore a permanent warning.
+self-hosted-runner:
+  labels:
+    - homelab

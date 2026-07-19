@@ -8,16 +8,16 @@ from __future__ import annotations
 
 import pytest
 from conftest import cleared, make_ci, make_view
-
 from fakes import FakeClient
-from reasonable_answer import roles, triage
+
 from reasonable_answer import report as report_mod
+from reasonable_answer import roles, triage
 from reasonable_answer.controller import decide
 from reasonable_answer.graph import run
 from reasonable_answer.llm import _identity_matches
 from reasonable_answer.schemas import CleanRecord, CritiqueOutput, RawIssue, StructuralRef
 from reasonable_answer.store import RunStore, UnsafeRunId, purge, safe_run_dir
-from reasonable_answer.taxonomy import LENSES, Category, Lens, Severity
+from reasonable_answer.taxonomy import Category, Lens, Severity
 
 REPORT = """# Answer
 

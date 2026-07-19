@@ -5,8 +5,8 @@ from __future__ import annotations
 import json
 
 import pytest
-
 from fakes import FakeClient
+
 from reasonable_answer.config import Budgets, Config, ConfigError
 from reasonable_answer.graph import run
 from reasonable_answer.schemas import CritiqueOutput, RawIssue, StructuralRef
@@ -129,7 +129,10 @@ def test_a_blocking_issue_at_the_cap_needs_human_review(identities, config):
             ]
         )
 
-    client = make_client(identities, critique_fn=lambda a, u: blocking(a, u) if lens_of(u) == "evidence" else CritiqueOutput(issues=[]))
+    client = make_client(
+        identities,
+        critique_fn=lambda a, u: blocking(a, u) if lens_of(u) == "evidence" else CritiqueOutput(issues=[]),
+    )
     final = run(config, question="Is it so?", seed=REPORT, client=client)
     assert final["terminal_status"] == "needs_human_review"
 
@@ -177,7 +180,9 @@ def test_the_generator_is_never_the_author_of_the_draft_it_revises(identities, c
 
     writers = [c.alias for c in client.calls if c.schema is None]
     assert writers  # sanity
-    assert all(a != b for a, b in zip(writers, writers[1:])), writers
+    # strict=False is deliberate: this pairs each writer with its successor, so the two
+    # sequences differ in length by one by construction.
+    assert all(a != b for a, b in zip(writers, writers[1:], strict=False)), writers
 
 
 def test_every_critique_call_excludes_the_author(identities, config):

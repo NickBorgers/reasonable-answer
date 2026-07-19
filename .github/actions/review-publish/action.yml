@@ -1,0 +1,125 @@
+---
+name: Publish reviewer artifact as a GitHub PR Review
+description: >
+  Renders a structured reviewer JSON artifact (conforming to
+  schema/reviewer-v1.json) as a GitHub PR Review using
+  `gh pr review --approve | --request-changes | --comment`.
+
+  PR Reviews and rendered comments are display-only — they exist for
+  humans to read in the PR UI. The judge (aggregate.mjs) consumes the
+  JSON artifact directly and never reads PR comments or PR Reviews.
+
+  Keeping the verdict in structured data rather than parsing markdown back out of
+  the issue API is what keeps the judge's inputs trustworthy.
+
+inputs:
+  artifact_path:
+    description: Host path to the reviewer JSON artifact
+    required: true
+  pr_number:
+    description: PR number to post the review on
+    required: true
+  github_token:
+    description: GH token (PAT) with PR review write permission (all pipeline writes use the PAT)
+    required: true
+  repo:
+    description: owner/repo (defaults to current repo)
+    required: false
+    default: ${{ github.repository }}
+
+outputs:
+  comment_url:
+    description: URL of the published reviewer comment (empty on failure)
+    value: ${{ steps.publish.outputs.comment_url }}
+
+runs:
+  using: composite
+  steps:
+    - name: Render and publish
+      id: publish
+      shell: bash
+      env:
+        GH_TOKEN: ${{ inputs.github_token }}
+        REPO: ${{ inputs.repo }}
+        PR_NUMBER: ${{ inputs.pr_number }}
+        ARTIFACT_PATH: ${{ inputs.artifact_path }}
+      run: |
+        set -euo pipefail
+
+        if [ ! -f "$ARTIFACT_PATH" ]; then
+          echo "::error::review-publish: artifact not found at $ARTIFACT_PATH"
+          exit 1
+        fi
+
+        DECISION=$(jq -r '.decision' "$ARTIFACT_PATH")
+        ROLE=$(jq -r '.role' "$ARTIFACT_PATH")
+        SUMMARY=$(jq -r '.summary // ""' "$ARTIFACT_PATH")
+
+        # Render markdown body for the human-facing PR Review.
+        BODY_FILE=$(mktemp)
+        {
+          echo "## $(echo "$ROLE" | sed 's/.*/\u&/') Review"
+          echo
+          if [ -n "$SUMMARY" ]; then
+            echo "$SUMMARY"
+            echo
+          fi
+
+          BLOCKERS=$(jq -r '.blocking_issues | length' "$ARTIFACT_PATH")
+          if [ "$BLOCKERS" -gt 0 ]; then
+            echo "### Blocking Issues"
+            jq -r '.blocking_issues[] | "- **\(.severity)** [`\(.id)`] \(.message)\(if .file then " (`\(.file)\(if .line then ":\(.line)" else "" end)`)" else "" end)"' "$ARTIFACT_PATH"
+            echo
+          fi
+
+          NOTES=$(jq -r '.non_blocking_notes | length' "$ARTIFACT_PATH")
+          if [ "$NOTES" -gt 0 ]; then
+            echo "### Worth Considering"
+            jq -r '.non_blocking_notes[] | "- \(.message)\(if .file then " (`\(.file)\(if .line then ":\(.line)" else "" end)`)" else "" end)"' "$ARTIFACT_PATH"
+            echo
+          fi
+
+          FOLLOWUPS=$(jq -r '.followup_issues | length' "$ARTIFACT_PATH")
+          if [ "$FOLLOWUPS" -gt 0 ]; then
+            echo "### Suggested Follow-up Issues"
+            echo "_(These are well-scoped issues this reviewer would file post-merge.)_"
+            jq -r '.followup_issues[] | "- \(.title)"' "$ARTIFACT_PATH"
+            echo
+          fi
+
+          echo "<sub>Posted by review-pipeline (\`role=$ROLE\`, \`decision=$DECISION\`).</sub>"
+        } > "$BODY_FILE"
+
+        # Originally this used `gh pr review --approve|--request-changes|--comment`
+        # to post a structured GitHub PR Review. That fails with:
+        #
+        #   GraphQL: Review Can not approve your own pull request
+        #
+        # whenever the WORKFLOW_PAT belongs to the same user who authored the PR —
+        # which is the common case in this repo, since the resolver agent opens PRs
+        # using that same PAT. Posting a plain `gh pr comment` sidesteps it.
+        #
+        # The structured verdict still lives in the reviewer artifact
+        # (which the judge consumes), so the loss of the GitHub PR
+        # Review type doesn't affect verdict aggregation. The decision
+        # is also rendered in the comment body header for humans.
+        case "$DECISION" in
+          approve|request_changes|comment|abstain) ;;
+          *)
+            echo "::error::review-publish: unknown decision '$DECISION'"
+            exit 1
+            ;;
+        esac
+
+        # `gh pr comment` prints the created comment URL on stdout
+        # (e.g. https://github.com/<owner>/<repo>/pull/123#issuecomment-456789).
+        # review-finalize.yml uses this URL to link each blocker id in the rendered
+        # summary comment back to the reviewer's full text.
+        # Sidecar file lives next to the JSON artifact so the existing
+        # upload-artifact glob in review-reviewer.yml picks it up.
+        COMMENT_URL=$(gh pr comment "$PR_NUMBER" --repo "$REPO" --body-file "$BODY_FILE" | tail -n1 | tr -d '[:space:]')
+        echo "comment_url=$COMMENT_URL" >> "$GITHUB_OUTPUT"
+        SIDECAR="${ARTIFACT_PATH%-result.json}-comment-url.txt"
+        printf '%s\n' "$COMMENT_URL" > "$SIDECAR"
+
+        rm -f "$BODY_FILE"

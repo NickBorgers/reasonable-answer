@@ -28,6 +28,7 @@ dev = [
     "httpx>=0.28.1",
     "pytest>=8.3.0",
     "pytest-cov>=6.0.0",
+    "ruff>=0.9.0",
 ]
 
 [build-system]
@@ -41,6 +42,29 @@ packages = ["src/reasonable_answer"]
 # no working config and every command fails on a path that only exists in a checkout.
 [tool.hatch.build.targets.wheel.force-include]
 "config/roster.yaml" = "reasonable_answer/_default_roster.yaml"
+
+# 110 is where this codebase already sits: at 100 there are 26 offenders, at 110 there
+# are 9, and the long lines are mostly prose comments explaining an invariant — wrapping
+# those costs more readability than it buys.
+[tool.ruff]
+line-length = 110
+target-version = "py311"
+
+[tool.ruff.lint]
+select = ["E", "F", "I", "UP", "B", "SIM"]
+# UP042 wants `StrEnum` instead of `(str, Enum)`. That is not a refactor here: the two
+# differ in what `str()` and `format()` produce ("logic" vs "Lens.LOGIC"), and these enum
+# values are interpolated into prompts and serialized into the audit trail. Changing them
+# would silently change model-facing text and stored run records.
+ignore = ["UP042"]
+
+[tool.ruff.lint.per-file-ignores]
+# `typer.Option(...)` in a parameter default is not the B008 mistake — it is how typer
+# declares CLI options, and the "fix" would break every command signature.
+"src/reasonable_answer/cli.py" = ["B008"]
+# render.py holds the inline CSS and HTML templates. Wrapping a CSS rule or an f-string
+# tag at 110 columns makes it harder to read, not easier.
+"src/reasonable_answer/web/render.py" = ["E501"]
 
 [tool.pytest.ini_options]
 testpaths = ["tests"]

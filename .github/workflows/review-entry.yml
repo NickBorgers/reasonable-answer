@@ -1,0 +1,254 @@
+---
+name: Review pipeline — entry
+
+# The single entry point for the agentic review pipeline. Listens to PR events and
+# `/review` comments, resolves the head SHA, runs SHA-keyed dedup, and dispatches the
+# orchestrator only if this run owns the SHA. Push, reopen, synchronize, and /review all
+# collapse into one path with no per-trigger special cases.
+
+on:
+  pull_request:
+    types: [opened, synchronize, reopened, ready_for_review]
+  issue_comment:
+    types: [created]
+
+permissions:
+  # Read-only, deliberately. Every write in this pipeline — PR comments, labels, commit
+  # statuses — authenticates with `secrets.WORKFLOW_PAT` instead.
+  #
+  # This is not belt-and-braces. GitHub validates that a reusable callee declares a
+  # SUBSET of its caller's permissions, and that rule applies transitively. So declaring
+  # read-only here FORCES every downstream review-*.yml to be read-only too: no
+  # reachable job in the graph can obtain write access to this repository through
+  # GITHUB_TOKEN, regardless of what it asks for.
+  #
+  # The one deliberate exception is the merge-gate status in review-finalize.yml, which
+  # must use GITHUB_TOKEN — branch protection only honours statuses published by the
+  # GitHub Actions app. See the comment there.
+  contents: read
+  issues: read
+  packages: read
+  pull-requests: read
+  statuses: write
+  actions: read
+
+concurrency:
+  # Comment triggers get their own slot keyed by comment id so two /review comments do
+  # not cancel each other; PR events group by branch so a burst of pushes collapses into
+  # one review.
+  group: review-entry-${{ github.event_name == 'issue_comment' && format('comment-{0}', github.event.comment.id) || github.event.pull_request.head.ref }}
+  cancel-in-progress: false
+
+jobs:
+  authorize:
+    name: Authorize trigger
+    runs-on: ubuntu-latest
+    outputs:
+      authorized: ${{ steps.authorize.outputs.authorized }}
+      pr_number: ${{ steps.authorize.outputs.pr_number }}
+      reason: ${{ steps.authorize.outputs.reason }}
+    steps:
+      - name: Validate trigger, repo origin, and trust level
+        id: authorize
+        uses: actions/github-script@v7
+        with:
+          script: |
+            const allowedAssociations = new Set(['OWNER', 'MEMBER', 'COLLABORATOR']);
+            const repoFullName = `${context.repo.owner}/${context.repo.repo}`;
+
+            const output = (key, value) => core.setOutput(key, String(value ?? ''));
+            let authorized = false;
+            let prNumber = '';
+            let reason = '';
+
+            if (context.eventName === 'pull_request') {
+              const pr = context.payload.pull_request;
+              prNumber = String(pr.number);
+
+              // Fork PRs never reach the agents. The reviewers run on a self-hosted
+              // runner with tailnet reachability and a PAT in the environment.
+              if (pr.head.repo.full_name !== repoFullName) {
+                reason = `external-pr:${pr.head.repo.full_name}`;
+              } else if (!allowedAssociations.has(pr.author_association)) {
+                reason = `pr-author:${pr.author_association}`;
+              } else {
+                authorized = true;
+              }
+            } else if (context.eventName === 'issue_comment') {
+              const issue = context.payload.issue;
+              const comment = context.payload.comment;
+              const body = (comment.body || '').trim();
+
+              if (!issue.pull_request) {
+                reason = 'not-pr-comment';
+              } else if (!/^\/review(?:\s|$)/.test(body)) {
+                reason = 'not-review-command';
+              } else if (!allowedAssociations.has(comment.author_association)) {
+                reason = `comment-author:${comment.author_association}`;
+              } else {
+                prNumber = String(issue.number);
+
+                // Both the commenter AND the PR author must be trusted. A trusted
+                // collaborator typing /review on an untrusted contributor's PR would
+                // otherwise feed that contributor's code to an agent holding a PAT.
+                const [{ data: issueData }, { data: prData }] = await Promise.all([
+                  github.rest.issues.get({
+                    owner: context.repo.owner,
+                    repo: context.repo.repo,
+                    issue_number: issue.number,
+                  }),
+                  github.rest.pulls.get({
+                    owner: context.repo.owner,
+                    repo: context.repo.repo,
+                    pull_number: issue.number,
+                  }),
+                ]);
+
+                if (prData.head.repo.full_name !== repoFullName) {
+                  reason = `external-pr:${prData.head.repo.full_name}`;
+                } else if (!allowedAssociations.has(issueData.author_association)) {
+                  reason = `pr-author:${issueData.author_association}`;
+                } else {
+                  authorized = true;
+                }
+              }
+            } else {
+              reason = `unsupported-event:${context.eventName}`;
+            }
+
+            core.info(
+              authorized
+                ? `review-entry authorized for PR #${prNumber}`
+                : `review-entry skipped: ${reason || 'not authorized'}`
+            );
+
+            output('authorized', authorized ? 'true' : 'false');
+            output('pr_number', prNumber);
+            output('reason', reason || 'authorized');
+
+  resolve:
+    name: Resolve SHA + dedup claim
+    needs: authorize
+    if: needs.authorize.outputs.authorized == 'true'
+    runs-on: ubuntu-latest
+    outputs:
+      should_run: ${{ steps.dedup.outputs.claimed }}
+      pr_number: ${{ steps.resolve.outputs.pr_number }}
+      reviewed_sha: ${{ steps.resolve.outputs.reviewed_sha }}
+      head_ref: ${{ steps.resolve.outputs.head_ref }}
+      base_ref: ${{ steps.resolve.outputs.base_ref }}
+      base_sha: ${{ steps.resolve.outputs.base_sha }}
+      terminal_verdict: ${{ steps.terminal.outputs.terminal_verdict }}
+    steps:
+      - name: Checkout main (for composite actions)
+        uses: actions/checkout@v4
+        with:
+          ref: main
+
+      - name: Resolve PR + head SHA
+        id: resolve
+        env:
+          GH_TOKEN: ${{ secrets.WORKFLOW_PAT }}
+          REPO: ${{ github.repository }}
+          EVENT_NAME: ${{ github.event_name }}
+          # Event payload fields arrive as env vars rather than being interpolated into
+          # the script body: head.ref and comment.body are attacker-controllable, and
+          # inlining them is a shell-injection vector.
+          PR_EVENT_NUMBER: ${{ github.event.pull_request.number }}
+          PR_EVENT_HEAD_SHA: ${{ github.event.pull_request.head.sha }}
+          PR_EVENT_HEAD_REF: ${{ github.event.pull_request.head.ref }}
+          PR_EVENT_BASE_REF: ${{ github.event.pull_request.base.ref }}
+          PR_EVENT_BASE_SHA: ${{ github.event.pull_request.base.sha }}
+          ISSUE_EVENT_NUMBER: ${{ github.event.issue.number }}
+          COMMENT_BODY: ${{ github.event.comment.body }}
+        run: |
+          set -euo pipefail
+
+          if [ "$EVENT_NAME" = "pull_request" ]; then
+            PR_NUMBER="$PR_EVENT_NUMBER"
+            REVIEWED_SHA="$PR_EVENT_HEAD_SHA"
+            HEAD_REF="$PR_EVENT_HEAD_REF"
+            BASE_REF="$PR_EVENT_BASE_REF"
+            BASE_SHA="$PR_EVENT_BASE_SHA"
+          else
+            if [[ ! "$COMMENT_BODY" =~ ^/review([[:space:]]|$) ]]; then
+              echo "review-entry: comment is not /review; nothing to do"
+              exit 0
+            fi
+            PR_NUMBER="$ISSUE_EVENT_NUMBER"
+            PR_JSON=$(gh api "repos/${REPO}/pulls/${PR_NUMBER}")
+            REVIEWED_SHA=$(echo "$PR_JSON" | jq -r '.head.sha')
+            HEAD_REF=$(echo "$PR_JSON" | jq -r '.head.ref')
+            BASE_REF=$(echo "$PR_JSON" | jq -r '.base.ref')
+            BASE_SHA=$(echo "$PR_JSON" | jq -r '.base.sha')
+          fi
+
+          {
+            echo "pr_number=$PR_NUMBER"
+            echo "reviewed_sha=$REVIEWED_SHA"
+            echo "head_ref=$HEAD_REF"
+            echo "base_ref=$BASE_REF"
+            echo "base_sha=$BASE_SHA"
+          } >> "$GITHUB_OUTPUT"
+
+      # Stop on GO, keep retrying on NO-GO.
+      #
+      # If this exact commit already carries a successful merge-gate status, a prior
+      # cycle cleared it and re-reviewing can only cost tokens and invite a different
+      # verdict on identical content. NO-GO deliberately does NOT short-circuit: a push
+      # that tries to address the blockers should get reviewed again, bounded by the
+      # cycle cap in review-pipeline.yml.
+      #
+      # Only `pull_request` events are subject to this. `/review` is the human override
+      # and must always be able to force a fresh cycle.
+      - name: Check for a prior GO verdict on the reviewed SHA
+        id: terminal
+        if: steps.resolve.outputs.reviewed_sha != '' && github.event_name == 'pull_request'
+        env:
+          GH_TOKEN: ${{ secrets.WORKFLOW_PAT }}
+          REPO: ${{ github.repository }}
+          SHA: ${{ steps.resolve.outputs.reviewed_sha }}
+        run: |
+          set -euo pipefail
+          PRIOR=$(gh api "repos/${REPO}/commits/${SHA}/statuses" \
+            --jq '[.[] | select(.context == "All Required Agent Reviews" and .state == "success")] | first | .description // empty')
+          if [ -n "$PRIOR" ]; then
+            echo "review-entry: ${SHA} was already cleared (${PRIOR}); skipping. Post /review to force a fresh cycle."
+            echo "terminal_verdict=true" >> "$GITHUB_OUTPUT"
+          else
+            echo "terminal_verdict=false" >> "$GITHUB_OUTPUT"
+          fi
+
+      - name: SHA-keyed dedup claim
+        id: dedup
+        if: steps.resolve.outputs.reviewed_sha != '' && steps.terminal.outputs.terminal_verdict != 'true'
+        uses: ./.github/actions/review-dedup
+        with:
+          sha: ${{ steps.resolve.outputs.reviewed_sha }}
+          context: review/pipeline
+          description: 'cycle-claim by review-entry'
+          github_token: ${{ secrets.WORKFLOW_PAT }}
+
+      - name: Note dedup result
+        if: steps.dedup.outputs.claimed == 'false'
+        env:
+          EXISTING_STATE: ${{ steps.dedup.outputs.existing_state }}
+        run: |
+          echo "review-entry: SHA already claimed (${EXISTING_STATE}); exiting cleanly"
+
+  pipeline:
+    name: Run review pipeline
+    needs: [authorize, resolve]
+    if: |
+      needs.authorize.outputs.authorized == 'true' &&
+      needs.resolve.outputs.should_run == 'true' &&
+      needs.resolve.outputs.terminal_verdict != 'true'
+    uses: ./.github/workflows/review-pipeline.yml
+    with:
+      pr_number: ${{ needs.resolve.outputs.pr_number }}
+      reviewed_sha: ${{ needs.resolve.outputs.reviewed_sha }}
+      head_ref: ${{ needs.resolve.outputs.head_ref }}
+      base_ref: ${{ needs.resolve.outputs.base_ref }}
+      base_sha: ${{ needs.resolve.outputs.base_sha }}
+    secrets:
+      WORKFLOW_PAT: ${{ secrets.WORKFLOW_PAT }}

@@ -1,0 +1,86 @@
+---
+name: Review pipeline — judge
+
+# Deterministic. No model, no git, no write access.
+#
+# Two properties make this stage trustworthy, and both are structural rather than
+# conventional: it checks out `main`, so a PR cannot modify the code that judges it; and
+# it holds `contents: read`, so it could not push even if it wanted to.
+
+on:
+  workflow_call:
+    inputs:
+      pr_number:
+        required: true
+        type: string
+      reviewed_sha:
+        required: true
+        type: string
+      cycle:
+        required: true
+        type: string
+    secrets:
+      WORKFLOW_PAT:
+        required: true
+    outputs:
+      verdict:
+        value: ${{ jobs.judge.outputs.verdict }}
+      category:
+        value: ${{ jobs.judge.outputs.category }}
+
+permissions:
+  contents: read
+  actions: read
+  statuses: write
+
+jobs:
+  judge:
+    name: Aggregate verdict
+    runs-on: ubuntu-latest
+    outputs:
+      verdict: ${{ steps.judge.outputs.verdict }}
+      category: ${{ steps.judge.outputs.category }}
+    steps:
+      - name: Checkout main
+        uses: actions/checkout@v4
+        with:
+          ref: main
+
+      - uses: actions/setup-node@v4
+        with:
+          node-version: '20'
+
+      - name: Download reviewer artifacts
+        uses: actions/download-artifact@v4
+        with:
+          pattern: reviewer-*-${{ inputs.reviewed_sha }}
+          path: reviewer-artifacts
+
+      - name: Aggregate
+        id: judge
+        env:
+          REVIEWER_DIR: reviewer-artifacts
+          VERDICT_OUTPUT_PATH: verdict-${{ inputs.reviewed_sha }}.json
+        run: node .github/scripts/review/judge.mjs
+
+      # Recorded on the commit so the next run can find it. The cycle-reset and
+      # merge-inherit logic in review-pipeline.yml both read this back; PR labels would
+      # not survive a force-push and are not SHA-bound.
+      - name: Record the verdict on the reviewed SHA
+        uses: ./.github/actions/review-state
+        with:
+          op: write-status
+          sha: ${{ inputs.reviewed_sha }}
+          context: review/verdict
+          state: ${{ steps.judge.outputs.verdict == 'GO' && 'success' || 'failure' }}
+          description: ${{ steps.judge.outputs.verdict }}
+          github_token: ${{ secrets.WORKFLOW_PAT }}
+
+      - name: Upload the verdict
+        if: always()
+        uses: actions/upload-artifact@v4
+        with:
+          name: verdict-${{ inputs.reviewed_sha }}
+          path: verdict-${{ inputs.reviewed_sha }}.json
+          retention-days: 7
+          if-no-files-found: warn

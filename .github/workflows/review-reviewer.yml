@@ -1,0 +1,135 @@
+---
+name: Review pipeline — reviewer
+
+# Runs one reviewer role. Called once per applicable role by review-pipeline.yml.
+#
+# The reviewer is strictly read-only: it produces a JSON artifact and a PR comment, and
+# has no path to the branch. That is what makes the whole graph safe to run against
+# agent-authored code — no stage here can push.
+
+on:
+  workflow_call:
+    inputs:
+      role:
+        required: true
+        type: string
+      agent:
+        description: 'claude | codex'
+        required: true
+        type: string
+      pr_number:
+        required: true
+        type: string
+      reviewed_sha:
+        required: true
+        type: string
+      base_ref:
+        required: true
+        type: string
+      cycle:
+        required: true
+        type: string
+    secrets:
+      WORKFLOW_PAT:
+        required: true
+
+permissions:
+  contents: read
+  issues: read
+  packages: read
+  pull-requests: read
+  statuses: write
+  actions: read
+
+jobs:
+  review:
+    name: ${{ inputs.role }}
+    runs-on: [self-hosted, homelab]
+    steps:
+      - name: Checkout main (actions, prompts, schema)
+        uses: actions/checkout@v4
+        with:
+          ref: main
+
+      # The reviewed code goes in a subdirectory, so the agent reads its prompt, the
+      # schema, and the runner script from `main` while reviewing the PR's tree. A PR
+      # cannot rewrite the instructions used to review it.
+      - name: Checkout the reviewed SHA
+        uses: actions/checkout@v4
+        with:
+          ref: ${{ inputs.reviewed_sha }}
+          fetch-depth: 0
+          path: pr-head
+
+      - name: Stage the prompt into the reviewed checkout
+        env:
+          ROLE: ${{ inputs.role }}
+        run: |
+          set -euo pipefail
+          mkdir -p "pr-head/.review-prompt"
+          cp ".github/scripts/review/prompts/${ROLE}.md" "pr-head/.review-prompt/${ROLE}.md"
+          cp ".github/scripts/review/schema/reviewer-v1.json" "pr-head/.review-prompt/reviewer-v1.json"
+
+      - name: Run the reviewer
+        id: run
+        uses: ./.github/actions/review-agent-run
+        with:
+          agent: ${{ inputs.agent }}
+          role: ${{ inputs.role }}
+          prompt_path: .review-prompt/${{ inputs.role }}.md
+          image: ${{ vars.CI_IMAGE || format('ghcr.io/nickborgers/{0}-ci:latest', 'reasonable-answer') }}
+          workspace_folder: pr-head
+          pr_number: ${{ inputs.pr_number }}
+          reviewed_sha: ${{ inputs.reviewed_sha }}
+          base_ref: ${{ inputs.base_ref }}
+          cycle: ${{ inputs.cycle }}
+          workflow_pat: ${{ secrets.WORKFLOW_PAT }}
+          llm_proxy_base_url: ${{ vars.LLM_PROXY_BASE_URL }}
+          llm_proxy_openai_base_url: ${{ vars.LLM_PROXY_OPENAI_BASE_URL }}
+          llm_proxy_api_key: ${{ vars.AI_API_KEY || 'fake-key' }}
+
+      # Validated against main's schema, not the PR's. A PR that widened the schema to
+      # let its own reviewer emit something unexpected would be validating against its
+      # own definition of valid.
+      - name: Validate the artifact against the schema
+        env:
+          RESULT_JSON: ${{ steps.run.outputs.result_json }}
+          EXPECTED_ROLE: ${{ inputs.role }}
+          EXPECTED_SHA: ${{ inputs.reviewed_sha }}
+          EXPECTED_CYCLE: ${{ inputs.cycle }}
+        run: |
+          set -euo pipefail
+
+          npx --yes ajv-cli@5 validate \
+            -s .github/scripts/review/schema/reviewer-v1.json \
+            -d "$RESULT_JSON" --strict=false
+
+          # Schema validity is not enough: an artifact that is well-formed but claims a
+          # different SHA, role, or cycle would be silently aggregated into the wrong
+          # epoch. The judge rejects mixed epochs, but catching it here says which
+          # reviewer went wrong.
+          actual_role=$(jq -r '.role' "$RESULT_JSON")
+          actual_sha=$(jq -r '.reviewed_sha' "$RESULT_JSON")
+          actual_cycle=$(jq -r '.cycle' "$RESULT_JSON")
+
+          fail=0
+          [ "$actual_role" = "$EXPECTED_ROLE" ] || { echo "::error::role mismatch: $actual_role != $EXPECTED_ROLE"; fail=1; }
+          [ "$actual_sha" = "$EXPECTED_SHA" ] || { echo "::error::reviewed_sha mismatch: $actual_sha != $EXPECTED_SHA"; fail=1; }
+          [ "$actual_cycle" = "$EXPECTED_CYCLE" ] || { echo "::error::cycle mismatch: $actual_cycle != $EXPECTED_CYCLE"; fail=1; }
+          exit "$fail"
+
+      - name: Publish the reviewer comment
+        uses: ./.github/actions/review-publish
+        with:
+          artifact_path: ${{ steps.run.outputs.result_json }}
+          pr_number: ${{ inputs.pr_number }}
+          github_token: ${{ secrets.WORKFLOW_PAT }}
+
+      - name: Upload the reviewer artifact
+        if: always()
+        uses: actions/upload-artifact@v4
+        with:
+          name: reviewer-${{ inputs.role }}-${{ inputs.reviewed_sha }}
+          path: pr-head/.review-output/${{ inputs.role }}-*
+          retention-days: 7
+          if-no-files-found: warn

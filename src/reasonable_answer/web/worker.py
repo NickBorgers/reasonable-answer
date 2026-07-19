@@ -13,8 +13,8 @@ import queue
 import threading
 import time
 import uuid
+from collections.abc import Callable
 from dataclasses import dataclass
-from typing import Callable
 
 from ..config import Config
 from ..graph import run as run_graph

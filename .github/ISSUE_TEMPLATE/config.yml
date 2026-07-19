@@ -1,0 +1,8 @@
+blank_issues_enabled: true
+contact_links:
+  - name: Design documentation
+    url: https://github.com/NickBorgers/reasonable-answer/tree/main/docs
+    about: The normative spec — start with DESIGN.md, then isolation.md and convergence.md.
+  - name: CI and pipeline setup
+    url: https://github.com/NickBorgers/reasonable-answer/blob/main/docs/ci-setup.md
+    about: Runner registration, secrets, and branch protection.
