@@ -32,23 +32,39 @@ class UnsafeRunId(ValueError):
     """The run id could escape the runs directory."""
 
 
-def safe_run_dir(root: Path, run_id: str) -> Path:
+def safe_run_dir(root: Path, run_id: str, must_exist_root: bool = True) -> Path:
     if not RUN_ID.match(run_id or "") or ".." in run_id:
         raise UnsafeRunId(f"invalid run id: {run_id!r}")
-    root = Path(root).resolve()
-    target = (root / run_id).resolve()
-    if target != root and root not in target.parents:
+    # `strict=False` so validation works before the root exists; the id alphabet
+    # already excludes separators, so no symlink can be traversed here.
+    root = Path(root).resolve(strict=False)
+    target = (root / run_id).resolve(strict=False)
+    if root not in target.parents:
         raise UnsafeRunId(f"run id escapes the runs directory: {run_id!r}")
     return target
 
 
+def _next_sequence(critiques: Path) -> int:
+    if not critiques.exists():
+        return 1
+    highest = 0
+    for path in critiques.iterdir():
+        prefix = path.name.split("-", 1)[0]
+        if prefix.isdigit():
+            highest = max(highest, int(prefix))
+    return highest + 1
+
+
 class RunStore:
     def __init__(self, root: Path, run_id: str) -> None:
+        # Validate before touching the filesystem at all — a rejected run id must
+        # not leave a directory behind.
         self.run_id = run_id
-        Path(root).mkdir(parents=True, exist_ok=True)
-        self.dir = safe_run_dir(root, run_id)
-        self._seq = count(1)
+        self.dir = safe_run_dir(root, run_id, must_exist_root=False)
         self.dir.mkdir(parents=True, exist_ok=True)
+        # Continue the critique sequence where a previous process left off, so a
+        # resumed run appends to the audit trail instead of overwriting it.
+        self._seq = count(_next_sequence(self.dir / "critiques"))
         os.chmod(self.dir, 0o700)
         for sub in (*CONTENT_DIRS, "signals"):
             (self.dir / sub).mkdir(exist_ok=True)

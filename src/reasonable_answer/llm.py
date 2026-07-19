@@ -227,17 +227,18 @@ class LLMClient:
 
 
 def _identity_matches(reported: str, alias: str, resolved: str | None) -> bool:
-    """Proxies echo back either the alias or the underlying model id; accept either,
-    reject anything else. Comparison is on the last path segment, case-folded, since
-    providers vary on `provider/model` vs `model`."""
+    """Proxies echo back either the alias or the fully-qualified model id; accept
+    exactly those two, case-folded, and nothing else.
 
-    def key(value: str) -> str:
-        return value.strip().split("/")[-1].casefold()
-
-    accepted = {key(alias)}
+    Matching on the bare basename would accept `provider-b/model-x` for a pinned
+    `provider-a/model-x` — a different model behind the same short name, which is
+    precisely the silent fallback this check exists to catch.
+    """
+    value = (reported or "").strip().casefold()
+    accepted = {alias.strip().casefold()}
     if resolved:
-        accepted.add(key(resolved))
-    return key(reported) in accepted
+        accepted.add(resolved.strip().casefold())
+    return value in accepted
 
 
 def _response_format(mode: str, name: str, json_schema: dict[str, Any]) -> dict[str, Any] | None:

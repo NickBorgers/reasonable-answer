@@ -84,9 +84,16 @@ Point `proxy.base_url` at any OpenAI-compatible endpoint. If yours needs a key, 
 A known-unacceptable artifact is never labelled `accepted` or `converged_unconfirmed` — that is a
 tested property, not a convention.
 
-**Known limitation (v1):** there is no external retrieval. The evidence lens challenges uncited
+**Known limitations (v1).** There is no external retrieval. The evidence lens challenges uncited
 claims, on-its-face misrepresentation, and implausible citations *within* the artifact. Output is
 labelled *consensus-reviewed with in-artifact sourcing* — not fact-checked.
+
+A critic's quote fields (`claim_span`, `related_span`) are verified to be verbatim text from
+the artifact, so a critic cannot smuggle invented text to the next writer that way. Its
+`rationale` and `instruction` are still critic-authored prose; they are length-bounded, carry no
+provenance, and reach the writer inside an explicit untrusted-data fence, but they are not
+mechanically derived. Replacing them with generated text from the structured fields would close
+that channel completely at some cost in fix quality.
 
 ## Output
 

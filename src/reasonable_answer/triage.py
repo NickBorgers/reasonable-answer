@@ -60,15 +60,28 @@ def validate_issue(
             f"locus {issue.locus} does not exist in the artifact under review"
         )
     if require_verbatim_spans:
-        # `claim_span` is the one free-text field that crosses to the writer carrying
-        # apparent authority ("here is the offending text"). Anchoring it to the
-        # actual paragraph closes it as an injection channel: a critic can only
-        # forward words the artifact already contains.
+        # The quote fields cross to the writer carrying apparent authority ("here is
+        # the offending text"). Anchoring them to the artifact means a critic can
+        # only forward words the report already contains.
         paragraph = structure.text_at(issue.locus) or ""
-        if _normalize(issue.claim_span) not in _normalize(paragraph):
-            raise LensValidationError(
-                f"claim_span at {issue.locus} is not a verbatim quote from that paragraph"
-            )
+        _require_quote(issue.claim_span, _normalize(paragraph), "claim_span", issue.locus)
+        if issue.related_span is not None:
+            # `related_span` is the contradicting claim or the cited passage, so it
+            # may live anywhere in the artifact, not only at this locus.
+            _require_quote(issue.related_span, _normalize(structure.full_text), "related_span",
+                           issue.locus)
+
+
+def _require_quote(span: str, haystack: str, field: str, locus) -> None:
+    needle = _normalize(span)
+    if not needle:
+        # "*" or "``" satisfy the schema's min_length but normalize away, and the
+        # empty string is a substring of everything — an issue anchored to nothing.
+        raise LensValidationError(f"{field} at {locus} contains no quotable text")
+    if needle not in haystack:
+        raise LensValidationError(
+            f"{field} at {locus} is not a verbatim quote from the artifact"
+        )
 
 
 def clamp(issues: list[RawIssue]) -> list[RawIssue]:
@@ -142,7 +155,12 @@ def clean_records(results: list[LensResult]) -> list[CleanRecord]:
     for result in results:
         if result.failed:
             continue
-        if any(is_material(i.severity) for i in clamp(result.issues)):
+        # A stylistic finding is ignored for convergence, so it must not withhold
+        # clearance either — even if the critic escalated its severity.
+        blocking_issues = [
+            i for i in clamp(result.issues) if i.category is not Category.STYLISTIC
+        ]
+        if any(is_material(i.severity) for i in blocking_issues):
             continue
         records.append(
             CleanRecord(

@@ -34,6 +34,11 @@ class Structure:
             p.section == ref.section and p.paragraph == ref.paragraph for p in self.paragraphs
         )
 
+    @property
+    def full_text(self) -> str:
+        """Every paragraph, for span checks that may legitimately quote elsewhere."""
+        return "\n\n".join(p.text for p in self.paragraphs)
+
     def text_at(self, ref: StructuralRef) -> str | None:
         for p in self.paragraphs:
             if p.section == ref.section and p.paragraph == ref.paragraph:

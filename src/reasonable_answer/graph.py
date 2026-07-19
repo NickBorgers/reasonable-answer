@@ -11,6 +11,7 @@ than automatic (docs/isolation.md). Two things make it structural:
 
 from __future__ import annotations
 
+import json
 import logging
 import uuid
 from concurrent.futures import ThreadPoolExecutor
@@ -45,6 +46,7 @@ class State(TypedDict, total=False):
     run_id: str
     question: str
     seed: str | None
+    fingerprint: str
 
     report: str
     artifact_hash: str
@@ -687,6 +689,42 @@ def build_graph(rt: Runtime):
     return graph
 
 
+def _recursion_limit(config: Config) -> int:
+    """Size the graph's step budget from the *loop's* own bounded transitions.
+
+    A flat limit can bite before the controller's budgets do: rule 2 and rule 8 each
+    re-enter critique → triage → orchestrate → control without generating, so a
+    small `hard_cap` with large retry budgets could hit LangGraph's ceiling and raise
+    instead of terminating at rule 3 or 11.
+    """
+    b = config.budgets
+    laps = b.hard_cap + b.polish_cap + b.critique_attempts + b.confirmation_attempts + 2
+    return max(100, laps * 5 + 10)
+
+
+def _run_fingerprint(config: Config, question: str, seed: str | None) -> str:
+    """What a resumed run must still be: the same question, the same seed, the same
+    roster and the same budgets. Resuming a checkpoint under different inputs would
+    answer a question nobody asked."""
+    import hashlib
+
+    payload = json.dumps(
+        {
+            "question": question,
+            "seed_hash": report_mod.artifact_hash(seed) if seed else None,
+            "roster": config.roster.model_dump(),
+            "budgets": config.budgets.model_dump(),
+        },
+        sort_keys=True,
+        default=str,
+    )
+    return hashlib.sha256(payload.encode()).hexdigest()
+
+
+class ResumeMismatch(RuntimeError):
+    """The stored run was started with different inputs than this invocation."""
+
+
 def _checkpointer(rt: Runtime):
     """A per-run SQLite checkpoint next to the audit trail. Best-effort: an
     unavailable checkpointer costs resumability, never correctness."""
@@ -713,7 +751,7 @@ def run(
     checkpointer = checkpointer if checkpointer is not None else _checkpointer(rt)
     compiled = build_graph(rt).compile(checkpointer=checkpointer)
     invoke_config = {
-        "recursion_limit": max(100, config.budgets.hard_cap * 12),
+        "recursion_limit": _recursion_limit(config),
         "configurable": {"thread_id": rt.store.run_id},
     }
 
@@ -721,9 +759,21 @@ def run(
     # system, and losing an hour of critique to a dropped connection is the failure
     # mode that matters. An unfinished thread continues from its last completed node;
     # a fresh one starts at intake.
-    initial: State | None = {"run_id": rt.store.run_id, "question": question, "seed": seed}
+    fingerprint = _run_fingerprint(config, question, seed)
+    initial: State | None = {
+        "run_id": rt.store.run_id,
+        "question": question,
+        "seed": seed,
+        "fingerprint": fingerprint,
+    }
     if checkpointer is not None:
         snapshot = compiled.get_state(invoke_config)
+        stored = snapshot.values.get("fingerprint")
+        if stored and stored != fingerprint:
+            raise ResumeMismatch(
+                f"run '{rt.store.run_id}' was started with a different question, seed, "
+                f"roster or budget set; refusing to resume it under new inputs"
+            )
         if snapshot.next:
             log.info("resuming run %s at %s", rt.store.run_id, snapshot.next)
             rt.store.event("resume", resumed_at=list(snapshot.next))

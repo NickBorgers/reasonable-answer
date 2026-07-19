@@ -1,9 +1,14 @@
 # reasonable-answer — Design Overview
 
-> **Status:** design documentation only (v3). No code yet. This document set describes the
-> principles and structure a future build should implement. v3 incorporates four rounds of
-> adversarial design review (Codex) and the resulting design decisions — see
-> [decisions.md](./decisions.md).
+> **Status:** design v3, **implemented** — see [../README.md](../README.md) for running it and
+> `src/reasonable_answer/` for the code. v3 incorporates four rounds of adversarial design review
+> (Codex) and the resulting design decisions — see [decisions.md](./decisions.md).
+>
+> Implementation deltas worth knowing: a tick is counted per *draft* (in the generate node), so a
+> writer returning byte-identical output still advances the clock; `stylistic` findings are
+> excluded from the counts entirely rather than counted-then-ignored; and a critic's `claim_span`
+> must be a verbatim quote from the paragraph it cites, which closes the last free-text channel
+> from critic to writer.
 
 ## What it is
 
