@@ -72,15 +72,14 @@ reason the pipeline keeps one.
 ## Docker
 
 ```bash
-docker compose up -d          # host is already on the tailnet
-docker compose --profile ts up -d   # container joins the tailnet itself (needs TS_AUTHKEY)
+docker compose up -d
 ```
 
 ~236 MB, `python:3.12-slim`, runs as uid 10001. Three things it needs:
 
 | | why |
 |---|---|
-| network path to the LiteLLM proxy | `*.ts.net` is a tailnet name — use host networking, the `ts` profile, or a routable proxy address |
+| the host can reach the LiteLLM proxy | assumed, not configured here — on this network that means the host is on the tailnet |
 | a volume at `/data/runs` | holds the audit trail *and* the SQLite checkpoints; resumability dies without it |
 | `roster.yaml` at `/etc/ra/roster.yaml` | change models without rebuilding |
 
