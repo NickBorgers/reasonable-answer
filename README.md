@@ -22,8 +22,9 @@ decides continue / finalize / abort, and it never sees the report.
 The repo is a devcontainer: clone, open, run the tests.
 
 ```bash
-make test      # full offline suite — no network, no API keys, ~1s
+make test      # full offline suite — no network, no API keys
 make doctor    # resolve every roster alias against the LiteLLM proxy, report health
+make serve     # web interface on http://127.0.0.1:8080
 make run Q="Does a four-day work week increase productivity?"
 ```
 
@@ -41,6 +42,53 @@ uv run ra doctor
 uv run ra purge <run_id> [--content-only]
 uv run ra expired
 ```
+
+## Web interface
+
+`make serve`, or `ra serve --host 0.0.0.0 --port 8080` in a container. Submit a question, watch
+the loop converge live, and browse every past run.
+
+The run page streams the pipeline's own event log over server-sent events, so you see each round
+as it happens — which model wrote the draft, which critic drew which lens, what each one found,
+and which controller rule fired:
+
+```
+round 2   writer gpt-5.4-mini
+  logic         qwen3.7-max      2 issues
+  evidence      llama-4-scout    clean
+  completeness  gemma4           clean
+  1 major  ->  rule 14  generate  material issues remain
+```
+
+**There is no authentication.** The intended posture is tailnet-only, with Tailscale ACLs as the
+access control; `ra serve` defaults to binding `127.0.0.1` for that reason. Anyone who can reach
+the interface can spend tokens and read every stored run, including seed material. Do not put it
+on a public interface without adding real auth in front of it.
+
+Showing reports and critiques to a *human* does not weaken the isolation design — blindness is
+about what enters a *model's* context. The UI is a window onto the audit trail, which is the
+reason the pipeline keeps one.
+
+## Docker
+
+```bash
+docker compose up -d          # host is already on the tailnet
+docker compose --profile ts up -d   # container joins the tailnet itself (needs TS_AUTHKEY)
+```
+
+~236 MB, `python:3.12-slim`, runs as uid 10001. Three things it needs:
+
+| | why |
+|---|---|
+| network path to the LiteLLM proxy | `*.ts.net` is a tailnet name — use host networking, the `ts` profile, or a routable proxy address |
+| a volume at `/data/runs` | holds the audit trail *and* the SQLite checkpoints; resumability dies without it |
+| `roster.yaml` at `/etc/ra/roster.yaml` | change models without rebuilding |
+
+Use a **named volume** if you can. A bind-mounted host directory arrives owned by root while the
+container runs unprivileged; the app detects this at startup and tells you what to chown rather
+than failing on your first submission.
+
+No database, no broker, no GPU, no model weights — all inference goes through the proxy.
 
 ## Configuration
 

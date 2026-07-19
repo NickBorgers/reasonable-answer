@@ -1,0 +1,53 @@
+# Tailnet-only deployment. The app has no authentication: Tailscale ACLs are the
+# access control, so the published port must never reach a public interface.
+#
+#   docker compose up -d           # host is already on the tailnet
+#   docker compose --profile ts up -d   # container joins the tailnet itself
+
+services:
+  ra:
+    build: .
+    image: reasonable-answer:latest
+    restart: unless-stopped
+    # 127.0.0.1 by default: reachable via the host's Tailscale, not from the LAN.
+    # Change to a tailnet address (or use the `ts` profile) to reach it from elsewhere.
+    ports:
+      - "127.0.0.1:8080:8080"
+    volumes:
+      # Audit trail + SQLite checkpoints. Without this, runs and resumability die
+      # with the container.
+      - ra-runs:/data/runs
+      # Edit the roster without rebuilding the image.
+      - ./config/roster.yaml:/etc/ra/roster.yaml:ro
+    environment:
+      # Every concurrent run multiplies load on one proxy; the local models in the
+      # roster are the bottleneck the design is built around.
+      RA_MAX_CONCURRENT_RUNS: "1"
+      # Only needed if the proxy is behind auth.
+      # LITELLM_API_KEY: ${LITELLM_API_KEY}
+    healthcheck:
+      test: ["CMD", "python", "-c", "import urllib.request;urllib.request.urlopen('http://127.0.0.1:8080/healthz',timeout=2)"]
+      interval: 30s
+      timeout: 3s
+      retries: 3
+
+  # Optional: give the container its own tailnet identity instead of relying on the
+  # host's. Needs TS_AUTHKEY in the environment or a .env file.
+  tailscale:
+    profiles: ["ts"]
+    image: tailscale/tailscale:latest
+    hostname: reasonable-answer
+    restart: unless-stopped
+    environment:
+      TS_AUTHKEY: ${TS_AUTHKEY:?set TS_AUTHKEY to use the ts profile}
+      TS_STATE_DIR: /var/lib/tailscale
+      TS_EXTRA_ARGS: --advertise-tags=tag:container
+    volumes:
+      - ts-state:/var/lib/tailscale
+    cap_add: [NET_ADMIN, SYS_MODULE]
+    devices:
+      - /dev/net/tun:/dev/net/tun
+
+volumes:
+  ra-runs:
+  ts-state:
