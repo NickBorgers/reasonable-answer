@@ -35,7 +35,22 @@ jobs:
       authorized: ${{ steps.check.outputs.authorized }}
       agent: ${{ steps.check.outputs.agent }}
     steps:
+      # Without the PAT there is nothing this can do. Say so once, clearly, instead of
+      # failing deep inside the agent job with a gh authentication error.
+      - name: Check the pipeline is configured
+        id: configured
+        env:
+          WORKFLOW_PAT: ${{ secrets.WORKFLOW_PAT }}
+        run: |
+          if [ -z "$WORKFLOW_PAT" ]; then
+            echo "::notice title=Resolver not configured::WORKFLOW_PAT is not set. See docs/ci-setup.md step 2. Skipping."
+            echo "configured=false" >> "$GITHUB_OUTPUT"
+          else
+            echo "configured=true" >> "$GITHUB_OUTPUT"
+          fi
+
       - name: Check trust and select agent
+        if: steps.configured.outputs.configured == 'true'
         id: check
         uses: actions/github-script@v7
         env:
@@ -153,6 +168,9 @@ jobs:
           # plain markdown diff with no escaping to get wrong. Only the named variables
           # are substituted, so `$` in prose survives.
           mkdir -p .agent-prompt
+          # shellcheck disable=SC2016  # envsubst's allowlist argument is a list of
+          # variable NAMES and must not be expanded by the shell — expanding it would
+          # substitute the values here and leave envsubst with nothing to match.
           envsubst '${ISSUE_NUMBER} ${ISSUE_TITLE} ${REPO} ${BRANCH_NAME}' \
             < .github/ci/prompts/resolve-issue.md > .agent-prompt/resolve-issue.md
           echo "path=.agent-prompt/resolve-issue.md" >> "$GITHUB_OUTPUT"

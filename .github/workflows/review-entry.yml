@@ -45,10 +45,28 @@ jobs:
     runs-on: ubuntu-latest
     outputs:
       authorized: ${{ steps.authorize.outputs.authorized }}
+      configured: ${{ steps.configured.outputs.configured }}
       pr_number: ${{ steps.authorize.outputs.pr_number }}
       reason: ${{ steps.authorize.outputs.reason }}
     steps:
+      # Until WORKFLOW_PAT exists the pipeline cannot do anything, and every step that
+      # touches the API fails with an unhelpful gh error. Report "not configured" once,
+      # clearly, and stop — a repository mid-setup should not show a wall of red that is
+      # indistinguishable from a genuine breakage.
+      - name: Check the pipeline is configured
+        id: configured
+        env:
+          WORKFLOW_PAT: ${{ secrets.WORKFLOW_PAT }}
+        run: |
+          if [ -z "$WORKFLOW_PAT" ]; then
+            echo "::notice title=Review pipeline not configured::WORKFLOW_PAT is not set. See docs/ci-setup.md step 2. Skipping."
+            echo "configured=false" >> "$GITHUB_OUTPUT"
+          else
+            echo "configured=true" >> "$GITHUB_OUTPUT"
+          fi
+
       - name: Validate trigger, repo origin, and trust level
+        if: steps.configured.outputs.configured == 'true'
         id: authorize
         uses: actions/github-script@v7
         with:
@@ -129,7 +147,7 @@ jobs:
   resolve:
     name: Resolve SHA + dedup claim
     needs: authorize
-    if: needs.authorize.outputs.authorized == 'true'
+    if: needs.authorize.outputs.configured == 'true' && needs.authorize.outputs.authorized == 'true'
     runs-on: ubuntu-latest
     outputs:
       should_run: ${{ steps.dedup.outputs.claimed }}
@@ -240,6 +258,7 @@ jobs:
     name: Run review pipeline
     needs: [authorize, resolve]
     if: |
+      needs.authorize.outputs.configured == 'true' &&
       needs.authorize.outputs.authorized == 'true' &&
       needs.resolve.outputs.should_run == 'true' &&
       needs.resolve.outputs.terminal_verdict != 'true'
