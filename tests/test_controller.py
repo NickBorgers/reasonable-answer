@@ -6,10 +6,10 @@ from __future__ import annotations
 import itertools
 
 import pytest
-
 from conftest import cleared, make_ci, make_view
+
 from reasonable_answer.controller import acceptance_state, decide, detect_cycle
-from reasonable_answer.schemas import LensStatus, SeverityCounts
+from reasonable_answer.schemas import LensStatus
 from reasonable_answer.taxonomy import LENSES
 
 
@@ -24,7 +24,7 @@ def test_rule_2_failed_lens_recritiques_before_any_conclusion():
     # review check must precede it (RC-004).
     ci = make_ci(
         make_view(lenses_failed=1),
-        lens_status=cleared({l.value: 2 for l in LENSES}),
+        lens_status=cleared({lens.value: 2 for lens in LENSES}),
         critique_attempts_remaining=3,
     )
     d = decide(ci)
@@ -42,7 +42,7 @@ def test_rule_4_min_ticks_blocks_early_acceptance():
     # this is what stops a seed being rubber-stamped on its first critique.
     ci = make_ci(
         make_view(round=1, min_ticks=2),
-        lens_status=cleared({l.value: 2 for l in LENSES}),
+        lens_status=cleared({lens.value: 2 for lens in LENSES}),
     )
     d = decide(ci)
     assert (d.rule, d.action) == (4, "generate")
@@ -60,7 +60,7 @@ def test_rule_6_cap_with_major_is_exhausted():
 
 
 def test_rule_7_strong_acceptance():
-    ci = make_ci(lens_status=cleared({l.value: 2 for l in LENSES}))
+    ci = make_ci(lens_status=cleared({lens.value: 2 for lens in LENSES}))
     d = decide(ci)
     assert (d.rule, d.terminal_status) == (7, "accepted")
 
@@ -74,12 +74,12 @@ def test_rule_8_top_up_does_not_generate_and_works_at_the_cap():
     )
     d = decide(ci)
     assert (d.rule, d.action) == (8, "recritique")
-    assert d.recritique_lenses and all(l.value == "completeness" for l in d.recritique_lenses)
+    assert d.recritique_lenses and all(lens.value == "completeness" for lens in d.recritique_lenses)
 
 
 def test_rule_9_polish_requires_the_orchestrator_and_is_cap_gated():
     view = make_view(round=3, hard_cap=8, totals={"minor": 4})
-    status = cleared({l.value: 2 for l in LENSES}, unused=0)
+    status = cleared({lens.value: 2 for lens in LENSES}, unused=0)
     # strong_met wins first — rule 7 precedes 9 by design.
     assert decide(make_ci(view, lens_status=status, polish_recommended=True)).rule == 7
 
@@ -151,7 +151,7 @@ def test_no_rule_generates_at_or_beyond_the_cap():
             )
             ci = make_ci(
                 view,
-                lens_status=cleared({l.value: cleared_n for l in LENSES}, eligible=eligible,
+                lens_status=cleared({lens.value: cleared_n for lens in LENSES}, eligible=eligible,
                                     unused=eligible - cleared_n if eligible > cleared_n else 0),
                 polish_recommended=polish,
             )
@@ -176,7 +176,7 @@ def test_decision_is_total():
                     view,
                     fatal=fatal,
                     critique_attempts_remaining=budget,
-                    lens_status=cleared({l.value: cleared_n for l in LENSES}, eligible=eligible),
+                    lens_status=cleared({lens.value: cleared_n for lens in LENSES}, eligible=eligible),
                 )
                 d = decide(ci)
                 assert 1 <= d.rule <= 14
@@ -191,13 +191,13 @@ def test_known_unacceptable_artifact_is_never_accepted():
         for cleared_n in (0, 1, 2):
             ci = make_ci(
                 make_view(totals={"blocking": blocking, "major": major}),
-                lens_status=cleared({l.value: cleared_n for l in LENSES}),
+                lens_status=cleared({lens.value: cleared_n for lens in LENSES}),
             )
             assert decide(ci).terminal_status not in ("accepted", "converged_unconfirmed")
 
 
 def test_acceptance_state_requires_zero_material():
-    status = cleared({l.value: 2 for l in LENSES})
+    status = cleared({lens.value: 2 for lens in LENSES})
     assert acceptance_state(status, material=0) == "strong_met"
     assert acceptance_state(status, material=1) == "none"
 

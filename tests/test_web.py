@@ -2,17 +2,15 @@
 
 from __future__ import annotations
 
-import json
 import time
 
 import pytest
+from fakes import FakeClient
 from fastapi.testclient import TestClient
 
-from fakes import FakeClient
 from reasonable_answer.graph import run as run_graph
-from reasonable_answer.schemas import CritiqueOutput, RawIssue, StructuralRef
+from reasonable_answer.schemas import CritiqueOutput
 from reasonable_answer.store import RunStore
-from reasonable_answer.taxonomy import Category, Severity
 from reasonable_answer.web.app import create_app
 from reasonable_answer.web.registry import Registry
 from reasonable_answer.web.worker import RunWorker
@@ -173,7 +171,7 @@ def test_the_timeline_reconstructs_rounds_from_the_event_log(config, identities,
     assert timeline
     assert [r.round for r in timeline] == sorted(r.round for r in timeline)
     for snapshot in timeline:
-        for lens, lens_snapshot in snapshot.lenses.items():
+        for _lens, lens_snapshot in snapshot.lenses.items():
             # the critic on every lens differs from the writer of that round
             assert lens_snapshot.critic != snapshot.writer
 

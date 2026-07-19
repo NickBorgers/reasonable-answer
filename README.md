@@ -1,5 +1,8 @@
 # reasonable-answer
 
+[![PR Validation](https://github.com/NickBorgers/reasonable-answer/actions/workflows/pr-validation.yml/badge.svg)](https://github.com/NickBorgers/reasonable-answer/actions/workflows/pr-validation.yml)
+[![Docker Release](https://github.com/NickBorgers/reasonable-answer/actions/workflows/docker-release.yml/badge.svg)](https://github.com/NickBorgers/reasonable-answer/actions/workflows/docker-release.yml)
+
 Takes a question (and optionally a seed report) and produces a higher-quality report whose
 argument is *sound* — where "sound" means **no eligible reviewer can find a material defect**,
 not that anyone asserted it was good.
@@ -192,3 +195,24 @@ The test suite is offline: a scriptable fake proxy drives the whole graph, so th
 properties (author exclusion, fail-closed lenses, termination, orchestrator blindness) are tested
 without a network. `tests/test_controller.py` sweeps the controller's input space for totality and
 for the property that no rule generates at or beyond the hard cap.
+
+Lint with `uv run ruff check src/ tests/`.
+
+## CI and agentic review
+
+Every PR gets a secret-free validation run (ruff, the offline suite on 3.11 and 3.12, a lockfile
+check, `actionlint`, and a container build with a health-check smoke test), plus an agent review by
+three roles: **invariant**, **security**, and **test**. A deterministic judge aggregates their
+structured verdicts and writes the merge gate; it runs from `main` with read-only permissions, so a
+PR cannot modify the code that judges it. Nothing in the pipeline can push.
+
+Comment `/autoresolve` on an issue and an agent opens a PR for it; `/review` forces a fresh review
+cycle on a PR.
+
+The `invariant` reviewer is the one that earns its keep here: `docs/` is normative spec, so it
+checks that a change preserves author exclusion, orchestrator blindness, fail-closed lenses,
+severity floors, and termination — and blocks a change that alters one of those behaviors without
+updating the spec and recording the decision.
+
+- [docs/ci-pipeline.md](./docs/ci-pipeline.md) — what runs, and which properties are load-bearing
+- [docs/ci-setup.md](./docs/ci-setup.md) — runner registration, secrets, branch protection

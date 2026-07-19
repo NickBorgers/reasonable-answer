@@ -1,0 +1,132 @@
+---
+name: Select applicable reviewer roles
+description: >
+  Decides which reviewer roles apply to a diff, so a docs-only change does not pay for a
+  full review and a change to the pipeline's own guarantees cannot skip the reviewer that
+  guards them.
+
+  Emits a JSON array of role names. `invariant` always applies: this project's safety
+  properties are the reason the pipeline exists, and a review set that could come back
+  empty would hit the aggregator's all-abstain fail-closed branch instead of reviewing
+  anything.
+
+inputs:
+  base_sha:
+    description: Base SHA of the diff
+    required: true
+  head_sha:
+    description: Head SHA of the diff
+    required: true
+  repo_dir:
+    description: >
+      Directory holding the checkout to diff in. The caller checks out `main` (for this
+      action) and the PR head into separate paths, so the git commands here must be
+      pointed at the latter explicitly.
+    required: true
+
+outputs:
+  roles:
+    description: JSON array of applicable role names
+    value: ${{ steps.classify.outputs.roles }}
+  changed_files:
+    description: Newline-separated list of changed paths
+    value: ${{ steps.classify.outputs.changed_files }}
+
+runs:
+  using: composite
+  steps:
+    - name: Classify
+      id: classify
+      shell: bash
+      env:
+        BASE_SHA: ${{ inputs.base_sha }}
+        HEAD_SHA: ${{ inputs.head_sha }}
+        REPO_DIR: ${{ inputs.repo_dir }}
+      run: |
+        set -euo pipefail
+
+        FILES=$(git -C "$REPO_DIR" diff --name-only "${BASE_SHA}...${HEAD_SHA}")
+        if [ -z "$FILES" ]; then
+          echo "::warning::review-classify: empty diff; defaulting to the invariant reviewer"
+          echo 'roles=["invariant"]' >> "$GITHUB_OUTPUT"
+          {
+            echo "changed_files<<EOF"
+            echo "EOF"
+          } >> "$GITHUB_OUTPUT"
+          exit 0
+        fi
+
+        echo "Changed files:"
+        echo "$FILES" | sed 's/^/  /'
+
+        # Spec-critical markdown. These files are NOT inert prose: docs/ is the
+        # normative specification this codebase is reviewed against, and the prompt
+        # files ARE the reviewers' instructions. A change to either must go down the
+        # full review path, so they do not count toward "docs only".
+        #
+        # This is an allowlist, which means it is wrong by default for anything new.
+        # A new prompt-bearing or spec-bearing document must be added here.
+        is_spec_critical() {
+          case "$1" in
+            docs/DESIGN.md|docs/isolation.md|docs/convergence.md|docs/architecture.md|docs/decisions.md) return 0 ;;
+            docs/ci-pipeline.md|docs/ci-setup.md) return 0 ;;
+            .github/scripts/review/prompts/*.md|.github/ci/prompts/*.md) return 0 ;;
+            AGENTS.md|CLAUDE.md) return 0 ;;
+            *) return 1 ;;
+          esac
+        }
+
+        docs_only=true
+        want_security=false
+        want_test=false
+
+        while IFS= read -r f; do
+          [ -n "$f" ] || continue
+
+          if is_spec_critical "$f"; then
+            docs_only=false
+            want_security=true
+            want_test=true
+            continue
+          fi
+
+          case "$f" in
+            *.md|LICENSE|.gitignore|.dockerignore)
+              ;;
+            *)
+              docs_only=false
+              ;;
+          esac
+
+          case "$f" in
+            # Anything that can change the pipeline's own guarantees, the runtime
+            # surface, or the dependency set gets the security reviewer.
+            .github/*|scripts/*|Dockerfile|compose.yaml|pyproject.toml|uv.lock|config/*|src/*)
+              want_security=true
+              ;;
+          esac
+
+          case "$f" in
+            src/*|tests/*|config/*|pyproject.toml)
+              want_test=true
+              ;;
+          esac
+        done <<< "$FILES"
+
+        # invariant always runs.
+        roles='"invariant"'
+        if [ "$docs_only" = false ] && [ "$want_security" = true ]; then
+          roles="${roles},\"security\""
+        fi
+        if [ "$want_test" = true ]; then
+          roles="${roles},\"test\""
+        fi
+
+        echo "roles=[${roles}]" >> "$GITHUB_OUTPUT"
+        {
+          echo "changed_files<<REVIEW_EOF"
+          echo "$FILES"
+          echo "REVIEW_EOF"
+        } >> "$GITHUB_OUTPUT"
+
+        echo "Selected roles: [${roles}]"

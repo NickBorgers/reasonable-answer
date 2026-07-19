@@ -10,9 +10,10 @@ from rich.console import Console
 from rich.table import Table
 
 from .config import Config, ConfigError, validate_roster_health
-from .graph import build_runtime, run as run_graph
+from .graph import run as run_graph
 from .llm import LLMClient
-from .store import expired_runs, purge as purge_run
+from .store import expired_runs
+from .store import purge as purge_run
 
 app = typer.Typer(add_completion=False, help="reasonable-answer — isolation-pipeline report refiner")
 console = Console()

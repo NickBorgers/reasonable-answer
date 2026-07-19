@@ -1,0 +1,15 @@
+# Ownership is a second signal alongside the agent reviewers, not a replacement for it.
+# The named modules are the ones carrying the design's safety invariants — a change
+# there should always reach a human, whatever the pipeline says.
+
+*                                       @NickBorgers
+
+/.github/                               @NickBorgers
+/docs/                                  @NickBorgers
+
+# Invariant-bearing modules.
+/src/reasonable_answer/schemas.py       @NickBorgers
+/src/reasonable_answer/controller.py    @NickBorgers
+/src/reasonable_answer/taxonomy.py      @NickBorgers
+/src/reasonable_answer/triage.py        @NickBorgers
+/src/reasonable_answer/roles.py         @NickBorgers

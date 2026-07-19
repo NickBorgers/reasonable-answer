@@ -11,8 +11,9 @@ import json
 
 import pytest
 from conftest import make_view
-
 from fakes import FakeClient
+from pydantic import ValidationError
+
 from reasonable_answer import prompts
 from reasonable_answer.graph import _orchestrate_call, run
 from reasonable_answer.schemas import CritiqueOutput, OrchestratorView
@@ -48,7 +49,7 @@ def test_orchestrator_view_has_no_identifiers():
 
 
 def test_orchestrator_view_rejects_extra_fields():
-    with pytest.raises(Exception):
+    with pytest.raises(ValidationError):
         OrchestratorView(**json.loads(make_view().model_dump_json()), artifact_hash="x")
 
 
@@ -108,7 +109,7 @@ def test_confirmation_critique_is_byte_identical_to_a_normal_one(identities, con
     for call in client.calls:
         if call.schema != "CritiqueOutput":
             continue
-        lens = next(l.value for l in LENSES if f"YOUR DIMENSION: {l.value}" in call.user)
+        lens = next(lens.value for lens in LENSES if f"YOUR DIMENSION: {lens.value}" in call.user)
         by_lens.setdefault(lens, set()).add(call.user)
     # every critique of the same artifact on the same lens used the identical prompt,
     # first pass and confirmation alike

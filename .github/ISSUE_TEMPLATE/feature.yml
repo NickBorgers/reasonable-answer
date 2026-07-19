@@ -1,0 +1,29 @@
+name: Feature or change
+description: Propose something new, or a change to how the system behaves
+labels: [enhancement]
+body:
+  - type: textarea
+    id: motivation
+    attributes:
+      label: Motivation
+      description: What problem does this solve? What does it make possible?
+    validations:
+      required: true
+
+  - type: textarea
+    id: proposal
+    attributes:
+      label: Proposal
+    validations:
+      required: true
+
+  - type: textarea
+    id: design-impact
+    attributes:
+      label: Design impact
+      description: >
+        Which parts of `docs/` would need to change? If this weakens or removes a safety
+        property, say so plainly and explain what replaces it — the design's properties
+        exist because specific adversarial findings killed the alternatives.
+    validations:
+      required: false

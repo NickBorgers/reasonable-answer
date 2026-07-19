@@ -1,0 +1,336 @@
+---
+name: Review pipeline — orchestrator
+
+# Called only by review-entry.yml, which owns authorization and the dedup claim.
+#
+# Graph:  gather → {invariant, security, test} → judge → finalize
+#
+# The reviewer jobs are three static callers rather than a matrix, because
+# `strategy.matrix` cannot be used on a job that `uses:` a reusable workflow, and
+# `matrix.*` is not available in a reusable caller's `if:`. Getting that wrong produces
+# a startup_failure with no logs and nothing to debug.
+
+on:
+  workflow_call:
+    inputs:
+      pr_number:
+        required: true
+        type: string
+      reviewed_sha:
+        required: true
+        type: string
+      head_ref:
+        required: true
+        type: string
+      base_ref:
+        required: true
+        type: string
+      base_sha:
+        required: true
+        type: string
+    secrets:
+      WORKFLOW_PAT:
+        required: true
+
+permissions:
+  contents: read
+  issues: read
+  packages: read
+  pull-requests: read
+  statuses: write
+  actions: read
+
+env:
+  # The cycle cap is a cost backstop, not a loop breaker. With no automated fixer in
+  # this pipeline, a NO-GO returns to a human, so consecutive machine-driven cycles
+  # essentially never occur and cap-exhausted should never fire in practice.
+  #
+  # If an automated fixer is ever added, this changes meaning entirely and the
+  # stop-on-GO / retry-on-NO-GO asymmetry has to be re-derived along with it.
+  MAX_CYCLES: '2'
+  # Commits authored by the resolver agent. Used to tell machine pushes from human ones.
+  AGENT_COMMIT_EMAIL: 'ci@reasonable-answer.local'
+
+jobs:
+  gather:
+    name: Gather cycle state
+    runs-on: ubuntu-latest
+    outputs:
+      cycle: ${{ steps.cycle.outputs.cycle }}
+      cap_exhausted: ${{ steps.cycle.outputs.cap_exhausted }}
+      inherit: ${{ steps.inherit.outputs.inherit }}
+      inherited_verdict: ${{ steps.inherit.outputs.inherited_verdict }}
+      roles: ${{ steps.classify.outputs.roles }}
+    steps:
+      - name: Checkout main (for composite actions)
+        uses: actions/checkout@v4
+        with:
+          ref: main
+          path: main-checkout
+
+      - name: Checkout reviewed SHA
+        uses: actions/checkout@v4
+        with:
+          ref: ${{ inputs.reviewed_sha }}
+          fetch-depth: 0
+          path: pr-head
+
+      - name: Read prior cycle
+        id: prior
+        uses: ./main-checkout/.github/actions/review-state
+        with:
+          op: read-cycle
+          sha: ${{ inputs.reviewed_sha }}
+          base_sha: ${{ inputs.base_sha }}
+          github_token: ${{ secrets.WORKFLOW_PAT }}
+
+      # A merge of main into the PR branch is not new content to review. Without this,
+      # routinely resyncing a long-lived branch burns cycles and can push a PR into the
+      # cap without a single substantive change having been made.
+      - name: Detect merge-from-main
+        id: inherit
+        working-directory: pr-head
+        env:
+          GH_TOKEN: ${{ secrets.WORKFLOW_PAT }}
+          REPO: ${{ github.repository }}
+          SHA: ${{ inputs.reviewed_sha }}
+          BASE_REF: ${{ inputs.base_ref }}
+          PRIOR_CYCLE_SHA: ${{ steps.prior.outputs.cycle_sha }}
+        run: |
+          set -euo pipefail
+
+          inherit=false
+          inherited=""
+
+          # A merge commit has two or more parents: "<sha> <parent1> <parent2>" is 3 words.
+          parents=$(git rev-list --parents -n 1 "$SHA" | wc -w)
+          if [ "$parents" -ge 3 ]; then
+            git fetch --quiet origin "$BASE_REF"
+            # Second parent already on the base branch ⇒ this merged base INTO the PR,
+            # rather than bringing new work in from somewhere else.
+            if git merge-base --is-ancestor "${SHA}^2" "origin/${BASE_REF}"; then
+              if [ -n "$PRIOR_CYCLE_SHA" ]; then
+                inherited=$(gh api "repos/${REPO}/commits/${PRIOR_CYCLE_SHA}/statuses" \
+                  --jq '[.[] | select(.context == "review/verdict")] | sort_by(.created_at) | last | .description // empty')
+              fi
+              if [ -n "$inherited" ]; then
+                inherit=true
+                echo "gather: merge-from-${BASE_REF}; inheriting prior verdict '${inherited}'"
+              else
+                echo "gather: merge-from-${BASE_REF} but no prior verdict to inherit; reviewing normally"
+              fi
+            fi
+          fi
+
+          {
+            echo "inherit=$inherit"
+            echo "inherited_verdict=$inherited"
+          } >> "$GITHUB_OUTPUT"
+
+      - name: Compute cycle
+        id: cycle
+        working-directory: pr-head
+        env:
+          GH_TOKEN: ${{ secrets.WORKFLOW_PAT }}
+          REPO: ${{ github.repository }}
+          SHA: ${{ inputs.reviewed_sha }}
+          PRIOR: ${{ steps.prior.outputs.cycle }}
+          PRIOR_CYCLE_SHA: ${{ steps.prior.outputs.cycle_sha }}
+        run: |
+          set -euo pipefail
+
+          prior="${PRIOR:-0}"
+          cycle=$((prior + 1))
+
+          # A human who pushes on top of a converged GO is starting a new conversation,
+          # not continuing the old one. Resetting the counter means their work gets a
+          # full review budget instead of inheriting a nearly-exhausted one.
+          author_email=$(git log -1 --format='%ae' "$SHA")
+          if [ "$prior" -gt 0 ] && [ "$author_email" != "$AGENT_COMMIT_EMAIL" ] && [ -n "$PRIOR_CYCLE_SHA" ]; then
+            prior_verdict=$(gh api "repos/${REPO}/commits/${PRIOR_CYCLE_SHA}/statuses" \
+              --jq '[.[] | select(.context == "review/verdict")] | sort_by(.created_at) | last | .description // empty')
+            if [ "$prior_verdict" = "GO" ]; then
+              echo "gather: human commit (${author_email}) on top of a GO; resetting cycle to 1"
+              cycle=1
+            fi
+          fi
+
+          cap_exhausted=false
+          if [ "$cycle" -gt "${MAX_CYCLES}" ]; then
+            cap_exhausted=true
+            echo "gather: cycle ${cycle} exceeds cap ${MAX_CYCLES}"
+          fi
+
+          echo "gather: cycle=${cycle} (prior=${prior}) cap_exhausted=${cap_exhausted}"
+          {
+            echo "cycle=$cycle"
+            echo "cap_exhausted=$cap_exhausted"
+          } >> "$GITHUB_OUTPUT"
+
+      - name: Record cycle on the reviewed SHA
+        if: steps.cycle.outputs.cap_exhausted != 'true' && steps.inherit.outputs.inherit != 'true'
+        uses: ./main-checkout/.github/actions/review-state
+        with:
+          op: write-status
+          sha: ${{ inputs.reviewed_sha }}
+          context: review/cycle
+          state: success
+          description: ${{ steps.cycle.outputs.cycle }}
+          github_token: ${{ secrets.WORKFLOW_PAT }}
+
+      - name: Select applicable reviewer roles
+        id: classify
+        if: steps.cycle.outputs.cap_exhausted != 'true' && steps.inherit.outputs.inherit != 'true'
+        uses: ./main-checkout/.github/actions/review-classify
+        with:
+          base_sha: ${{ inputs.base_sha }}
+          head_sha: ${{ inputs.reviewed_sha }}
+          repo_dir: pr-head
+
+  # ── Reviewers ────────────────────────────────────────────────────────────────
+  # Roles run on different model families on purpose. This project's own design argues
+  # that decorrelated blind spots are what make independent review worth more than
+  # repeated review; the same reasoning applies to its CI.
+
+  review-invariant:
+    name: 'Review: invariant'
+    needs: gather
+    if: |
+      needs.gather.outputs.cap_exhausted != 'true' &&
+      needs.gather.outputs.inherit != 'true' &&
+      contains(fromJSON(needs.gather.outputs.roles), 'invariant')
+    uses: ./.github/workflows/review-reviewer.yml
+    with:
+      role: invariant
+      agent: claude
+      pr_number: ${{ inputs.pr_number }}
+      reviewed_sha: ${{ inputs.reviewed_sha }}
+      base_ref: ${{ inputs.base_ref }}
+      cycle: ${{ needs.gather.outputs.cycle }}
+    secrets:
+      WORKFLOW_PAT: ${{ secrets.WORKFLOW_PAT }}
+
+  review-security:
+    name: 'Review: security'
+    needs: gather
+    if: |
+      needs.gather.outputs.cap_exhausted != 'true' &&
+      needs.gather.outputs.inherit != 'true' &&
+      contains(fromJSON(needs.gather.outputs.roles), 'security')
+    uses: ./.github/workflows/review-reviewer.yml
+    with:
+      role: security
+      agent: codex
+      pr_number: ${{ inputs.pr_number }}
+      reviewed_sha: ${{ inputs.reviewed_sha }}
+      base_ref: ${{ inputs.base_ref }}
+      cycle: ${{ needs.gather.outputs.cycle }}
+    secrets:
+      WORKFLOW_PAT: ${{ secrets.WORKFLOW_PAT }}
+
+  review-test:
+    name: 'Review: test'
+    needs: gather
+    if: |
+      needs.gather.outputs.cap_exhausted != 'true' &&
+      needs.gather.outputs.inherit != 'true' &&
+      contains(fromJSON(needs.gather.outputs.roles), 'test')
+    uses: ./.github/workflows/review-reviewer.yml
+    with:
+      role: test
+      agent: claude
+      pr_number: ${{ inputs.pr_number }}
+      reviewed_sha: ${{ inputs.reviewed_sha }}
+      base_ref: ${{ inputs.base_ref }}
+      cycle: ${{ needs.gather.outputs.cycle }}
+    secrets:
+      WORKFLOW_PAT: ${{ secrets.WORKFLOW_PAT }}
+
+  judge:
+    name: Judge
+    needs: [gather, review-invariant, review-security, review-test]
+    if: |
+      always() &&
+      needs.gather.result == 'success' &&
+      needs.gather.outputs.cap_exhausted != 'true' &&
+      needs.gather.outputs.inherit != 'true'
+    uses: ./.github/workflows/review-judge.yml
+    with:
+      pr_number: ${{ inputs.pr_number }}
+      reviewed_sha: ${{ inputs.reviewed_sha }}
+      cycle: ${{ needs.gather.outputs.cycle }}
+    secrets:
+      WORKFLOW_PAT: ${{ secrets.WORKFLOW_PAT }}
+
+  # ── Terminal paths ───────────────────────────────────────────────────────────
+
+  finalize:
+    name: Finalize
+    needs: [gather, judge]
+    if: always() && needs.judge.result == 'success'
+    uses: ./.github/workflows/review-finalize.yml
+    with:
+      pr_number: ${{ inputs.pr_number }}
+      reviewed_sha: ${{ inputs.reviewed_sha }}
+      cycle: ${{ needs.gather.outputs.cycle }}
+      verdict: ${{ needs.judge.outputs.verdict }}
+      category: ${{ needs.judge.outputs.category }}
+      skip_verdict_artifact: false
+    secrets:
+      WORKFLOW_PAT: ${{ secrets.WORKFLOW_PAT }}
+
+  cap-exhausted:
+    name: Finalize (cycle cap)
+    needs: gather
+    if: always() && needs.gather.result == 'success' && needs.gather.outputs.cap_exhausted == 'true'
+    uses: ./.github/workflows/review-finalize.yml
+    with:
+      pr_number: ${{ inputs.pr_number }}
+      reviewed_sha: ${{ inputs.reviewed_sha }}
+      cycle: ${{ needs.gather.outputs.cycle }}
+      verdict: 'NO-GO'
+      category: cycle_capped
+      # There is no verdict artifact on this path. An unconditional download would fail
+      # the job before it applies labels or writes the merge-gate status, leaving the PR
+      # with no verdict at all — worse than the NO-GO it was trying to report.
+      skip_verdict_artifact: true
+    secrets:
+      WORKFLOW_PAT: ${{ secrets.WORKFLOW_PAT }}
+
+  inherit:
+    name: Finalize (inherited)
+    needs: gather
+    if: always() && needs.gather.result == 'success' && needs.gather.outputs.inherit == 'true'
+    uses: ./.github/workflows/review-finalize.yml
+    with:
+      pr_number: ${{ inputs.pr_number }}
+      reviewed_sha: ${{ inputs.reviewed_sha }}
+      cycle: ${{ needs.gather.outputs.cycle }}
+      verdict: ${{ needs.gather.outputs.inherited_verdict }}
+      category: inherited
+      skip_verdict_artifact: true
+    secrets:
+      WORKFLOW_PAT: ${{ secrets.WORKFLOW_PAT }}
+
+  cleanup-claim:
+    name: Release dedup claim
+    needs: [gather, judge, finalize, cap-exhausted, inherit]
+    # Unconditional. A crashed reviewer would otherwise leave `review/pipeline` pending
+    # on this SHA forever, and every future run on it — including a human's /review —
+    # would be refused by dedup with no way to clear it short of the API.
+    if: always()
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+        with:
+          ref: main
+
+      - name: Advance the claim to a terminal state
+        uses: ./.github/actions/review-state
+        with:
+          op: write-status
+          sha: ${{ inputs.reviewed_sha }}
+          context: review/pipeline
+          state: success
+          description: 'pipeline run complete'
+          github_token: ${{ secrets.WORKFLOW_PAT }}

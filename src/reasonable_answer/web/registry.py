@@ -9,9 +9,10 @@ That also means the audit trail and the UI can never disagree.
 from __future__ import annotations
 
 import json
+from collections.abc import Iterator
 from dataclasses import dataclass, field
 from pathlib import Path
-from typing import Any, Iterator, Literal
+from typing import Any, Literal
 
 from ..taxonomy import LENSES
 

@@ -1,0 +1,150 @@
+---
+name: Review pipeline — finalize
+
+# The only stage that changes what a human sees: applies labels, posts the summary
+# comment, and writes the merge gate.
+#
+# Reached by three different paths (a real verdict, the cycle cap, an inherited
+# verdict), and two of them have no verdict artifact to download. `skip_verdict_artifact`
+# exists for exactly that: an unconditional download on those paths fails the job before
+# it writes any status, leaving the PR with a stale label and no gate — a worse outcome
+# than the NO-GO it was trying to report.
+
+on:
+  workflow_call:
+    inputs:
+      pr_number:
+        required: true
+        type: string
+      reviewed_sha:
+        required: true
+        type: string
+      cycle:
+        required: true
+        type: string
+      verdict:
+        required: true
+        type: string
+      category:
+        required: true
+        type: string
+      skip_verdict_artifact:
+        required: true
+        type: boolean
+    secrets:
+      WORKFLOW_PAT:
+        required: true
+
+permissions:
+  contents: read
+  issues: read
+  pull-requests: read
+  statuses: write
+  actions: read
+
+jobs:
+  finalize:
+    name: Publish verdict
+    runs-on: ubuntu-latest
+    steps:
+      - name: Checkout main
+        uses: actions/checkout@v4
+        with:
+          ref: main
+
+      - name: Download the verdict artifact
+        if: '!inputs.skip_verdict_artifact'
+        uses: actions/download-artifact@v4
+        with:
+          name: verdict-${{ inputs.reviewed_sha }}
+          path: verdict
+
+      - name: Download reviewer artifacts
+        if: '!inputs.skip_verdict_artifact'
+        continue-on-error: true
+        uses: actions/download-artifact@v4
+        with:
+          pattern: reviewer-*-${{ inputs.reviewed_sha }}
+          path: reviewer-artifacts
+
+      - name: Render and post the summary comment
+        env:
+          GH_TOKEN: ${{ secrets.WORKFLOW_PAT }}
+          REPO: ${{ github.repository }}
+          PR_NUMBER: ${{ inputs.pr_number }}
+          REVIEWED_SHA: ${{ inputs.reviewed_sha }}
+          CYCLE: ${{ inputs.cycle }}
+          VERDICT: ${{ inputs.verdict }}
+          CATEGORY: ${{ inputs.category }}
+          VERDICT_DIR: verdict
+          REVIEWER_DIR: reviewer-artifacts
+          RUN_URL: ${{ github.server_url }}/${{ github.repository }}/actions/runs/${{ github.run_id }}
+        run: ./.github/scripts/review/render-finalize-comment.sh
+
+      - name: Apply labels
+        env:
+          GH_TOKEN: ${{ secrets.WORKFLOW_PAT }}
+          REPO: ${{ github.repository }}
+          PR_NUMBER: ${{ inputs.pr_number }}
+          VERDICT: ${{ inputs.verdict }}
+        run: |
+          set -euo pipefail
+
+          # Self-healing: the labels may not exist yet on a fresh repository.
+          gh label create agent-reviews-passed --repo "$REPO" --color 0E8A16 \
+            --description 'All agent reviewers cleared this SHA' 2>/dev/null || true
+          gh label create needs-human-review --repo "$REPO" --color B60205 \
+            --description 'Agent review returned NO-GO' 2>/dev/null || true
+
+          if [ "$VERDICT" = "GO" ]; then
+            add=agent-reviews-passed; remove=needs-human-review
+          else
+            add=needs-human-review; remove=agent-reviews-passed
+          fi
+
+          gh pr edit "$PR_NUMBER" --repo "$REPO" --add-label "$add" 2>/dev/null || true
+          gh pr edit "$PR_NUMBER" --repo "$REPO" --remove-label "$remove" 2>/dev/null || true
+
+      # ─────────────────────────────────────────────────────────────────────────
+      # The merge gate. This one status MUST be written with GITHUB_TOKEN.
+      #
+      # Branch protection only honours required-status contexts published by the GitHub
+      # Actions app (integration_id 15368). A status posted by a personal access token
+      # is recorded and displayed identically, but does not satisfy the protection rule
+      # — so using WORKFLOW_PAT here leaves the gate permanently un-green with no error
+      # anywhere to explain why.
+      #
+      # Every other write in this pipeline uses WORKFLOW_PAT. This is the exception.
+      # ─────────────────────────────────────────────────────────────────────────
+      - name: Publish "All Required Agent Reviews"
+        uses: actions/github-script@v7
+        with:
+          github-token: ${{ secrets.GITHUB_TOKEN }}
+          script: |
+            const verdict = process.env.VERDICT;
+            const category = process.env.CATEGORY;
+            const cycle = process.env.CYCLE;
+
+            const descriptions = {
+              go: `GO — all applicable reviewers cleared (cycle ${cycle})`,
+              reviewer_blockers: `NO-GO — unaddressed blocking issues (cycle ${cycle})`,
+              pipeline_error: `NO-GO — pipeline could not trust its inputs (cycle ${cycle})`,
+              cycle_capped: `NO-GO — review cycle cap reached (cycle ${cycle})`,
+              inherited: `${verdict} — inherited from the pre-merge verdict`,
+            };
+
+            await github.rest.repos.createCommitStatus({
+              owner: context.repo.owner,
+              repo: context.repo.repo,
+              sha: process.env.REVIEWED_SHA,
+              state: verdict === 'GO' ? 'success' : 'failure',
+              context: 'All Required Agent Reviews',
+              description: (descriptions[category] ?? `${verdict} (cycle ${cycle})`).slice(0, 140),
+              target_url: process.env.RUN_URL,
+            });
+        env:
+          VERDICT: ${{ inputs.verdict }}
+          CATEGORY: ${{ inputs.category }}
+          CYCLE: ${{ inputs.cycle }}
+          REVIEWED_SHA: ${{ inputs.reviewed_sha }}
+          RUN_URL: ${{ github.server_url }}/${{ github.repository }}/actions/runs/${{ github.run_id }}

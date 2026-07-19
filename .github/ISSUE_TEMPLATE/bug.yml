@@ -1,0 +1,44 @@
+name: Bug
+description: Something behaves differently from how the design says it should
+labels: [bug]
+body:
+  - type: textarea
+    id: what
+    attributes:
+      label: What happened
+    validations:
+      required: true
+
+  - type: textarea
+    id: expected
+    attributes:
+      label: What you expected
+      description: >
+        If the design docs say something different from what happened, cite the file and
+        the decision ID — that turns a bug report into a spec violation, which is a much
+        stronger claim.
+    validations:
+      required: true
+
+  - type: textarea
+    id: repro
+    attributes:
+      label: Reproduction
+      description: Commands, config, and the run id if there is one.
+      render: shell
+    validations:
+      required: false
+
+  - type: input
+    id: terminal-status
+    attributes:
+      label: Terminal status
+      description: "If a run ended unexpectedly: accepted / converged_unconfirmed / exhausted_unresolved / needs_human_review / aborted"
+    validations:
+      required: false
+
+  - type: markdown
+    attributes:
+      value: |
+        Do not paste report or seed content from `runs/` into a public issue — it may
+        contain material you did not intend to publish. Describe it instead.
