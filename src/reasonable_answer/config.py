@@ -1,0 +1,184 @@
+"""Run configuration: the role-structured roster, budgets, and startup validation.
+
+The roster is a **writer pool** plus **per-lens critic pools** (D15/D16). Critic-only
+specialists are allowed and are the clean way to satisfy author-exclusion: a model
+pinned to the evidence lens that never writes can review every tick.
+
+Startup validation is **fail closed** (RA-015): an empty writer pool, a lens with no
+eligible non-author model, or a bad `min_ticks`/`hard_cap` pair aborts the run before
+a single token is spent.
+"""
+
+from __future__ import annotations
+
+import os
+from pathlib import Path
+
+import yaml
+from pydantic import BaseModel, ConfigDict, Field, model_validator
+
+from .taxonomy import LENSES, Lens
+
+DEFAULT_CONFIG_PATH = Path(__file__).resolve().parents[2] / "config" / "roster.yaml"
+
+
+class ConfigError(RuntimeError):
+    """Raised for any fail-closed startup violation."""
+
+
+class Budgets(BaseModel):
+    model_config = ConfigDict(extra="forbid")
+
+    # Bounds are part of failing closed: a zero concurrency crashes the executor, a
+    # negative stagnation limit terminates the run on tick one, and a negative budget
+    # silently reads as "exhausted" — all of which change the state machine without
+    # anyone saying so.
+    min_ticks: int = Field(default=2, ge=1, le=100)
+    hard_cap: int = Field(default=8, ge=2, le=200)
+    polish_cap: int = Field(default=1, ge=0, le=20)
+    critique_attempts: int = Field(default=6, ge=0, le=100)
+    confirmation_attempts: int = Field(default=6, ge=0, le=100)
+    stagnation_limit: int = Field(default=3, ge=1, le=100)
+    cycle_period: int = Field(default=4, ge=1, le=100)
+    repair_retries: int = Field(default=1, ge=0, le=10)
+    call_retries: int = Field(default=2, ge=0, le=10)
+    timeout_seconds: float = Field(default=300.0, gt=0, le=7200)
+    max_concurrency: int = Field(default=3, ge=1, le=16)
+
+    @model_validator(mode="after")
+    def _check(self) -> Budgets:
+        # RI-001: guarantees no generating rule can fire at or beyond the cap.
+        if not (0 < self.min_ticks < self.hard_cap):
+            raise ConfigError(
+                f"config invariant violated: 0 < min_ticks < hard_cap "
+                f"(got min_ticks={self.min_ticks}, hard_cap={self.hard_cap})"
+            )
+        return self
+
+
+class ProxyConfig(BaseModel):
+    model_config = ConfigDict(extra="forbid")
+
+    base_url: str = "https://llm.featherback-mermaid.ts.net/v1"
+    api_key_env: str = "LITELLM_API_KEY"
+    api_key_fallback: str = "fake-key"
+
+    @property
+    def api_key(self) -> str:
+        return os.environ.get(self.api_key_env) or self.api_key_fallback
+
+
+class Roster(BaseModel):
+    model_config = ConfigDict(extra="forbid")
+
+    writers: list[str] = Field(min_length=1)
+    critics: dict[str, list[str]]
+
+    @model_validator(mode="after")
+    def _check(self) -> Roster:
+        missing = {lens.value for lens in LENSES} - set(self.critics)
+        if missing:
+            raise ConfigError(f"roster is missing critic pools for lenses: {sorted(missing)}")
+        extra = set(self.critics) - {lens.value for lens in LENSES}
+        if extra:
+            raise ConfigError(f"roster declares unknown lenses: {sorted(extra)}")
+        for lens, pool in self.critics.items():
+            if not pool:
+                raise ConfigError(f"critic pool for lens '{lens}' is empty")
+            if len(set(pool)) != len(pool):
+                raise ConfigError(f"critic pool for lens '{lens}' has duplicate aliases")
+        if len(set(self.writers)) != len(self.writers):
+            raise ConfigError("writer pool has duplicate aliases")
+        return self
+
+    def critics_for(self, lens: Lens) -> list[str]:
+        return list(self.critics[lens.value])
+
+    @property
+    def all_aliases(self) -> list[str]:
+        seen: list[str] = []
+        for alias in [*self.writers, *(a for pool in self.critics.values() for a in pool)]:
+            if alias not in seen:
+                seen.append(alias)
+        return seen
+
+
+class Config(BaseModel):
+    model_config = ConfigDict(extra="forbid")
+
+    proxy: ProxyConfig = Field(default_factory=ProxyConfig)
+    roster: Roster
+    budgets: Budgets = Field(default_factory=Budgets)
+    runs_dir: Path = Path("runs")
+    retention_days: int = 14
+    max_report_chars: int = 60_000
+    max_question_chars: int = 4_000
+    #: anchor every critic quote to the paragraph it cites, closing the last
+    #: free-text channel from critic to writer
+    require_verbatim_spans: bool = True
+
+    @classmethod
+    def load(cls, path: str | Path | None = None) -> Config:
+        p = Path(path) if path else DEFAULT_CONFIG_PATH
+        if not p.exists():
+            raise ConfigError(f"config file not found: {p}")
+        data = yaml.safe_load(p.read_text()) or {}
+        return cls.model_validate(data)
+
+
+def validate_roster_health(config: Config, identities: dict[str, str]) -> list[str]:
+    """Fail-closed structural checks + soft warnings. Returns the warning list.
+
+    `identities` maps alias -> resolved provider/model/version string (RA-017).
+    Distinctness is enforced at the *resolved* level, not the alias level: two
+    aliases pointing at the same underlying model do not count as two reviewers.
+    """
+    roster = config.roster
+    if not roster.writers:
+        raise ConfigError("fail closed: writer pool is empty")
+
+    warnings: list[str] = []
+
+    unresolved = [a for a in roster.all_aliases if a not in identities]
+    if unresolved:
+        raise ConfigError(f"fail closed: could not resolve identities for {unresolved}")
+
+    # A lens must always have at least one model that can review *any* writer's
+    # output; otherwise some tick would have zero eligible non-author critics.
+    for lens in LENSES:
+        pool_ids = {identities[a] for a in roster.critics_for(lens)}
+        for writer in roster.writers:
+            eligible = pool_ids - {identities[writer]}
+            if not eligible:
+                raise ConfigError(
+                    f"fail closed: lens '{lens.value}' has no eligible non-author critic "
+                    f"when '{writer}' is the author"
+                )
+            if len(eligible) < 2:
+                warnings.append(
+                    f"lens '{lens.value}' is roster_limited when '{writer}' authors "
+                    f"(only {len(eligible)} eligible model) — acceptance will degrade to "
+                    f"converged_unconfirmed"
+                )
+        if len(pool_ids) < len(roster.critics_for(lens)):
+            warnings.append(
+                f"lens '{lens.value}' has aliases resolving to the same underlying model; "
+                f"they do not count as distinct reviewers"
+            )
+        families = {_family(identities[a]) for a in roster.critics_for(lens)}
+        if len(families) < 2:
+            warnings.append(
+                f"lens '{lens.value}' critic pool shares one model family {sorted(families)} — "
+                f"weak independence (correlated blind spots)"
+            )
+    return warnings
+
+
+def _family(identity: str) -> str:
+    """Coarse model-family key, e.g. 'openrouter/meta-llama/llama-4-scout' -> 'meta-llama'."""
+    parts = identity.split("/")
+    if len(parts) >= 3:
+        return parts[1]
+    if len(parts) == 2:
+        return parts[0]
+    return identity.split("-")[0]
