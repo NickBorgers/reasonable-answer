@@ -37,6 +37,7 @@ jobs:
   judge:
     name: Aggregate verdict
     runs-on: ubuntu-latest
+    timeout-minutes: 15
     outputs:
       verdict: ${{ steps.judge.outputs.verdict }}
       category: ${{ steps.judge.outputs.category }}

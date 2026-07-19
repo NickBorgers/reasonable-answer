@@ -19,6 +19,10 @@ on:
         required: false
         type: string
 
+# Default for any job that does not declare its own.
+permissions:
+  contents: read
+
 concurrency:
   group: ci-image-${{ github.ref }}
   cancel-in-progress: false
@@ -30,6 +34,7 @@ jobs:
   build:
     name: Build and Push CI Image
     runs-on: ubuntu-latest
+    timeout-minutes: 45
     permissions:
       contents: read
       packages: write

@@ -45,6 +45,10 @@ jobs:
   review:
     name: ${{ inputs.role }}
     runs-on: [self-hosted, homelab]
+    # The agent has its own 30m timeout inside the container. This is the outer bound
+    # that also covers a hung image pull or a wedged docker daemon — without it a stuck
+    # job holds a scarce self-hosted runner for GitHub's 6-hour default.
+    timeout-minutes: 45
     steps:
       - name: Checkout main (actions, prompts, schema)
         uses: actions/checkout@v4
@@ -100,9 +104,41 @@ jobs:
         run: |
           set -euo pipefail
 
-          npx --yes ajv-cli@5 validate \
-            -s .github/scripts/review/schema/reviewer-v1.json \
-            -d "$RESULT_JSON" --strict=false
+          MAIN_SCHEMA=".github/scripts/review/schema/reviewer-v1.json"
+          PR_SCHEMA="pr-head/.github/scripts/review/schema/reviewer-v1.json"
+          ROLE_VALUE=$(jq -r '.role' "$RESULT_JSON")
+
+          # --spec=draft2020 is required: the schema declares
+          # $schema: json-schema.org/draft/2020-12, and without the flag ajv-cli@5 fails
+          # to register the meta-schema and dies with "no schema with key or ref".
+          #
+          # Main's schema is authoritative — a PR cannot redefine the rules its own
+          # artifacts are validated against.
+          if jq -e --arg r "$ROLE_VALUE" '.properties.role.enum | index($r) != null' "$MAIN_SCHEMA" >/dev/null; then
+            npx --yes ajv-cli@5 validate --spec=draft2020 --strict=false -s "$MAIN_SCHEMA" -d "$RESULT_JSON"
+          else
+            # Narrow bootstrap shim for adding a reviewer role. Without it, a new role
+            # needs two merges: the enum must reach main before a PR may emit it.
+            # Accept the PR-head schema ONLY if its role enum is a strict superset of
+            # main's — new roles allowed, existing ones may not be removed — and then
+            # validate against MAIN's schema with only the enum widened, so no other
+            # constraint can be relaxed by the PR.
+            [ -f "$PR_SCHEMA" ] || { echo "::error::role '$ROLE_VALUE' unknown and no PR-head schema present"; exit 1; }
+
+            for role in $(jq -r '.properties.role.enum[]' "$MAIN_SCHEMA"); do
+              if ! jq -e --arg r "$role" '.properties.role.enum | index($r) != null' "$PR_SCHEMA" >/dev/null; then
+                echo "::error::PR-head schema removes role '$role' present in main; refusing bootstrap shim"
+                exit 1
+              fi
+            done
+
+            UNION=$(jq -s '[.[0].properties.role.enum[], .[1].properties.role.enum[]] | unique' "$MAIN_SCHEMA" "$PR_SCHEMA")
+            TEMP_SCHEMA=$(mktemp)
+            jq --argjson u "$UNION" '.properties.role.enum = $u' "$MAIN_SCHEMA" > "$TEMP_SCHEMA"
+            echo "::notice::role '$ROLE_VALUE' is new in this PR; validating against main's schema with a widened role enum"
+            npx --yes ajv-cli@5 validate --spec=draft2020 --strict=false -s "$TEMP_SCHEMA" -d "$RESULT_JSON"
+            rm -f "$TEMP_SCHEMA"
+          fi
 
           # Schema validity is not enough: an artifact that is well-formed but claims a
           # different SHA, role, or cycle would be silently aggregated into the wrong

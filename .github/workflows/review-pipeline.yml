@@ -55,6 +55,7 @@ jobs:
   gather:
     name: Gather cycle state
     runs-on: ubuntu-latest
+    timeout-minutes: 20
     outputs:
       cycle: ${{ steps.cycle.outputs.cycle }}
       cap_exhausted: ${{ steps.cycle.outputs.cap_exhausted }}
@@ -320,6 +321,7 @@ jobs:
     # would be refused by dedup with no way to clear it short of the API.
     if: always()
     runs-on: ubuntu-latest
+    timeout-minutes: 20
     steps:
       - uses: actions/checkout@v4
         with:

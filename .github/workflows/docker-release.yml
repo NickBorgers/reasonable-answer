@@ -11,6 +11,10 @@ on:
     tags: ['v*']
   workflow_dispatch:
 
+# Default for any job that does not declare its own.
+permissions:
+  contents: read
+
 concurrency:
   group: docker-release-${{ github.ref }}
   cancel-in-progress: false
@@ -26,6 +30,7 @@ jobs:
   build-and-push:
     name: Build and Push
     runs-on: ubuntu-latest
+    timeout-minutes: 60
     permissions:
       contents: read
       packages: write
@@ -100,6 +105,7 @@ jobs:
     name: Verify Pushed Image
     needs: build-and-push
     runs-on: ubuntu-latest
+    timeout-minutes: 60
     permissions:
       contents: read
       packages: read
