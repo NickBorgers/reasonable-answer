@@ -128,6 +128,39 @@ critic_model, lens, attempt, confirm_state)`. Reducers are idempotent; results w
 `artifact_hash` doesn't match the current round are rejected (guards against LangGraph
 retries/replay faking convergence). A checkpointer persists state for resuming the slow local run.
 
+## Surviving a redeploy
+
+The service is continuously deployed: it receives SIGTERM, a grace window, and then
+SIGKILL, none of which it controls. A run is 10–25 minutes, so finishing one inside the
+grace window is not achievable and is not attempted.
+
+The guarantee comes from the checkpointer, not the grace period. State is persisted at
+every node boundary, so a hard kill costs at most the node in flight — never the run.
+**The graceful path is therefore an optimisation, not a correctness mechanism:** it buys
+the chance to land the in-flight node instead of re-paying for it after the restart.
+Shortening the grace period wastes work; it does not corrupt anything.
+
+* **On SIGTERM** the run stops at the next node boundary and records a `pause` event.
+  `graph.run()` streams the graph rather than calling `invoke()`, because a completed,
+  checkpointed node is the only instant at which stopping costs nothing.
+* **On startup** every run the registry reports as `queued` or `interrupted` is
+  re-enqueued (`RunWorker.recover`). Nobody should have to notice a deploy, let alone
+  click resume.
+* **The queue is not the record of what is owed.** Jobs are written to `events.jsonl`
+  before being enqueued, so a process that dies holding a full queue loses nothing.
+* **Runs that never progress are abandoned** after `max_resume_attempts` consecutive
+  fruitless auto-resumes, so a deterministically-failing run cannot be retried forever.
+  Abandonment writes an event, never a `final.json` — that file means the controller
+  reached a verdict, and giving up is not a verdict. A human can always resume past it.
+* **A roster change invalidates every in-flight run.** `_run_fingerprint` covers the
+  roster and budgets, so a deploy that also ships a new `config/roster.yaml` will refuse
+  to resume runs started under the old one. That refusal is correct — it lands them in
+  `abandoned` rather than looping.
+
+Deadlines nest, all derived from `RA_SHUTDOWN_GRACE_SECONDS`: the platform's
+SIGTERM-to-SIGKILL budget contains uvicorn's connection drain, which contains the
+worker's wait for a node boundary.
+
 ## Structural isolation of the orchestrator (RA-002, RB-004, RB-008)
 
 ```mermaid

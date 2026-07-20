@@ -23,6 +23,7 @@ from typing import Any
 from fastapi import FastAPI, Form, HTTPException, Request
 from fastapi.responses import HTMLResponse, PlainTextResponse, RedirectResponse, StreamingResponse
 
+from .. import shutdown
 from ..config import Config, ConfigError
 from .registry import Registry, RunSummary
 from .render import render_index, render_report, render_run, render_run_progress
@@ -39,12 +40,22 @@ def create_app(
     config = config or Config.load(os.environ.get("RA_CONFIG"))
     _check_runs_dir_writable(config)
     concurrent = max_concurrent or int(os.environ.get("RA_MAX_CONCURRENT_RUNS", "1"))
+    if (cap := os.environ.get("RA_MAX_RESUME_ATTEMPTS")):
+        config = config.model_copy(update={"max_resume_attempts": int(cap)})
     worker = worker or RunWorker(config, max_concurrent=concurrent)
     registry = Registry(config.runs_dir)
 
     @asynccontextmanager
     async def lifespan(_: FastAPI):
+        # Recovery lives here rather than in RunWorker.__init__ so that constructing a
+        # worker stays inert — tests build one directly and should not have the previous
+        # process's leftovers enqueued underneath them.
+        worker.recover(registry)
         yield
+        # uvicorn installs its own SIGTERM handler inside `uvicorn.run()`, which would
+        # overwrite anything we registered first, so the signal reaches us here instead:
+        # uvicorn's handler sets should_exit, which unwinds into lifespan shutdown.
+        shutdown.request_stop("lifespan")
         worker.shutdown()
 
     app = FastAPI(title="reasonable-answer", docs_url=None, redoc_url=None, lifespan=lifespan)
@@ -91,7 +102,10 @@ def create_app(
     @app.post("/runs/{run_id}/resume")
     def resume(run_id: str) -> RedirectResponse:
         summary = _require(registry, worker, run_id)
-        if summary.status != "interrupted":
+        # `abandoned` is accepted on purpose: it means automatic recovery gave up, and a
+        # human overriding that is the entire point of the escape hatch. A manual resume
+        # is not counted against the attempt cap, so this always works.
+        if summary.status not in ("interrupted", "abandoned"):
             raise HTTPException(status_code=409, detail=f"run is {summary.status}, not interrupted")
         worker.resume(run_id, summary.question, registry.seed(run_id))
         return RedirectResponse(url=f"/runs/{run_id}", status_code=303)
@@ -123,6 +137,12 @@ def create_app(
             seen = 0
             while True:
                 if await request.is_disconnected():
+                    return
+                # uvicorn drains connections *before* running lifespan shutdown, and this
+                # generator otherwise only ends when the client leaves or the run
+                # finishes. One forgotten browser tab would hold the whole grace period
+                # before the worker was even told to stop.
+                if shutdown.stop_requested():
                     return
                 batch = list(registry.events(run_id, offset=seen))
                 if batch:
