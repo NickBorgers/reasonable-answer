@@ -26,7 +26,7 @@ locally: high quality, abysmal token rate. Resumability and a full audit trail m
 more than latency.
 
 That anti-goal is what makes the roster affordable. The whole roster is **open-weight only**
-(D17), and because a 60-90s model load off SSD is negligible against a 10-25 minute run, models
+(D18), and because a 60-90s model load off SSD is negligible against a 10-25 minute run, models
 may be **swapped** between roles rather than held resident. The budget is therefore the *largest
 single model*, not the sum — roughly **450GB** on a shared 768GB box. Approximate 4-bit
 footprints (MoE needs the whole model resident, since the router can reach any expert on any

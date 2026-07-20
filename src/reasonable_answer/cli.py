@@ -9,6 +9,7 @@ import typer
 from rich.console import Console
 from rich.table import Table
 
+from . import search
 from .config import Config, ConfigError, validate_roster_health
 from .graph import run as run_graph
 from .llm import LLMClient
@@ -74,6 +75,8 @@ def doctor(
     table.add_column("resolved identity")
     table.add_column("roles")
     table.add_column("structured output")
+    if config.search.enabled:
+        table.add_column("tool calls")
     for alias in config.roster.all_aliases:
         roles_ = []
         if alias in config.roster.writers:
@@ -84,7 +87,17 @@ def doctor(
         if alias == config.roster.orchestrator_alias:
             roles_.append("orchestrator")
         mode = client.probe_structured_output(alias)
-        table.add_row(alias, identities[alias], ", ".join(roles_), mode)
+        row = [alias, identities[alias], ", ".join(roles_), mode]
+        if config.search.enabled:
+            # Only writers hold the tool today, so a critic's inability to call one
+            # is information, not a problem.
+            if alias not in config.roster.writers:
+                row.append("[dim]n/a[/dim]")
+            elif client.probe_tool_calling(alias):
+                row.append("[green]yes[/green]")
+            else:
+                row.append("[red]NO[/red]")
+        table.add_row(*row)
     console.print(table)
 
     warnings = validate_roster_health(config, identities)
@@ -92,6 +105,25 @@ def doctor(
         console.print(f"[yellow]warning:[/yellow] {warning}")
     if not warnings:
         console.print("[green]roster healthy: every lens has >=2 eligible non-author models[/green]")
+
+    if not config.search.enabled:
+        console.print("[dim]web search: disabled (writers cite from model memory)[/dim]")
+    else:
+        try:
+            search.resolve_token(config.search.api_key_env, config.search.token_file)
+        except search.SearchConfigError as exc:
+            console.print(f"[red]web search: {exc}[/red]")
+            raise typer.Exit(code=1) from exc
+        blind = [a for a in config.roster.writers if not client.probe_tool_calling(a)]
+        if blind:
+            console.print(
+                f"[red]web search: writers cannot emit tool calls: {blind} — a run "
+                f"would fail closed at startup[/red]"
+            )
+            raise typer.Exit(code=1)
+        console.print(
+            f"[green]web search: ready ({config.search.query_budget} queries/run)[/green]"
+        )
 
 
 @app.command()

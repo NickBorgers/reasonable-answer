@@ -70,7 +70,16 @@ synthesizes the no-op fix result that describes what actually happened, rather t
 relaxing the aggregator — the epoch checks stay live, and adding a real fixer later is a
 one-line change.
 
-Two properties make the judge trustworthy, and both are structural rather than
+A reviewer only publishes its artifact under the name the judge consumes **if it
+validated**, and the judge separately requires every role the classifier selected to be
+present. Both halves are needed. Without the first, an artifact that had just failed
+schema validation was still aggregated into the verdict. Without the second, a reviewer
+that fails publishes nothing, silently leaves the review set, and the survivors clear the
+merge on its behalf — so a crashed reviewer would *reduce* scrutiny instead of blocking.
+That combination produced a real GO on a run where a reviewer had failed; a failed
+reviewer is now a fail-closed `pipeline_error`.
+
+Two further properties make the judge trustworthy, and both are structural rather than
 conventional: it checks out **`main`**, so a PR cannot modify the code that judges it, and
 it holds `contents: read`, so it could not push if it tried.
 
@@ -96,6 +105,14 @@ it holds `contents: read`, so it could not push if it tried.
 `invariant` always runs. `security` runs unless the change is docs-only, and always for
 anything under `.github/`, `src/`, or the dependency and container files. `test` runs for
 `src/`, `tests/`, `config/`, and `pyproject.toml`.
+
+**`invariant` must never abstain**, and its prompt says so. Selecting it unconditionally
+is what guarantees the judge never sees an empty or wholly-abstaining review set — and
+the judge treats all-abstain as a fail-closed `pipeline_error`. So a role that is always
+selected but permitted to abstain produces exactly the vacuous outcome the unconditional
+selection exists to prevent: every infrastructure-only PR would NO-GO with an error about
+the pipeline rather than the change. A diff with no invariant surface is an `approve` that
+says why, which is a real finding.
 
 **Spec-critical markdown is carved out of "docs-only".** `docs/DESIGN.md`,
 `isolation.md`, `convergence.md`, `architecture.md`, `decisions.md`, and every prompt file

@@ -234,11 +234,37 @@ jobs:
           pr_number: ${{ inputs.pr_number }}
           github_token: ${{ secrets.WORKFLOW_PAT }}
 
+      # Only a VALIDATED artifact is published under the name the judge consumes.
+      #
+      # Uploading unconditionally meant an artifact that had just failed schema
+      # validation was still downloaded and aggregated into the verdict — a reviewer
+      # could fail and still count toward clearing the merge gate. The judge now also
+      # requires every selected role to be present, so a reviewer that fails here goes
+      # on to fail the whole run closed rather than quietly dropping out of the set.
       - name: Upload the reviewer artifact
-        if: always()
+        if: success()
         uses: actions/upload-artifact@v4
         with:
           name: reviewer-${{ inputs.role }}-${{ inputs.reviewed_sha }}
           path: pr-head/.review-output/${{ inputs.role }}-*
           retention-days: 7
+          # `.review-output` is a dot-directory, and upload-artifact@v4 excludes hidden
+          # paths by default. Without this every reviewer artifact is silently dropped,
+          # the judge receives an empty reviewer set, and the run fails closed as a
+          # pipeline_error that says nothing about the actual cause.
+          include-hidden-files: true
+          # A reviewer that produced no artifact is a failure worth surfacing here,
+          # rather than one discovered three jobs later as a confusing judge error.
+          if-no-files-found: error
+
+      # Kept separately so a failed review is still debuggable. The name deliberately
+      # does not match the judge's `reviewer-*-<sha>` download pattern.
+      - name: Upload diagnostics for a failed reviewer
+        if: failure()
+        uses: actions/upload-artifact@v4
+        with:
+          name: failed-reviewer-${{ inputs.role }}-${{ inputs.reviewed_sha }}
+          path: pr-head/.review-output/${{ inputs.role }}-*
+          retention-days: 7
+          include-hidden-files: true
           if-no-files-found: warn

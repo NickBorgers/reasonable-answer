@@ -21,7 +21,7 @@ from typing import Any, TypedDict
 from langgraph.graph import END, START, StateGraph
 from pydantic import ValidationError
 
-from . import prompts, roles, triage
+from . import prompts, roles, search, triage
 from . import report as report_mod
 from .config import Config, ConfigError, validate_roster_health
 from .controller import acceptance_state, decide, detect_cycle
@@ -91,6 +91,12 @@ class Runtime:
     identities: dict[str, str]
     store: RunStore
     warnings: list[str] = field(default_factory=list)
+    #: None when search is disabled; writers then run exactly as they did before.
+    searcher: Any | None = None
+
+    @property
+    def search_enabled(self) -> bool:
+        return self.searcher is not None
 
 
 def build_runtime(
@@ -105,6 +111,8 @@ def build_runtime(
         mode = client.probe_structured_output(alias)
         log.info("structured-output mode for %s (%s): %s", alias, identities[alias], mode)
 
+    searcher = _build_searcher(config, client)
+
     run_id = run_id or f"run-{uuid.uuid4().hex[:12]}"
     store = RunStore(config.runs_dir, run_id)
     store.event(
@@ -113,11 +121,50 @@ def build_runtime(
         modes={a: client.mode_for(a) for a in config.roster.all_aliases},
         warnings=warnings,
         budgets=config.budgets.model_dump(),
+        search_enabled=searcher is not None,
+        search_query_budget=config.search.query_budget if searcher else 0,
     )
     for warning in warnings:
         log.warning("roster: %s", warning)
     return Runtime(config=config, client=client, identities=identities, store=store,
-                   warnings=warnings)
+                   warnings=warnings, searcher=searcher)
+
+
+def _build_searcher(config: Config, client: LLMClient) -> search.BraveSearch | None:
+    """Construct the search client, or fail closed. Returns None when search is off.
+
+    Both checks here are fatal by design. A missing credential is obvious. The
+    tool-calling probe is the subtle one: several small models accept a `tools`
+    parameter and never emit a call. That writer would still be told to produce a
+    '## Sources' section, and would fill it from memory — citations that look
+    identical to retrieved ones but were never looked up. Refusing to start is the
+    only honest response, since nothing downstream can tell the two apart.
+    """
+    if not config.search.enabled:
+        return None
+
+    token = search.resolve_token(config.search.api_key_env, config.search.token_file)
+
+    incapable = [a for a in config.roster.writers if not client.probe_tool_calling(a)]
+    if incapable:
+        raise ConfigError(
+            f"fail closed: web search is enabled but these writers cannot emit tool "
+            f"calls: {incapable}. They would produce unsourced reports that still "
+            f"claim citations. Remove them from the writer pool or disable search."
+        )
+
+    log.info(
+        "web search enabled: %d queries for this run, %d results per query",
+        config.search.query_budget,
+        config.search.max_results,
+    )
+    return search.BraveSearch(
+        token,
+        budget=search.QueryBudget(config.search.query_budget),
+        max_results=config.search.max_results,
+        timeout=config.budgets.timeout_seconds,
+        min_interval=config.search.min_interval_seconds,
+    )
 
 
 # --------------------------------------------------------------------- intake
@@ -212,12 +259,21 @@ def _generate(state: State, rt: Runtime) -> dict:
     else:
         user = prompts.writer_first_draft(state["question"])
 
+    search_kwargs: dict[str, Any] = {}
+    if rt.search_enabled:
+        search_kwargs = {
+            "tools": [search.SEARCH_TOOL],
+            "tool_handler": search.make_tool_handler(rt.searcher),
+            "max_tool_rounds": cfg.search.max_tool_rounds,
+        }
+
     try:
         completion = rt.client.complete(
             alias,
-            system=prompts.WRITER_SYSTEM,
+            system=prompts.writer_system(rt.search_enabled),
             user=user,
             max_tokens=32000,
+            **search_kwargs,
         )
     except ModelCallError as exc:
         return {"fatal": True, "fatal_reason": f"generator {alias} failed: {exc}"}
@@ -243,6 +299,8 @@ def _generate(state: State, rt: Runtime) -> dict:
         polish=polish,
         defects_applied=len(defects),
         tokens=completion.completion_tokens,
+        # Auditable after the fact: did this draft's citations come from a lookup?
+        searches=completion.tool_calls,
     )
 
     return {

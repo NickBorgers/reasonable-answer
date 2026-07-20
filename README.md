@@ -154,9 +154,23 @@ object to. Runs that reach the cap ship the *best-scoring* draft, not the last o
 outstanding defects listed in `final.json`. Raise `hard_cap`, or narrow the question, if you want
 more convergence pressure.
 
-**Known limitations (v1).** There is no external retrieval. The evidence lens challenges uncited
-claims, on-its-face misrepresentation, and implausible citations *within* the artifact. Output is
-labelled *consensus-reviewed with in-artifact sourcing* — not fact-checked.
+**Retrieval (optional, off by default).** Set `search.enabled: true` in the roster and writers get a
+`web_search` tool backed by the Brave Search API, so the URLs in `## Sources` are ones a search
+actually returned rather than ones the model remembered. Credential: `$BRAVE_SEARCH_API_KEY`, or a
+gitignored `brave.token` for local work. Startup fails closed if the key is missing *or* if any
+writer cannot emit tool calls — that writer would still be told to produce a `## Sources` section
+and would fill it from memory, and no downstream check can tell a remembered citation from a
+retrieved one. Each run carries a query budget (default 60) because the free tier is 2,000
+queries/month; when it runs out the writer is told so explicitly rather than being handed silence.
+
+**Known limitations.** *Critics do not retrieve, in either posture.* The evidence lens challenges
+uncited claims, on-its-face misrepresentation, and implausible citations *within* the artifact — it
+cannot open a URL to check that the page says what the writer claims. So retrieval changes where
+citations come from, not whether they support their claims: with search on, sources are real and
+retrieved, but whether each one **supports the specific claim it is attached to** remains unverified.
+Output is labelled *consensus-reviewed with in-artifact sourcing* by default, or *…with retrieved
+sourcing* when `search.enabled: true` — neither is fact-checked. (See D5/D17 in
+[decisions.md](docs/decisions.md) and the evidence section of [convergence.md](docs/convergence.md).)
 
 A critic's quote fields (`claim_span`, `related_span`) are verified to be verbatim text from
 the artifact, so a critic cannot smuggle invented text to the next writer that way. Its

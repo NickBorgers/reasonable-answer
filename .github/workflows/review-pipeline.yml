@@ -260,6 +260,7 @@ jobs:
       pr_number: ${{ inputs.pr_number }}
       reviewed_sha: ${{ inputs.reviewed_sha }}
       cycle: ${{ needs.gather.outputs.cycle }}
+      roles: ${{ needs.gather.outputs.roles }}
     secrets:
       WORKFLOW_PAT: ${{ secrets.WORKFLOW_PAT }}
 

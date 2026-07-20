@@ -17,6 +17,7 @@ import json
 import logging
 import re
 import urllib.request
+from collections.abc import Callable
 from dataclasses import dataclass
 from typing import Any, TypeVar
 
@@ -28,6 +29,10 @@ from .config import Config, ConfigError
 log = logging.getLogger(__name__)
 
 T = TypeVar("T", bound=BaseModel)
+
+#: (tool_name, raw_json_arguments) -> the string handed back to the model as the
+#: tool result. Implementations own fencing it as untrusted data (RA-010).
+ToolHandler = Callable[[str, str], str]
 
 #: strongest first
 MODES = ("json_schema", "json_object", "prompt")
@@ -47,6 +52,20 @@ class Completion:
     model_reported: str
     prompt_tokens: int
     completion_tokens: int
+    #: how many tool calls the model made producing this text; 0 when no tools were
+    #: offered. Recorded in the audit trail so a run can be asked, afterwards,
+    #: whether its citations were actually looked up.
+    tool_calls: int = 0
+
+
+@dataclass(frozen=True)
+class _Reply:
+    """One raw round-trip: the assistant message plus what the proxy said it was."""
+
+    message: dict[str, Any]
+    reported: str
+    prompt_tokens: int
+    completion_tokens: int
 
 
 class LLMClient:
@@ -60,6 +79,7 @@ class LLMClient:
         )
         self._identities: dict[str, str] = {}
         self._modes: dict[str, str] = {}
+        self._tool_capable: dict[str, bool] = {}
 
     # ------------------------------------------------------------------ identity
 
@@ -140,21 +160,77 @@ class LLMClient:
         max_tokens: int = 16000,
         temperature: float | None = None,
         response_format: dict[str, Any] | None = None,
+        tools: list[dict[str, Any]] | None = None,
+        tool_handler: ToolHandler | None = None,
+        max_tool_rounds: int = 6,
     ) -> Completion:
-        """One chat completion, retried within the call budget."""
-        kwargs: dict[str, Any] = {
-            "model": alias,
-            "messages": [
-                {"role": "system", "content": system},
-                {"role": "user", "content": user},
-            ],
-            "max_tokens": max_tokens,
-        }
-        if temperature is not None:
-            kwargs["temperature"] = temperature
-        if response_format is not None:
-            kwargs["response_format"] = response_format
+        """One chat completion, retried within the call budget.
 
+        When `tools` and `tool_handler` are both supplied the call becomes an agentic
+        loop: the model may emit tool calls, which are executed and fed back, until it
+        answers in prose or `max_tool_rounds` is reached. Tool *results* are untrusted
+        third-party text (RA-010) — the handler is responsible for fencing them.
+        """
+        messages: list[dict[str, Any]] = [
+            {"role": "system", "content": system},
+            {"role": "user", "content": user},
+        ]
+        base: dict[str, Any] = {"model": alias, "max_tokens": max_tokens}
+        if temperature is not None:
+            base["temperature"] = temperature
+        if response_format is not None:
+            base["response_format"] = response_format
+
+        if not (tools and tool_handler):
+            reply = self._create(alias, {**base, "messages": messages})
+            return Completion(
+                text=(reply.message.get("content") or "").strip(),
+                model_reported=reply.reported,
+                prompt_tokens=reply.prompt_tokens,
+                completion_tokens=reply.completion_tokens,
+            )
+
+        prompt_tokens = completion_tokens = 0
+        tool_calls_made = 0
+        for round_no in range(max_tool_rounds + 1):
+            # The final round drops `tools` entirely: a model that keeps calling tools
+            # forever must still produce an answer, and removing the tool is the only
+            # instruction every provider in the roster honours identically.
+            exhausted = round_no == max_tool_rounds
+            kwargs = {**base, "messages": messages}
+            if not exhausted:
+                kwargs["tools"] = tools
+            reply = self._create(alias, kwargs)
+            prompt_tokens += reply.prompt_tokens
+            completion_tokens += reply.completion_tokens
+
+            calls = _tool_calls(reply.message)
+            if not calls or exhausted:
+                return Completion(
+                    text=(reply.message.get("content") or "").strip(),
+                    model_reported=reply.reported,
+                    prompt_tokens=prompt_tokens,
+                    completion_tokens=completion_tokens,
+                    tool_calls=tool_calls_made,
+                )
+
+            messages.append(reply.message)
+            for call in calls:
+                tool_calls_made += 1
+                messages.append(
+                    {
+                        "role": "tool",
+                        "tool_call_id": call.get("id", ""),
+                        "content": tool_handler(
+                            call.get("function", {}).get("name", ""),
+                            call.get("function", {}).get("arguments", "") or "{}",
+                        ),
+                    }
+                )
+        raise ModelCallError(f"{alias}: tool loop did not terminate")  # pragma: no cover
+
+    def _create(self, alias: str, kwargs: dict[str, Any]) -> _Reply:
+        """One request, retried within the call budget."""
         last: Exception | None = None
         for attempt in range(self._config.budgets.call_retries + 1):
             try:
@@ -163,7 +239,6 @@ class LLMClient:
                 last = exc
                 log.warning("call to %s failed (attempt %d): %s", alias, attempt + 1, exc)
                 continue
-            choice = resp.choices[0].message.content or ""
             usage = resp.usage
             reported = getattr(resp, "model", None) or alias
             # "No silent fallback to a duplicate" (RA-017): if the proxy served this
@@ -174,13 +249,62 @@ class LLMClient:
                 raise ModelCallError(
                     f"identity mismatch: alias '{alias}' was served by '{reported}'"
                 )
-            return Completion(
-                text=choice,
-                model_reported=getattr(resp, "model", alias) or alias,
+            return _Reply(
+                message=_message_dict(resp.choices[0].message),
+                reported=reported,
                 prompt_tokens=getattr(usage, "prompt_tokens", 0) if usage else 0,
                 completion_tokens=getattr(usage, "completion_tokens", 0) if usage else 0,
             )
         raise ModelCallError(f"{alias}: exhausted call retries ({last})")
+
+    def probe_tool_calling(self, alias: str) -> bool:
+        """Can `alias` actually emit a tool call? Probed once, like structured output.
+
+        The roster mixes frontier models with small open ones, and several of the
+        latter accept a `tools` parameter and then ignore it. Search that silently
+        never happens is the failure mode this exists to catch: the writer prompt
+        still demands a '## Sources' section, so an un-searched draft comes back
+        with invented citations that look exactly like verified ones.
+        """
+        if alias in self._tool_capable:
+            return self._tool_capable[alias]
+
+        probe = {
+            "type": "function",
+            "function": {
+                "name": "ping",
+                "description": "Return the string 'pong'. Call this to answer.",
+                "parameters": {
+                    "type": "object",
+                    "properties": {"value": {"type": "string"}},
+                    "required": ["value"],
+                    "additionalProperties": False,
+                },
+            },
+        }
+        try:
+            reply = self._create(
+                alias,
+                {
+                    "model": alias,
+                    "messages": [
+                        {"role": "system", "content": "You call tools when told to."},
+                        {"role": "user", "content": "Call the ping tool with value='ping'."},
+                    ],
+                    "max_tokens": 3000,
+                    "tools": [probe],
+                },
+            )
+        except Exception as exc:
+            log.debug("alias %s failed the tool-calling probe: %s", alias, exc)
+            self._tool_capable[alias] = False
+            return False
+        capable = bool(_tool_calls(reply.message))
+        self._tool_capable[alias] = capable
+        return capable
+
+    def tool_capable(self, alias: str) -> bool:
+        return self._tool_capable.get(alias, False)
 
     def structured(
         self,
@@ -224,6 +348,32 @@ class LLMClient:
                     f"Return corrected JSON only. No prose, no code fence."
                 )
         raise MalformedOutputError(f"{alias}: schema violation after repair: {last_err}")
+
+
+def _message_dict(message: Any) -> dict[str, Any]:
+    """Normalise an SDK message object to the plain dict the wire format expects, so
+    it can be appended straight back onto `messages` for the next tool round."""
+    if isinstance(message, dict):
+        raw = message
+    elif hasattr(message, "model_dump"):
+        raw = message.model_dump(exclude_none=True)
+    else:  # pragma: no cover - defensive
+        raw = {
+            "role": getattr(message, "role", "assistant"),
+            "content": getattr(message, "content", ""),
+        }
+    out: dict[str, Any] = {"role": raw.get("role") or "assistant"}
+    # `content` must survive as an explicit null when there are tool calls; several
+    # providers reject an assistant message that omits the key entirely.
+    out["content"] = raw.get("content")
+    if raw.get("tool_calls"):
+        out["tool_calls"] = raw["tool_calls"]
+    return out
+
+
+def _tool_calls(message: dict[str, Any]) -> list[dict[str, Any]]:
+    calls = message.get("tool_calls") or []
+    return [c for c in calls if isinstance(c, dict)]
 
 
 def _identity_matches(reported: str, alias: str, resolved: str | None) -> bool:

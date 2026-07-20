@@ -175,6 +175,11 @@ def test_roster_health_fails_closed_on_an_unresolvable_orchestrator(identities):
         ("openrouter/deepseek/deepseek-v4-flash", "deepseek"),
         ("openrouter/minimax/minimax-m3", "minimax"),
         ("anthropic/claude-haiku-4-5", "claude"),
+        ("bare-alias", "bare"),  # no '/' to strip; the leading run still keys it
+        # No leading a-z run at all, so the regex does not match and the whole stem is
+        # the key. Falling back to "" instead would make every numerically-named model
+        # one family and fire a decorrelation warning that means nothing.
+        ("openrouter/vendor/3-mini", "3-mini"),
     ],
 )
 def test_family_is_keyed_on_the_model_name_not_the_provider(identity, expected):

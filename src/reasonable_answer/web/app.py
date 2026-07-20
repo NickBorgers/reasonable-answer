@@ -25,7 +25,7 @@ from fastapi.responses import HTMLResponse, PlainTextResponse, RedirectResponse,
 
 from ..config import Config, ConfigError
 from .registry import Registry, RunSummary
-from .render import render_index, render_run, render_run_progress
+from .render import render_index, render_report, render_run, render_run_progress
 from .worker import RunWorker
 
 log = logging.getLogger(__name__)
@@ -146,6 +146,14 @@ def create_app(
         )
 
     # ----------------------------------------------------------------- assets
+
+    @app.get("/runs/{run_id}/report", response_class=HTMLResponse)
+    def report_page(run_id: str) -> str:
+        summary = _require(registry, worker, run_id)
+        report = registry.report(run_id)
+        if report is None:
+            raise HTTPException(status_code=404, detail="this run has not produced a report yet")
+        return render_report(summary, report, registry.final(run_id))
 
     @app.get("/runs/{run_id}/report.md", response_class=PlainTextResponse)
     def report_markdown(run_id: str) -> str:

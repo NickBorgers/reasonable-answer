@@ -19,6 +19,10 @@ on:
       cycle:
         required: true
         type: string
+      roles:
+        description: 'JSON array of the roles the classifier selected'
+        required: true
+        type: string
     secrets:
       WORKFLOW_PAT:
         required: true
@@ -62,6 +66,7 @@ jobs:
         env:
           REVIEWER_DIR: reviewer-artifacts
           VERDICT_OUTPUT_PATH: verdict-${{ inputs.reviewed_sha }}.json
+          EXPECTED_ROLES: ${{ inputs.roles }}
         run: node .github/scripts/review/judge.mjs
 
       # Recorded on the commit so the next run can find it. The cycle-reset and
