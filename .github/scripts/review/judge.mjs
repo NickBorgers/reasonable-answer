@@ -25,9 +25,12 @@
 import { readFileSync, readdirSync, writeFileSync } from "node:fs";
 import { join } from "node:path";
 import { aggregate } from "./aggregate.mjs";
+import { checkExpectedRoles } from "./expected-roles.mjs";
 
 const REVIEWER_DIR = process.env.REVIEWER_DIR;
 const VERDICT_OUTPUT_PATH = process.env.VERDICT_OUTPUT_PATH;
+// JSON array of the roles the classifier selected for this diff.
+const EXPECTED_ROLES = process.env.EXPECTED_ROLES;
 
 if (!REVIEWER_DIR || !VERDICT_OUTPUT_PATH) {
   console.error("judge.mjs: REVIEWER_DIR and VERDICT_OUTPUT_PATH must be set");
@@ -64,7 +67,11 @@ const fixResult = {
   skipped: [],
 };
 
-const verdict = aggregate(reviewers, fixResult);
+// A reviewer that failed publishes no artifact, so it would simply be absent from the
+// set and aggregate() would report that "all reviewers cleared" on the strength of the
+// survivors. See expected-roles.mjs for why that is the wrong direction to fail in.
+const missingRoles = checkExpectedRoles(reviewers, EXPECTED_ROLES ? JSON.parse(EXPECTED_ROLES) : []);
+const verdict = missingRoles ?? aggregate(reviewers, fixResult);
 
 console.log(JSON.stringify(verdict, null, 2));
 writeFileSync(VERDICT_OUTPUT_PATH, JSON.stringify(verdict, null, 2) + "\n");
