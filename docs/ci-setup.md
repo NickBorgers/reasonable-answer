@@ -171,7 +171,7 @@ break every time the matrix changes.
    select `security` or `test`.
 2. Open a PR touching `src/reasonable_answer/controller.py`. All three reviewers should
    run.
-3. File an issue with the **Agent task** template, then comment `/autoresolve`. A PR
+3. File an issue with the **Agent task** template. An agent starts on it immediately. A PR
    should appear with `Resolves #N` — **and the review pipeline should fire on it.** If
    the PR appears but nothing reviews it, the resolver checkout is not using
    `WORKFLOW_PAT`.

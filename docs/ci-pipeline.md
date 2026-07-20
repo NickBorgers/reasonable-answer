@@ -15,7 +15,7 @@ than reproducing that archaeology.
 | `pr-validation.yml` | every PR | `ubuntu-latest` | ruff, offline pytest on 3.11 + 3.12, lockfile check, actionlint, judge unit tests, docker build + smoke test |
 | `docker-release.yml` | push to `main`, `v*` tags | `ubuntu-latest` | multi-arch build and push to GHCR, then pull back **by digest** and smoke test |
 | `ci-image.yml` | changes to `.github/ci/**`, manual | `ubuntu-latest` | builds the agent image and verifies every tool inside it runs |
-| `resolve-issue.yml` | `/autoresolve` comment | `[self-hosted, homelab]` | an agent implements the issue and opens a PR |
+| `resolve-issue.yml` | issue opened/reopened/unlabeled, `/autoresolve` comment | `[self-hosted, homelab]` | an agent implements the issue and opens a PR |
 | `review-entry.yml` → `review-pipeline.yml` | PR events, `/review` | mixed | authorize → gather → reviewers → judge → finalize |
 
 ## PR validation is secret-free, on purpose
@@ -112,6 +112,28 @@ it holds `contents: read`, so it could not push if it tried.
   before it can merge. GO-is-terminal is what keeps the bound safe — a converged PR never
   re-enters the loop.
 
+### Issue resolution, and the retry gesture
+
+Filing an issue starts an agent. There are four entry points: `issues` `opened`,
+`reopened`, and `unlabeled`, plus an `/autoresolve` comment on an existing issue. All four
+are gated on the issue author being OWNER/MEMBER/COLLABORATOR; on `issues` events the
+actor who filed, reopened, or unlabeled is checked too, because label edits are open to
+anyone with triage rights and those need not be a collaborator.
+
+**The `<agent>-started` label is never removed by the workflow.** It means "an agent has
+attempted this", and a human removing it is how you ask for another attempt.
+
+That asymmetry is load-bearing rather than tidy. Every label write uses `WORKFLOW_PAT`,
+and PAT-driven events *do* trigger workflows — so a workflow that cleared its own label
+would fire its own `unlabeled` trigger on the way out and retry itself forever. The
+existing-PR check does not bound that: it only skips once a PR exists, which is exactly
+not the case when the agent failed, which is exactly when a retry fires. Adding a label
+emits `labeled`, which is deliberately absent from the trigger list, so marking an issue
+started is safe.
+
+An `agent:claude` / `agent:codex` label is a persistent per-issue override; an explicit
+choice in an `/autoresolve` comment outranks it.
+
 ### The fixer
 
 `review-fixer.yml` is the only stage that may write to the PR branch. It runs **after the
@@ -121,12 +143,12 @@ Judging the post-fix tree would let the fixer clear its own work unread.
 
 It runs in one of two modes.
 
-**`cold`** — the common case, and the one to optimise for. `author-resume` can only fire on
-a PR that `resolve-issue.yml` opened; a PR a human or a coding agent on a laptop opens
-carries no session, and that is nearly all of them. A cold fixer applies only fixes passing
-an explicit mechanical gate: the blocker must name a file and line, be fully determined by
-its own description, stay inside reviewer-named files, and stay small. Everything else is
-skipped with a reason.
+**`cold`** — the fallback, and still the one to optimise for. `author-resume` can only fire
+on a PR that `resolve-issue.yml` opened. Now that filing an issue starts an agent, those
+are no longer rare — but any PR opened by hand, or by a coding agent on a laptop, carries
+no session and lands here. A cold fixer applies only fixes passing an explicit mechanical
+gate: the blocker must name a file and line, be fully determined by its own description,
+stay inside reviewer-named files, and stay small. Everything else is skipped with a reason.
 
 **`author-resume`** — the agent that wrote the PR is resumed with its conversation intact.
 It answers reviewers with the reasoning that produced the code, and may push back on a
@@ -308,5 +330,5 @@ Every knob lives in [`review-agent-run`](../.github/actions/review-agent-run/act
 - **No two-lens security split.** Folding a confidence threshold and an exclusion list
   into one prompt gets most of the value without a second reviewer job, a merger module,
   and a vendored-prompt pin.
-- **No auto-trigger on `issues: opened`.** `/autoresolve` is opt-in, so filing a thought
-  does not spend an agent run.
+- **No sandboxed path for fork PRs.** They are refused outright rather than reviewed with
+  reduced privileges. A fork's code never reaches the self-hosted runners.

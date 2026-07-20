@@ -1,20 +1,43 @@
 ---
 name: Issue Resolution Agent
 
-# Opt-in only: an issue is resolved when a trusted user comments `/autoresolve`, never
-# merely by being filed. Auto-triggering on `issues: opened` would spend an agent run on
-# every thought anyone writes down.
+# An issue filed by a trusted author starts an agent immediately. Four entry points:
+#
+#   issues: opened      — filing it is the request
+#   issues: reopened    — reopening asks for another attempt
+#   issues: unlabeled   — removing `<agent>-started` is the retry gesture (see below)
+#   issue_comment       — `/autoresolve` on an existing issue
 #
 #   /autoresolve            use the repository default agent
 #   /autoresolve claude     force Claude Code
 #   /autoresolve codex      force Codex
+#
+# An `agent:claude` / `agent:codex` label is a persistent per-issue override; a comment's
+# explicit choice outranks it.
+#
+# THE `<agent>-started` LABEL IS NEVER REMOVED BY THIS WORKFLOW.
+#
+# That is load-bearing, not an oversight. The label means "an agent has attempted this",
+# and a human removing it is how you ask for another attempt. Every label write here uses
+# WORKFLOW_PAT, and PAT-driven events DO trigger workflows — so a workflow that cleared
+# its own label would fire its own `unlabeled` trigger on the way out and retry forever.
+# The existing-PR check does not bound that: it only skips once a PR exists, which is
+# exactly not the case when the agent failed, which is exactly when a retry fires.
+#
+# Adding a label emits `labeled`, which is deliberately absent from the trigger list, so
+# marking an issue started is safe.
 
 on:
   issue_comment:
     types: [created]
+  issues:
+    types: [opened, reopened, unlabeled]
 
 concurrency:
-  group: autoresolve-${{ github.event.issue.number }}
+  # `github.run_id` fallback: an `issues` event still carries an issue number, but the
+  # fallback keeps the expression total if that is ever absent rather than collapsing
+  # every run into one group named `autoresolve-`.
+  group: autoresolve-${{ github.event.issue.number || github.run_id }}
   cancel-in-progress: true
 
 permissions:
@@ -26,10 +49,22 @@ permissions:
 jobs:
   authorize:
     name: Authorize
-    # Cheap pre-filter so the job does not even start on ordinary comments.
+    # Cheap pre-filter so the job does not even start on ordinary comments or on label
+    # churn unrelated to the retry gesture. `github.event.issue.pull_request == null`
+    # excludes PRs, which arrive through the same issue_comment event.
     if: |
-      github.event.issue.pull_request == null &&
-      startsWith(github.event.comment.body, '/autoresolve')
+      github.event.issue.pull_request == null && (
+        (github.event_name == 'issue_comment' &&
+         startsWith(github.event.comment.body, '/autoresolve')) ||
+        (github.event_name == 'issues' && (
+          github.event.action == 'opened' ||
+          github.event.action == 'reopened' ||
+          (github.event.action == 'unlabeled' && (
+            github.event.label.name == 'claude-started' ||
+            github.event.label.name == 'codex-started'
+          ))
+        ))
+      )
     runs-on: ubuntu-latest
     timeout-minutes: 10
     outputs:
@@ -59,25 +94,49 @@ jobs:
         with:
           script: |
             const allowed = new Set(['OWNER', 'MEMBER', 'COLLABORATOR']);
+            // Absent on `issues` events — filing, reopening, and unlabeling carry no
+            // comment. Every read of it below must tolerate that.
             const comment = context.payload.comment;
             const issue = context.payload.issue;
+            const sender = context.payload.sender;
 
-            // Both the commenter AND the issue author must be trusted. Checking only
-            // the commenter would let a trusted user's `/autoresolve` feed an untrusted
-            // stranger's issue text to an agent that holds a write-capable PAT.
+            // The issue author must always be trusted: their text is what reaches an
+            // agent holding a write-capable PAT.
+            //
+            // On `issue_comment` the commenter must be trusted too. Checking only the
+            // commenter would let a trusted user's `/autoresolve` feed an untrusted
+            // stranger's issue text to that agent; checking only the author would let a
+            // stranger's comment start a run on a trusted issue.
+            //
+            // On `issues` events there is no commenter, so the actor who filed,
+            // reopened, or unlabeled is the second party to check. `unlabeled` matters
+            // most here: removing a label is the retry gesture, and label edits are open
+            // to anyone with triage rights, who need not be a collaborator.
             let authorized = true;
             let reason = '';
-            if (!allowed.has(comment.author_association)) {
-              authorized = false;
-              reason = `comment-author:${comment.author_association}`;
-            } else if (!allowed.has(issue.author_association)) {
+            if (!allowed.has(issue.author_association)) {
               authorized = false;
               reason = `issue-author:${issue.author_association}`;
+            } else if (comment && !allowed.has(comment.author_association)) {
+              authorized = false;
+              reason = `comment-author:${comment.author_association}`;
+            } else if (!comment) {
+              // author_association is not on the `issues` payload's sender, so ask.
+              const { data: perm } = await github.rest.repos.getCollaboratorPermissionLevel({
+                owner: context.repo.owner,
+                repo: context.repo.repo,
+                username: sender.login,
+              });
+              if (!['admin', 'write'].includes(perm.permission)) {
+                authorized = false;
+                reason = `actor:${sender.login}:${perm.permission}`;
+              }
             }
 
             // Explicit choice in the comment wins, then an `agent:*` label, then the
-            // repository default.
-            const body = (comment.body || '').trim();
+            // repository default. On `issues` events there is no comment, so the label
+            // is the only override available.
+            const body = ((comment && comment.body) || '').trim();
             const explicit = body.match(/^\/autoresolve\s+(claude|codex)\b/);
             const labels = (issue.labels || []).map((l) => (l.name || l));
             let agent = process.env.DEFAULT_AGENT;
@@ -103,12 +162,17 @@ jobs:
     # This job is what puts an agent on a self-hosted runner with a write-capable PAT,
     # so its entry condition should be readable in one place without having to trust
     # that an upstream job computed its output correctly.
+    #
+    # The commenter check applies only to `issue_comment`; on `issues` events there is no
+    # comment, and `github.event.comment.author_association` would be the empty string,
+    # which `contains()` rejects — silently disabling every issue-lifecycle entry point.
     if: |
       needs.authorize.outputs.authorized == 'true' &&
       github.event.issue.state == 'open' &&
       github.event.issue.pull_request == null &&
       contains(fromJSON('["OWNER","MEMBER","COLLABORATOR"]'), github.event.issue.author_association) &&
-      contains(fromJSON('["OWNER","MEMBER","COLLABORATOR"]'), github.event.comment.author_association)
+      (github.event_name != 'issue_comment' ||
+       contains(fromJSON('["OWNER","MEMBER","COLLABORATOR"]'), github.event.comment.author_association))
     runs-on: [self-hosted, homelab]
     # Outer bound over the agent's own 60m timeout; see review-reviewer.yml.
     timeout-minutes: 80
@@ -150,9 +214,15 @@ jobs:
         run: |
           set -euo pipefail
           gh label create "${AGENT}-started" --repo "$REPO" --color 7057ff \
-            --description "An agent is working on this issue" 2>/dev/null || true
-          # Clear any stale marker from a previous attempt before setting this one.
-          gh issue edit "$ISSUE_NUMBER" --repo "$REPO" --remove-label claude-started --remove-label codex-started 2>/dev/null || true
+            --description "An agent has attempted this issue; remove to retry" 2>/dev/null || true
+
+          # ADD ONLY. Nothing in this workflow may remove a `<agent>-started` label.
+          #
+          # Removing one is the retry gesture, and these writes use WORKFLOW_PAT, whose
+          # events do trigger workflows. Clearing a stale marker here would fire this
+          # workflow's own `unlabeled` trigger and start a second run of itself.
+          #
+          # Adding emits `labeled`, which is deliberately not in the trigger list.
           gh issue edit "$ISSUE_NUMBER" --repo "$REPO" --add-label "${AGENT}-started"
 
       - name: Create the working branch
@@ -233,6 +303,7 @@ jobs:
           ISSUE_NUMBER: ${{ github.event.issue.number }}
           RUN_URL: ${{ github.server_url }}/${{ github.repository }}/actions/runs/${{ github.run_id }}
           OUTCOME: ${{ job.status }}
+          AGENT: ${{ needs.authorize.outputs.agent }}
         run: |
           set -euo pipefail
           PR=$(gh pr list --repo "$REPO" --state open \
@@ -242,10 +313,12 @@ jobs:
               --body "Opened #${PR}. The review pipeline will run on it automatically. ([run log](${RUN_URL}))"
           else
             gh issue comment "$ISSUE_NUMBER" --repo "$REPO" \
-              --body "The agent finished with status \`${OUTCOME}\` but did not open a PR. ([run log](${RUN_URL}))"
+              --body "The agent finished with status \`${OUTCOME}\` but did not open a PR. Remove the \`${AGENT}-started\` label to try again. ([run log](${RUN_URL}))"
           fi
-          gh issue edit "$ISSUE_NUMBER" --repo "$REPO" \
-            --remove-label claude-started --remove-label codex-started 2>/dev/null || true
+
+          # The `<agent>-started` label is deliberately left in place; see the header.
+          # Clearing it here would fire this workflow's own `unlabeled` trigger, and a
+          # run that failed to open a PR would retry itself forever.
 
       - name: Upload the agent transcript
         if: always() && steps.existing.outputs.skip != 'true'
