@@ -81,6 +81,48 @@ search:
   fetch_max_bytes: 400000
   fetch_max_chars: 6000
 
+# Critic auditioning (docs/architecture.md). Measures whether each rostered critic can
+# actually find a planted defect and stay quiet on a sound report — the question neither
+# `validate_roster_health` nor `ra doctor`'s probes ask.
+#
+# This exists because run-d5934276fafd shipped with two lenses effectively unstaffed:
+# llama-4-scout returned 0 issues on all 6 evidence calls and gemma-4-31b-it 0 on all 6
+# completeness calls, across artifacts other critics found 6 and 10 material issues in.
+# Every counter and status in that run read as though three lenses had reviewed it.
+#
+# Off by default: an audition costs |critics| x |fixtures| x repetitions calls against a
+# paid proxy, and a checkout with no credential must behave exactly as it always has.
+# Run it deliberately with `ra audition`; `ra doctor` only reads the cache it leaves.
+#
+# NOTE on this roster specifically: `gemma4` is the same model as the gemma-4-31b-it
+# that flagged nothing in that run, now at position 3 on both evidence and completeness.
+# Position 3 is unreachable on the first pass and is reached on the rule 8 confirmation
+# top-up — where a false clean raises cleared_count to 2, satisfies strong_met, and
+# terminates the run `accepted`. Audition it before trusting that lineup.
+audition:
+  enabled: false
+  # Warn rather than abort when a critic grades `unfit`. Fail-closed is the right
+  # instinct — the soundness claim is void without capable reviewers — but coupling
+  # every run to a cache whose freshness depends on a rate-limited proxy means an
+  # operator blocked by an expired audition disables the harness outright.
+  enforce: false
+  cache_path: .ra-audition.json
+  max_age_days: 30
+  # Critics are non-deterministic (see the minimax-m3 note above). Single-shot
+  # auditioning would inherit that flakiness and report it as capability.
+  repetitions: 3
+  max_concurrency: 3
+  thresholds:
+    # Fail-closed line, measured on `tier: obvious` fixtures only. A model scoring
+    # exactly 0 there is unfit regardless of this value — that case is not tunable.
+    min_obvious_sensitivity: 0.5
+    warn_lens_sensitivity: 0.6
+    # Mean material issues invented per sound control report. Above this a critic
+    # manufactures work every round and the run stagnates instead of converging.
+    max_control_material_rate: 1.0
+    warn_control_material_rate: 0.34
+    max_schema_failure_rate: 0.2
+
 budgets:
   min_ticks: 2
   hard_cap: 8

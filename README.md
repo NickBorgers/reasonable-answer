@@ -27,6 +27,7 @@ The repo is a devcontainer: clone, open, run the tests.
 ```bash
 make test      # full offline suite — no network, no API keys
 make doctor    # resolve every roster alias against the LiteLLM proxy, report health
+make audition  # measure whether each rostered critic can actually perform its lens
 make serve     # web interface on http://127.0.0.1:8080
 make run Q="Does a four-day work week increase productivity?"
 ```
@@ -42,6 +43,7 @@ Or directly:
 ```bash
 uv run ra run -q "your question" --seed draft.md --config config/roster.yaml -v
 uv run ra doctor
+uv run ra audition
 uv run ra purge <run_id> [--content-only]
 uv run ra expired
 ```
