@@ -97,6 +97,14 @@ it holds `contents: read`, so it could not push if it tried.
 anything under `.github/`, `src/`, or the dependency and container files. `test` runs for
 `src/`, `tests/`, `config/`, and `pyproject.toml`.
 
+**`invariant` must never abstain**, and its prompt says so. Selecting it unconditionally
+is what guarantees the judge never sees an empty or wholly-abstaining review set — and
+the judge treats all-abstain as a fail-closed `pipeline_error`. So a role that is always
+selected but permitted to abstain produces exactly the vacuous outcome the unconditional
+selection exists to prevent: every infrastructure-only PR would NO-GO with an error about
+the pipeline rather than the change. A diff with no invariant surface is an `approve` that
+says why, which is a real finding.
+
 **Spec-critical markdown is carved out of "docs-only".** `docs/DESIGN.md`,
 `isolation.md`, `convergence.md`, `architecture.md`, `decisions.md`, and every prompt file
 are normative — the docs *are* the spec, and the prompts *are* the reviewers' instructions.

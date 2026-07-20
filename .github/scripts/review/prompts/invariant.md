@@ -121,7 +121,7 @@ Valid JSON conforming exactly to `.github/scripts/review/schema/reviewer-v1.json
   "role": "invariant",
   "reviewed_sha": "${REVIEWED_SHA}",
   "cycle": ${CYCLE},
-  "decision": "approve | request_changes | comment | abstain",
+  "decision": "approve | request_changes | comment",
   "summary": "<one paragraph containing verbatim 'Alignment check: PASS|FAIL' and 'Scope check: PASS|FAIL'>",
   "blocking_issues": [],
   "non_blocking_notes": [],
@@ -130,10 +130,18 @@ Valid JSON conforming exactly to `.github/scripts/review/schema/reviewer-v1.json
 }
 ```
 
-- `decision`: `request_changes` if `blocking_issues[]` is non-empty; `approve` if the diff is clean
-  and this role applies; `abstain` only if the diff genuinely carries no invariant surface (e.g.
-  README typo, `.gitignore`). A diff touching `src/reasonable_answer/**` or `docs/**` is never an
-  abstain.
+- `decision`: `request_changes` if `blocking_issues[]` is non-empty, otherwise `approve`.
+
+  **Do not abstain. This role has no abstain.** It is selected for every pull request precisely so
+  that some reviewer always renders a verdict, and the judge treats an all-abstaining review set as
+  a fail-closed pipeline error — so abstaining here does not mean "no concerns", it blocks the merge
+  with an error that describes the pipeline rather than the change.
+
+  When a diff carries no invariant surface at all — CI plumbing, `.gitignore`, a README typo — that
+  is an `approve` whose summary says so plainly: which files the diff touches, and why rows 1–9 have
+  no surface on it. That is a real and useful finding, and it is what the reviewer above you needs.
+  Confirming that a change cannot affect the design's safety properties is part of this job, not an
+  admission that the job did not apply.
 - `summary` ≤ 500 chars — the validator hard-fails longer. Detail goes in the arrays.
 - **Blocking ids must be short, kebab-case, prefixed `inv-`, and STABLE across cycles for the same
   underlying problem** (`inv-author-exclusion-1`, `inv-view-leak-1`, `inv-docs-drift-2`). The judge

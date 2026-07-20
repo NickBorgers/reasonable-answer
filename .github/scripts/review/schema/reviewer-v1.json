@@ -72,6 +72,11 @@
         "additionalProperties": false,
         "required": ["message"],
         "properties": {
+          "id": {
+            "type": "string",
+            "minLength": 1,
+            "description": "Optional. Present so a fix_suggestions[] entry can reference a note, which fix_suggestions.id already documents as allowed — without this property that reference was unsatisfiable and a reviewer that supplied one failed validation."
+          },
           "file": { "type": ["string", "null"] },
           "line": { "type": ["integer", "null"], "minimum": 1 },
           "message": { "type": "string", "minLength": 1 }
