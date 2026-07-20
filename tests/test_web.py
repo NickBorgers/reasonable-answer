@@ -147,6 +147,41 @@ def test_report_markdown_is_served_only_once_it_exists(client, config):
     assert "# Answer" in markdown.text
 
 
+def test_the_report_is_rendered_not_shown_as_raw_markdown(client, config):
+    """A reader gets HTML; `report.md` stays the escape hatch for the source."""
+    response = client.post("/runs", data={"question": "Rendered?"}, follow_redirects=False)
+    run_id = response.headers["location"].rsplit("/", 1)[-1]
+    _wait_for_final(config, run_id)
+
+    for url in (f"/runs/{run_id}", f"/runs/{run_id}/report"):
+        page = client.get(url)
+        assert page.status_code == 200
+        assert "<h1>Answer</h1>" in page.text
+        assert "# Answer" not in page.text
+
+
+def test_a_report_that_contains_html_is_rendered_as_text_not_markup(config, identities):
+    """The report is model-written, so markdown rendering must not become an XSS hole."""
+    hostile = '# Answer\n\n<script>alert("xss")</script>\n\n[click](javascript:alert(1))\n'
+    store = RunStore(config.runs_dir, "run-mdxss")
+    store.question("Hostile?")
+    store.event("intake", path="question")
+    store.final(hostile, {"status": "accepted", "chosen_round": 1})
+
+    worker = RunWorker(config, max_concurrent=1, runner=lambda *a, **k: None)
+    app = create_app(config, worker=worker)
+    try:
+        with TestClient(app) as c:
+            for url in ("/runs/run-mdxss", "/runs/run-mdxss/report"):
+                page = c.get(url).text
+                assert "<script>alert" not in page
+                assert "&lt;script&gt;" in page
+                # markdown-it refuses the scheme, so the link stays inert literal text
+                assert 'href="javascript:' not in page
+    finally:
+        worker.shutdown()
+
+
 def test_audit_json_exposes_the_whole_event_stream(client, config):
     response = client.post("/runs", data={"question": "Audit?"}, follow_redirects=False)
     run_id = response.headers["location"].rsplit("/", 1)[-1]

@@ -12,6 +12,7 @@ import time
 from typing import Any
 
 from ..config import Config
+from .markdown import to_html
 from .registry import RoundSnapshot, RunSummary
 
 STATUS_TONE = {
@@ -178,7 +179,8 @@ def render_run(
     )
 
     downloads = (
-        f"""<a class="secondary button" href="/runs/{esc(summary.run_id)}/report.md">report.md</a>
+        f"""<a class="button" href="/runs/{esc(summary.run_id)}/report">Read the report</a>
+        <a class="secondary button" href="/runs/{esc(summary.run_id)}/report.md">report.md</a>
         <a class="secondary button" href="/runs/{esc(summary.run_id)}/audit.json">audit.json</a>"""
         if report
         else f'<a class="secondary button" href="/runs/{esc(summary.run_id)}/audit.json">audit.json</a>'
@@ -307,8 +309,27 @@ def _report_section(report: str | None, final: dict[str, Any] | None) -> str:
   {provenance}
   {defects}
   {warn}
-  <article class="report">{esc(report)}</article>
+  <article class="report">{to_html(report)}</article>
 </section>"""
+
+
+def render_report(summary: RunSummary, report: str, final: dict[str, Any] | None) -> str:
+    """The report on its own page — the thing to hand to someone who wants to *read* it,
+    rather than watch the pipeline that produced it."""
+    chosen = (final or {}).get("chosen_round")
+    provenance = f" · shipped from round {esc(chosen)}" if chosen else ""
+    body = f"""
+<section class="panel reading">
+  <div class="run-meta">
+    {_badge(summary.status)}
+    <a class="dim" href="/runs/{esc(summary.run_id)}">back to the run</a>
+    <span class="dim mono">{esc(summary.run_id)}{provenance}</span>
+    <a class="dim" href="/runs/{esc(summary.run_id)}/report.md">report.md</a>
+  </div>
+  <p class="question">{esc(summary.question)}</p>
+  <article class="report">{to_html(report)}</article>
+</section>"""
+    return render_layout(f"{summary.question[:60]} — reasonable-answer", body)
 
 
 # ------------------------------------------------------------------- assets
@@ -459,11 +480,45 @@ table.runs { width: 100%; border-collapse: collapse; }
 .callout h3 { margin-top: 0; color: var(--ink); }
 .defects { margin: .5rem 0 0; padding-left: 1.1rem; }
 .defects li { margin-bottom: .4rem; font-size: .9rem; }
+/* The report is model-written markdown rendered to HTML, so it is the one place in
+   this stylesheet that has to style tags it did not author. Everything is scoped
+   under .report for that reason. */
 .report {
-  white-space: pre-wrap; font-family: ui-monospace, SFMono-Regular, Menlo, monospace;
-  font-size: .85rem; line-height: 1.65; background: var(--bg); border: 1px solid var(--line);
-  border-radius: 8px; padding: 1rem; overflow-x: auto;
+  line-height: 1.7; background: var(--bg); border: 1px solid var(--line);
+  border-radius: 8px; padding: 1.4rem 1.6rem; overflow-wrap: break-word;
 }
+.report > :first-child { margin-top: 0; }
+.report > :last-child { margin-bottom: 0; }
+.report h1, .report h2, .report h3, .report h4 { line-height: 1.3; margin: 1.8rem 0 .6rem; }
+.report h1 { font-size: 1.5rem; }
+.report h2 { font-size: 1.2rem; padding-bottom: .3rem; border-bottom: 1px solid var(--line); }
+.report h3 { font-size: 1rem; }
+.report h4 { font-size: .95rem; color: var(--dim); }
+.report p, .report ul, .report ol, .report blockquote { margin: 0 0 1rem; }
+.report li { margin-bottom: .3rem; }
+.report a { color: var(--accent); }
+.report blockquote {
+  border-left: 3px solid var(--line); margin-left: 0; padding: .1rem 0 .1rem 1rem; color: var(--dim);
+}
+.report code {
+  font-family: ui-monospace, SFMono-Regular, Menlo, monospace; font-size: .85em;
+  background: var(--panel); border: 1px solid var(--line); border-radius: 4px; padding: .05rem .3rem;
+}
+.report pre {
+  background: var(--panel); border: 1px solid var(--line); border-radius: 6px;
+  padding: .8rem 1rem; overflow-x: auto;
+}
+.report pre code { background: none; border: 0; padding: 0; }
+.report table { border-collapse: collapse; width: 100%; margin-bottom: 1rem; font-size: .9rem; }
+.report th, .report td { border: 1px solid var(--line); padding: .4rem .6rem; text-align: left; }
+.report th { background: var(--panel); }
+.report hr { border: 0; border-top: 1px solid var(--line); margin: 1.8rem 0; }
+.report img { max-width: 100%; }
+/* The Sources section is a reference list, not prose — tighten it and let long URLs wrap. */
+.report h2 + ol, .report h2 + ul { font-size: .9rem; }
+.reading { max-width: 48rem; margin: 0 auto; }
+.reading .run-meta { margin-bottom: .8rem; }
+.reading .question { font-size: 1.05rem; font-weight: 600; margin: 0 0 1rem; }
 .roster-grid { display: grid; grid-template-columns: repeat(auto-fit, minmax(11rem, 1fr)); gap: 1rem; }
 .roster-grid ul { list-style: none; margin: 0; padding: 0; }
 .roster-grid li {
