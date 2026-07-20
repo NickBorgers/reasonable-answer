@@ -1,0 +1,10 @@
+{
+  "name": "reasonable-answer-review-validator",
+  "version": "1.0.0",
+  "private": true,
+  "description": "Pinned JSON-schema validator for reviewer and fixer artifacts. Exists so the review pipeline never resolves a package version at runtime -- see the comment in review-fixer.yml.",
+  "license": "MIT",
+  "dependencies": {
+    "ajv-cli": "5.0.0"
+  }
+}

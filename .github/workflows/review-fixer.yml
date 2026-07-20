@@ -371,9 +371,34 @@ jobs:
           EXPECTED_MODE: ${{ steps.session.outputs.mode }}
         run: |
           set -euo pipefail
+
+          # `npm ci` from a committed lockfile, never `npx --yes ajv-cli@5`.
+          #
+          # This job checks out the PR with WORKFLOW_PAT and can push to the branch. A
+          # floating major range resolves at runtime, so a new 5.x release — or a
+          # compromised registry account — would execute package code here, inside the one
+          # stage that holds a write-capable credential, and it would run BEFORE the gates
+          # below that are supposed to decide whether anything gets pushed.
+          #
+          # The lockfile pins the whole transitive tree by integrity hash, so what runs is
+          # what was reviewed when it was committed. Raised as sec-supply-chain-1 on #12.
+          #
+          # Bootstrap: until the validator lands on main, main has no such directory, and
+          # failing hard would stop the change that introduces it from passing its own
+          # review. The fallback pins an EXACT version rather than a range — still resolved
+          # at runtime, but no longer a moving target. It disappears once this is on main.
+          VALIDATOR_DIR=".github/scripts/review/validator"
+          if [ -f "${VALIDATOR_DIR}/package-lock.json" ]; then
+            npm ci --prefix "$VALIDATOR_DIR" --no-audit --no-fund
+            AJV=("${VALIDATOR_DIR}/node_modules/.bin/ajv")
+          else
+            echo "::notice::main has no pinned validator yet; falling back to ajv-cli@5.0.0 (exact). This path disappears once the validator is on main."
+            AJV=(npx --yes ajv-cli@5.0.0)
+          fi
+
           # Main's schema, never the PR's — a PR cannot redefine the contract its own
           # fixer output is checked against.
-          npx --yes ajv-cli@5 validate --spec=draft2020 --strict=false \
+          "${AJV[@]}" validate --spec=draft2020 --strict=false \
             -s ".github/scripts/review/schema/fix-result-v1.json" -d "$RESULT_JSON"
 
           # The fixer declares which tree it worked from. If that is not the tree the

@@ -67,6 +67,51 @@ test("request_changes overridden when fixer addressed every blocker -> GO", () =
   assert.equal(v.verdict, "GO");
 });
 
+// The real fixer emits objects, not bare strings, because the commit message and PR
+// comment need to say what was done. Both shapes must resolve identically — a mismatch
+// here silently credits nothing and no PR could ever converge.
+test("addressed[] as objects resolves the same as strings -> GO", () => {
+  const v = aggregate(
+    [reviewer("security", "request_changes", [blocker("sec-1")])],
+    {
+      input_sha: SHA_A,
+      new_sha: SHA_B,
+      addressed: [{ id: "security/sec-1", how: "pinned the dependency", resolution: "code_change" }],
+      skipped: [],
+    }
+  );
+  assert.equal(v.verdict, "GO");
+});
+
+test("addressed[] mixing objects and strings resolves both -> GO", () => {
+  const v = aggregate(
+    [reviewer("security", "request_changes", [blocker("sec-1"), blocker("sec-2")])],
+    {
+      input_sha: SHA_A,
+      new_sha: SHA_B,
+      addressed: [{ id: "security/sec-1", how: "x" }, "security/sec-2"],
+      skipped: [],
+    }
+  );
+  assert.equal(v.verdict, "GO");
+});
+
+// A malformed entry must never clear a blocker. Failing to credit a real fix costs one
+// cycle; wrongly clearing one merges an unaddressed blocker.
+test("malformed addressed[] entries clear nothing -> NO-GO", () => {
+  const v = aggregate(
+    [reviewer("security", "request_changes", [blocker("sec-1")])],
+    {
+      input_sha: SHA_A,
+      new_sha: SHA_B,
+      addressed: [null, {}, { how: "no id" }, 42, ""],
+      skipped: [],
+    }
+  );
+  assert.equal(v.verdict, "NO-GO");
+  assert.deepEqual(v.unaddressed_blocker_ids, ["security/sec-1"]);
+});
+
 // ───────────────────────── NO-GO paths ─────────────────────────
 
 test("empty reviewer set is NO-GO", () => {

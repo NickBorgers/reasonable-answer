@@ -66,10 +66,18 @@ guessing whenever it cannot trust its inputs: reviewer artifacts spanning multip
 an empty reviewer set, or every reviewer abstaining. It has unit tests, which
 `pr-validation.yml` runs whenever `.github/scripts/review/**` changes.
 
-There is no automated fixer: a NO-GO goes back to a human. `judge.mjs` therefore
-synthesizes the no-op fix result that describes what actually happened, rather than
-relaxing the aggregator — the epoch checks stay live, and adding a real fixer later is a
-one-line change.
+`judge.mjs` reads the fixer's artifact when one exists. When it does not — no blockers to
+fix, the cycle cap forbade fixing, or the fixer failed — it synthesizes the no-op fix
+result rather than relaxing the aggregator, so the epoch checks stay live and every
+blocker reads as unaddressed. That is the fail-closed direction. A fix result that is
+present but unparseable *does* fail the job: a broken fixer must not be indistinguishable
+from an idle one.
+
+What the verdict covers is worth being precise about. The reviewers read the **pre-fix**
+tree and so does the verdict; `addressed[]` only records which of their blockers the fixer
+claims to have closed. Nothing in the judge inspects the fixer's diff. That is what stops
+the fixer clearing its own work — the fixed SHA is graded by its own cycle, by reviewers
+that actually read it.
 
 A reviewer only publishes its artifact under the name the judge consumes **if it
 validated**, and the judge separately requires every role the classifier selected to be
@@ -189,6 +197,14 @@ In order, and all of them fail closed:
    runner with no secrets.
 5. The remote branch head still equals the reviewed SHA. If a human pushed meanwhile, the
    fix is discarded rather than racing them.
+
+Artifacts are validated with a JSON-schema validator **pinned by a committed lockfile**
+(`.github/scripts/review/validator/`), never `npx --yes ajv-cli@5`. A floating range
+resolves at runtime, and the fixer job holds a push-capable PAT — a new 5.x release or a
+compromised registry account would execute package code there, before the gates that
+decide whether anything gets pushed. The lockfile pins the transitive tree by integrity
+hash. `review-reviewer.yml` uses the same pinned validator; it holds no push credential,
+but it does run on a self-hosted runner on the tailnet.
 
 The **host** commits, never the agent — the container runs as uid 1000 against a `.git`
 owned by the runner, and agent-side git writes corrupt the index in ways that surface two

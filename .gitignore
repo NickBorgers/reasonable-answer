@@ -14,3 +14,6 @@ runs/
 .review-output/
 .review-prompt/
 .agent-prompt/
+
+# The pinned review validator is installed by CI from its committed lockfile.
+.github/scripts/review/validator/node_modules/
