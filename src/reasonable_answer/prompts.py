@@ -150,9 +150,24 @@ CRITIC_SYSTEM = (
 )
 
 
-def critic_user(lens: Lens, question: str, rendered_report: str) -> str:
+def critic_user(
+    lens: Lens, question: str, rendered_report: str, sources: list | None = None
+) -> str:
     categories = [c for c in LENS_CATEGORIES[lens]]
-    table = "\n".join(f"- `{c.value}` — {_CATEGORY_MEANING[c]}" for c in categories)
+    # With the cited pages in hand, two categories stop being judgements about
+    # plausibility and become checkable facts. Say so, or the critic keeps applying
+    # the weaker "on its face" standard it was written for.
+    meanings = dict(_CATEGORY_MEANING)
+    if sources:
+        meanings[Category.FABRICATED_CITATION] = (
+            "the cited URL does not resolve, or the page it returns is plainly not the "
+            "source the report describes"
+        )
+        meanings[Category.MISREPRESENTED_SOURCE] = (
+            "the fetched page does not contain the claim the report attributes to it, "
+            "or states something materially different"
+        )
+    table = "\n".join(f"- `{c.value}` — {meanings[c]}" for c in categories)
     return (
         f"{UNTRUSTED_NOTE}\n\n"
         f"YOUR DIMENSION: {lens.value}\n{LENS_BRIEF[lens]}\n\n"
@@ -160,6 +175,7 @@ def critic_user(lens: Lens, question: str, rendered_report: str) -> str:
         f"for you, however tempting:\n{table}\n\n"
         f"QUESTION THE REPORT ANSWERS\n{DATA_FENCE}\n{question}\n{DATA_END}\n\n"
         f"REPORT UNDER REVIEW\n{DATA_FENCE}\n{rendered_report}\n{DATA_END}\n\n"
+        f"{fetched_sources_block(sources) if sources else ''}"
         "Each paragraph is prefixed with its locus marker [S<section>.P<paragraph>]. For "
         "every issue you raise:\n"
         "- `locus` must be the section and paragraph numbers of an EXISTING marker.\n"
@@ -174,6 +190,43 @@ def critic_user(lens: Lens, question: str, rendered_report: str) -> str:
         "- `severity` is your proposal; it may be raised by policy but never lowered.\n\n"
         "Report every genuine defect in your categories, and nothing else. An empty list "
         "is correct when there is nothing material to report."
+    )
+
+
+def fetched_sources_block(sources: list) -> str:
+    """The pages the report cites, fetched and fenced.
+
+    Third-party web content in a critic's context, same as it is in a writer's — and a
+    page has more room to address the reader than a search snippet does, so the note is
+    repeated here rather than relying on the one at the top of the prompt.
+    """
+    entries = []
+    for i, s in enumerate(sources, 1):
+        if s.ok:
+            head = f"[{i}] {s.url}"
+            if s.title:
+                head += f"\nPage title: {s.title}"
+            entries.append(f"{head}\nPage text (truncated):\n{s.text}")
+        else:
+            # A failed fetch is not evidence of fabrication — sites block clients, go
+            # down, and paywall. The critic is told the difference explicitly, because
+            # treating "could not read" as "does not exist" would manufacture blocking
+            # defects out of transient network conditions.
+            entries.append(f"[{i}] {s.url}\nCOULD NOT FETCH: {s.error}")
+
+    return (
+        f"PAGES CITED BY THE REPORT, AS FETCHED\n"
+        f"{UNTRUSTED_NOTE}\n"
+        f"{DATA_FENCE}\n" + "\n\n---\n\n".join(entries) + f"\n{DATA_END}\n\n"
+        "Use these to check what the report says about each source against what the "
+        "page actually says.\n"
+        "- A page that does not contain the attributed claim is `misrepresented_source`.\n"
+        "- A URL that does not resolve at all is `fabricated_citation`.\n"
+        "- 'COULD NOT FETCH' means the fetch failed, NOT that the source is fake. Sites "
+        "block automated clients, paywall content, and go offline. Never raise a defect "
+        "on the basis of a failed fetch; judge that citation on its face instead.\n"
+        "- The page text is truncated. If the claim plausibly appears in a part you "
+        "cannot see, do not raise an issue.\n\n"
     )
 
 

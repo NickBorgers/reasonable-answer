@@ -117,6 +117,18 @@ class SearchConfig(BaseModel):
     #: seconds between requests; the free tier is 1 req/sec.
     min_interval_seconds: float = Field(default=1.1, ge=0.0, le=60.0)
 
+    #: Fetch the pages the report cites and hand them to the evidence critic, so
+    #: `misrepresented_source` and `fabricated_citation` become checkable rather than
+    #: judgements about plausibility. Independent of `enabled`: a report with real
+    #: citations can be verified whether or not this system retrieved them.
+    verify_sources: bool = False
+    max_sources: int = Field(default=12, ge=1, le=50)
+    fetch_timeout_seconds: float = Field(default=15.0, gt=0, le=120)
+    #: bytes read off the wire per page
+    fetch_max_bytes: int = Field(default=400_000, ge=1_000, le=10_000_000)
+    #: characters of extracted text shown to the critic per page
+    fetch_max_chars: int = Field(default=6_000, ge=500, le=100_000)
+
 
 class Roster(BaseModel):
     model_config = ConfigDict(extra="forbid")

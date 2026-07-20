@@ -149,14 +149,20 @@ and would fill it from memory, and no downstream check can tell a remembered cit
 retrieved one. Each run carries a query budget (default 60) because the free tier is 2,000
 queries/month; when it runs out the writer is told so explicitly rather than being handed silence.
 
-**Known limitations.** *Critics do not retrieve, in either posture.* The evidence lens challenges
-uncited claims, on-its-face misrepresentation, and implausible citations *within* the artifact — it
-cannot open a URL to check that the page says what the writer claims. So retrieval changes where
-citations come from, not whether they support their claims: with search on, sources are real and
-retrieved, but whether each one **supports the specific claim it is attached to** remains unverified.
-Output is labelled *consensus-reviewed with in-artifact sourcing* by default, or *…with retrieved
-sourcing* when `search.enabled: true` — neither is fact-checked. (See D5/D17 in
-[decisions.md](docs/decisions.md) and the evidence section of [convergence.md](docs/convergence.md).)
+**Source verification (optional, off by default).** Set `search.verify_sources: true` and the pages
+the report cites are fetched and handed to the **evidence lens only**, as untrusted data. That turns
+`fabricated_citation` and `misrepresented_source` from judgements about plausibility into checks
+against the page. A failed fetch is explicitly *not* treated as evidence of fabrication — sites
+block automated clients, paywall, and go offline. This fetches URLs a model chose, which is SSRF
+exposure by construction; it is expected to be constrained at the network layer, not here.
+
+**Known limitations.** Output is labelled *consensus-reviewed with in-artifact sourcing* by default,
+*…with retrieved sourcing* when `search.enabled: true`, and *…with verified sourcing* when
+`verify_sources` is also on. **None of the three is fact-checked.** Verification establishes that a
+cited page exists and says something compatible with the claim — not that the page is correct, and
+not that the roster chose good sources. With verification off, whether a source supports the claim
+attached to it is unverified entirely. (See D5/D17/D18 in [decisions.md](docs/decisions.md) and the
+evidence section of [convergence.md](docs/convergence.md).)
 
 A critic's quote fields (`claim_span`, `related_span`) are verified to be verbatim text from
 the artifact, so a critic cannot smuggle invented text to the next writer that way. Its

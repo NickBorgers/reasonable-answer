@@ -54,6 +54,19 @@ search:
   # The free tier is 1 request/second; requests are throttled to stay under it.
   min_interval_seconds: 1.1
 
+  # Fetch the pages the report cites and hand them to the evidence critic, so
+  # `misrepresented_source` and `fabricated_citation` stop being judgements about
+  # plausibility and become checkable against the page. Independent of `enabled` —
+  # a report with real citations can be verified whether or not we retrieved them.
+  #
+  # This fetches URLs a model chose. That is SSRF exposure by construction and is
+  # expected to be constrained at the network layer, not here.
+  verify_sources: false
+  max_sources: 12
+  fetch_timeout_seconds: 15.0
+  fetch_max_bytes: 400000
+  fetch_max_chars: 6000
+
 budgets:
   min_ticks: 2
   hard_cap: 8
