@@ -319,6 +319,34 @@ def test_a_crashing_run_leaves_the_worker_alive_and_the_run_resumable(config):
         worker.shutdown()
 
 
+def test_resuming_a_seeded_run_passes_the_seed_back(config):
+    """The graph fingerprints question + seed + roster + budgets and refuses a
+    checkpoint whose inputs drifted. A resume that forgets the seed therefore looks
+    identical to someone changing the question, and every seeded run becomes
+    unresumable — so the seed has to come back off disk."""
+    seen: list[str | None] = []
+
+    def recording(cfg, *, question, seed, run_id):
+        seen.append(seed)
+
+    worker = RunWorker(config, max_concurrent=1, runner=recording)
+    app = create_app(config, worker=worker)
+    try:
+        store = RunStore(config.runs_dir, "run-seeded")
+        store.question("Does the seed survive?", "# A seed report")
+        store.event("intake", path="seed")
+
+        with TestClient(app) as c:
+            assert c.post("/runs/run-seeded/resume", follow_redirects=False).status_code == 303
+
+        deadline = time.time() + 5
+        while not seen and time.time() < deadline:
+            time.sleep(0.05)
+        assert seen == ["# A seed report"]
+    finally:
+        worker.shutdown()
+
+
 def test_resuming_an_active_run_does_not_double_run(config):
     def slow(cfg, *, question, seed, run_id):
         time.sleep(0.5)

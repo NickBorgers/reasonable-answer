@@ -172,6 +172,16 @@ class Registry:
         path = self.dir(run_id) / "question.txt"
         return path.read_text().strip() if path.exists() else "(question not recorded)"
 
+    def seed(self, run_id: str) -> str | None:
+        """The seed the run was started with, or None if it began from a question alone.
+
+        Resuming needs this: the graph fingerprints `question + seed + roster + budgets`
+        and refuses a checkpoint whose inputs have drifted, so a resume that forgets the
+        seed looks exactly like someone changing the question mid-run.
+        """
+        path = self.dir(run_id) / "seed.md"
+        return path.read_text() if path.exists() else None
+
     def drafts(self, run_id: str) -> list[tuple[str, str]]:
         """(filename, body) for every draft, oldest first."""
         reports = self.dir(run_id) / "reports"
