@@ -149,11 +149,14 @@ and would fill it from memory, and no downstream check can tell a remembered cit
 retrieved one. Each run carries a query budget (default 60) because the free tier is 2,000
 queries/month; when it runs out the writer is told so explicitly rather than being handed silence.
 
-**Known limitations.** *Critics still do not retrieve.* The evidence lens challenges uncited claims,
-on-its-face misrepresentation, and implausible citations *within* the artifact — it cannot open a URL
-to check that the page says what the writer claims. So with search on, sources are real and
-retrieved; whether each one **supports the specific claim it is attached to** remains unverified.
-Output is labelled *consensus-reviewed with retrieved sourcing* — still not fact-checked.
+**Known limitations.** *Critics do not retrieve, in either posture.* The evidence lens challenges
+uncited claims, on-its-face misrepresentation, and implausible citations *within* the artifact — it
+cannot open a URL to check that the page says what the writer claims. So retrieval changes where
+citations come from, not whether they support their claims: with search on, sources are real and
+retrieved, but whether each one **supports the specific claim it is attached to** remains unverified.
+Output is labelled *consensus-reviewed with in-artifact sourcing* by default, or *…with retrieved
+sourcing* when `search.enabled: true` — neither is fact-checked. (See D5/D17 in
+[decisions.md](docs/decisions.md) and the evidence section of [convergence.md](docs/convergence.md).)
 
 A critic's quote fields (`claim_span`, `related_span`) are verified to be verbatim text from
 the artifact, so a critic cannot smuggle invented text to the next writer that way. Its

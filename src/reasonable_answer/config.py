@@ -91,7 +91,7 @@ class ProxyConfig(BaseModel):
 
 
 class SearchConfig(BaseModel):
-    """Web search for writers (RA-018).
+    """Web search for writers (D17, amending D5 / resolving RA-011's deferral).
 
     Off by default: a roster with no credential must keep working exactly as before.
     When it is on, startup is fail-closed on both halves — a missing credential and a

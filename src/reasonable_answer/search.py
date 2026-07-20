@@ -122,14 +122,19 @@ class BraveSearch:
         max_results: int = 5,
         timeout: float = 20.0,
         min_interval: float = 1.1,
+        monotonic: Callable[[], float] = time.monotonic,
+        sleep: Callable[[float], None] = time.sleep,
     ) -> None:
         self._token = token
         self._budget = budget
         self._max_results = max_results
         self._timeout = timeout
         self._min_interval = min_interval
+        # Injected so the rate limiter can be tested without a real sleep.
+        self._monotonic = monotonic
+        self._sleep = sleep
         self._lock = threading.Lock()
-        self._last_call = 0.0
+        self._last_call: float | None = None
 
     @property
     def budget(self) -> QueryBudget:
@@ -162,17 +167,24 @@ class BraveSearch:
             # 429 is the one a caller can act on (back off); everything else is opaque.
             raise SearchError(f"brave search HTTP {exc.code}: {exc.reason}") from exc
         except Exception as exc:
-            raise SearchError(f"brave search failed: {exc}") from exc
+            # Only the exception *type*, never its message (RA-016). The request URL
+            # carries the query in its querystring, and several urllib errors embed
+            # the URL in their str() — so an unfiltered message is a path for private
+            # run material to reach a log line via an exception.
+            raise SearchError(f"brave search failed: {type(exc).__name__}") from exc
 
         return _parse_results(payload)
 
     def _throttle(self) -> None:
         with self._lock:
-            elapsed = time.monotonic() - self._last_call
-            wait = self._min_interval - elapsed
-            if wait > 0:
-                time.sleep(wait)
-            self._last_call = time.monotonic()
+            # `None` rather than 0.0 for "no call yet": time.monotonic()'s origin is
+            # arbitrary, so a 0.0 baseline made the very first search sleep on any
+            # machine whose monotonic clock started below min_interval.
+            if self._last_call is not None:
+                wait = self._min_interval - (self._monotonic() - self._last_call)
+                if wait > 0:
+                    self._sleep(wait)
+            self._last_call = self._monotonic()
 
 
 def _parse_results(payload: dict) -> list[SearchResult]:
@@ -182,22 +194,37 @@ def _parse_results(payload: dict) -> list[SearchResult]:
         url = (entry.get("url") or "").strip()
         if not url:
             continue
+        # Dropped rather than truncated: a clipped URL is not citable, and handing the
+        # writer a broken one invites exactly the invented-citation failure retrieval
+        # exists to prevent.
+        if len(url) > MAX_URL_CHARS:
+            log.debug("dropping result with an oversized URL (%d chars)", len(url))
+            continue
         out.append(
             SearchResult(
-                title=_clean(entry.get("title")),
+                title=_clean(entry.get("title"), MAX_TITLE_CHARS),
                 url=url,
-                description=_clean(entry.get("description")),
-                age=entry.get("age") or entry.get("page_age") or None,
+                description=_clean(entry.get("description"), MAX_SNIPPET_CHARS),
+                age=_clean(entry.get("age") or entry.get("page_age"), 40) or None,
             )
         )
     return out
 
 
-def _clean(value: str | None) -> str:
+#: Per-field caps on untrusted text, matching the per-field discipline the rest of the
+#: system applies (a critic's spans are length-bounded too). `max_results` bounds how
+#: many results arrive; without these, one result with a pathological title or snippet
+#: could still dominate the writer's context.
+MAX_TITLE_CHARS = 300
+MAX_SNIPPET_CHARS = 1_000
+MAX_URL_CHARS = 2_000
+
+
+def _clean(value: str | None, limit: int) -> str:
     """Brave marks query-term matches with <strong> tags; strip the markup so it does
     not read as structure once the result is fenced into a prompt."""
     text = (value or "").replace("<strong>", "").replace("</strong>", "")
-    return " ".join(text.split())
+    return " ".join(text.split())[:limit]
 
 
 def make_tool_handler(client: BraveSearch) -> Callable[[str, str], str]:
@@ -221,10 +248,17 @@ def make_tool_handler(client: BraveSearch) -> Callable[[str, str], str]:
         try:
             results = client.search(query)
         except SearchError as exc:
-            log.warning("search failed for %r: %s", query, exc)
+            # The query itself is never logged (RA-016). A writer composes it while
+            # looking at the question, the seed and the draft, so it can carry
+            # verbatim private run material — logging it would copy audit-trail
+            # content out of the mode-0700 runs/<id>/ tree into ordinary process
+            # logs. Length is enough to debug a malformed query.
+            log.warning("search failed (query %d chars): %s", len(query), exc)
             return prompts.search_error_block(str(exc))
-        log.info("search %r -> %d results (%d/%d used)",
-                 query, len(results), client.budget.used, client.budget.limit)
+        log.info(
+            "search returned %d results (query %d chars, %d/%d budget used)",
+            len(results), len(query), client.budget.used, client.budget.limit,
+        )
         return prompts.search_results_block(query, results)
 
     return handle

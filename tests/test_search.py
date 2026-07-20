@@ -168,6 +168,77 @@ def test_http_error_becomes_search_error(monkeypatch):
         client.search("q")
 
 
+def test_untrusted_result_fields_are_length_capped(monkeypatch):
+    payload = {
+        "web": {
+            "results": [
+                {
+                    "title": "T" * 5000,
+                    "url": "https://example.org/a",
+                    "description": "D" * 50_000,
+                },
+                {"title": "long url", "url": "https://example.org/" + "p" * 5000},
+            ]
+        }
+    }
+    monkeypatch.setattr("urllib.request.urlopen", lambda *a, **k: _stub_response(payload))
+    results = BraveSearch("tok", budget=QueryBudget(5), min_interval=0).search("q")
+
+    # max_results bounds the count; without per-field caps one pathological result
+    # could still dominate the writer's context.
+    assert len(results[0].title) == search.MAX_TITLE_CHARS
+    assert len(results[0].description) == search.MAX_SNIPPET_CHARS
+    # An oversized URL is dropped, not clipped — a clipped URL is not citable.
+    assert len(results) == 1
+
+
+def test_throttle_waits_between_calls_but_not_before_the_first():
+    slept: list[float] = []
+    now = [1000.0]
+    client = BraveSearch(
+        "tok",
+        budget=QueryBudget(5),
+        min_interval=1.1,
+        monotonic=lambda: now[0],
+        sleep=lambda s: (slept.append(s), now.__setitem__(0, now[0] + s)),
+    )
+
+    client._throttle()
+    assert slept == [], "the first request has nothing to wait behind"
+
+    client._throttle()
+    assert slept and slept[0] == pytest.approx(1.1)
+
+
+def test_throttle_does_not_wait_when_enough_time_has_passed():
+    slept: list[float] = []
+    now = [1000.0]
+    client = BraveSearch(
+        "tok", budget=QueryBudget(5), min_interval=1.1,
+        monotonic=lambda: now[0], sleep=slept.append,
+    )
+    client._throttle()
+    now[0] += 60.0
+    client._throttle()
+    assert slept == []
+
+
+@pytest.mark.parametrize(
+    "kwargs",
+    [
+        {"query_budget": 0},  # reads as "no searches ever", silently
+        {"max_results": 21},  # beyond what the API returns
+        {"max_tool_rounds": 0},  # a loop that can never call the tool
+        {"min_interval_seconds": -1},  # negative wait
+    ],
+)
+def test_out_of_range_search_config_is_rejected_at_load(kwargs):
+    from pydantic import ValidationError
+
+    with pytest.raises(ValidationError):
+        SearchConfig(**kwargs)
+
+
 def test_empty_query_costs_no_budget():
     client = BraveSearch("tok", budget=QueryBudget(5), min_interval=0)
     with pytest.raises(SearchError, match="empty query"):
@@ -375,3 +446,42 @@ def test_generate_hands_the_writer_the_search_tool(tmp_path, identities, config)
     # And the result the writer would see is fenced, not raw.
     assert prompts.UNTRUSTED_NOTE in client.tool_results[0]
     assert "https://example.org/x" in client.tool_results[0]
+
+
+def test_the_audit_trail_records_whether_the_draft_searched(tmp_path, identities, config):
+    """The flagship auditability property: a run can be asked afterwards whether a
+    given draft's citations came from a lookup or from memory."""
+    import json
+
+    from reasonable_answer.graph import _generate
+
+    class _Searcher:
+        budget = QueryBudget(10)
+
+        def search(self, query, count=None):
+            return [SearchResult(title="T", url="https://example.org/x", description="D")]
+
+    rt, _ = _runtime(tmp_path, identities, config, searcher=_Searcher())
+    _generate({"question": "q?", "round": 0}, rt)
+
+    events = [
+        json.loads(line)
+        for line in (rt.store.dir / "events.jsonl").read_text().splitlines()
+    ]
+    generate = [e for e in events if e["kind"] == "generate"]
+    assert generate and generate[-1]["searches"] == 1
+
+
+def test_a_draft_written_without_search_records_zero(tmp_path, identities, config):
+    import json
+
+    from reasonable_answer.graph import _generate
+
+    rt, _ = _runtime(tmp_path, identities, config, searcher=None)
+    _generate({"question": "q?", "round": 0}, rt)
+
+    events = [
+        json.loads(line)
+        for line in (rt.store.dir / "events.jsonl").read_text().splitlines()
+    ]
+    assert [e for e in events if e["kind"] == "generate"][-1]["searches"] == 0

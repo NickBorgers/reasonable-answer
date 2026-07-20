@@ -34,13 +34,28 @@ but **triage clamps it up to a mechanical, category-specific floor** — the cri
 `material == 0`; `minor`/`stylistic` never block. (Flooring `overstated_claim`/
 `omitted_counterargument` at `major` is deliberately conservative and config-tunable.)
 
-### Evidence handling (RA-011) — known limitation
+### Evidence handling (RA-011, D5, D17)
 
 The report **carries its own citations**; the evidence lens challenges any material `uncited_claim`,
 any on-its-face `misrepresented_source`, and any `fabricated_citation`. Citations must be
-well-formed/resolvable in format. **No external retrieval in v1**, so a diverse roster can still
-share a factual blind spot; output is labeled *consensus-reviewed with in-artifact sourcing*, not
-fact-checked. A retrieval/fetch layer is the planned mitigation.
+well-formed/resolvable in format.
+
+**Retrieval is opt-in and off by default (D17).** The two postures differ in what a citation *is*:
+
+* **`search.enabled: false` (default)** — no external retrieval, exactly as D5 specifies. A diverse
+  roster can still share a factual blind spot, and a citation is whatever the writer recalled.
+  Output is labeled *consensus-reviewed with in-artifact sourcing*, not fact-checked.
+* **`search.enabled: true`** — writers hold a `web_search` tool and may cite only URLs a search
+  actually returned, so a citation is a real, retrieved page. Output is labeled *consensus-reviewed
+  with retrieved sourcing*, still not fact-checked. Startup fails closed if a writer cannot emit
+  tool calls, because such a writer would still produce a `## Sources` section and fill it from
+  memory — and no downstream check distinguishes that from a retrieved citation.
+
+**Retrieval does not make the report fact-checked.** It constrains where citations come from; it
+does not establish that a cited page *supports the specific claim attached to it*. The evidence
+lens reads the artifact, not the cited pages, so whether source [2] says what the paragraph citing
+it claims remains unverified in both postures. A source-fetching layer for the evidence lens is the
+planned mitigation.
 
 ## Two signal schemas — content-free vs. operational (RB-004, RB-008)
 
