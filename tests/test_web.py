@@ -147,6 +147,85 @@ def test_report_markdown_is_served_only_once_it_exists(client, config):
     assert "# Answer" in markdown.text
 
 
+def test_the_report_is_rendered_not_shown_as_raw_markdown(client, config):
+    """A reader gets HTML; `report.md` stays the escape hatch for the source."""
+    response = client.post("/runs", data={"question": "Rendered?"}, follow_redirects=False)
+    run_id = response.headers["location"].rsplit("/", 1)[-1]
+    _wait_for_final(config, run_id)
+
+    for url in (f"/runs/{run_id}", f"/runs/{run_id}/report"):
+        page = client.get(url)
+        assert page.status_code == 200
+        assert "<h1>Answer</h1>" in page.text
+        assert "# Answer" not in page.text
+
+
+def test_the_report_page_404s_before_there_is_a_report_and_for_unknown_runs(config, identities):
+    """Both of the new route's guards: no such run, and a run with nothing to show yet."""
+    store = RunStore(config.runs_dir, "run-early")
+    store.question("Too soon?")
+    store.event("intake", path="question")
+
+    worker = RunWorker(config, max_concurrent=1, runner=lambda *a, **k: None)
+    app = create_app(config, worker=worker)
+    try:
+        with TestClient(app) as c:
+            assert c.get("/runs/run-early/report").status_code == 404
+            assert c.get("/runs/run-doesnotexist/report").status_code == 404
+    finally:
+        worker.shutdown()
+
+
+def test_report_markdown_features_reports_actually_use_are_enabled(config):
+    """Tables and strikethrough are enabled on top of CommonMark; pin that."""
+    from reasonable_answer.web.markdown import to_html
+
+    html = to_html("| a | b |\n| - | - |\n| 1 | 2 |\n\n~~struck~~\n")
+    assert "<table>" in html
+    assert "<s>struck</s>" in html
+
+
+def test_a_finished_report_outranks_the_progress_trail(client, config):
+    """Once there is an answer, the answer is the page; the rounds fold up below it."""
+    response = client.post("/runs", data={"question": "Which comes first?"}, follow_redirects=False)
+    run_id = response.headers["location"].rsplit("/", 1)[-1]
+    _wait_for_final(config, run_id)
+
+    page = client.get(f"/runs/{run_id}").text
+    assert page.index("<h1>Answer</h1>") < page.index('id="progress"')
+    assert "<details class=\"fold\">" in page
+
+
+def test_a_report_that_contains_html_is_rendered_as_text_not_markup(config, identities):
+    """The report is model-written, so markdown rendering must not become an XSS hole."""
+    hostile = (
+        '# Answer\n\n<script>alert("xss")</script>\n\n'
+        "[click](javascript:alert(1))\n\n"
+        "![probe](http://127.0.0.1:9/pixel.png)\n"
+    )
+    store = RunStore(config.runs_dir, "run-mdxss")
+    store.question("Hostile?")
+    store.event("intake", path="question")
+    store.final(hostile, {"status": "accepted", "chosen_round": 1})
+
+    worker = RunWorker(config, max_concurrent=1, runner=lambda *a, **k: None)
+    app = create_app(config, worker=worker)
+    try:
+        with TestClient(app) as c:
+            for url in ("/runs/run-mdxss", "/runs/run-mdxss/report"):
+                page = c.get(url).text
+                assert "<script>alert" not in page
+                assert "&lt;script&gt;" in page
+                # markdown-it refuses the scheme, so the link stays inert literal text
+                assert 'href="javascript:' not in page
+                # An <img> would be an automatic outbound GET from the reader's browser
+                # the moment the page loads, so image syntax stays literal text too.
+                assert "<img" not in page
+                assert "127.0.0.1:9/pixel.png" in page  # rendered, but as text
+    finally:
+        worker.shutdown()
+
+
 def test_audit_json_exposes_the_whole_event_stream(client, config):
     response = client.post("/runs", data={"question": "Audit?"}, follow_redirects=False)
     run_id = response.headers["location"].rsplit("/", 1)[-1]

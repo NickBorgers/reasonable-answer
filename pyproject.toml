@@ -18,6 +18,9 @@ web = [
     "fastapi>=0.115.0",
     "uvicorn[standard]>=0.32.0",
     "python-multipart>=0.0.9",
+    # Renders the report markdown for the browser. Declared even though `rich` already
+    # pulls it in: the web layer uses it directly and must not depend on that accident.
+    "markdown-it-py>=3.0",
 ]
 
 [project.scripts]
