@@ -240,7 +240,7 @@ three roles: **invariant**, **security**, and **test**. A deterministic judge ag
 structured verdicts and writes the merge gate; it runs from `main` with read-only permissions, so a
 PR cannot modify the code that judges it. Nothing in the pipeline can push.
 
-Comment `/autoresolve` on an issue and an agent opens a PR for it; `/review` forces a fresh review
+File an issue and an agent opens a PR for it; `/review` forces a fresh review
 cycle on a PR.
 
 The `invariant` reviewer is the one that earns its keep here: `docs/` is normative spec, so it
