@@ -43,6 +43,7 @@ jobs:
   authorize:
     name: Authorize trigger
     runs-on: ubuntu-latest
+    timeout-minutes: 10
     outputs:
       authorized: ${{ steps.authorize.outputs.authorized }}
       configured: ${{ steps.configured.outputs.configured }}
@@ -87,6 +88,11 @@ jobs:
               // runner with tailnet reachability and a PAT in the environment.
               if (pr.head.repo.full_name !== repoFullName) {
                 reason = `external-pr:${pr.head.repo.full_name}`;
+              } else if (pr.draft) {
+                // Reviewing work-in-progress spends agent time on code the author has
+                // not finished writing. `ready_for_review` is a trigger, so marking the
+                // PR ready starts the review; `/review` forces one sooner.
+                reason = 'draft-pr';
               } else if (!allowedAssociations.has(pr.author_association)) {
                 reason = `pr-author:${pr.author_association}`;
               } else {
@@ -149,6 +155,7 @@ jobs:
     needs: authorize
     if: needs.authorize.outputs.configured == 'true' && needs.authorize.outputs.authorized == 'true'
     runs-on: ubuntu-latest
+    timeout-minutes: 10
     outputs:
       should_run: ${{ steps.dedup.outputs.claimed }}
       pr_number: ${{ steps.resolve.outputs.pr_number }}

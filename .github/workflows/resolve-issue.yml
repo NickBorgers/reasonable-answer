@@ -31,6 +31,7 @@ jobs:
       github.event.issue.pull_request == null &&
       startsWith(github.event.comment.body, '/autoresolve')
     runs-on: ubuntu-latest
+    timeout-minutes: 10
     outputs:
       authorized: ${{ steps.check.outputs.authorized }}
       agent: ${{ steps.check.outputs.agent }}
@@ -98,8 +99,19 @@ jobs:
   resolve:
     name: Resolve issue
     needs: authorize
-    if: needs.authorize.outputs.authorized == 'true'
+    # The association checks are repeated here, not merely inherited from `authorize`.
+    # This job is what puts an agent on a self-hosted runner with a write-capable PAT,
+    # so its entry condition should be readable in one place without having to trust
+    # that an upstream job computed its output correctly.
+    if: |
+      needs.authorize.outputs.authorized == 'true' &&
+      github.event.issue.state == 'open' &&
+      github.event.issue.pull_request == null &&
+      contains(fromJSON('["OWNER","MEMBER","COLLABORATOR"]'), github.event.issue.author_association) &&
+      contains(fromJSON('["OWNER","MEMBER","COLLABORATOR"]'), github.event.comment.author_association)
     runs-on: [self-hosted, homelab]
+    # Outer bound over the agent's own 60m timeout; see review-reviewer.yml.
+    timeout-minutes: 80
     steps:
       # WORKFLOW_PAT, not GITHUB_TOKEN. A PR opened with GITHUB_TOKEN does not trigger
       # workflows, so the PR this job creates would never get reviewed — the loop would

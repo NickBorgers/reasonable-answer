@@ -46,6 +46,7 @@ jobs:
   finalize:
     name: Publish verdict
     runs-on: ubuntu-latest
+    timeout-minutes: 15
     steps:
       - name: Checkout main
         uses: actions/checkout@v4
