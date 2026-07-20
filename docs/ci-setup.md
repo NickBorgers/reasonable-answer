@@ -35,6 +35,49 @@ mkdir -p ~/.config/gh ~/.claude ~/.codex
 sudo -u <runner-user> curl -sf "$LLM_PROXY_BASE_URL" >/dev/null && echo reachable
 ```
 
+## 1a. Protect the runners — this repository is public
+
+A self-hosted runner attached to a public repository is the highest-risk configuration
+in GitHub Actions: anyone can fork, open a pull request, and — absent a gate — have their
+code execute on your hardware. Here that hardware sits on your tailnet and the agents run
+with tool permissions bypassed, so the blast radius is real.
+
+Four independent layers stop this. They are independent on purpose: any one of them
+failing should not be sufficient.
+
+| layer | where | what it stops |
+|---|---|---|
+| Fork-PR approval policy | repository setting | a fork PR triggering *any* workflow run without your explicit approval |
+| Entry authorization | `review-entry.yml` / `resolve-issue.yml` | fork PRs and non-collaborator authors, before anything is dispatched |
+| Local guard | `review-reviewer.yml` `guard` job, on a hosted runner | reaching a self-hosted runner even if a future caller forgets to authorize |
+| Job-level conditions | `resolve-issue.yml` resolve job | the same, restated where the runner is actually claimed |
+
+The repository setting is the one that is not in version control, so verify it:
+
+```bash
+gh api repos/NickBorgers/reasonable-answer/actions/permissions/fork-pr-contributor-approval
+# expected: {"approval_policy":"all_external_contributors"}
+```
+
+If it reads `first_time_contributors`, fix it — that default lets anyone who has had a
+single trivial PR merged run workflows on your runners with no approval:
+
+```bash
+gh api -X PUT repos/NickBorgers/reasonable-answer/actions/permissions/fork-pr-contributor-approval \
+  -f approval_policy=all_external_contributors
+```
+
+Also worth doing, outside this repo's control:
+
+- **Scope the runners to this repository**, not to the user or an org runner group. A
+  repo-scoped runner cannot be borrowed by another repository's workflows.
+- Keep the runner user unprivileged, and remember `--network host` means the agent
+  container inherits the runner's full tailnet reachability.
+
+Note that `pull_request_target` appears nowhere in this repository, and must not be
+introduced: it runs workflows from the *base* branch with *write* permissions in the
+context of a fork's PR, which would defeat every layer above.
+
 ## 2. Create the secret
 
 | name | type | scope |

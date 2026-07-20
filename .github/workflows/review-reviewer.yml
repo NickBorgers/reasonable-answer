@@ -42,8 +42,81 @@ permissions:
   actions: read
 
 jobs:
+  # Everything below runs on GitHub-hosted infrastructure and must pass before a
+  # self-hosted runner is allocated at all.
+  #
+  # The caller chain (review-entry → review-pipeline → here) already authorizes, but
+  # that protection is INHERITED. Re-checking locally means the guarantee belongs to
+  # this workflow: a future caller that forgets to authorize cannot expose the homelab
+  # runners to a fork's code, because this job is between them and the runner.
+  guard:
+    name: Guard
+    runs-on: ubuntu-latest
+    timeout-minutes: 15
+    outputs:
+      ok: ${{ steps.authorize.outputs.ok }}
+    steps:
+      - name: Re-verify origin, author, and validation status
+        id: authorize
+        uses: actions/github-script@v7
+        env:
+          PR_NUMBER: ${{ inputs.pr_number }}
+          REVIEWED_SHA: ${{ inputs.reviewed_sha }}
+        with:
+          github-token: ${{ secrets.WORKFLOW_PAT }}
+          script: |
+            const allowed = new Set(['OWNER', 'MEMBER', 'COLLABORATOR']);
+            const repoFullName = `${context.repo.owner}/${context.repo.repo}`;
+            const prNumber = Number(process.env.PR_NUMBER);
+            const sha = process.env.REVIEWED_SHA;
+
+            const { data: pr } = await github.rest.pulls.get({
+              owner: context.repo.owner, repo: context.repo.repo, pull_number: prNumber,
+            });
+
+            // A fork's code must never reach a self-hosted runner: the agent runs with
+            // permissions bypassed and the runner sits on a private tailnet.
+            if (pr.head.repo.full_name !== repoFullName) {
+              core.setFailed(`Refusing to review a fork PR on self-hosted infrastructure: ${pr.head.repo.full_name}`);
+              return core.setOutput('ok', 'false');
+            }
+            if (!allowed.has(pr.author_association)) {
+              core.setFailed(`Refusing to review a PR from an untrusted author: ${pr.author_association}`);
+              return core.setOutput('ok', 'false');
+            }
+            // The reviewed SHA must still be the PR head. If the branch moved on, the
+            // agent would burn a run on code that is already superseded.
+            if (pr.head.sha !== sha) {
+              core.warning(`Reviewed SHA ${sha} is no longer PR head (${pr.head.sha}); skipping.`);
+              return core.setOutput('ok', 'false');
+            }
+
+            // Require PR Validation to have passed on this exact commit before spending
+            // agent time. Reviewing code that does not lint, build, or pass its tests
+            // produces findings the author already knows about.
+            for (let attempt = 1; attempt <= 10; attempt++) {
+              const { data: checks } = await github.rest.checks.listForRef({
+                owner: context.repo.owner, repo: context.repo.repo, ref: sha, per_page: 100,
+              });
+              const gate = checks.check_runs.find((c) => c.name === 'PR Validation Required');
+              if (gate?.status === 'completed') {
+                if (gate.conclusion === 'success') {
+                  core.info('PR Validation passed; proceeding.');
+                  return core.setOutput('ok', 'true');
+                }
+                core.warning(`PR Validation concluded '${gate.conclusion}'; skipping review until it passes.`);
+                return core.setOutput('ok', 'false');
+              }
+              core.info(`Attempt ${attempt}/10: PR Validation not finished yet; waiting 15s...`);
+              await new Promise((r) => setTimeout(r, 15000));
+            }
+            core.warning('PR Validation did not complete in time; skipping review.');
+            core.setOutput('ok', 'false');
+
   review:
     name: ${{ inputs.role }}
+    needs: guard
+    if: needs.guard.outputs.ok == 'true'
     runs-on: [self-hosted, homelab]
     # The agent has its own 30m timeout inside the container. This is the outer bound
     # that also covers a hung image pull or a wedged docker daemon — without it a stuck
