@@ -60,7 +60,8 @@ RUN set -eux; \
     rm -rf "${tmp_dir}"
 
 # Node 20 — the review pipeline's aggregation and its unit tests are plain .mjs run with
-# `node --test`, and reviewer artifacts are schema-validated with npx ajv-cli.
+# `node --test`, and reviewer artifacts are schema-validated with the lockfile-pinned
+# ajv installed via `npm ci`.
 RUN curl -fsSL "https://deb.nodesource.com/setup_${NODE_MAJOR}.x" | bash - \
     && apt-get install -y --no-install-recommends nodejs \
     && rm -rf /var/lib/apt/lists/*
