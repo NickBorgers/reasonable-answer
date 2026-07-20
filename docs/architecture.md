@@ -6,9 +6,10 @@ The roster is **role-structured**, not a flat swap:
 
 - **Writer pool** — models that author reports (round-robin as generators).
 - **Per-lens critic pools** — each lens (logic / evidence / completeness) has its own set of
-  eligible models, which may include **pinned specialists** (e.g. Llama 4 Scout as a dedicated
-  evidence reviewer). Models may be **critic-only** (never author), which cleanly satisfies the
-  author-exclusion rule.
+  eligible models, headed by the one best matched to that lens. Models may be **critic-only**
+  (never author), which cleanly satisfies the author-exclusion rule and is how the roster's
+  strongest model (`glm-5.2`) gets to review *every* draft instead of half of them.
+- **Orchestrator** — the blind referee's model, configured separately (default `writers[0]`).
 
 The one hard invariant: **a report is never critiqued — on any lens — by the model that authored
 it.** With disjoint writer/critic pools this holds automatically; with overlap it is enforced per
@@ -69,12 +70,12 @@ rule is that a lens's model must **not** be the author of the artifact under rev
 ```mermaid
 flowchart TD
     R["report Rₙ"] --> L1["logic lens · model: strong reasoner<br/>contradicted_claim · invalid_inference · overstated_claim"]
-    R --> L2["evidence lens · model: Llama 4 Scout (huge ctx)<br/>uncited_claim · fabricated_citation · misrepresented_source"]
-    R --> L3["completeness lens · model: 3rd family<br/>omitted_counterargument · unclear_structure"]
+    R --> L2["evidence lens · model: lowest hallucination<br/>uncited_claim · fabricated_citation · misrepresented_source"]
+    R --> L3["completeness lens · model: most decorrelated priors<br/>omitted_counterargument · unclear_structure"]
     L1 --> TR["triage (mechanical)"]
     L2 --> TR
     L3 --> TR
-    TR --> SR["OrchestratorView → orchestrator (counts only)"]
+    TR --> SR["OrchestratorView → orchestrator (counts only, own roster entry)"]
     TR --> DL["DefectList → next generator (fix-tasks)"]
 ```
 
@@ -171,13 +172,17 @@ critique. Intake validates size/format (markdown/text) and normalizes.
 
 - **Roster (role-structured):** a **writer pool** plus **per-lens critic pools**; each lens pool
   sized to **≥2 eligible non-author models** for a strong `accepted` (a single-model lens degrades
-  that dimension to `converged_unconfirmed`). Critic-only specialists (e.g. Scout→evidence) are
-  allowed. Resolve/record provider/model/version behind each LiteLLM alias; enforce distinctness at
-  that level; no silent fallback to a duplicate. **Fail closed** (abort) if any lens has zero
-  eligible non-author model or the writer pool is empty. Prefer distinct providers/families per
-  lens; warn when a lens's two models share a family (weak decorrelation). Startup validates
-  structured-output support, per-lens roster health, and the config invariant `0 < min_ticks <
-  hard_cap` (fail closed) so no generating rule can fire at or beyond the cap.
+  that dimension to `converged_unconfirmed`). Critic-only specialists are allowed and are how the
+  strongest model reviews every draft. Resolve/record provider/model/version behind each LiteLLM
+  alias — including the orchestrator's — and enforce distinctness at that level; no silent fallback
+  to a duplicate. **Fail closed** (abort) if any lens has zero eligible non-author model or the
+  writer pool is empty. Prefer distinct providers/families per lens; warn when a lens's two models
+  share a family (weak decorrelation) — the family key is derived from the *model name*, not the
+  provider or serving backend, so two checkpoints of one base model cannot look independent by
+  being served differently. Startup resolves identities and probes structured-output support for
+  every alias in the roster (writers, critics, and the orchestrator), validates per-lens roster
+  health, and checks the config invariant `0 < min_ticks < hard_cap` (fail closed) so no generating
+  rule can fire at or beyond the cap.
 - **Concurrency/limits:** bounded concurrency (the 3 lenses may run in parallel), per-call timeout +
   retry budget, token/context budgeting for the slow local model, backpressure so parallel lenses
   don't overload one proxy/model.

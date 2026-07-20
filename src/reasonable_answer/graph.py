@@ -583,7 +583,7 @@ def _orchestrate_call(client: LLMClient, alias: str, view: OrchestratorView) -> 
 
 def _orchestrate(state: State, rt: Runtime) -> dict:
     view = OrchestratorView.model_validate(state["view"])
-    alias = rt.config.roster.writers[0]
+    alias = rt.config.roster.orchestrator_alias
     recommended = _orchestrate_call(rt.client, alias, view)
     rt.store.event("orchestrate", polish_recommended=recommended)
     return {"polish_next": recommended}
