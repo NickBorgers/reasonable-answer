@@ -68,8 +68,11 @@
 | Resume/replay | checkpoint replay idempotency; stale-hash rejection |
 | End-to-end | labeled fixtures where a known-flawed seed must reach `accepted` with the flaw fixed |
 
-Real-proxy integration tests are **env-gated** (`LLM_PROXY_BASE_URL` / `LLM_PROXY_API_KEY`); the
-full suite passes with no keys, honoring "clone → run tests."
+Real-proxy integration tests are **marker-gated**: they carry the `live` pytest marker declared in
+`pyproject.toml`, and CI deselects them with `-m "not live"`. The proxy endpoint comes from
+`proxy.base_url` in the roster, and its key from the environment variable named by
+`proxy.api_key_env` (`LITELLM_API_KEY` by default). The full suite passes with no keys and no
+network, honoring "clone → run tests."
 
 ## Additional decisions (from Codex round 2)
 
