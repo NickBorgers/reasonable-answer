@@ -21,7 +21,7 @@ from typing import Any, TypedDict
 from langgraph.graph import END, START, StateGraph
 from pydantic import ValidationError
 
-from . import prompts, roles, search, triage
+from . import fetch, prompts, roles, search, triage
 from . import report as report_mod
 from .config import Config, ConfigError, validate_roster_health
 from .controller import acceptance_state, decide, detect_cycle
@@ -93,10 +93,17 @@ class Runtime:
     warnings: list[str] = field(default_factory=list)
     #: None when search is disabled; writers then run exactly as they did before.
     searcher: Any | None = None
+    #: None when source verification is off; the evidence lens then judges citations
+    #: on their face, exactly as it did before.
+    fetcher: Any | None = None
 
     @property
     def search_enabled(self) -> bool:
         return self.searcher is not None
+
+    @property
+    def verify_sources(self) -> bool:
+        return self.fetcher is not None
 
 
 def build_runtime(
@@ -112,6 +119,15 @@ def build_runtime(
         log.info("structured-output mode for %s (%s): %s", alias, identities[alias], mode)
 
     searcher = _build_searcher(config, client)
+    fetcher = (
+        fetch.SourceFetcher(
+            timeout=config.search.fetch_timeout_seconds,
+            max_bytes=config.search.fetch_max_bytes,
+            max_chars=config.search.fetch_max_chars,
+        )
+        if config.search.verify_sources
+        else None
+    )
 
     run_id = run_id or f"run-{uuid.uuid4().hex[:12]}"
     store = RunStore(config.runs_dir, run_id)
@@ -123,11 +139,12 @@ def build_runtime(
         budgets=config.budgets.model_dump(),
         search_enabled=searcher is not None,
         search_query_budget=config.search.query_budget if searcher else 0,
+        verify_sources=fetcher is not None,
     )
     for warning in warnings:
         log.warning("roster: %s", warning)
     return Runtime(config=config, client=client, identities=identities, store=store,
-                   warnings=warnings, searcher=searcher)
+                   warnings=warnings, searcher=searcher, fetcher=fetcher)
 
 
 def _build_searcher(config: Config, client: LLMClient) -> search.BraveSearch | None:
@@ -369,11 +386,27 @@ def _critique_one(
     rendered = report_mod.render_with_loci(report_text)
     structure = report_mod.parse(report_text)
 
+    # Only the evidence lens. Handing fetched pages to logic or completeness would
+    # widen what those lenses can see without widening what they may raise, and the
+    # extra context is a channel for smuggling material into a scope that has no use
+    # for it (docs/isolation.md).
+    sources = None
+    if lens is Lens.EVIDENCE and rt.verify_sources:
+        urls = fetch.extract_source_urls(report_text, limit=rt.config.search.max_sources)
+        sources = rt.fetcher.fetch_all(urls) if urls else None
+        if sources:
+            rt.store.event(
+                "fetch_sources",
+                artifact_hash=artifact_hash,
+                fetched=len(sources),
+                failed=sum(1 for s in sources if not s.ok),
+            )
+
     try:
         output = rt.client.structured(
             alias,
             system=prompts.CRITIC_SYSTEM,
-            user=prompts.critic_user(lens, question, rendered),
+            user=prompts.critic_user(lens, question, rendered, sources),
             schema=CritiqueOutput,
             max_tokens=16000,
         )
