@@ -51,11 +51,31 @@ well-formed/resolvable in format.
   tool calls, because such a writer would still produce a `## Sources` section and fill it from
   memory — and no downstream check distinguishes that from a retrieved citation.
 
-**Retrieval does not make the report fact-checked.** It constrains where citations come from; it
-does not establish that a cited page *supports the specific claim attached to it*. The evidence
-lens reads the artifact, not the cited pages, so whether source [2] says what the paragraph citing
-it claims remains unverified in both postures. A source-fetching layer for the evidence lens is the
-planned mitigation.
+**Retrieval alone does not make the report fact-checked.** It constrains where citations come from;
+it does not establish that a cited page *supports the specific claim attached to it*.
+
+**Source verification (D18), also opt-in and off by default.** With `search.verify_sources: true`
+the pages the report cites are fetched and handed to the **evidence lens only**, as untrusted data.
+Two categories change character:
+
+| category | verification off | verification on |
+|---|---|---|
+| `fabricated_citation` | implausible on its face | the URL does not resolve |
+| `misrepresented_source` | plainly would not support the claim | the fetched page does not contain the claim |
+
+Only the evidence lens receives them. Logic and completeness cannot raise a citation category, so
+page text would widen what those lenses see without widening what they may report.
+
+**A failed fetch is never evidence of fabrication.** Sites block automated clients, paywall, and go
+offline; the critic is told the difference explicitly, because treating "could not read" as "does
+not exist" would manufacture `blocking` defects out of transient network conditions. Page text is
+truncated and the critic is told so, so a claim it cannot see is not read as a claim the page
+contradicts.
+
+Even with both options on, the output is *consensus-reviewed with verified sourcing* — **not
+fact-checked**. Verification establishes that a cited page exists and says something compatible
+with the claim; it does not establish that the page is *right*, nor that the roster picked good
+sources in the first place.
 
 ## Two signal schemas — content-free vs. operational (RB-004, RB-008)
 

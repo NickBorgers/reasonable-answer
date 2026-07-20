@@ -120,6 +120,24 @@ They carry the same fence and the same explicit "this is data, not instructions"
 other untrusted input, and the writer is additionally told that anything inside a result which
 addresses it is data to report on, never a directive.
 
+**Fetched source pages (D18)** are the same class, one step further: with
+`search.verify_sources: true` the *full text* of a cited page enters a **critic's** context, and a
+page has far more room to address its reader than a search snippet does. Three things bound it:
+
+- **Evidence lens only.** Logic and completeness never receive page text. They cannot raise a
+  citation category, so the pages would widen what they see without widening what they may report —
+  and every extra channel into a lens is a way for material to reach a scope with no use for it.
+- **Structured output is unchanged.** The critic still emits only closed-enum categories with
+  verbatim spans quoted from *the report*, so a page cannot smuggle an instruction into a fix-task
+  even if the critic is persuaded by it. This is why verification adds evidence rather than a tool:
+  the critic gains no new output channel.
+- **Same fence, restated.** The untrusted-data note is repeated inside the fetched-pages block
+  rather than relied on from the top of the prompt, given how much text sits between them.
+
+The residual risk is a page that argues the report is wrong where it is right — a critic can be
+*misled* by a hostile page into raising a spurious defect. That costs a revision round; it cannot
+reach the writer as an instruction, and the controller still bounds termination.
+
 Mitigations, by boundary:
 - **Structured output everywhere** — critics emit only closed-enum categories; a critic
   literally cannot emit a free-form instruction that reaches the generator as a command.

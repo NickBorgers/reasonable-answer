@@ -1,6 +1,6 @@
 """Resolve the URLs a report cites, so the evidence lens can read them.
 
-Search (RA-018) made citations *real* — the writer can no longer invent a URL. It did
+Search (D17) made citations *real* — the writer can no longer invent a URL. It did
 nothing about whether a cited page **supports the claim attached to it**, because no
 critic could open it. The evidence lens has always owned two categories it could not
 actually falsify:
@@ -10,10 +10,13 @@ actually falsify:
 * ``misrepresented_source`` — a page that does not say what the report claims. Only
   answerable with the page text in hand.
 
-**Not an SSRF boundary.** This fetches URLs a model chose, which is exposure by
+**Not an SSRF boundary** (D18). This fetches URLs a model chose, which is exposure by
 construction; the deployment is expected to constrain egress at the network layer. The
 bounds here — timeout, byte cap, redirect cap, http(s) only — exist so one slow or
 enormous page cannot stall or exhaust a run, not as a security control.
+
+Fetched pages are untrusted third-party text entering a **critic's** context (RA-010),
+and reach only the evidence lens — see docs/isolation.md.
 """
 
 from __future__ import annotations
