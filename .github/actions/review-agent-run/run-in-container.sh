@@ -31,16 +31,27 @@ if [ -n "${BASE_REF:-}" ]; then
   git fetch --quiet --depth=50 origin "$BASE_REF" 2>/dev/null || true
 fi
 
-echo "run-in-container: ${REVIEW_ROLE:-agent} via ${CI_AGENT}, timeout ${TIMEOUT}"
+RESUME="${AGENT_RESUME:-0}"
+
+echo "run-in-container: ${REVIEW_ROLE:-agent} via ${CI_AGENT}, timeout ${TIMEOUT}, resume=${RESUME}"
 
 # `< /dev/null` matters: without it the CLIs wait on stdin and hang until the timeout.
 case "$CI_AGENT" in
   claude)
     model_args=()
     [ -n "${AGENT_MODEL:-}" ] && model_args=(--model "$AGENT_MODEL")
+
+    # --continue resumes the most recent session in the mounted state directory. That
+    # directory is keyed per (agent, issue, run-id) by ci-session-store.sh and therefore
+    # holds exactly one session, which is what makes "most recent" unambiguous. A shared
+    # directory accumulating every attempt on an issue would resume an arbitrary one.
+    resume_args=()
+    [ "$RESUME" = "1" ] && resume_args=(--continue)
+
     timeout "$TIMEOUT" claude -p \
       --dangerously-skip-permissions \
       --permission-mode=bypassPermissions \
+      "${resume_args[@]}" \
       "${model_args[@]}" \
       --verbose \
       "$PROMPT_BODY" \
@@ -64,11 +75,22 @@ EOF
     # The model is selected by config.toml above; passing --model as well would
     # override the provider-qualified default.
     model_args=()
-    timeout "$TIMEOUT" codex exec \
-      --dangerously-bypass-approvals-and-sandbox \
-      "${model_args[@]}" \
-      "$PROMPT_BODY" \
-      < /dev/null 2>&1 | tee "$OUTPUT_LOG_PATH"
+
+    # `codex exec resume --last` picks the most recent rollout under the mounted
+    # sessions directory — unambiguous for the same reason as claude's --continue.
+    if [ "$RESUME" = "1" ]; then
+      timeout "$TIMEOUT" codex exec resume --last \
+        --dangerously-bypass-approvals-and-sandbox \
+        "${model_args[@]}" \
+        "$PROMPT_BODY" \
+        < /dev/null 2>&1 | tee "$OUTPUT_LOG_PATH"
+    else
+      timeout "$TIMEOUT" codex exec \
+        --dangerously-bypass-approvals-and-sandbox \
+        "${model_args[@]}" \
+        "$PROMPT_BODY" \
+        < /dev/null 2>&1 | tee "$OUTPUT_LOG_PATH"
+    fi
     ;;
   *)
     echo "::error::run-in-container: unknown CI_AGENT '$CI_AGENT'"

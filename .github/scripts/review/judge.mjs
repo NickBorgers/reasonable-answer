@@ -8,21 +8,25 @@
 // job with `permissions: contents: read`, checked out from `main`, so the judge
 // structurally cannot push and a PR cannot modify the code that judges it.
 //
-// NO FIXER IN THIS PIPELINE
+// THE FIXER
 //
-// There is no automated fix stage: a NO-GO goes back to a human. aggregate() still
-// requires a fix-result, because its epoch checks (the fixer must have started from the
-// same SHA the reviewers reviewed) are part of the fail-closed contract and are worth
-// keeping intact. So this driver synthesizes the no-op fix result that describes what
-// actually happened — nothing was changed, nothing was addressed:
+// review-fixer.yml runs before this stage and may have pushed a commit. Its artifact is
+// read from FIX_RESULT_PATH when present. When it is absent — no blockers to fix, the
+// cycle cap forbade fixing, or the fixer failed — this driver synthesizes the no-op fix
+// result that describes what actually happened:
 //
 //   { input_sha: reviewedSha, new_sha: reviewedSha, addressed: [], skipped: [] }
 //
-// This is deliberately preferred over relaxing aggregate() to tolerate a missing fix
-// result. The epoch validation stays live, and introducing a real fixer later is a
-// one-line change back to reading the artifact from disk.
+// Synthesizing is deliberately preferred over relaxing aggregate() to tolerate a missing
+// fix result: the epoch checks (the fixer must have started from the same SHA the
+// reviewers reviewed) are part of the fail-closed contract and stay live either way.
+//
+// Note what this judges. The reviewers read the PRE-fix tree, and so does this verdict —
+// `addressed[]` only records which of their blockers the fixer claims to have closed. The
+// fixed SHA is reviewed by its own cycle. Nothing here inspects the fixer's diff, which
+// is why the fixer cannot clear its own work.
 
-import { readFileSync, readdirSync, writeFileSync } from "node:fs";
+import { existsSync, readFileSync, readdirSync, writeFileSync } from "node:fs";
 import { join } from "node:path";
 import { aggregate } from "./aggregate.mjs";
 import { checkExpectedRoles } from "./expected-roles.mjs";
@@ -59,13 +63,37 @@ for (const entry of readdirSync(REVIEWER_DIR, { withFileTypes: true })) {
 // safe because a disagreement is caught there rather than papered over here.
 const reviewedSha = reviewers[0]?.reviewed_sha ?? "";
 
-const fixResult = {
+// The fixer's artifact, when there is one. FIX_RESULT_PATH is set only on runs where the
+// fix stage ran and produced output; it legitimately does not exist when the reviewers
+// raised no blockers, when the cycle cap forbade fixing, or when the fixer failed.
+//
+// Absence is NOT an error. It means "nothing was fixed", which is exactly the no-op
+// result below. Every blocker then reads as unaddressed and the verdict is NO-GO — the
+// fail-closed direction.
+//
+// A present-but-unparseable artifact is different, and does fail: silently falling back
+// to the no-op there would let a broken fixer look identical to an idle one.
+let fixResult = {
   schema_version: "1",
   input_sha: reviewedSha,
   new_sha: reviewedSha,
   addressed: [],
   skipped: [],
 };
+
+const FIX_RESULT_PATH = process.env.FIX_RESULT_PATH;
+if (FIX_RESULT_PATH && existsSync(FIX_RESULT_PATH)) {
+  try {
+    fixResult = JSON.parse(readFileSync(FIX_RESULT_PATH, "utf8"));
+    console.error(
+      `judge.mjs: read fix result from ${FIX_RESULT_PATH} ` +
+        `(mode=${fixResult.mode}, addressed=${(fixResult.addressed ?? []).length})`
+    );
+  } catch (err) {
+    console.error(`judge.mjs: could not parse ${FIX_RESULT_PATH}: ${err.message}`);
+    process.exit(1);
+  }
+}
 
 // A reviewer that failed publishes no artifact, so it would simply be absent from the
 // set and aggregate() would report that "all reviewers cleared" on the strength of the

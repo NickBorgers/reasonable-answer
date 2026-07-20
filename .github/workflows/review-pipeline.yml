@@ -41,12 +41,17 @@ permissions:
   actions: read
 
 env:
-  # The cycle cap is a cost backstop, not a loop breaker. With no automated fixer in
-  # this pipeline, a NO-GO returns to a human, so consecutive machine-driven cycles
-  # essentially never occur and cap-exhausted should never fire in practice.
+  # With the fixer in the graph this is a real loop breaker, not just a cost backstop.
+  # The loop it bounds is: review → fix → push → review → fix → ...
   #
-  # If an automated fixer is ever added, this changes meaning entirely and the
-  # stop-on-GO / retry-on-NO-GO asymmetry has to be re-derived along with it.
+  # At MAX_CYCLES=2 the sequence is: cycle 1 reviews and may fix; cycle 2 reviews the
+  # fix and may not fix again (see `fix_allowed`); a third cycle is capped and finalizes
+  # NO-GO. So a PR gets at most one automated fix attempt, and that attempt is always
+  # reviewed by a fresh panel before anything can merge.
+  #
+  # The stop-on-GO / retry-on-NO-GO asymmetry still holds and is what makes the bound
+  # safe: a GO short-circuits in review-entry.yml, so a converged PR never re-enters the
+  # loop, while a NO-GO keeps trying only until this cap binds.
   MAX_CYCLES: '2'
   # Commits authored by the resolver agent. Used to tell machine pushes from human ones.
   AGENT_COMMIT_EMAIL: 'ci@reasonable-answer.local'
@@ -59,6 +64,7 @@ jobs:
     outputs:
       cycle: ${{ steps.cycle.outputs.cycle }}
       cap_exhausted: ${{ steps.cycle.outputs.cap_exhausted }}
+      fix_allowed: ${{ steps.cycle.outputs.fix_allowed }}
       inherit: ${{ steps.inherit.outputs.inherit }}
       inherited_verdict: ${{ steps.inherit.outputs.inherited_verdict }}
       roles: ${{ steps.classify.outputs.roles }}
@@ -162,10 +168,24 @@ jobs:
             echo "gather: cycle ${cycle} exceeds cap ${MAX_CYCLES}"
           fi
 
-          echo "gather: cycle=${cycle} (prior=${prior}) cap_exhausted=${cap_exhausted}"
+          # Whether the fixer may run. Computed here rather than in the fixer job's `if:`
+          # because the `env` context is not available to job-level conditions — only
+          # github, needs, vars, and inputs are.
+          #
+          # A fix pushed on the last permitted cycle would never be reviewed, since the
+          # cycle it creates is capped. That lands unexamined agent-written code on the
+          # branch and reports it as progress, which is worse than returning the blockers
+          # to a human intact.
+          fix_allowed=false
+          if [ "$cap_exhausted" = "false" ] && [ "$cycle" -lt "${MAX_CYCLES}" ]; then
+            fix_allowed=true
+          fi
+
+          echo "gather: cycle=${cycle} (prior=${prior}) cap_exhausted=${cap_exhausted} fix_allowed=${fix_allowed}"
           {
             echo "cycle=$cycle"
             echo "cap_exhausted=$cap_exhausted"
+            echo "fix_allowed=$fix_allowed"
           } >> "$GITHUB_OUTPUT"
 
       - name: Record cycle on the reviewed SHA
@@ -247,9 +267,37 @@ jobs:
     secrets:
       WORKFLOW_PAT: ${{ secrets.WORKFLOW_PAT }}
 
+  # ── Fixer ────────────────────────────────────────────────────────────────────
+  # The only stage that may write to the branch. It runs between the reviewers and the
+  # judge on purpose: the judge then grades the SHA the reviewers actually read, and the
+  # fixed SHA earns its own cycle with its own reviewers. Judging the post-fix tree
+  # would let the fixer clear its own work without anyone reading it.
+  #
+  # Skipped on the final permitted cycle. A fix pushed there would never be reviewed —
+  # the next cycle is capped — so it would land unexamined code on the branch and call
+  # it progress.
+  fix:
+    name: Fix
+    needs: [gather, review-invariant, review-security, review-test]
+    if: |
+      always() &&
+      needs.gather.result == 'success' &&
+      needs.gather.outputs.cap_exhausted != 'true' &&
+      needs.gather.outputs.inherit != 'true' &&
+      needs.gather.outputs.fix_allowed == 'true'
+    uses: ./.github/workflows/review-fixer.yml
+    with:
+      pr_number: ${{ inputs.pr_number }}
+      reviewed_sha: ${{ inputs.reviewed_sha }}
+      head_ref: ${{ inputs.head_ref }}
+      base_ref: ${{ inputs.base_ref }}
+      cycle: ${{ needs.gather.outputs.cycle }}
+    secrets:
+      WORKFLOW_PAT: ${{ secrets.WORKFLOW_PAT }}
+
   judge:
     name: Judge
-    needs: [gather, review-invariant, review-security, review-test]
+    needs: [gather, review-invariant, review-security, review-test, fix]
     if: |
       always() &&
       needs.gather.result == 'success' &&
@@ -316,7 +364,7 @@ jobs:
 
   cleanup-claim:
     name: Release dedup claim
-    needs: [gather, judge, finalize, cap-exhausted, inherit]
+    needs: [gather, fix, judge, finalize, cap-exhausted, inherit]
     # Unconditional. A crashed reviewer would otherwise leave `review/pipeline` pending
     # on this SHA forever, and every future run on it — including a human's /review —
     # would be refused by dedup with no way to clear it short of the API.

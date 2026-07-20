@@ -104,13 +104,28 @@ git config user.name  "reasonable-answer agent"
 
 Commit, push the branch, and open a PR whose body contains:
 
-- `Resolves #${ISSUE_NUMBER}`
+- `Resolves #${ISSUE_NUMBER}` — on its own line, exactly this form (`Fixes` / `Closes` also work).
 - A short summary of the approach and why.
 - An **`Invariants touched:`** section. List each invariant from the list above that the change
   affects, and how, or write `none`. The invariant reviewer diffs your claim against the code, so
   an inaccurate list is worse than an empty one.
 - If you changed an invariant: the `docs/` files you updated and the decision you recorded.
 - Anything you chose **not** to do, and why.
+
+The **last line of the body must be exactly**:
+
+```
+Author-Session: ${AGENT}/${RUN_ID}
+```
+
+This is required, not decorative. When the review pipeline finds blocking issues, it resumes *you*
+— this conversation, with everything you are holding right now — to answer them, instead of handing
+the diff to an agent that has to guess at your reasoning from the code. That agent cannot tell a
+real defect from a reviewer misreading something you did on purpose, so it patches both.
+
+The trailer is how the pipeline finds your session. Omit it, reword it, or move it off its own line
+and you get replaced by that stranger. The `Resolves #${ISSUE_NUMBER}` line matters for the same
+reason — it is what recovers the issue number your session is filed under.
 
 ```bash
 gh pr create --title "<concise title>" --body-file <file> --base main

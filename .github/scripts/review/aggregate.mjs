@@ -25,8 +25,9 @@
 //      matches the reviewers' `reviewed_sha`.
 //   4. Blocker resolution is keyed by namespaced `role/id`, not by
 //      bare `id`, so two reviewers emitting the same id cannot
-//      cross-clear each other's blockers. The fixer must therefore
-//      emit `addressed[]` entries as `"<role>/<id>"` strings.
+//      cross-clear each other's blockers. `addressed[]` entries may be
+//      either `"<role>/<id>"` strings or objects carrying that value
+//      as `.id`; anything else is ignored rather than coerced.
 //   5. The empty-reviewer set is NO-GO ("no reviewers ran").
 //   6. The all-abstain case is NO-GO ("no applicable reviewers"),
 //      not a vacuous GO. The pipeline should ensure at least one role
@@ -167,7 +168,21 @@ export function aggregate(reviewers, fixResult) {
   }
 
   // (4) Resolve blockers by NAMESPACED id ("<role>/<id>").
-  const addressed = new Set(Array.isArray(fixResult.addressed) ? fixResult.addressed : []);
+  //
+  // Two shapes are accepted. The original contract was a bare `"<role>/<id>"` string.
+  // The real fixer emits an object per entry — `{ id, how, resolution, files }` — because
+  // the commit message and PR comment need to say what was done, not just that something
+  // was. Normalizing here rather than flattening at the call site keeps the artifact
+  // self-describing and keeps this function total over both.
+  //
+  // Anything without a usable string id is dropped rather than coerced. A malformed entry
+  // must not clear a blocker: failing to credit a real fix costs one cycle, while
+  // wrongly clearing one lets an unaddressed blocker merge.
+  const addressed = new Set(
+    (Array.isArray(fixResult.addressed) ? fixResult.addressed : [])
+      .map((a) => (typeof a === "string" ? a : a?.id))
+      .filter((id) => typeof id === "string" && id.length > 0)
+  );
 
   const unaddressed = [];
   for (const r of reviewers) {

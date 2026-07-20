@@ -61,12 +61,24 @@ jobs:
           pattern: reviewer-*-${{ inputs.reviewed_sha }}
           path: reviewer-artifacts
 
+      # Legitimately absent when the reviewers raised no blockers, when the cycle cap
+      # forbade fixing, or when the fixer failed. `continue-on-error` because all three
+      # are normal outcomes, and judge.mjs treats a missing artifact as "nothing was
+      # fixed" — the fail-closed reading.
+      - name: Download the fixer artifact
+        continue-on-error: true
+        uses: actions/download-artifact@v4
+        with:
+          name: fixer-${{ inputs.reviewed_sha }}
+          path: fixer-artifact
+
       - name: Aggregate
         id: judge
         env:
           REVIEWER_DIR: reviewer-artifacts
           VERDICT_OUTPUT_PATH: verdict-${{ inputs.reviewed_sha }}.json
           EXPECTED_ROLES: ${{ inputs.roles }}
+          FIX_RESULT_PATH: fixer-artifact/fixer-result.json
         run: node .github/scripts/review/judge.mjs
 
       # Recorded on the commit so the next run can find it. The cycle-reset and
