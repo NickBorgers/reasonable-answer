@@ -714,12 +714,14 @@ def _finalize(state: State, rt: Runtime) -> dict:
         text = state.get("report", "")
         chosen_round = state.get("round", 0)
     elif board:
-        # Never ship the last draft just because it is last — ship the best-scoring one.
-        from .controller import best_scoring_index
+        # Never ship the last draft just because it is last — ship the best-scoring one,
+        # scored on each artifact's most-critiqued triage rather than its first.
+        from .controller import best_scoring_index, latest_scores_per_artifact
 
-        idx = best_scoring_index([(b["blocking"], b["major"], b["minor"]) for b in board])
-        text = board[idx]["report"]
-        chosen_round = board[idx]["round"]
+        rows = latest_scores_per_artifact(board)
+        idx = best_scoring_index([(b["blocking"], b["major"], b["minor"]) for b in rows])
+        text = rows[idx]["report"]
+        chosen_round = rows[idx]["round"]
     else:
         text = state.get("report", "")
         chosen_round = state.get("round", 0)
