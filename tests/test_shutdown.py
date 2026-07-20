@@ -164,12 +164,17 @@ def test_shutdown_returns_while_a_job_is_still_running(config):
 
 def test_shutdown_leaves_queued_work_on_disk_for_the_next_process(config):
     """Anything still in the queue is owed, not lost: it is already an event on disk."""
-    worker = RunWorker(config, max_concurrent=1, runner=lambda *a, **k: time.sleep(5))
+    # Threads are non-daemon now, so a runner that outlives the assertions would leave a
+    # live thread behind: it watches the stop flag instead of sleeping through it.
+    def waits_for_the_flag(cfg, *, question, seed, run_id, stop=None):
+        stop.wait(timeout=10)
+
+    worker = RunWorker(config, max_concurrent=1, runner=waits_for_the_flag)
     try:
         worker.submit("First?")
         queued = worker.submit("Second?")
     finally:
-        worker.shutdown(timeout=0.2)
+        worker.shutdown(timeout=2.0)
 
     summary = Registry(config.runs_dir).summary(queued)
     assert summary.status == "queued"
@@ -345,3 +350,99 @@ def test_requesting_a_stop_is_visible_and_idempotent():
     shutdown.request_stop("test")
     shutdown.request_stop("test again")
     assert shutdown.stop_requested()
+
+
+def test_a_real_signal_reaches_the_stop_flag():
+    """The wiring the whole feature hangs off. In a container `ra` is PID 1, which has
+    no default SIGTERM disposition — without a handler the signal is simply discarded."""
+    import signal
+
+    original = signal.getsignal(signal.SIGTERM)
+    try:
+        shutdown.install_handlers()
+        assert not shutdown.stop_requested()
+        signal.raise_signal(signal.SIGTERM)
+        assert shutdown.stop_requested()
+    finally:
+        signal.signal(signal.SIGTERM, original)
+
+
+# --------------------------------------------------------------------- the CLI
+
+
+def test_a_paused_cli_run_exits_130_and_says_how_to_resume(config, monkeypatch, tmp_path):
+    """`ra run` is the other entry point that takes a SIGTERM, and a pause is not a
+    failure — it needs an exit code that says so and a way back in."""
+    import yaml
+    from typer.testing import CliRunner
+
+    from reasonable_answer import cli
+
+    roster = tmp_path / "roster.yaml"
+    roster.write_text(yaml.safe_dump({"roster": config.roster.model_dump()}))
+
+    def pauses(cfg, **kwargs):
+        raise GracefulStop("paused at generate", "run-cli")
+
+    monkeypatch.setattr(cli, "run_graph", pauses)
+    result = CliRunner().invoke(cli.app, ["run", "-q", "Is it so?", "-c", str(roster)])
+
+    assert result.exit_code == 130
+    assert "run-cli" in result.output  # the resume hint names the run
+
+
+# --------------------------------------------------------------------- the UI
+
+
+def test_the_event_stream_lets_go_when_the_process_is_stopping(config):
+    """uvicorn drains connections *before* running lifespan shutdown, so this generator
+    is what decides whether one forgotten browser tab holds the entire grace period."""
+    _interrupted_run(config, "run-watched")
+
+    worker = RunWorker(config, max_concurrent=1, runner=lambda *a, **k: time.sleep(30))
+    app = create_app(config, worker=worker)
+    try:
+        with TestClient(app) as c:
+            shutdown.request_stop("test")
+            started = time.monotonic()
+            with c.stream("GET", "/runs/run-watched/stream") as response:
+                assert list(response.iter_lines()) == []  # closed rather than held open
+            assert time.monotonic() - started < 5.0
+    finally:
+        worker.shutdown(timeout=1.0)
+
+
+def test_resuming_a_run_that_is_not_interrupted_is_a_conflict(config, monkeypatch):
+    """The statuses that accept a resume are an allowlist; everything else is a 409."""
+    monkeypatch.setenv("RA_RESUME_ON_BOOT", "0")
+    store = RunStore(config.runs_dir, "run-finished")
+    store.question("Already done?")
+    store.event("intake", path="question")
+    store.final("# done", {"terminal_status": "accepted", "note": ""})
+
+    worker = RunWorker(config, max_concurrent=1, runner=lambda *a, **k: None)
+    app = create_app(config, worker=worker)
+    try:
+        with TestClient(app) as c:
+            assert c.post("/runs/run-finished/resume").status_code == 409
+    finally:
+        worker.shutdown(timeout=1.0)
+
+
+def test_a_paused_run_reads_as_interrupted_with_a_reason(config):
+    """`pause` and a crash are both resumable, but only one of them was deliberate."""
+    store = _interrupted_run(config, "run-paused")
+    store.event("pause", reason="shutdown", next=["critique"])
+
+    summary = Registry(config.runs_dir).summary("run-paused")
+    assert summary.status == "interrupted"
+    assert "resumes automatically" in summary.terminal_note
+
+
+def test_the_resume_cap_can_be_set_from_the_environment(config, monkeypatch):
+    monkeypatch.setenv("RA_MAX_RESUME_ATTEMPTS", "7")
+    app = create_app(config, worker=RunWorker(config, runner=lambda *a, **k: None))
+    try:
+        assert app.state.config.max_resume_attempts == 7
+    finally:
+        app.state.worker.shutdown(timeout=1.0)
