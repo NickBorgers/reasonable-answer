@@ -1,0 +1,13 @@
+lens: logic
+tier: moderate
+question: "Do bike lanes reduce traffic fatalities?"
+defects:
+  - category: invalid_inference
+    locus: {section: 3, paragraph: 2}
+    note: >
+      S3.P2 moves from an observed association to a universal causal prediction about
+      "any city that builds them". The report elsewhere is careful — S1.P1 says the
+      mechanism is contested, S4.P1 concedes no staggered-adoption study has reported —
+      so the fixture tests whether a critic catches an overreach that the surrounding
+      text explicitly disclaims. Tier is moderate rather than obvious because the
+      underlying causal story in S3.P1 is plausible and a fast reader may wave it through.

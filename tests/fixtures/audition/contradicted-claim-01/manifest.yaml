@@ -1,0 +1,11 @@
+lens: logic
+tier: obvious
+question: "Did the Dust Bowl migration permanently depress wages in California?"
+defects:
+  - category: contradicted_claim
+    locus: {section: 4, paragraph: 2}
+    note: >
+      S4.P2 asserts the wage suppression was permanent and that receiving counties never
+      recovered. S4.P1, immediately above it, states the gap had closed by 1950, and the
+      thesis in S1.P1 says the effects were temporary. The contradiction is with the
+      adjacent paragraph, not buried across sections.

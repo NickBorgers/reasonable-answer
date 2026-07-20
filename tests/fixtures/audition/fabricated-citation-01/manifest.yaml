@@ -1,0 +1,16 @@
+lens: evidence
+tier: obvious
+question: "Does remote work reduce team productivity?"
+defects:
+  - category: fabricated_citation
+    locus: {section: 2, paragraph: 2}
+    note: >
+      S2.P2 cites a journal article that does not exist, with a precise sample size,
+      duration and effect size. It also appears in the Sources block, so a critic that
+      only checks "is it listed" will pass it. The two real citations around it are
+      accurate, which is the point: the fixture measures whether the critic verifies
+      citations or pattern-matches on their shape.
+slots:
+  fabricated_author: ["Vasquez and Lindqvist", "Okonkwo and Mehta", "Rasmussen and Bianchi"]
+  fabricated_year: ["2021", "2022", "2020"]
+  fabricated_journal: ["Journal of Organizational Behavior", "Administrative Science Quarterly", "Organization Science"]

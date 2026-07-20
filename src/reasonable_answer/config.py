@@ -187,6 +187,50 @@ class Roster(BaseModel):
         return seen
 
 
+class AuditionThresholds(BaseModel):
+    """Where `fit` / `marginal` / `unfit` fall. Tunable because the right line depends
+    on the corpus and on how much a deployment is willing to spend on false alarms.
+
+    No threshold can rescue a model that finds zero obvious defects; that case is
+    hardcoded in `audition.judge`. Everything here is a judgement call about degrees.
+    """
+
+    model_config = ConfigDict(extra="forbid")
+
+    #: Fail closed below this, measured on `tier: obvious` fixtures only.
+    min_obvious_sensitivity: float = Field(default=0.5, ge=0.0, le=1.0)
+    warn_lens_sensitivity: float = Field(default=0.6, ge=0.0, le=1.0)
+    #: Mean material issues invented per sound control report. Above this a critic
+    #: cannot be reasoned with: every round it manufactures work the next writer must
+    #: "fix", and the run stagnates instead of converging.
+    max_control_material_rate: float = Field(default=1.0, ge=0.0)
+    warn_control_material_rate: float = Field(default=0.34, ge=0.0)
+    max_schema_failure_rate: float = Field(default=0.2, ge=0.0, le=1.0)
+
+
+class AuditionConfig(BaseModel):
+    model_config = ConfigDict(extra="forbid")
+
+    #: Off by default: an audition costs |models| x |fixtures| x repetitions calls
+    #: against a paid proxy, and a checkout with no credential must still behave
+    #: exactly as it always has.
+    enabled: bool = False
+    #: Warn-by-default rather than fail-closed. The guarantee is genuinely void
+    #: without capable reviewers, so the fail-closed instinct is right in principle —
+    #: but coupling every run to a cache whose freshness depends on a rate-limited
+    #: proxy means an operator blocked by an expired audition disables the harness
+    #: outright, which is strictly worse than a loud warning. Opt in deliberately.
+    enforce: bool = False
+    cache_path: Path = Path(".ra-audition.json")
+    max_age_days: int = Field(default=30, ge=1, le=365)
+    #: Critics are non-deterministic; docs/decisions.md already records minimax-m3
+    #: probing differently across `ra doctor` runs. Single-shot auditioning would
+    #: inherit exactly that flakiness and call it a capability measurement.
+    repetitions: int = Field(default=3, ge=1, le=20)
+    max_concurrency: int = Field(default=3, ge=1, le=16)
+    thresholds: AuditionThresholds = Field(default_factory=AuditionThresholds)
+
+
 class Config(BaseModel):
     model_config = ConfigDict(extra="forbid")
 
@@ -194,6 +238,7 @@ class Config(BaseModel):
     roster: Roster
     budgets: Budgets = Field(default_factory=Budgets)
     search: SearchConfig = Field(default_factory=SearchConfig)
+    audition: AuditionConfig = Field(default_factory=AuditionConfig)
     runs_dir: Path = Path("runs")
     retention_days: int = 14
     max_report_chars: int = 60_000

@@ -19,8 +19,8 @@ from dataclasses import dataclass, field
 from typing import Any, TypedDict
 
 from langgraph.graph import END, START, StateGraph
-from pydantic import ValidationError
 
+from . import critique as critique_mod
 from . import fetch, prompts, roles, search, triage
 from . import report as report_mod
 from .config import Config, ConfigError, validate_roster_health
@@ -29,7 +29,6 @@ from .llm import LLMClient, MalformedOutputError, ModelCallError
 from .schemas import (
     CleanRecord,
     ControllerInput,
-    CritiqueOutput,
     Decision,
     Defect,
     LensResult,
@@ -374,18 +373,6 @@ def _critique_one(
             attempt=attempt,
         )
 
-    base = LensResult(
-        lens=lens,
-        artifact_hash=artifact_hash,
-        critic_alias=alias,
-        critic_identity=identity,
-        artifact_author_identity=author_identity,
-        attempt=attempt,
-    )
-
-    rendered = report_mod.render_with_loci(report_text)
-    structure = report_mod.parse(report_text)
-
     # Only the evidence lens. Handing fetched pages to logic or completeness would
     # widen what those lenses can see without widening what they may raise, and the
     # extra context is a channel for smuggling material into a scope that has no use
@@ -402,27 +389,19 @@ def _critique_one(
                 failed=sum(1 for s in sources if not s.ok),
             )
 
-    try:
-        output = rt.client.structured(
-            alias,
-            system=prompts.CRITIC_SYSTEM,
-            user=prompts.critic_user(lens, question, rendered, sources),
-            schema=CritiqueOutput,
-            max_tokens=16000,
-        )
-    except (ModelCallError, MalformedOutputError, ValidationError) as exc:
-        return base.model_copy(update={"failed": True, "failure_reason": str(exc)[:400]})
-
-    try:
-        for issue in output.issues:
-            triage.validate_issue(
-                lens, issue, structure, rt.config.require_verbatim_spans
-            )
-    except triage.LensValidationError as exc:
-        # Fail-closed: one bad field fails the whole lens; nothing is silently dropped.
-        return base.model_copy(update={"failed": True, "failure_reason": str(exc)[:400]})
-
-    return base.model_copy(update={"issues": output.issues})
+    return critique_mod.critique_once(
+        rt.client,
+        alias,
+        identity,
+        lens,
+        question,
+        report_text,
+        artifact_hash,
+        author_identity,
+        sources=sources,
+        require_verbatim_spans=rt.config.require_verbatim_spans,
+        attempt=attempt,
+    )
 
 
 def _critique(state: State, rt: Runtime) -> dict:
