@@ -166,6 +166,129 @@ def test_non_http_scheme_is_refused():
     assert "http(s)" in result.error
 
 
+def test_byte_cap_bounds_what_is_read_off_the_wire():
+    """The declared bound that stops one enormous page exhausting a run.
+
+    Distinct from max_chars, which truncates *extracted text* after the whole body has
+    already been read — a 2GB page would still be pulled into memory first.
+    """
+    read_sizes: list[int | None] = []
+    body = ("<html><body><p>" + "x" * 100_000 + "</p></body></html>").encode()
+
+    class _Resp:
+        headers = {"Content-Type": "text/html"}
+        status = 200
+
+        def read(self, amt=None):
+            read_sizes.append(amt)
+            return body[:amt] if amt else body
+
+        def __enter__(self):
+            return self
+
+        def __exit__(self, *exc):
+            return False
+
+    import urllib.request as _u
+
+    original = _u.OpenerDirector.open
+    _u.OpenerDirector.open = lambda self, *a, **k: _Resp()
+    try:
+        result = SourceFetcher(max_bytes=500, max_chars=100_000).fetch(
+            "https://example.org/huge"
+        )
+    finally:
+        _u.OpenerDirector.open = original
+
+    assert read_sizes == [500], "read() must be given the byte cap, not called unbounded"
+    assert len(result.text) < 1_000
+
+
+def test_a_redirect_out_of_http_is_refused(monkeypatch):
+    """SSRF-adjacent regression.
+
+    Python's stock redirect handler allows `ftp:` targets and `build_opener()` ships an
+    FTPHandler, so checking only the initial URL does not deliver http(s)-only fetching.
+    A cited page could 302 verification into another egress protocol.
+    """
+    import urllib.error
+
+    from reasonable_answer.fetch import _BoundedRedirects
+
+    handler = _BoundedRedirects(3)
+    with pytest.raises(urllib.error.HTTPError, match="non-http"):
+        handler.redirect_request(
+            _FakeReq(), None, 302, "Found", {}, "ftp://evil.example/payload"
+        )
+
+
+@pytest.mark.parametrize(
+    "target", ["https://example.org/ok", "http://example.org/ok"]
+)
+def test_http_redirects_are_still_followed(target):
+    from reasonable_answer.fetch import _BoundedRedirects
+
+    result = _BoundedRedirects(3).redirect_request(
+        _FakeReq(), None, 302, "Found", {}, target
+    )
+    assert result.full_url == target
+
+
+def test_the_opener_has_no_handler_for_other_schemes():
+    from reasonable_answer.fetch import _http_only_opener
+
+    names = {type(h).__name__ for h in _http_only_opener(3).handlers}
+    # build_opener() would have installed all three of these.
+    assert not names & {"FTPHandler", "FileHandler", "DataHandler"}
+    assert "HTTPHandler" in names and "HTTPSHandler" in names
+
+
+def test_redirect_cap_is_wired_through():
+    from reasonable_answer.fetch import _http_only_opener
+
+    redirects = [h for h in _http_only_opener(2).handlers if hasattr(h, "max_redirections")]
+    assert redirects and redirects[0].max_redirections == 2
+
+
+def test_connection_failure_is_recorded_not_raised(monkeypatch):
+    """The common real-world 'could not fetch' case, on which the whole
+    'a failed fetch is never evidence of fabrication' promise rests."""
+    import urllib.error
+
+    def refused(self, *a, **k):
+        raise urllib.error.URLError("Connection refused")
+
+    monkeypatch.setattr(urllib.request.OpenerDirector, "open", refused)
+    result = SourceFetcher().fetch("https://example.org/down")
+
+    assert not result.ok
+    assert "URLError" in result.error
+
+
+def test_timeout_is_passed_to_the_opener(monkeypatch):
+    seen = {}
+
+    def capture(self, req, timeout=None, **k):
+        seen["timeout"] = timeout
+        return _stub(PAGE)
+
+    monkeypatch.setattr(urllib.request.OpenerDirector, "open", capture)
+    SourceFetcher(timeout=7.5).fetch("https://example.org/a")
+    assert seen["timeout"] == 7.5
+
+
+class _FakeReq:
+    full_url = "https://example.org/start"
+    headers: dict = {}
+
+    def get_method(self):
+        return "GET"
+
+    @property
+    def origin_req_host(self):
+        return "example.org"
+
+
 def test_page_with_no_text_is_flagged(monkeypatch):
     monkeypatch.setattr(
         urllib.request.OpenerDirector,
@@ -286,6 +409,52 @@ def test_verification_off_leaves_the_evidence_prompt_unchanged(
 
     assert "PAGES CITED BY THE REPORT" not in client.calls[-1].user
     assert "on its face" in client.calls[-1].user
+
+
+def test_the_audit_trail_records_what_was_fetched(tmp_path, identities, config):
+    """Locks the audit-trail contract: a run can be asked afterwards how many cited
+    pages were actually readable when the evidence lens judged them."""
+    import json
+
+    from reasonable_answer.graph import _critique_one
+
+    class _PartlyFailing:
+        def fetch_all(self, urls):
+            return [
+                FetchedSource(url=urls[0], text="ok"),
+                FetchedSource(url=urls[1], error="HTTP 403"),
+            ]
+
+    rt, _ = _runtime(tmp_path, identities, config, fetcher=_PartlyFailing())
+    _critique_one(
+        rt, Lens.EVIDENCE, "q?", REPORT, "h" * 64, "vendor-a/model-a", set(), attempt=1
+    )
+
+    events = [
+        json.loads(line)
+        for line in (rt.store.dir / "events.jsonl").read_text().splitlines()
+    ]
+    fetched = [e for e in events if e["kind"] == "fetch_sources"]
+    assert fetched and fetched[-1]["fetched"] == 2 and fetched[-1]["failed"] == 1
+
+
+@pytest.mark.parametrize(
+    "kwargs",
+    [
+        {"max_sources": 0},  # verification silently checks nothing
+        {"fetch_timeout_seconds": 0},  # every fetch fails instantly
+        {"fetch_max_bytes": 0},  # every page reads as empty
+        {"fetch_max_chars": 0},  # the critic is shown no page text
+    ],
+)
+def test_out_of_range_fetch_config_is_rejected_at_load(kwargs):
+    from pydantic import ValidationError
+
+    from reasonable_answer.config import SearchConfig
+
+    # Each of these would degrade verification to a no-op that still reports success.
+    with pytest.raises(ValidationError):
+        SearchConfig(**kwargs)
 
 
 def test_a_report_with_no_sources_section_fetches_nothing(tmp_path, identities, config):

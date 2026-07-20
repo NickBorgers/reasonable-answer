@@ -162,7 +162,7 @@ class SourceFetcher:
         if not url.lower().startswith(("http://", "https://")):
             return FetchedSource(url=url, error="not an http(s) URL")
 
-        opener = urllib.request.build_opener(_BoundedRedirects(self._max_redirects))
+        opener = _http_only_opener(self._max_redirects)
         req = urllib.request.Request(
             url,
             headers={"User-Agent": USER_AGENT, "Accept": "text/html,text/plain;q=0.9"},
@@ -203,8 +203,42 @@ class SourceFetcher:
         return FetchedSource(url=url, title=parser.title, text=text, status=status)
 
 
+def _http_only_opener(max_redirects: int) -> urllib.request.OpenerDirector:
+    """An opener that can speak http(s) and nothing else.
+
+    `build_opener()` installs `FTPHandler`, `FileHandler` and `DataHandler` alongside
+    the HTTP ones, so the *default* opener can service `ftp:`, `file:` and `data:` URLs.
+    Assembling the director by hand means an unexpected scheme has no handler at all,
+    rather than relying solely on the scheme checks to catch it.
+    """
+    opener = urllib.request.OpenerDirector()
+    for handler in (
+        urllib.request.HTTPHandler(),
+        urllib.request.HTTPSHandler(),
+        urllib.request.HTTPDefaultErrorHandler(),
+        urllib.request.HTTPErrorProcessor(),
+        _BoundedRedirects(max_redirects),
+    ):
+        opener.add_handler(handler)
+    return opener
+
+
 class _BoundedRedirects(urllib.request.HTTPRedirectHandler):
-    """Follow redirects, but not forever."""
+    """Follow redirects, but not forever and not out of http(s).
+
+    Python's stock handler allows a redirect target whose scheme is `http`, `https`
+    **or `ftp`** (`HTTPRedirectHandler.http_error_302`), and `build_opener()` installs
+    an `FTPHandler` by default. Checking only the *initial* URL therefore does not give
+    http(s)-only fetching: a cited page can 302 verification into a different egress
+    protocol. This narrows the allowlist to what the module actually claims.
+    """
 
     def __init__(self, limit: int) -> None:
         self.max_redirections = limit
+
+    def redirect_request(self, req, fp, code, msg, headers, newurl):
+        if not newurl.lower().startswith(("http://", "https://")):
+            raise urllib.error.HTTPError(
+                newurl, code, f"refused redirect to non-http(s) URL: {newurl}", headers, fp
+            )
+        return super().redirect_request(req, fp, code, msg, headers, newurl)

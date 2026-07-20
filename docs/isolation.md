@@ -127,10 +127,13 @@ page has far more room to address its reader than a search snippet does. Three t
 - **Evidence lens only.** Logic and completeness never receive page text. They cannot raise a
   citation category, so the pages would widen what they see without widening what they may report —
   and every extra channel into a lens is a way for material to reach a scope with no use for it.
-- **Structured output is unchanged.** The critic still emits only closed-enum categories with
-  verbatim spans quoted from *the report*, so a page cannot smuggle an instruction into a fix-task
-  even if the critic is persuaded by it. This is why verification adds evidence rather than a tool:
-  the critic gains no new output channel.
+- **The critic's output channel is unchanged.** Verification adds evidence, not a tool, so the
+  critic gains no new way to emit anything. Its findings still pass through the same closed schema,
+  and the resulting defect list still reaches the writer **only as fenced untrusted data**
+  (RA-010/D12) — that fence, not span-anchoring, is what stops a page-persuaded critic from
+  reaching the writer as a command. (A `Defect` does carry free-text `rationale`/`instruction`, and
+  for evidence categories `related_span` is deliberately not verbatim-anchored, since it describes
+  a source rather than quoting the report. That channel is pre-existing and is not widened here.)
 - **Same fence, restated.** The untrusted-data note is repeated inside the fetched-pages block
   rather than relied on from the top of the prompt, given how much text sits between them.
 
