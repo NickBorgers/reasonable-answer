@@ -90,6 +90,34 @@ class ProxyConfig(BaseModel):
         return os.environ.get(self.api_key_env) or self.api_key_fallback
 
 
+class SearchConfig(BaseModel):
+    """Web search for writers (RA-018).
+
+    Off by default: a roster with no credential must keep working exactly as before.
+    When it is on, startup is fail-closed on both halves — a missing credential and a
+    writer that cannot actually emit a tool call are each fatal before any tokens are
+    spent, because a writer that silently does not search still produces a
+    '## Sources' section and the invented citations are indistinguishable from real
+    ones downstream.
+    """
+
+    model_config = ConfigDict(extra="forbid")
+
+    enabled: bool = False
+    api_key_env: str = "BRAVE_SEARCH_API_KEY"
+    #: local dev convenience; gitignored via *.token. Env var wins when both exist.
+    token_file: str | None = "brave.token"
+    max_results: int = Field(default=5, ge=1, le=20)
+    #: whole-run cap. The free Brave tier is 2,000 queries/month, and an agentic loop
+    #: across writers and revisions will spend that without one.
+    query_budget: int = Field(default=60, ge=1, le=5000)
+    #: how many times one writer call may go round the search loop before it is made
+    #: to answer with what it has.
+    max_tool_rounds: int = Field(default=6, ge=1, le=20)
+    #: seconds between requests; the free tier is 1 req/sec.
+    min_interval_seconds: float = Field(default=1.1, ge=0.0, le=60.0)
+
+
 class Roster(BaseModel):
     model_config = ConfigDict(extra="forbid")
 
@@ -131,6 +159,7 @@ class Config(BaseModel):
     proxy: ProxyConfig = Field(default_factory=ProxyConfig)
     roster: Roster
     budgets: Budgets = Field(default_factory=Budgets)
+    search: SearchConfig = Field(default_factory=SearchConfig)
     runs_dir: Path = Path("runs")
     retention_days: int = 14
     max_report_chars: int = 60_000
