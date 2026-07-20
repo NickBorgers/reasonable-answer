@@ -7,6 +7,9 @@ htmlcov/
 # run output contains seed material, drafts and critiques — never commit it
 runs/
 
+# API credentials — provided as a file locally, an env var in prod
+*.token
+
 # scratch directories the CI agents write into the workspace
 .review-output/
 .review-prompt/

@@ -20,6 +20,7 @@ class Call:
     system: str
     user: str
     schema: str | None = None
+    tools: list[str] = field(default_factory=list)
 
 
 @dataclass
@@ -34,6 +35,10 @@ class FakeClient:
     calls: list[Call] = field(default_factory=list)
     modes: dict[str, str] = field(default_factory=dict)
     generations: int = 0
+    #: alias -> can it emit tool calls; absent means yes
+    tool_capable: dict[str, bool] = field(default_factory=dict)
+    #: every tool-result string the fake handed back to a "model"
+    tool_results: list[str] = field(default_factory=list)
 
     # ---- the LLMClient surface the graph uses -----------------------------
 
@@ -49,14 +54,30 @@ class FakeClient:
     def mode_for(self, alias: str) -> str:
         return self.probe_structured_output(alias)
 
+    def probe_tool_calling(self, alias: str) -> bool:
+        return self.tool_capable.get(alias, True)
+
+    def tool_capable_for(self, alias: str) -> bool:
+        return self.probe_tool_calling(alias)
+
     def complete(self, alias: str, *, system: str, user: str, **kwargs: Any) -> Completion:
-        self.calls.append(Call(alias, system, user))
+        self.calls.append(
+            Call(alias, system, user, tools=[
+                t["function"]["name"] for t in (kwargs.get("tools") or [])
+            ])
+        )
         self.generations += 1
+        # Drive the handler once when one is supplied, so tests can assert on what a
+        # tool result actually looks like by the time it reaches a model.
+        handler = kwargs.get("tool_handler")
+        if handler is not None:
+            self.tool_results.append(handler("web_search", '{"query": "probe"}'))
         return Completion(
             text=self.report_fn(self.generations),
             model_reported=alias,
             prompt_tokens=0,
             completion_tokens=0,
+            tool_calls=1 if handler is not None else 0,
         )
 
     def structured(self, alias: str, *, system: str, user: str, schema: type, **kwargs: Any):

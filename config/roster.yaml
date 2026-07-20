@@ -32,6 +32,28 @@ roster:
       - gpt-5.4-mini
       - claude-haiku-4-5
 
+# Web search for writers. Off by default so a checkout with no API key behaves
+# exactly as it always has.
+#
+# When enabled, startup is fail-closed twice over: no credential is fatal, and so is
+# a writer that cannot emit tool calls — that writer would still be told to produce a
+# '## Sources' section and would fill it from memory, and nothing downstream can tell
+# a remembered citation from a retrieved one.
+#
+# Credential: $BRAVE_SEARCH_API_KEY (prod) or ./brave.token (local, gitignored).
+# Key from https://api-dashboard.search.brave.com/app/keys — the "Data for AI" SKU.
+search:
+  enabled: false
+  api_key_env: BRAVE_SEARCH_API_KEY
+  token_file: brave.token
+  max_results: 5
+  # Whole-run cap. The free tier allows 2,000 queries/month, so a 60-query run is
+  # roughly 33 runs a month before it starts costing money.
+  query_budget: 60
+  max_tool_rounds: 6
+  # The free tier is 1 request/second; requests are throttled to stay under it.
+  min_interval_seconds: 1.1
+
 budgets:
   min_ticks: 2
   hard_cap: 8

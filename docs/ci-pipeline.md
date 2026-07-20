@@ -71,7 +71,16 @@ synthesizes the no-op fix result that describes what actually happened, rather t
 relaxing the aggregator — the epoch checks stay live, and adding a real fixer later is a
 one-line change.
 
-Two properties make the judge trustworthy, and both are structural rather than
+A reviewer only publishes its artifact under the name the judge consumes **if it
+validated**, and the judge separately requires every role the classifier selected to be
+present. Both halves are needed. Without the first, an artifact that had just failed
+schema validation was still aggregated into the verdict. Without the second, a reviewer
+that fails publishes nothing, silently leaves the review set, and the survivors clear the
+merge on its behalf — so a crashed reviewer would *reduce* scrutiny instead of blocking.
+That combination produced a real GO on a run where a reviewer had failed; a failed
+reviewer is now a fail-closed `pipeline_error`.
+
+Two further properties make the judge trustworthy, and both are structural rather than
 conventional: it checks out **`main`**, so a PR cannot modify the code that judges it, and
 it holds `contents: read`, so it could not push if it tried.
 
