@@ -165,14 +165,38 @@ def detect_cycle(hash_history: list[str], period: int) -> bool:
     return len(set(window)) < len(window)
 
 
+def latest_scores_per_artifact(board: list[dict]) -> list[dict]:
+    """Collapse a scoreboard to one row per artifact, keeping the LAST row for each.
+
+    An artifact is triaged once per critique pass, so rule 8 top-ups and rule 2
+    re-critiques append a second, third, ... row for the same `artifact_hash`. Those
+    rows disagree: a pass that only reached rubber-stamp critics scores clean, and the
+    next pass by a fresh eligible critic scores the same bytes as defective. The last
+    row is the one the most lenses have looked at, so it is the only one that may be
+    used to rank artifacts against each other (RC-002 applied to selection, not just
+    to clearance). Keeping the earlier row lets a refuted clean verdict win.
+    """
+    by_hash: dict[str, dict] = {}
+    for row in board:
+        by_hash[row["artifact_hash"]] = row
+    # Ordered by round so that `best_scoring_index`'s latest-wins tie-break means what
+    # it says; a dict would otherwise order by each artifact's FIRST appearance.
+    return sorted(by_hash.values(), key=lambda r: r["round"])
+
+
 def best_scoring_index(
     scores: list[tuple[int, int, int]], w_b: int = 100, w_m: int = 10, w_n: int = 1
 ) -> int:
-    """Minimal `w_b*blocking + w_m*major + w_n*minor`; ties go to the earliest round."""
+    """Minimal `w_b*blocking + w_m*major + w_n*minor`; ties go to the LATEST round.
+
+    Later is better on a tie: a later artifact has absorbed every fix-task the earlier
+    ones generated, and it has survived at least as many critique passes. Preferring
+    the earliest ships the first draft that happened to look clean.
+    """
     if not scores:
         return 0
     best = min(
         range(len(scores)),
-        key=lambda i: (w_b * scores[i][0] + w_m * scores[i][1] + w_n * scores[i][2], i),
+        key=lambda i: (w_b * scores[i][0] + w_m * scores[i][1] + w_n * scores[i][2], -i),
     )
     return best

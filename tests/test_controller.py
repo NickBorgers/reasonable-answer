@@ -8,7 +8,13 @@ import itertools
 import pytest
 from conftest import cleared, make_ci, make_view
 
-from reasonable_answer.controller import acceptance_state, decide, detect_cycle
+from reasonable_answer.controller import (
+    acceptance_state,
+    best_scoring_index,
+    decide,
+    detect_cycle,
+    latest_scores_per_artifact,
+)
 from reasonable_answer.schemas import LensStatus
 from reasonable_answer.taxonomy import LENSES
 
@@ -206,3 +212,54 @@ def test_detect_cycle():
     assert not detect_cycle(["a", "b", "c"], period=4)
     assert detect_cycle(["a", "b", "a"], period=4)
     assert not detect_cycle(["a", "b", "c", "d", "e", "a"], period=2)
+
+
+def _row(round_no, artifact_hash, blocking, major, minor):
+    return {
+        "round": round_no,
+        "artifact_hash": artifact_hash,
+        "blocking": blocking,
+        "major": major,
+        "minor": minor,
+        "report": f"{artifact_hash}@r{round_no}",
+    }
+
+
+def test_best_scoring_index_breaks_ties_toward_the_latest_round():
+    # Equal scores: the later artifact has absorbed every earlier fix-task and has
+    # survived at least as many passes, so it wins.
+    assert best_scoring_index([(0, 0, 0), (0, 0, 0), (0, 0, 0)]) == 2
+    # A real difference still beats recency.
+    assert best_scoring_index([(0, 0, 0), (0, 1, 0)]) == 0
+    assert best_scoring_index([(1, 0, 0), (0, 9, 9)]) == 1
+    assert best_scoring_index([]) == 0
+
+
+def test_latest_scores_per_artifact_supersedes_a_refuted_clean_pass():
+    # One artifact, triaged twice: pass 1 reached only critics that flag nothing,
+    # pass 2 reached a fresh eligible critic that found 5 major.
+    board = [_row(4, "aaa", 0, 0, 0), _row(4, "aaa", 0, 5, 1)]
+    rows = latest_scores_per_artifact(board)
+    assert [(r["round"], r["major"]) for r in rows] == [(4, 5)]
+
+
+def test_finalize_selection_prefers_the_better_attested_artifact():
+    # run-d5934276fafd: round 4 scored clean on its first pass, then 5 major on a
+    # rule-8 top-up. Round 6 scored clean on four passes. Round 4 shipped, because
+    # its stale clean row tied round 6 and ties went to the earliest index.
+    board = [
+        _row(1, "r1", 0, 1, 0),
+        _row(2, "r2", 0, 1, 0),
+        _row(3, "r3", 1, 1, 0),
+        _row(4, "r4", 0, 0, 0),  # <- refuted by the next row
+        _row(4, "r4", 0, 5, 1),
+        _row(5, "r5", 0, 0, 0),  # <- refuted by the next row
+        _row(5, "r5", 0, 12, 0),
+        _row(6, "r6", 0, 0, 0),
+        _row(6, "r6", 0, 0, 0),
+        _row(6, "r6", 0, 0, 0),
+        _row(6, "r6", 0, 0, 0),
+    ]
+    rows = latest_scores_per_artifact(board)
+    idx = best_scoring_index([(r["blocking"], r["major"], r["minor"]) for r in rows])
+    assert rows[idx]["round"] == 6
