@@ -160,6 +160,31 @@ def test_the_report_is_rendered_not_shown_as_raw_markdown(client, config):
         assert "# Answer" not in page.text
 
 
+def test_the_report_page_404s_before_there_is_a_report_and_for_unknown_runs(config, identities):
+    """Both of the new route's guards: no such run, and a run with nothing to show yet."""
+    store = RunStore(config.runs_dir, "run-early")
+    store.question("Too soon?")
+    store.event("intake", path="question")
+
+    worker = RunWorker(config, max_concurrent=1, runner=lambda *a, **k: None)
+    app = create_app(config, worker=worker)
+    try:
+        with TestClient(app) as c:
+            assert c.get("/runs/run-early/report").status_code == 404
+            assert c.get("/runs/run-doesnotexist/report").status_code == 404
+    finally:
+        worker.shutdown()
+
+
+def test_report_markdown_features_reports_actually_use_are_enabled(config):
+    """Tables and strikethrough are enabled on top of CommonMark; pin that."""
+    from reasonable_answer.web.markdown import to_html
+
+    html = to_html("| a | b |\n| - | - |\n| 1 | 2 |\n\n~~struck~~\n")
+    assert "<table>" in html
+    assert "<s>struck</s>" in html
+
+
 def test_a_finished_report_outranks_the_progress_trail(client, config):
     """Once there is an answer, the answer is the page; the rounds fold up below it."""
     response = client.post("/runs", data={"question": "Which comes first?"}, follow_redirects=False)
@@ -173,7 +198,11 @@ def test_a_finished_report_outranks_the_progress_trail(client, config):
 
 def test_a_report_that_contains_html_is_rendered_as_text_not_markup(config, identities):
     """The report is model-written, so markdown rendering must not become an XSS hole."""
-    hostile = '# Answer\n\n<script>alert("xss")</script>\n\n[click](javascript:alert(1))\n'
+    hostile = (
+        '# Answer\n\n<script>alert("xss")</script>\n\n'
+        "[click](javascript:alert(1))\n\n"
+        "![probe](http://127.0.0.1:9/pixel.png)\n"
+    )
     store = RunStore(config.runs_dir, "run-mdxss")
     store.question("Hostile?")
     store.event("intake", path="question")
@@ -189,6 +218,10 @@ def test_a_report_that_contains_html_is_rendered_as_text_not_markup(config, iden
                 assert "&lt;script&gt;" in page
                 # markdown-it refuses the scheme, so the link stays inert literal text
                 assert 'href="javascript:' not in page
+                # An <img> would be an automatic outbound GET from the reader's browser
+                # the moment the page loads, so image syntax stays literal text too.
+                assert "<img" not in page
+                assert "127.0.0.1:9/pixel.png" in page  # rendered, but as text
     finally:
         worker.shutdown()
 

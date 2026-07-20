@@ -72,6 +72,11 @@ def render_layout(title: str, body: str, live: bool = False) -> str:
 <head>
 <meta charset="utf-8">
 <meta name="viewport" content="width=device-width, initial-scale=1">
+<!-- Belt to the renderer's braces: the report is model-written, so even if some future
+     construct slips past markdown-it, the browser has no directive that lets this page
+     fetch anything off-origin. `unsafe-inline` covers the stylesheet and the SSE script,
+     both of which are literals in this file; `connect-src 'self'` is the progress stream. -->
+<meta http-equiv="Content-Security-Policy" content="default-src 'none'; img-src 'none'; style-src 'unsafe-inline'; script-src 'unsafe-inline'; connect-src 'self'; form-action 'self'; base-uri 'none'">
 <title>{esc(title)}</title>
 <style>{CSS}</style>
 </head>
@@ -524,7 +529,6 @@ table.runs { width: 100%; border-collapse: collapse; }
 .report th, .report td { border: 1px solid var(--line); padding: .4rem .6rem; text-align: left; }
 .report th { background: var(--panel); }
 .report hr { border: 0; border-top: 1px solid var(--line); margin: 1.8rem 0; }
-.report img { max-width: 100%; }
 /* The Sources section is a reference list, not prose — tighten it and let long URLs wrap. */
 .report h2 + ol, .report h2 + ul { font-size: .9rem; }
 .fold > summary {
