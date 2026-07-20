@@ -36,6 +36,7 @@ review-entry            authorize · fork-reject · resolve SHA · prior-GO chec
        ├─ invariant     Claude    ─┐
        ├─ security      Codex      ├─ read-only, each emits a JSON artifact
        ├─ test          Claude    ─┘
+       ├─ fix           the ONLY branch-writing stage; skipped on the last cycle
        ├─ judge         deterministic, from main, contents: read
        └─ finalize      labels · summary comment · merge gate
 ```
@@ -87,9 +88,89 @@ it holds `contents: read`, so it could not push if it tried.
 - **A merge of the base branch into the PR inherits the previous verdict** instead of
   burning a cycle. Without this, routinely resyncing a long-lived branch can push a PR
   into the cap without a single substantive change.
-- **`MAX_CYCLES: 2`** is a cost backstop, not a loop breaker. With no automated fixer a
-  NO-GO returns to a human, so consecutive machine cycles essentially never happen. If a
-  fixer is ever added, this changes meaning entirely and must be re-derived.
+- **`MAX_CYCLES: 2`** is a real loop breaker now that the fixer exists. The loop it bounds
+  is review → fix → push → review. At 2: cycle 1 reviews and may fix; cycle 2 reviews that
+  fix and may not fix again; a third cycle is capped and finalizes NO-GO. So a PR gets at
+  most one automated fix attempt, and that attempt is always reviewed by a fresh panel
+  before it can merge. GO-is-terminal is what keeps the bound safe — a converged PR never
+  re-enters the loop.
+
+### The fixer
+
+`review-fixer.yml` is the only stage that may write to the PR branch. It runs **after the
+reviewers and before the judge**, which is load-bearing: the judge then grades the SHA the
+reviewers actually read, and the fixed SHA earns its own cycle with its own reviewers.
+Judging the post-fix tree would let the fixer clear its own work unread.
+
+It runs in one of two modes.
+
+**`author-resume`** — the agent that wrote the PR is resumed with its conversation intact.
+It answers reviewers with the reasoning that produced the code, and may push back on a
+finding by clarifying the PR body instead of changing code.
+
+**`cold`** — no session available. A fresh agent applies only fixes that pass an explicit
+mechanical gate: the blocker must name a file and line, be fully determined by its own
+description, stay inside reviewer-named files, and stay small. Everything else is skipped
+with a reason. A cold fixer may **not** claim `body_clarification`; the artifact validator
+rejects it, because "the reviewer misread my intent" is not a claim an agent without that
+intent can make.
+
+Falling back from the first to the second is always safe and always logged.
+
+#### How the author's context survives
+
+Container state dies with the container, and the homelab runners are ephemeral and plural,
+so a session written on one is simply absent on the next. The conversation therefore travels
+as an artifact:
+
+1. `resolve-issue.yml` prepares a host directory keyed `(agent, issue, run-id)` and mounts
+   it over the CLI's state directory, so the session outlives the container.
+2. After the run it is packed and uploaded as `author-session-<agent>-<run-id>`.
+3. The agent writes `Author-Session: <agent>/<run-id>` as the last line of the PR body.
+4. The fixer parses that trailer, downloads the artifact **from the original run**, unpacks,
+   validates, and mounts it — then resumes with `claude --continue` or
+   `codex exec resume --last`.
+
+The per-`(agent, issue, run-id)` keying is what makes "most recent session" unambiguous. A
+shared directory accumulating every `/autoresolve` attempt on an issue would resume an
+arbitrary one.
+
+Two consequences worth knowing:
+
+- **Artifacts expire after 7 days.** A PR that sits longer silently loses resume and
+  degrades to cold. The fixer emits a `::warning::` rather than letting the mode change go
+  unexplained.
+- **Editing the PR body can disable resume.** Dropping the `Resolves #N` line or the
+  trailer breaks the lookup. Both fixer prompts tell the agent to preserve them; a human
+  editing the body should too.
+
+#### Gates before anything is pushed
+
+In order, and all of them fail closed:
+
+1. The artifact validates against **main's** `fix-result-v1.json`.
+2. `input_sha` equals the frozen reviewed SHA — otherwise the fixer worked from a tree
+   nobody reviewed.
+3. `mode` matches what the workflow determined, so a cold fixer cannot self-report as a
+   resumed author to unlock `body_clarification`.
+4. `ruff` passes on the whole tree. Tests are deliberately **not** run here: that would
+   mean installing the PR's own `pyproject.toml`, executing PR-authored build config in the
+   one job holding a write-capable PAT. Tests belong to PR Validation, which runs on a
+   runner with no secrets.
+5. The remote branch head still equals the reviewed SHA. If a human pushed meanwhile, the
+   fix is discarded rather than racing them.
+
+The **host** commits, never the agent — the container runs as uid 1000 against a `.git`
+owned by the runner, and agent-side git writes corrupt the index in ways that surface two
+jobs later. Both fixer prompts forbid touching `.git`; the host-side commit is the other
+half of that contract. The commit is authored as `ci@reasonable-answer.local`, which is what
+cycle control uses to tell machine pushes from human ones.
+
+Unlike the design this borrows from, the fixer does **not** claim `review/pipeline` on the
+SHA it just pushed. That claim would suppress the `synchronize` event — but in this graph
+that event *is* cycle 2, the one that reviews the fix. The contention it guards against does
+not exist here: `fix` needs all three reviewers, so when it pushes, only `ubuntu-latest` jobs
+remain and no self-hosted runner is held.
 
 ### Role selection
 
@@ -174,12 +255,10 @@ Every knob lives in [`review-agent-run`](../.github/actions/review-agent-run/act
 
 ## Deliberately not built
 
-- **No automated fixer.** It is the single largest source of complexity in the design this
-  borrows from, and dragging it in would mean stale-tip push races, cross-run session
-  resume, and agent-driven conflict resolution. Without it the pipeline has *zero*
-  branch-writing stages, which makes a whole class of loop bugs structurally impossible
-  rather than merely defended against. Revisit only if the human turnaround on a NO-GO
-  actually hurts.
+- **No agent-driven merge-conflict resolution.** The fixer works on the reviewed SHA and
+  never merges the base branch. If the branch has drifted, that is a human's call — an
+  agent picking resolutions at conflict markers is exactly the kind of unreviewable change
+  this pipeline exists to catch, not to generate.
 - **No two-lens security split.** Folding a confidence threshold and an exclusion list
   into one prompt gets most of the value without a second reviewer job, a merger module,
   and a vendored-prompt pin.

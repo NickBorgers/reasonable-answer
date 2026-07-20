@@ -174,6 +174,8 @@ jobs:
           ISSUE_TITLE: ${{ github.event.issue.title }}
           REPO: ${{ github.repository }}
           BRANCH_NAME: ${{ steps.branch.outputs.name }}
+          AGENT: ${{ needs.authorize.outputs.agent }}
+          RUN_ID: ${{ github.run_id }}
         run: |
           set -euo pipefail
           # envsubst rather than inlining the prompt in YAML: a prompt change stays a
@@ -183,9 +185,25 @@ jobs:
           # shellcheck disable=SC2016  # envsubst's allowlist argument is a list of
           # variable NAMES and must not be expanded by the shell — expanding it would
           # substitute the values here and leave envsubst with nothing to match.
-          envsubst '${ISSUE_NUMBER} ${ISSUE_TITLE} ${REPO} ${BRANCH_NAME}' \
+          envsubst '${ISSUE_NUMBER} ${ISSUE_TITLE} ${REPO} ${BRANCH_NAME} ${AGENT} ${RUN_ID}' \
             < .github/ci/prompts/resolve-issue.md > .agent-prompt/resolve-issue.md
           echo "path=.agent-prompt/resolve-issue.md" >> "$GITHUB_OUTPUT"
+
+      # The agent's conversation is the thing the review pipeline's fixer wants later:
+      # resuming the author beats handing a stranger the diff and a list of complaints.
+      # Container state is discarded on exit, so the session directory has to be a mount.
+      - name: Prepare the author session directory
+        if: steps.existing.outputs.skip != 'true'
+        id: session
+        env:
+          AGENT: ${{ needs.authorize.outputs.agent }}
+          ISSUE_NUMBER: ${{ github.event.issue.number }}
+          RUN_ID: ${{ github.run_id }}
+        run: |
+          set -euo pipefail
+          DIR=$(./scripts/ci-session-store.sh prepare "$AGENT" "$ISSUE_NUMBER" "$RUN_ID")
+          echo "dir=${DIR}" >> "$GITHUB_OUTPUT"
+          echo "Author session directory: ${DIR}"
 
       - name: Run the agent
         if: steps.existing.outputs.skip != 'true'
@@ -201,6 +219,7 @@ jobs:
           base_ref: ${{ github.event.repository.default_branch }}
           cycle: '1'
           timeout_minutes: '60'
+          session_host_dir: ${{ steps.session.outputs.dir }}
           workflow_pat: ${{ secrets.WORKFLOW_PAT }}
           llm_proxy_base_url: ${{ vars.LLM_PROXY_BASE_URL }}
           llm_proxy_openai_base_url: ${{ vars.LLM_PROXY_OPENAI_BASE_URL }}
@@ -236,3 +255,32 @@ jobs:
           path: .review-output/resolve-issue-*
           retention-days: 7
           if-no-files-found: warn
+
+      # Pack the conversation for the fixer. Best-effort: an agent that died before
+      # writing a session leaves nothing to pack, and that must not fail a run that
+      # otherwise opened a good PR — the fixer degrades to a cold run and says so.
+      - name: Pack the author session
+        id: pack
+        if: always() && steps.existing.outputs.skip != 'true'
+        continue-on-error: true
+        env:
+          AGENT: ${{ needs.authorize.outputs.agent }}
+          ISSUE_NUMBER: ${{ github.event.issue.number }}
+          RUN_ID: ${{ github.run_id }}
+        run: |
+          set -euo pipefail
+          TAR="${RUNNER_TEMP}/author-session.tgz"
+          ./scripts/ci-session-store.sh pack "$AGENT" "$ISSUE_NUMBER" "$RUN_ID" "$TAR"
+          echo "tar=${TAR}" >> "$GITHUB_OUTPUT"
+
+      # The name is the contract: review-fixer.yml reconstructs it from the
+      # `Author-Session: <agent>/<run-id>` trailer in the PR body. Changing this format
+      # silently disables author-resume rather than failing anything.
+      - name: Upload the author session
+        if: always() && steps.pack.outcome == 'success' && steps.pack.outputs.tar != ''
+        uses: actions/upload-artifact@v4
+        with:
+          name: author-session-${{ needs.authorize.outputs.agent }}-${{ github.run_id }}
+          path: ${{ steps.pack.outputs.tar }}
+          retention-days: 7
+          if-no-files-found: error

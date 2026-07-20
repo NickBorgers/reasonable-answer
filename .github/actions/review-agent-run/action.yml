@@ -69,6 +69,29 @@ inputs:
     description: 'Additional KEY=VALUE pairs (newline-separated) to forward'
     required: false
     default: ''
+  session_host_dir:
+    description: >
+      Host directory bind-mounted over the CLI's state directory. The author side passes an
+      empty prepared dir so the session it creates survives the container and can be packed
+      for transit; the fixer passes an unpacked prior session. Empty means no mount at all.
+      See scripts/ci-session-store.sh.
+    required: false
+    default: ''
+  resume:
+    description: >
+      Continue the conversation already present in session_host_dir rather than starting a
+      new one. Separate from session_host_dir because mounting and resuming are different
+      needs: the author mounts an empty dir to persist a *new* session, and asking it to
+      resume a conversation that does not exist yet fails.
+    required: false
+    default: 'false'
+  result_basename:
+    description: >
+      Basename of the JSON artifact the prompt writes, without extension. Defaults to the
+      role. The fixer overrides it so its artifact does not collide with a reviewer's in
+      the shared .review-output directory.
+    required: false
+    default: ''
 
 outputs:
   output_artifact:
@@ -140,6 +163,9 @@ runs:
         MODEL: ${{ inputs.model }}
         TIMEOUT_MINUTES: ${{ inputs.timeout_minutes }}
         EXTRA_ENV: ${{ inputs.extra_env }}
+        SESSION_HOST_DIR: ${{ inputs.session_host_dir }}
+        RESULT_BASENAME: ${{ inputs.result_basename }}
+        RESUME: ${{ inputs.resume }}
         REPO: ${{ github.repository }}
         PR_TITLE_B64: ${{ steps.pr-meta.outputs.pr_title_b64 }}
         PR_BODY_B64: ${{ steps.pr-meta.outputs.pr_body_b64 }}
@@ -150,6 +176,11 @@ runs:
           claude|codex) ;;
           *) echo "::error::review-agent-run: unknown agent '$AGENT'"; exit 1 ;;
         esac
+
+        # Artifact basename defaults to the role. The fixer overrides it because it shares
+        # .review-output with the reviewer artifacts it just downloaded, and a collision
+        # there would have the fixer overwrite an input it still needs to read.
+        ARTIFACT_BASE="${RESULT_BASENAME:-$ROLE}"
 
         STAGING_DIR="${RUNNER_TEMP:-/tmp}/ci-agent"
         mkdir -p "$STAGING_DIR"
@@ -168,8 +199,9 @@ runs:
           echo "CYCLE=${CYCLE}"
           echo "AGENT_TIMEOUT_MINUTES=${TIMEOUT_MINUTES}"
           echo "AGENT_MODEL=${MODEL}"
-          echo "RESULT_PATH=.review-output/${ROLE}-result.json"
-          echo "OUTPUT_LOG_PATH=.review-output/${ROLE}-output.log"
+          echo "RESULT_PATH=.review-output/${ARTIFACT_BASE}-result.json"
+          echo "OUTPUT_LOG_PATH=.review-output/${ARTIFACT_BASE}-output.log"
+          echo "AGENT_RESUME=$([ "$RESUME" = "true" ] && echo 1 || echo 0)"
           echo "REPO=${REPO}"
           echo "PR_TITLE_B64=${PR_TITLE_B64}"
           echo "PR_BODY_B64=${PR_BODY_B64}"
@@ -203,10 +235,27 @@ runs:
         CI_AGENT_IMAGE: ${{ inputs.image }}
         CI_AGENT_ENV_FILE: ${{ steps.stage-env.outputs.env_file }}
         WORKSPACE_FOLDER: ${{ inputs.workspace_folder }}
+        SESSION_HOST_DIR: ${{ inputs.session_host_dir }}
+        AGENT: ${{ inputs.agent }}
       run: |
         set -euo pipefail
 
         WORKSPACE_HOST="${GITHUB_WORKSPACE}/${WORKSPACE_FOLDER}"
+
+        # Resuming a prior conversation means mounting that agent's state directory over
+        # the one it would otherwise create empty. The mount point differs per CLI, and
+        # for codex it is deliberately the `sessions` subdirectory — mounting over all of
+        # ~/.codex shadows the standalone runtime at .codex/packages/ and `command -v
+        # codex` then fails inside the container.
+        session_mount=()
+        if [ -n "$SESSION_HOST_DIR" ]; then
+          case "$AGENT" in
+            claude) SESSION_CONTAINER_HOME=/home/ci/.claude ;;
+            codex)  SESSION_CONTAINER_HOME=/home/ci/.codex/sessions ;;
+          esac
+          session_mount=(-v "${SESSION_HOST_DIR}:${SESSION_CONTAINER_HOME}")
+          echo "review-agent-run: resuming ${AGENT} session from ${SESSION_HOST_DIR}"
+        fi
         # The runner script comes from the checkout this action lives in, mounted
         # read-only and separately from the workspace, so a PR cannot alter the script
         # that runs its own review.
@@ -223,6 +272,7 @@ runs:
           --workdir /workspace \
           -v "$WORKSPACE_HOST:/workspace" \
           -v "$CONTAINER_SCRIPT:/run-in-container.sh:ro" \
+          "${session_mount[@]}" \
           --env-file "$CI_AGENT_ENV_FILE" \
           -e GIT_CONFIG_COUNT=1 \
           -e GIT_CONFIG_KEY_0=safe.directory \
@@ -258,11 +308,13 @@ runs:
       shell: bash
       env:
         ROLE: ${{ inputs.role }}
+        RESULT_BASENAME: ${{ inputs.result_basename }}
         WORKSPACE_FOLDER: ${{ inputs.workspace_folder }}
       run: |
         set -euo pipefail
         BASE="${GITHUB_WORKSPACE}/${WORKSPACE_FOLDER}/.review-output"
+        ARTIFACT_BASE="${RESULT_BASENAME:-$ROLE}"
         {
-          echo "output_artifact=${BASE}/${ROLE}-output.log"
-          echo "result_json=${BASE}/${ROLE}-result.json"
+          echo "output_artifact=${BASE}/${ARTIFACT_BASE}-output.log"
+          echo "result_json=${BASE}/${ARTIFACT_BASE}-result.json"
         } >> "$GITHUB_OUTPUT"

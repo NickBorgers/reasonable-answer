@@ -1,0 +1,94 @@
+{
+  "$schema": "https://json-schema.org/draft/2020-12/schema",
+  "$id": "https://github.com/NickBorgers/reasonable-answer/.github/scripts/review/schema/fix-result-v1.json",
+  "title": "Fixer Artifact v1",
+  "description": "Structured output produced by the fixer stage — the only stage in the pipeline permitted to modify files. It is a declaration of what the fixer did, checked by the host runner before anything is pushed: `input_sha` is compared against the frozen reviewed SHA, and the branch head is re-read to confirm it has not moved. The fixer's own claims are never trusted as authorization to push. See docs/ci-pipeline.md.",
+  "type": "object",
+  "additionalProperties": false,
+  "required": [
+    "schema_version",
+    "input_sha",
+    "cycle",
+    "mode",
+    "summary",
+    "addressed",
+    "skipped"
+  ],
+  "properties": {
+    "schema_version": { "const": "1" },
+    "input_sha": {
+      "type": "string",
+      "pattern": "^[0-9a-f]{40}$",
+      "description": "The SHA the fixer believes it started from. The host verifies this equals the frozen reviewed SHA and aborts otherwise — a mismatch means the fixer worked from a tree nobody reviewed."
+    },
+    "new_sha": {
+      "type": ["string", "null"],
+      "description": "Left null or set to the input SHA by the agent; the host overwrites it after committing. The agent never touches .git, so it cannot know this value."
+    },
+    "cycle": { "type": "integer", "minimum": 1 },
+    "mode": {
+      "type": "string",
+      "enum": ["author-resume", "cold"],
+      "description": "Whether the original authoring agent was resumed with its conversation intact, or a fresh agent read the reviewer artifacts cold. Recorded because the two have materially different authority: only a resumed author may push back on a reviewer by claiming its intent was misread."
+    },
+    "summary": {
+      "type": "string",
+      "maxLength": 500,
+      "description": "One paragraph, for the PR comment. Never quote runs/ content — this repository is public."
+    },
+    "addressed": {
+      "type": "array",
+      "description": "Blockers this fixer believes it resolved. Namespaced `<role>/<id>` matching the reviewer that raised them. The judge re-reviews from scratch on the next cycle; this list is a record, not a clearance.",
+      "items": {
+        "type": "object",
+        "additionalProperties": false,
+        "required": ["id", "how"],
+        "properties": {
+          "id": {
+            "type": "string",
+            "pattern": "^(invariant|security|test)/[A-Za-z0-9._-]+$",
+            "description": "Namespaced blocker id. Bare ids are rejected so two reviewers with colliding local ids cannot cross-clear each other."
+          },
+          "how": { "type": "string", "minLength": 1 },
+          "resolution": {
+            "type": "string",
+            "enum": ["code_change", "body_clarification"],
+            "description": "`body_clarification` means no code changed — the fixer judged the reviewer misread the author's intent and sharpened the PR body instead. Only valid when mode is `author-resume`; a cold fixer has no intent to appeal to.",
+            "default": "code_change"
+          },
+          "files": {
+            "type": "array",
+            "items": { "type": "string", "minLength": 1 }
+          }
+        }
+      }
+    },
+    "skipped": {
+      "type": "array",
+      "description": "Blockers deliberately left alone. A skip is a normal outcome, not a failure: the safety gate is designed to skip anything it cannot fix mechanically and safely.",
+      "items": {
+        "type": "object",
+        "additionalProperties": false,
+        "required": ["id", "reason"],
+        "properties": {
+          "id": {
+            "type": "string",
+            "pattern": "^(invariant|security|test)/[A-Za-z0-9._-]+$"
+          },
+          "reason": { "type": "string", "minLength": 1 }
+        }
+      }
+    },
+    "docs_updated": {
+      "type": "array",
+      "description": "Any docs/*.md touched. This project is spec-driven: a code change that alters an invariant without a corresponding decision-log entry is drift, and the invariant reviewer will block it on the next cycle.",
+      "items": { "type": "string", "minLength": 1 }
+    },
+    "body_edited": {
+      "type": "boolean",
+      "description": "Whether the fixer edited the PR body. Tracked because the body carries the `Resolves #N` and `Author-Session:` lines that author-resume depends on; an edit that drops them silently disables resume on the next cycle."
+    },
+    "tokens_used": { "type": "integer", "minimum": 0 },
+    "duration_seconds": { "type": "integer", "minimum": 0 }
+  }
+}
