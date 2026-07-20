@@ -104,20 +104,41 @@ Judging the post-fix tree would let the fixer clear its own work unread.
 
 It runs in one of two modes.
 
+**`cold`** — the common case, and the one to optimise for. `author-resume` can only fire on
+a PR that `resolve-issue.yml` opened; a PR a human or a coding agent on a laptop opens
+carries no session, and that is nearly all of them. A cold fixer applies only fixes passing
+an explicit mechanical gate: the blocker must name a file and line, be fully determined by
+its own description, stay inside reviewer-named files, and stay small. Everything else is
+skipped with a reason.
+
 **`author-resume`** — the agent that wrote the PR is resumed with its conversation intact.
 It answers reviewers with the reasoning that produced the code, and may push back on a
-finding by clarifying the PR body instead of changing code.
+finding by clarifying the PR body instead of changing code. A cold fixer may **not** claim
+`body_clarification`; the validator rejects it, because "the reviewer misread my intent" is
+not a claim an agent without that intent can make.
 
-**`cold`** — no session available. A fresh agent applies only fixes that pass an explicit
-mechanical gate: the blocker must name a file and line, be fully determined by its own
-description, stay inside reviewer-named files, and stay small. Everything else is skipped
-with a reason. A cold fixer may **not** claim `body_clarification`; the artifact validator
-rejects it, because "the reviewer misread my intent" is not a claim an agent without that
-intent can make.
+#### Context reconstruction
 
-Falling back from the first to the second is always safe and always logged.
+Because cold is the normal path, the fixer rebuilds what it can of the author's intent
+before triaging anything, into `$PR_CONTEXT_PATH`:
 
-#### How the author's context survives
+- the PR conversation — where a human most often states the intent a reviewer then misreads
+- the branch's commit messages — the author's own narration, which survives when nothing
+  else about their reasoning does
+- the originating issue and its comments, when the PR body cites one. A PR does not need to
+  have been *opened* by an agent to say `Resolves #N`, so this is the context-from-issue
+  path for PRs that have no session.
+
+The record can only make the fixer **skip**, never make it apply. If it shows the flagged
+behaviour was deliberate, the blocker is skipped with a citation. If it is silent, the
+mechanical gate decides. Understanding why code exists does not establish that a change to
+it is safe, and conflating those is how a fixer talks itself past its own gate.
+
+All of it is untrusted text — issue bodies and PR comments are public and attacker-editable
+— so it is fenced and labelled as data, and both prompts state that instructions appearing
+inside it are not instructions.
+
+#### How the author's context survives, when there is any
 
 Container state dies with the container, and the homelab runners are ephemeral and plural,
 so a session written on one is simply absent on the next. The conversation therefore travels
