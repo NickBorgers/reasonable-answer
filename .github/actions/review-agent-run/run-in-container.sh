@@ -47,8 +47,23 @@ case "$CI_AGENT" in
       < /dev/null 2>&1 | tee "$OUTPUT_LOG_PATH"
     ;;
   codex)
+    # Codex does NOT honour OPENAI_BASE_URL. Left unconfigured it dials
+    # wss://api.openai.com/v1/responses directly and fails with 401 against a proxy
+    # placeholder key. Pointing it at LiteLLM requires a provider block in config.toml.
+    mkdir -p "$HOME/.codex"
+    cat > "$HOME/.codex/config.toml" <<EOF
+model = "${AGENT_MODEL:-gpt-5.5}"
+model_provider = "litellm"
+
+[model_providers.litellm]
+name = "LiteLLM"
+base_url = "${OPENAI_BASE_URL:?OPENAI_BASE_URL must be set for the codex path}"
+env_key = "OPENAI_API_KEY"
+EOF
+
+    # The model is selected by config.toml above; passing --model as well would
+    # override the provider-qualified default.
     model_args=()
-    [ -n "${AGENT_MODEL:-}" ] && model_args=(--model "$AGENT_MODEL")
     timeout "$TIMEOUT" codex exec \
       --dangerously-bypass-approvals-and-sandbox \
       "${model_args[@]}" \
