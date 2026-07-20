@@ -186,6 +186,21 @@ def render_run(
         else f'<a class="secondary button" href="/runs/{esc(summary.run_id)}/audit.json">audit.json</a>'
     )
 
+    # Once there is a report to read, the report is the page and the round-by-round
+    # trail is supporting evidence — so it moves below and folds away. While the run is
+    # live it is the only thing there is to look at, so it stays open.
+    progress = f"""<section class="panel" id="progress"
+   data-stream="/runs/{esc(summary.run_id)}/stream"
+   data-live="{'1' if summary.is_live else '0'}">
+{render_run_progress(summary, timeline, lens_names)}
+</section>"""
+    if report:
+        progress = f"""<details class="fold">
+  <summary>How it got here — {summary.rounds or "no"} round{"" if summary.rounds == 1 else "s"} of
+  write and critique</summary>
+  {progress}
+</details>"""
+
     body = f"""
 <section class="panel run-head">
   <div class="run-title">
@@ -201,13 +216,9 @@ def render_run(
   <div class="run-actions">{downloads}{resume}</div>
 </section>
 
-<section class="panel" id="progress"
-   data-stream="/runs/{esc(summary.run_id)}/stream"
-   data-live="{'1' if summary.is_live else '0'}">
-{render_run_progress(summary, timeline, lens_names)}
-</section>
-
 {_report_section(report, final)}
+
+{progress}
 """
     return render_layout(f"{summary.question[:60]} — reasonable-answer", body, live=summary.is_live)
 
@@ -516,6 +527,12 @@ table.runs { width: 100%; border-collapse: collapse; }
 .report img { max-width: 100%; }
 /* The Sources section is a reference list, not prose — tighten it and let long URLs wrap. */
 .report h2 + ol, .report h2 + ul { font-size: .9rem; }
+.fold > summary {
+  cursor: pointer; color: var(--dim); font-size: .9rem; padding: .4rem 0; list-style-position: outside;
+}
+.fold > summary:hover { color: var(--ink); }
+.fold[open] > summary { margin-bottom: .6rem; }
+.fold #progress h2 { margin-top: 0; }
 .reading { max-width: 48rem; margin: 0 auto; }
 .reading .run-meta { margin-bottom: .8rem; }
 .reading .question { font-size: 1.05rem; font-weight: 600; margin: 0 0 1rem; }

@@ -160,6 +160,17 @@ def test_the_report_is_rendered_not_shown_as_raw_markdown(client, config):
         assert "# Answer" not in page.text
 
 
+def test_a_finished_report_outranks_the_progress_trail(client, config):
+    """Once there is an answer, the answer is the page; the rounds fold up below it."""
+    response = client.post("/runs", data={"question": "Which comes first?"}, follow_redirects=False)
+    run_id = response.headers["location"].rsplit("/", 1)[-1]
+    _wait_for_final(config, run_id)
+
+    page = client.get(f"/runs/{run_id}").text
+    assert page.index("<h1>Answer</h1>") < page.index('id="progress"')
+    assert "<details class=\"fold\">" in page
+
+
 def test_a_report_that_contains_html_is_rendered_as_text_not_markup(config, identities):
     """The report is model-written, so markdown rendering must not become an XSS hole."""
     hostile = '# Answer\n\n<script>alert("xss")</script>\n\n[click](javascript:alert(1))\n'
