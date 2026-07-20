@@ -101,9 +101,18 @@ esac
 # An agent that ran to completion but produced nothing is a failure, not a silent pass.
 # Letting it through would hand the judge an empty reviewer set, and the fail-closed
 # contract would turn that into a confusing pipeline_error rather than a clear one here.
-if [ ! -s "$RESULT_PATH" ]; then
-  echo "::error::run-in-container: ${REVIEW_ROLE:-agent} did not produce $RESULT_PATH"
-  exit 1
+#
+# Not every caller works that way. The resolver's deliverable is a pull request, not a
+# JSON artifact — its prompt never asks for one — so it tripped this check on every run,
+# including the successful ones. A resolver that had just opened a good PR still reported
+# `failure`, which then made its own "did the agent succeed?" reporting meaningless and
+# took the transcript upload down with it.
+if [ "${EXPECT_RESULT:-1}" = "1" ]; then
+  if [ ! -s "$RESULT_PATH" ]; then
+    echo "::error::run-in-container: ${REVIEW_ROLE:-agent} did not produce $RESULT_PATH"
+    exit 1
+  fi
+  echo "run-in-container: ${REVIEW_ROLE:-agent} produced $RESULT_PATH"
+else
+  echo "run-in-container: ${REVIEW_ROLE:-agent} completed; no JSON artifact expected"
 fi
-
-echo "run-in-container: ${REVIEW_ROLE:-agent} produced $RESULT_PATH"
