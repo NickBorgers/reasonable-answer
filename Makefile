@@ -12,11 +12,13 @@ help:
 install:
 	uv sync --extra web
 
+# --extra web because tests/test_web.py imports fastapi; without it a fresh clone
+# fails at collection rather than running the suite.
 test:
-	uv run pytest
+	uv run --extra web pytest
 
 cov:
-	uv run pytest --cov=reasonable_answer --cov-report=term-missing
+	uv run --extra web pytest --cov=reasonable_answer --cov-report=term-missing
 
 doctor:
 	uv run ra doctor -v

@@ -1,12 +1,17 @@
 # Role-structured roster (docs/architecture.md).
 #
-# writers  — models that author reports (round-robin, never the previous author)
-# critics  — per-lens pools; a model may be critic-only (never a writer), which is
-#            the clean way to satisfy author-exclusion. Each lens wants >=2 eligible
-#            NON-AUTHOR models for a strong `accepted`.
+# writers       — models that author reports (round-robin, never the previous author)
+# critics       — per-lens pools; a model may be critic-only (never a writer), which is
+#                 the clean way to satisfy author-exclusion. Each lens wants >=2 eligible
+#                 NON-AUTHOR models for a strong `accepted`.
+# orchestrator  — the blind referee's model (optional; defaults to writers[0]). Its whole
+#                 job is bounded ints in, one boolean out, so it needs no reach.
 #
 # Aliases are LiteLLM proxy aliases; their resolved provider/model is fetched from
 # the proxy at startup and distinctness is enforced at that level (RA-017).
+#
+# Every entry is open-weight and loadable on the target local box (D17). The ceiling is
+# ~450GB for a single model, with swapping — see docs/DESIGN.md for the footprint table.
 
 proxy:
   base_url: https://llm.featherback-mermaid.ts.net/v1
@@ -15,22 +20,26 @@ proxy:
 
 roster:
   writers:
-    - claude-haiku-4-5
-    - gpt-5.4-mini
+    - mistral-large-3      # 675B/A41B Apache 2.0, ~340GB @4bit. Authors R1 and every odd round.
+    - deepseek-v4-flash    # 284B/A13B MIT, ~145GB @4bit.
+
+  # Free, local (ollama), and pinned in memory. Its failure mode is a skipped polish
+  # pass and nothing else: rule 9 is cap-gated and the LLM can only *enable* it.
+  orchestrator: gemma4-small
 
   critics:
     logic:
-      - qwen3.7-max          # critic-only specialist: strong reasoner
-      - gpt-5.4-mini
-      - claude-haiku-4-5
+      - glm-5.2            # critic-only: highest GPQA of any shipped open model
+      - minimax-m3
+      - mistral-large-3    # eligible whenever deepseek-v4-flash authors
     evidence:
-      - llama-4-scout        # critic-only specialist: huge context, scans citations
-      - claude-haiku-4-5
-      - gpt-5.4-mini
+      - glm-5.2            # critic-only: lowest hallucination of the open frontier
+      - minimax-m3
+      - gemma4
     completeness:
-      - gemma4               # critic-only specialist: third family
-      - gpt-5.4-mini
-      - claude-haiku-4-5
+      - mistral-large-3    # Western corpus — decorrelated priors from the CN-lab models
+      - glm-5.2
+      - gemma4
 
 budgets:
   min_ticks: 2

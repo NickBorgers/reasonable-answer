@@ -25,7 +25,7 @@ across fresh contexts, a diverse roster decorrelates those errors — and, conve
 makes a *strong* acceptance possible: each dimension blessed by **≥2 distinct non-author** models
 on the identical final report (see [convergence.md](./convergence.md)). Context separation handles
 the primary (social) bias; model diversity handles the secondary (blind-spot) bias. The system
-uses **both**. Assigning **each lens its own critic model** (D15 — e.g. Llama 4 Scout for evidence)
+uses **both**. Assigning **each lens its own critic model** (D15 — best model matched per dimension)
 pushes model diversity further: three different models examine the artifact per tick, one per
 dimension, and each dimension is confirmed by a *second* distinct model before strong acceptance.
 

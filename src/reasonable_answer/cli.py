@@ -81,6 +81,8 @@ def doctor(
         for lens, pool in config.roster.critics.items():
             if alias in pool:
                 roles_.append(lens)
+        if alias == config.roster.orchestrator_alias:
+            roles_.append("orchestrator")
         mode = client.probe_structured_output(alias)
         table.add_row(alias, identities[alias], ", ".join(roles_), mode)
     console.print(table)

@@ -55,8 +55,8 @@ def _ago(ts: float | None) -> str:
 
 
 def _short(identity: str | None) -> str:
-    """`openrouter/meta-llama/llama-4-scout` -> `llama-4-scout`, which is what a
-    human is actually scanning for."""
+    """`openrouter/mistralai/mistral-large-2512` -> `mistral-large-2512`, which is what
+    a human is actually scanning for."""
     if not identity:
         return "—"
     return identity.split("/")[-1]

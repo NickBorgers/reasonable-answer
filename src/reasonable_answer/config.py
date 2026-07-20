@@ -1,8 +1,10 @@
 """Run configuration: the role-structured roster, budgets, and startup validation.
 
-The roster is a **writer pool** plus **per-lens critic pools** (D15/D16). Critic-only
-specialists are allowed and are the clean way to satisfy author-exclusion: a model
-pinned to the evidence lens that never writes can review every tick.
+The roster is a **writer pool** plus **per-lens critic pools**, and an optional
+**orchestrator** entry (D15/D16/D18). Critic-only specialists are allowed and are the
+clean way to satisfy author-exclusion: a model that never writes can review every tick.
+That is how the strongest model in the roster earns its keep — as a writer it would be
+barred from reviewing its own drafts.
 
 Startup validation is **fail closed** (RA-015): an empty writer pool, a lens with no
 eligible non-author model, or a bad `min_ticks`/`hard_cap` pair aborts the run before
@@ -12,12 +14,16 @@ a single token is spent.
 from __future__ import annotations
 
 import os
+import re
 from pathlib import Path
 
 import yaml
 from pydantic import BaseModel, ConfigDict, Field, model_validator
 
 from .taxonomy import LENSES, Lens
+
+#: Leading alphabetic run of a model name — 'gemma-4-31b-it' and 'gemma4' both -> 'gemma'.
+_FAMILY_STEM = re.compile(r"[a-z]+")
 
 #: Shipped inside the wheel (see pyproject force-include), so an installed package
 #: has a working default even with no source tree around it.
@@ -95,6 +101,11 @@ class Roster(BaseModel):
 
     writers: list[str] = Field(min_length=1)
     critics: dict[str, list[str]]
+    #: The blind orchestrator's model. Its whole job is bounded ints in, one boolean
+    #: out (schemas.OrchestratorView), so it needs neither reach nor a writer's
+    #: capability. Defaults to writers[0] only because that alias is guaranteed to
+    #: exist and to have been probed.
+    orchestrator: str | None = None
 
     @model_validator(mode="after")
     def _check(self) -> Roster:
@@ -117,9 +128,20 @@ class Roster(BaseModel):
         return list(self.critics[lens.value])
 
     @property
+    def orchestrator_alias(self) -> str:
+        """The explicit entry if set, else writers[0]. Total: writers has min_length=1."""
+        return self.orchestrator or self.writers[0]
+
+    @property
     def all_aliases(self) -> list[str]:
+        # The orchestrator belongs here even when it is just writers[0]: `all_aliases`
+        # is what startup resolves identities for and probes for structured output
+        # (graph.build_runtime). An alias missing from it would skip both — the
+        # identity guard would silently degrade to accepting the bare alias, and a
+        # structured-output failure would surface mid-run instead of at startup.
+        pools = (a for pool in self.critics.values() for a in pool)
         seen: list[str] = []
-        for alias in [*self.writers, *(a for pool in self.critics.values() for a in pool)]:
+        for alias in [*self.writers, *pools, self.orchestrator_alias]:
             if alias not in seen:
                 seen.append(alias)
         return seen
@@ -200,10 +222,14 @@ def validate_roster_health(config: Config, identities: dict[str, str]) -> list[s
 
 
 def _family(identity: str) -> str:
-    """Coarse model-family key, e.g. 'openrouter/meta-llama/llama-4-scout' -> 'meta-llama'."""
-    parts = identity.split("/")
-    if len(parts) >= 3:
-        return parts[1]
-    if len(parts) == 2:
-        return parts[0]
-    return identity.split("-")[0]
+    """Coarse model-family key taken from the model *name*, ignoring the provider or
+    serving-backend prefix: 'openrouter/google/gemma-4-31b-it' and
+    'ollama_chat/gemma4:26b-a4b-it-q8_0' are both 'gemma'.
+
+    Keying on the prefix instead would read two namespaces at once — the org for a
+    three-segment identity, the backend for a two-segment one — and so call those two
+    Gemma checkpoints different families.
+    """
+    stem = identity.split("/")[-1].split(":")[0].lower()
+    match = _FAMILY_STEM.match(stem)
+    return match.group(0) if match else stem

@@ -220,6 +220,24 @@ def test_the_audit_trail_records_every_stage(identities, config):
     assert {"startup", "intake", "critique", "triage", "orchestrate", "control", "finalize"} <= kinds
 
 
+def test_the_orchestrator_runs_on_its_configured_model_not_the_first_writer(
+    identities, tmp_path, roster
+):
+    """Before this was configurable the referee was implicitly writers[0], so merely
+    reordering the writer pool changed who adjudicated polish."""
+    cfg = Config(
+        roster=roster.model_copy(update={"orchestrator": "referee"}),
+        budgets=Budgets(min_ticks=2, hard_cap=5, polish_cap=1),
+        runs_dir=tmp_path / "runs",
+    )
+    client = make_client({**identities, "referee": "vendor-f/referee"})
+    run(cfg, question="Is it so?", seed=REPORT, client=client)
+
+    orchestrations = [c for c in client.calls if c.schema == "OrchestratorRecommendation"]
+    assert orchestrations, "the orchestrator never ran"
+    assert {c.alias for c in orchestrations} == {"referee"}
+
+
 def test_run_directory_is_private(identities, config):
     client = make_client(identities)
     final = run(config, question="Is it so?", seed=REPORT, client=client)

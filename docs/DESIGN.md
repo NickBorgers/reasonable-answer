@@ -25,6 +25,30 @@ Speed is an explicit **anti-goal**. The intended runtime is a Mac Studio running
 locally: high quality, abysmal token rate. Resumability and a full audit trail matter far
 more than latency.
 
+That anti-goal is what makes the roster affordable. The whole roster is **open-weight only**
+(D17), and because a 60-90s model load off SSD is negligible against a 10-25 minute run, models
+may be **swapped** between roles rather than held resident. The budget is therefore the *largest
+single model*, not the sum — roughly **450GB** on a shared 768GB box. Approximate 4-bit
+footprints (MoE needs the whole model resident, since the router can reach any expert on any
+token, so active-parameter counts do not reduce this):
+
+| model | params | ~4-bit | in roster |
+|---|---|---|---|
+| `kimi-k3` | 2.8T/A50B | ~1.4TB | no — cannot load |
+| `deepseek-v4-pro` | 1.6T/A49B | ~800GB | no — cannot load |
+| `glm-5.2` | 744B/A40B | ~375GB | yes — critic-only, all lenses |
+| `mistral-large-3` | 675B/A41B | ~340GB | yes — writer + completeness |
+| `nemotron-3-ultra` | 550B/A55B | ~275GB | no — excluded by choice |
+| `deepseek-v4-flash` | 284B/A13B | ~145GB | yes — writer |
+| `minimax-m3` | 230B/A10B | ~115GB | yes — logic, evidence |
+| `gemma4-small` | 26B-A4B q8 | ~28GB | yes — orchestrator |
+| `gemma4` | 31B dense | ~16GB | yes — evidence, completeness |
+
+**Residency policy:** pin the two Gemmas (~44GB — the orchestrator plus a critic body) and swap
+the rest through one large slot. `glm-5.2` at ~375GB plus the pinned pair is ~419GB, inside
+budget. Note the 768GB configuration is not yet a shipping product; treat the capacity as
+unconfirmed and the open-weight roster as the portable thing.
+
 ## Core loop: an alternating refine game with a blind referee
 
 The heart of the system is an alternating game: models take turns **writing** and **critiquing** a
@@ -34,14 +58,15 @@ per row):
 
 | tick | report | writer | logic critic | evidence critic | completeness critic |
 |------|--------|--------|--------------|-----------------|---------------------|
-| 1 | R1 | W1 | La | **Scout** | Ca |
-| 2 | R2 | W2 | Lb | **Scout** | Cb |
-| 3 | R3 | W1 | La | **Scout** | Ca |
+| 1 | R1 | W1 | **GLM** | **GLM** | Ca |
+| 2 | R2 | W2 | **GLM** | **GLM** | Cb |
+| 3 | R3 | W1 | **GLM** | **GLM** | Ca |
 
 Each report has one **writer** (from the writer pool) and **three per-lens critic models**, none of
-which may be the writer of *that* report. A model can be a **critic-only specialist** — e.g. Llama 4
-Scout, pinned to the evidence lens, never a writer — so it can review every tick without ever
-violating author-exclusion. For a strong `accepted`, each lens pool holds **≥2 eligible non-author
+which may be the writer of *that* report. A model can be a **critic-only specialist** — `glm-5.2`,
+the strongest model in the roster, never authors — so it reviews every tick without ever violating
+author-exclusion. Had it been a writer instead, it would have been barred from reviewing its own
+drafts and the roster would have lost its best reviewer on half of all rounds. For a strong `accepted`, each lens pool holds **≥2 eligible non-author
 models** so every dimension gets a second, distinct reviewer (see D15/D16 in
 [decisions.md](./decisions.md) and [architecture.md](./architecture.md)).
 
@@ -110,7 +135,9 @@ can't game because none can see the whole board.
 ## Toolchain (chosen, with precedent)
 
 - **Python + LangGraph** for the stateful loop; **LiteLLM proxy** (one OpenAI-compatible
-  endpoint) for *all* models — cloud today, the local GLM 5.2 box is just another roster entry.
+  endpoint) for *all* models. The roster is open-weight throughout, reached over the proxy;
+  one entry (`gemma4-small`, the orchestrator) is already served locally by Ollama, so moving
+  the rest onto the local box is a proxy-side change and not an application-side one.
 - Modeled on the sibling project `~/code/hide-my-list` (Python + LangGraph + LiteLLM proxy).
 
 > **Critical caveat:** LangGraph state is *shared* across nodes, so isolation is not automatic.

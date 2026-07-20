@@ -56,10 +56,10 @@ as it happens — which model wrote the draft, which critic drew which lens, wha
 and which controller rule fired:
 
 ```
-round 2   writer gpt-5.4-mini
-  logic         qwen3.7-max      2 issues
-  evidence      llama-4-scout    clean
-  completeness  gemma4           clean
+round 2   writer deepseek-v4-flash
+  logic         glm-5.2          2 issues
+  evidence      glm-5.2          clean
+  completeness  mistral-large-3  clean
   1 major  ->  rule 14  generate  material issues remain
 ```
 
@@ -98,12 +98,22 @@ Everything lives in [config/roster.yaml](./config/roster.yaml). The roster is **
 
 ```yaml
 roster:
-  writers: [claude-haiku-4-5, gpt-5.4-mini]   # models that author reports
+  writers: [mistral-large-3, deepseek-v4-flash]   # models that author reports
+  orchestrator: gemma4-small                      # blind referee (optional; default writers[0])
   critics:
-    logic:        [qwen3.7-max, gpt-5.4-mini, claude-haiku-4-5]
-    evidence:     [llama-4-scout, ...]        # critic-only specialist: huge context
-    completeness: [gemma4, ...]               # third family, decorrelated blind spots
+    logic:        [glm-5.2, minimax-m3, mistral-large-3]
+    evidence:     [glm-5.2, minimax-m3, gemma4]
+    completeness: [mistral-large-3, glm-5.2, gemma4]
 ```
+
+Every entry is **open-weight** and small enough to load on the target local box (see
+[docs/DESIGN.md](./docs/DESIGN.md) for the footprint table). `glm-5.2` is deliberately
+*critic-only*: as a writer it would be barred from reviewing its own drafts, which would cost the
+roster its best reviewer on half of all rounds.
+
+The `orchestrator` decides only whether a cosmetic polish pass is worth running. It sees bounded
+counts and returns one boolean, so it runs on the cheapest local model in the roster; if it fails,
+the run simply skips polish.
 
 Models are addressed as **LiteLLM proxy aliases**; the proxy is one OpenAI-compatible endpoint for
 cloud and local models alike. At startup each alias is resolved to its underlying
@@ -117,6 +127,10 @@ Every lens wants **≥2 eligible non-author models**. `make doctor` tells you wh
 | ≥2 eligible non-author models on every lens | `accepted` |
 | some lens has only one | `converged_unconfirmed`, naming the under-reviewed dimension |
 | some lens has none | fails closed at startup |
+
+That count is over distinct *identities*, not families — two checkpoints of the same base model
+satisfy it while decorrelating very little. `make doctor` warns separately when a lens pool
+collapses to a single family.
 
 Point `proxy.base_url` at any OpenAI-compatible endpoint. If yours needs a key, set
 `LITELLM_API_KEY` (or change `api_key_env`).

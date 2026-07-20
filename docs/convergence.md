@@ -8,7 +8,7 @@ report, and it is bounded so it **always terminates**.
 > Fresh, blind contexts defeat the *primary* bias (social/context drift) regardless of model;
 > a diverse roster is a *secondary* layer that decorrelates model blind spots and enables strong
 > same-artifact acceptance. The roster is **role-structured** (D15/D16): a writer pool plus
-> per-lens critic pools with pinned specialists (e.g. Scout for evidence), sized to give **≥2
+> per-lens critic pools headed by the model best matched to each lens, sized to give **≥2
 > eligible non-author models per lens** for strong acceptance.
 
 ## The observable-category taxonomy (RA-006) with mechanical severity floors (RB-006, RC-005)
@@ -84,8 +84,8 @@ Identifiers live here, never in the LLM's view. **Noninterference** (RB-008) is 
 
 ## Acceptance evidence — immutable, hash-keyed records (RC-001, RC-002)
 
-Records are **per-lens** (D15): each lens can be assigned its own critic model (e.g. Llama 4 Scout
-for the evidence lens — huge context to scan every citation and its source text). A **per-lens
+Records are **per-lens** (D15): each lens can be assigned its own critic model (the evidence lens
+takes the lowest-hallucination model, since a fabricated citation is an attribution failure). A **per-lens
 clean record** is created only when *that lens* completes (not failed) and finds no material issue
 for its categories. Each record is immutable and keyed by:
 
