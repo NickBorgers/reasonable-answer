@@ -93,7 +93,7 @@ def create_app(
         summary = _require(registry, worker, run_id)
         if summary.status != "interrupted":
             raise HTTPException(status_code=409, detail=f"run is {summary.status}, not interrupted")
-        worker.resume(run_id, summary.question)
+        worker.resume(run_id, summary.question, registry.seed(run_id))
         return RedirectResponse(url=f"/runs/{run_id}", status_code=303)
 
     # ------------------------------------------------------------- fragments
