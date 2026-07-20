@@ -140,7 +140,19 @@ runs:
         set -euo pipefail
         # Read title and body now rather than trusting whatever the triggering event
         # carried, so a reviewer's scope check sees the PR as it currently reads.
-        PR_JSON=$(gh api "repos/${REPO}/pulls/${PR_NUMBER}")
+        #
+        # This action serves the resolver as well as the reviewers, and the resolver
+        # passes an ISSUE number — there is no PR yet, that is what it is about to
+        # create. `gh api .../pulls/<issue>` then 404s, and with `set -e` that killed the
+        # agent before it ran. Absent PR metadata is a normal state here, not an error.
+        if ! PR_JSON=$(gh api "repos/${REPO}/pulls/${PR_NUMBER}" 2>/dev/null); then
+          echo "No pull request #${PR_NUMBER} (expected when resolving an issue); continuing without PR metadata."
+          {
+            echo "pr_title_b64="
+            echo "pr_body_b64="
+          } >> "$GITHUB_OUTPUT"
+          exit 0
+        fi
         # base64 so newlines in the body survive the env file intact.
         echo "pr_title_b64=$(echo "$PR_JSON" | jq -r '.title // ""' | base64 -w0)" >> "$GITHUB_OUTPUT"
         echo "pr_body_b64=$(echo "$PR_JSON" | jq -r '.body // ""' | base64 -w0)" >> "$GITHUB_OUTPUT"
