@@ -256,6 +256,19 @@ jobs:
           set -euo pipefail
           CTX="${PR_WORKSPACE}/.review-output/pr-context.md"
 
+          # Print the argument, or "_none_" when it is empty. `|| echo "_none_"` only fires
+          # when the command *fails*; a command that succeeds with empty output — which is
+          # what `gh api .../comments` does on a PR with no comments — would otherwise
+          # render a heading with nothing under it, reading like a broken step rather than
+          # an honest "there is nothing here".
+          emit_or_none() {
+            if [ -n "$1" ]; then
+              printf '%s\n' "$1"
+            else
+              echo "_none_"
+            fi
+          }
+
           # The checkout is at a SHA, so origin/<base> is not guaranteed to resolve. Without
           # this the commit-log section silently degrades to "_none_" — the failure mode is a
           # thinner prompt, not an error, which is exactly the kind that goes unnoticed.
@@ -273,20 +286,23 @@ jobs:
             echo
             # Conversation comments — where a human most often states the intent that a
             # reviewer then misreads.
-            gh api "repos/${REPO}/issues/${PR_NUMBER}/comments" \
+            pr_comments=$(gh api "repos/${REPO}/issues/${PR_NUMBER}/comments" \
               --jq '.[] | "### @\(.user.login) (\(.created_at))\n\n\(.body)\n"' 2>/dev/null \
-              | head -c 60000 || echo "_none_"
+              | head -c 60000 || true)
+            emit_or_none "$pr_comments"
             echo
 
             echo "## Commit messages on this branch"
             echo
             # The author's own narration of what they did and why, which survives even
             # when nothing else about their reasoning does.
-            git -C "${PR_WORKSPACE}" log --no-merges --format='### %s%n%n%b%n' \
-              "FETCH_HEAD..${REVIEWED_SHA}" 2>/dev/null | head -c 40000 \
-              || git -C "${PR_WORKSPACE}" log --no-merges -20 --format='### %s%n%n%b%n' \
-                   "${REVIEWED_SHA}" 2>/dev/null | head -c 40000 \
-              || echo "_none_"
+            commit_log=$(git -C "${PR_WORKSPACE}" log --no-merges --format='### %s%n%n%b%n' \
+              "FETCH_HEAD..${REVIEWED_SHA}" 2>/dev/null | head -c 40000 || true)
+            if [ -z "$commit_log" ]; then
+              commit_log=$(git -C "${PR_WORKSPACE}" log --no-merges -20 --format='### %s%n%n%b%n' \
+                "${REVIEWED_SHA}" 2>/dev/null | head -c 40000 || true)
+            fi
+            emit_or_none "$commit_log"
             echo
 
             # A PR that cites an issue inherits that issue's requirement, whether or not
@@ -304,9 +320,10 @@ jobs:
               echo
               echo "### Issue discussion"
               echo
-              gh api "repos/${REPO}/issues/${ISSUE_NUM}/comments" \
+              issue_comments=$(gh api "repos/${REPO}/issues/${ISSUE_NUM}/comments" \
                 --jq '.[] | "**@\(.user.login):** \(.body)\n"' 2>/dev/null \
-                | head -c 40000 || echo "_none_"
+                | head -c 40000 || true)
+              emit_or_none "$issue_comments"
               echo
             fi
           } > "$CTX"
@@ -383,18 +400,16 @@ jobs:
           # The lockfile pins the whole transitive tree by integrity hash, so what runs is
           # what was reviewed when it was committed. Raised as sec-supply-chain-1 on #12.
           #
-          # Bootstrap: until the validator lands on main, main has no such directory, and
-          # failing hard would stop the change that introduces it from passing its own
-          # review. The fallback pins an EXACT version rather than a range — still resolved
-          # at runtime, but no longer a moving target. It disappears once this is on main.
+          # There is no runtime-resolved fallback: this stage holds a write-capable
+          # credential, so a missing lockfile fails hard rather than reaching for a
+          # floating install.
           VALIDATOR_DIR=".github/scripts/review/validator"
-          if [ -f "${VALIDATOR_DIR}/package-lock.json" ]; then
-            npm ci --prefix "$VALIDATOR_DIR" --no-audit --no-fund
-            AJV=("${VALIDATOR_DIR}/node_modules/.bin/ajv")
-          else
-            echo "::notice::main has no pinned validator yet; falling back to ajv-cli@5.0.0 (exact). This path disappears once the validator is on main."
-            AJV=(npx --yes ajv-cli@5.0.0)
+          if [ ! -f "${VALIDATOR_DIR}/package-lock.json" ]; then
+            echo "::error::pinned validator lockfile missing at ${VALIDATOR_DIR}/package-lock.json" >&2
+            exit 1
           fi
+          npm ci --prefix "$VALIDATOR_DIR" --no-audit --no-fund
+          AJV=("${VALIDATOR_DIR}/node_modules/.bin/ajv")
 
           # Main's schema, never the PR's — a PR cannot redefine the contract its own
           # fixer output is checked against.

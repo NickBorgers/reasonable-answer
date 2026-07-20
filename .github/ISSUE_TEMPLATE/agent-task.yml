@@ -5,8 +5,10 @@ body:
   - type: markdown
     attributes:
       value: |
-        Comment `/autoresolve` on this issue once it is filed and an agent will open a PR.
-        Add `/autoresolve claude` or `/autoresolve codex` to pick the model.
+        Filing this issue starts an agent, which will open a PR. `/autoresolve` is no
+        longer required to trigger one. To override which model runs, comment
+        `/autoresolve claude` or `/autoresolve codex` on the issue, or add the persistent
+        per-issue `agent:claude` / `agent:codex` label.
 
         **The structure below is load-bearing.** The invariant reviewer performs an
         alignment check by quoting this issue's named entities and acceptance criteria
