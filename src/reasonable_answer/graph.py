@@ -49,6 +49,12 @@ class State(TypedDict, total=False):
     run_id: str
     question: str
     seed: str | None
+    #: What ingest made of the seed at the edge — the format it came from, where it
+    #: came from, and anything it wants the user told. Provenance only: no node routes
+    #: on these, and they are outside the resume fingerprint (see `_run_fingerprint`).
+    seed_format: str | None
+    seed_source: str | None
+    seed_warnings: list[str]
     fingerprint: str
     #: Captured once at intake so every prompt in the run carries the same date
     #: (RB-010: confirmation critiques stay byte-identical across midnight).
@@ -238,7 +244,10 @@ def _intake(state: State, rt: Runtime) -> dict:
         "terminal_status": None,
         "scoreboard": [],
         "pending_lenses": [lens.value for lens in LENSES],
-        "warnings": rt.warnings,
+        # Ingest runs at the edge, so anything it noticed about the seed — a format
+        # that carried no headings, a truncated page — arrives here as text and joins
+        # the run's own warnings rather than getting its own channel.
+        "warnings": [*rt.warnings, *(state.get("seed_warnings") or [])],
     }
 
     if seed:
@@ -254,8 +263,20 @@ def _intake(state: State, rt: Runtime) -> dict:
             # guarantees it is never accepted on its first critique
             "round": 1,
         }
+        # Written here, not only by the web worker, so every entry path leaves the
+        # exact hashed bytes on disk and any seeded run is resumable.
+        rt.store.seed(seed)
         rt.store.report(1, h, seed, "seed")
-        rt.store.event("intake", path="seed", artifact_hash=h, run_date=base["run_date"])
+        rt.store.event(
+            "intake",
+            path="seed",
+            artifact_hash=h,
+            run_date=base["run_date"],
+            # Provenance belongs in the audit trail, not in the run state: it answers
+            # "where did R1 come from?" without changing what any node reads.
+            seed_format=state.get("seed_format"),
+            seed_source=state.get("seed_source"),
+        )
     else:
         rt.store.event("intake", path="question", run_date=base["run_date"])
     return base
@@ -881,7 +902,13 @@ def run(
     checkpointer: Any | None = None,
     client: LLMClient | None = None,
     stop: threading.Event | None = None,
+    seed_format: str | None = None,
+    seed_source: str | None = None,
+    seed_warnings: list[str] | None = None,
 ) -> dict:
+    """`seed` is markdown. Callers holding a PDF, a .docx or a URL convert it first
+    with `ingest`, at the edge, and pass the provenance it returns through the
+    `seed_*` parameters."""
     rt = build_runtime(config, run_id, client)
     checkpointer = checkpointer if checkpointer is not None else _checkpointer(rt)
     compiled = build_graph(rt).compile(checkpointer=checkpointer)
@@ -899,6 +926,9 @@ def run(
         "run_id": rt.store.run_id,
         "question": question,
         "seed": seed,
+        "seed_format": seed_format,
+        "seed_source": seed_source,
+        "seed_warnings": list(seed_warnings or []),
         "fingerprint": fingerprint,
     }
     if checkpointer is not None:

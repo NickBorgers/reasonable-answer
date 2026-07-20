@@ -25,7 +25,7 @@ from urllib.parse import urlsplit
 from fastapi import FastAPI, Form, HTTPException, Request
 from fastapi.responses import HTMLResponse, PlainTextResponse, RedirectResponse, StreamingResponse
 
-from .. import shutdown
+from .. import ingest, shutdown
 from ..config import Config, ConfigError
 from .registry import Registry, RunSummary
 from .render import render_index, render_report, render_run, render_run_progress
@@ -90,9 +90,15 @@ def create_app(
         runs = registry.list(active=worker.active())
         return render_index(runs, queue_depth=worker.queue_depth, config=config)
 
+    # A seed reaches this handler as pasted text or as an http(s) URL, and never as a
+    # filesystem path: no code path in the web layer may construct a `Path` from
+    # request data. The CLI reads local files because its caller already has the shell.
     @app.post("/runs")
     def submit(
-        request: Request, question: str = Form(...), seed: str = Form("")
+        request: Request,
+        question: str = Form(...),
+        seed: str = Form(""),
+        seed_url: str = Form(""),
     ) -> RedirectResponse:
         _reject_cross_site(request)
         question = question.strip()
@@ -103,13 +109,47 @@ def create_app(
                 status_code=400,
                 detail=f"question exceeds {config.max_question_chars} characters",
             )
+
         seed_text = seed.strip() or None
-        if seed_text and len(seed_text) > config.max_report_chars:
+        seed_url = seed_url.strip()
+        if seed_text and seed_url:
             raise HTTPException(
-                status_code=400, detail=f"seed exceeds {config.max_report_chars} characters"
+                status_code=400, detail="provide a seed as text or as a URL, not both"
             )
+        if seed_url and not config.seed.allow_url:
+            raise HTTPException(status_code=400, detail="URL seeds are disabled")
+        if seed_url and not seed_url.lower().startswith(("http://", "https://")):
+            # Refused here, before an opener exists, so `file:///etc/passwd` never
+            # reaches the fetch layer at all.
+            raise HTTPException(status_code=400, detail="a seed URL must be http(s)")
+
+        # Fetching blocks the request. `submit` is a plain `def`, so FastAPI runs it in
+        # a threadpool and the event loop is unaffected — and a dead URL fails visibly
+        # here instead of killing a worker thread a minute later.
+        ingested = None
+        if seed_url or seed_text:
+            try:
+                ingested = (
+                    ingest.from_url(seed_url, config=config)
+                    if seed_url
+                    else ingest.from_text(seed_text or "")
+                )
+            except ingest.IngestError as exc:
+                raise HTTPException(status_code=400, detail=str(exc)) from exc
+            if len(ingested.markdown) > config.max_report_chars:
+                raise HTTPException(
+                    status_code=400, detail=f"seed exceeds {config.max_report_chars} characters"
+                )
+
         try:
-            run_id = worker.submit(question, seed_text, identity=_identity(request))
+            run_id = worker.submit(
+                question,
+                ingested.markdown if ingested else None,
+                identity=_identity(request),
+                seed_format=ingested.format if ingested else None,
+                seed_source=ingested.source if ingested else None,
+                seed_warnings=ingested.warnings if ingested else (),
+            )
         except RateLimited as exc:
             # A concrete Retry-After lets a well-behaved client back off precisely
             # instead of guessing; the ceil keeps it an integer count of seconds.
@@ -144,6 +184,10 @@ def create_app(
         # is not counted against the attempt cap, so this always works.
         if summary.status not in ("interrupted", "abandoned"):
             raise HTTPException(status_code=409, detail=f"run is {summary.status}, not interrupted")
+        # The seed is part of the run's identity (`graph._run_fingerprint`), so resuming
+        # without it made every seeded run fail the fingerprint check and sit at
+        # `interrupted` forever. `seed.md` holds the converted markdown that was
+        # hashed, so reading it back reproduces the fingerprint exactly.
         worker.resume(run_id, summary.question, registry.seed(run_id))
         return RedirectResponse(url=f"/runs/{run_id}", status_code=303)
 

@@ -5,6 +5,7 @@ from __future__ import annotations
 import os
 import threading
 import time
+import urllib.request
 
 import pytest
 from fakes import FakeClient
@@ -41,8 +42,10 @@ def fake_client(identities):
 def client(config, fake_client):
     """A worker whose runner is the real graph but with a fake proxy behind it."""
 
-    def runner(cfg, *, question, seed, run_id, stop=None):
-        return run_graph(cfg, question=question, seed=seed, run_id=run_id, client=fake_client)
+    def runner(cfg, *, question, seed, run_id, stop=None, **seed_provenance):
+        return run_graph(
+            cfg, question=question, seed=seed, run_id=run_id, client=fake_client, **seed_provenance
+        )
 
     worker = RunWorker(config, max_concurrent=1, runner=runner)
     app = create_app(config, worker=worker)
@@ -370,7 +373,7 @@ def test_the_worker_caps_concurrency(config):
     running = []
     peak = 0
 
-    def slow_runner(cfg, *, question, seed, run_id, stop=None):
+    def slow_runner(cfg, *, question, seed, run_id, stop=None, **_):
         nonlocal peak
         running.append(run_id)
         peak = max(peak, len(running))
@@ -709,3 +712,112 @@ def test_the_sweeper_is_disabled_when_the_interval_is_not_positive(config):
     sweeper.start()  # a no-op — no background thread is spawned
     sweeper.join(timeout=0.1)
     assert not any(t.name == "ra-retention" for t in threading.enumerate())
+# ------------------------------------------------------------------- seed ingest
+
+
+def test_the_form_never_accepts_a_filesystem_path(client):
+    """The web layer must not read local files on a request's say-so. There is no
+    `seed_path` field, and a path in `seed_url` is refused by the scheme check."""
+    for value in ("/etc/passwd", "file:///etc/passwd", "../../secret.md"):
+        response = client.post(
+            "/runs", data={"question": "Q?", "seed_url": value}, follow_redirects=False
+        )
+        assert response.status_code == 400, value
+        assert "http(s)" in response.json()["detail"]
+
+
+def test_text_and_url_seeds_are_mutually_exclusive(client):
+    response = client.post(
+        "/runs",
+        data={"question": "Q?", "seed": "# A", "seed_url": "https://example.org/a"},
+        follow_redirects=False,
+    )
+    assert response.status_code == 400
+    assert "not both" in response.json()["detail"]
+
+
+def test_a_url_seed_is_fetched_converted_and_becomes_round_one(client, config, monkeypatch):
+    from fakes import http_stub
+
+    page = "<h1>Draft</h1><p>An existing claim.</p><h2>Sources</h2><p>https://example.org/a</p>"
+    monkeypatch.setattr(
+        urllib.request.OpenerDirector, "open", lambda self, *a, **k: http_stub(page)
+    )
+    response = client.post(
+        "/runs", data={"question": "Q?", "seed_url": "https://example.org/r"}, follow_redirects=False
+    )
+    assert response.status_code == 303
+    run_id = response.headers["location"].rsplit("/", 1)[-1]
+    _wait_for_final(config, run_id)
+
+    # The store holds the converted markdown, not the HTML that was fetched.
+    seed = Registry(config.runs_dir).seed(run_id)
+    assert seed.startswith("# Draft")
+    assert "<h1>" not in seed
+
+
+def test_a_dead_seed_url_fails_at_submit_not_in_a_worker(client, monkeypatch):
+    """Blocking the request is the point: the user learns immediately, instead of the
+    run dying a minute later with nothing but a log line."""
+    def boom(*a, **k):
+        raise OSError("connection refused")
+
+    monkeypatch.setattr(urllib.request.OpenerDirector, "open", boom)
+    response = client.post(
+        "/runs", data={"question": "Q?", "seed_url": "https://example.org/r"}, follow_redirects=False
+    )
+    assert response.status_code == 400
+    assert "could not fetch" in response.json()["detail"]
+
+
+def test_pasted_html_is_converted_rather_than_shown_to_critics_raw(client, config):
+    response = client.post(
+        "/runs",
+        data={"question": "Q?", "seed": "<h1>Pasted</h1><p>Body.</p>"},
+        follow_redirects=False,
+    )
+    run_id = response.headers["location"].rsplit("/", 1)[-1]
+    _wait_for_final(config, run_id)
+    assert Registry(config.runs_dir).seed(run_id).startswith("# Pasted")
+
+
+def test_the_url_field_disappears_when_url_seeds_are_disabled(config):
+    from reasonable_answer.web.render import render_index
+
+    config.seed.allow_url = False
+    assert 'name="seed_url"' not in render_index([], queue_depth=0, config=config)
+    config.seed.allow_url = True
+    assert 'name="seed_url"' in render_index([], queue_depth=0, config=config)
+
+
+def test_resume_restores_the_seed(config, tmp_path):
+    """A seeded run used to be unresumable from the web UI: `resume` dropped the seed,
+    so `_run_fingerprint` computed a different identity, `ResumeMismatch` was raised,
+    and the worker's generic handler swallowed it — leaving the run `interrupted`
+    forever. The seed is read back from the store, where it sits already converted.
+    """
+    seen: dict = {}
+
+    def runner(cfg, *, question, seed, run_id, **_):
+        seen["seed"] = seed
+
+    worker = RunWorker(config, max_concurrent=1, runner=runner)
+    try:
+        run_id = worker.submit("Q?", "# Seeded\n\nBody.")
+        deadline = time.time() + 5
+        while worker.status(run_id) and time.time() < deadline:
+            time.sleep(0.05)
+
+        app = create_app(config, worker=worker)
+        registry = Registry(config.runs_dir)
+        assert registry.seed(run_id) == "# Seeded\n\nBody."
+
+        seen.clear()
+        worker.resume(run_id, "Q?", registry.seed(run_id))
+        deadline = time.time() + 5
+        while not seen and time.time() < deadline:
+            time.sleep(0.05)
+        assert seen["seed"] == "# Seeded\n\nBody.", "resume must carry the seed, or the run is stuck"
+        assert app is not None
+    finally:
+        worker.shutdown()

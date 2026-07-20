@@ -219,6 +219,16 @@ class Registry:
         path = self.dir(run_id) / "final.md"
         return path.read_text() if path.exists() else None
 
+    def seed(self, run_id: str) -> str | None:
+        """The converted markdown the run was seeded with, or None if it was not.
+
+        Read back on resume because the seed is part of the run's fingerprint. This is
+        the same text `graph` hashed — `ingest` converts at the edge, before the store
+        is written — so no re-fetch and no re-conversion is involved.
+        """
+        path = self.dir(run_id) / "seed.md"
+        return path.read_text() if path.exists() else None
+
     def question(self, run_id: str) -> str:
         path = self.dir(run_id) / "question.txt"
         return path.read_text().strip() if path.exists() else "(question not recorded)"
@@ -256,7 +266,9 @@ class Registry:
             kind = event.get("kind")
             if kind == "intake" and event.get("path") == "seed":
                 current = 1
-                rounds.setdefault(1, RoundSnapshot(round=1, writer="(seed)"))
+                fmt = event.get("seed_format")
+                label = f"(seed: {fmt})" if fmt and fmt != "markdown" else "(seed)"
+                rounds.setdefault(1, RoundSnapshot(round=1, writer=label))
                 rounds[1].artifact_hash = event.get("artifact_hash")
             elif kind == "generate":
                 current += 1

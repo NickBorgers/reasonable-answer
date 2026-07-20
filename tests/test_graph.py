@@ -3,6 +3,7 @@
 from __future__ import annotations
 
 import json
+from pathlib import Path
 
 import pytest
 from fakes import FakeClient
@@ -309,3 +310,48 @@ def test_a_pool_of_duds_is_still_fatal(identities, config):
 
     assert final["fatal"]
     assert "every eligible writer failed" in final["fatal_reason"]
+def test_seed_warnings_from_ingest_reach_the_final_record(identities, config):
+    """Ingest runs at the edge, so anything it noticed about the seed has to be carried
+    into the run to be visible at all — the run page and final.json read `warnings`."""
+    final = run(
+        config,
+        question="Does it hold?",
+        seed="Prose with no headings whatsoever.",
+        seed_format="pdf",
+        seed_source="file:draft.pdf",
+        seed_warnings=["seed converted from pdf but no headings were recovered"],
+        client=make_client(identities),
+    )
+    assert any("no headings were recovered" in w for w in final["warnings"])
+
+
+def test_seed_provenance_lands_on_the_intake_event(identities, config):
+    """Provenance belongs in the audit trail: it answers 'where did R1 come from?'
+    without any node routing on it."""
+    final = run(
+        config,
+        question="Does it hold?",
+        seed=REPORT,
+        seed_format="docx",
+        seed_source="file:q3.docx",
+        client=make_client(identities),
+    )
+    events = [
+        json.loads(line)
+        for line in (Path(final["run_dir"]) / "events.jsonl").read_text().splitlines()
+        if line.strip()
+    ]
+    intake = next(e for e in events if e["kind"] == "intake")
+    assert intake["seed_format"] == "docx"
+    assert intake["seed_source"] == "file:q3.docx"
+
+
+def test_a_seeded_run_stores_the_exact_bytes_it_hashed(identities, config):
+    """Resume reproduces `_run_fingerprint` from `seed.md`, so those bytes must match
+    the seed exactly — `reports/r01-*.md` cannot serve, it carries an author header.
+    Written by the graph rather than only the web worker, so a CLI-started run is
+    resumable too.
+    """
+    seed = "# Draft\n\nBody."
+    final = run(config, question="Does it hold?", seed=seed, client=make_client(identities))
+    assert (Path(final["run_dir"]) / "seed.md").read_text() == seed

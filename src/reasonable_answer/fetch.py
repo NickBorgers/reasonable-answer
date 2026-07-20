@@ -27,6 +27,7 @@ import re
 import threading
 import urllib.error
 import urllib.request
+from collections.abc import Callable
 from dataclasses import dataclass
 from html.parser import HTMLParser
 
@@ -39,6 +40,24 @@ USER_AGENT = "reasonable-answer/1.0 (citation verification)"
 _SOURCES_HEADING = re.compile(r"^#{1,6}\s*sources\s*$", re.IGNORECASE | re.MULTILINE)
 _URL = re.compile(r"https?://[^\s<>\"'\)\]]+")
 _SKIP_TAGS = {"script", "style", "noscript", "svg", "head"}
+
+
+@dataclass(frozen=True)
+class RawResponse:
+    """An un-interpreted http(s) response body, with the bounds already applied.
+
+    Exists so the seed ingest path (which must accept PDFs and DOCX) can reuse the
+    hardened opener below without inheriting `SourceFetcher`'s text-only content-type
+    gate or its citation-sized character cap.
+    """
+
+    url: str
+    status: int | None
+    content_type: str
+    body: bytes
+    #: The body hit `max_bytes` and is therefore incomplete. Survivable for text;
+    #: fatal for a binary format, whose parser would be handed a mangled file.
+    truncated: bool
 
 
 @dataclass(frozen=True)
@@ -163,31 +182,33 @@ class SourceFetcher:
         if not url.lower().startswith(("http://", "https://")):
             return FetchedSource(url=url, error="not an http(s) URL")
 
-        opener = _http_only_opener(self._max_redirects)
-        req = urllib.request.Request(
-            url,
-            headers={"User-Agent": USER_AGENT, "Accept": "text/html,text/plain;q=0.9"},
-        )
         try:
-            with opener.open(req, timeout=self._timeout) as resp:  # noqa: S310
-                status = getattr(resp, "status", None)
-                ctype = (resp.headers.get("Content-Type") or "").lower()
-                if "html" not in ctype and "text" not in ctype:
-                    # A PDF is a legitimate citation but not something this can read.
-                    # Saying so is more useful than pretending the page was empty.
-                    return FetchedSource(
-                        url=url,
-                        status=status,
-                        error=f"unreadable content type ({ctype or 'unknown'})",
-                    )
-                raw = resp.read(self._max_bytes)
+            resp = http_get(
+                url,
+                timeout=self._timeout,
+                max_bytes=self._max_bytes,
+                max_redirects=self._max_redirects,
+                accept="text/html,text/plain;q=0.9",
+                # Don't spend the byte budget on a body this can't read anyway.
+                want_body=lambda ct: "html" in ct or "text" in ct,
+            )
         except urllib.error.HTTPError as exc:
             return FetchedSource(url=url, status=exc.code, error=f"HTTP {exc.code}")
         except Exception as exc:
             return FetchedSource(url=url, error=f"{type(exc).__name__}: {exc}"[:200])
 
+        status = resp.status
+        if "html" not in resp.content_type and "text" not in resp.content_type:
+            # A PDF is a legitimate citation but not something this can read. Saying so
+            # is more useful than pretending the page was empty.
+            return FetchedSource(
+                url=url,
+                status=status,
+                error=f"unreadable content type ({resp.content_type or 'unknown'})",
+            )
+
         try:
-            body = raw.decode("utf-8", errors="replace")
+            body = resp.body.decode("utf-8", errors="replace")
         except Exception as exc:  # pragma: no cover - decode with errors= never raises
             return FetchedSource(url=url, status=status, error=f"decode failed: {exc}")
 
@@ -202,6 +223,45 @@ class SourceFetcher:
                 url=url, status=status, title=parser.title, error="no readable text"
             )
         return FetchedSource(url=url, title=parser.title, text=text, status=status)
+
+
+def http_get(
+    url: str,
+    *,
+    timeout: float,
+    max_bytes: int,
+    max_redirects: int = 3,
+    accept: str,
+    user_agent: str = USER_AGENT,
+    want_body: Callable[[str], bool] | None = None,
+) -> RawResponse:
+    """Fetch one http(s) URL through the bounded, http(s)-only opener.
+
+    The single egress point for the whole package. Both callers — citation
+    verification and seed ingest — come through here, so `_http_only_opener` and
+    `_BoundedRedirects` stay the only way out to the network.
+
+    Raises whatever `urllib` raises; callers map exceptions to their own error shape.
+    `want_body`, when given, is consulted with the lowercased content-type *before* the
+    body is read: returning False yields an empty body rather than spending the byte
+    budget on something the caller cannot use.
+    """
+    if not url.lower().startswith(("http://", "https://")):
+        raise ValueError(f"not an http(s) URL: {url}")
+
+    opener = _http_only_opener(max_redirects)
+    req = urllib.request.Request(url, headers={"User-Agent": user_agent, "Accept": accept})
+    with opener.open(req, timeout=timeout) as resp:  # noqa: S310
+        status = getattr(resp, "status", None)
+        ctype = (resp.headers.get("Content-Type") or "").lower()
+        if want_body is not None and not want_body(ctype):
+            return RawResponse(url, status, ctype, b"", truncated=False)
+        # One byte past the cap: enough to tell a body that just fits from one that
+        # was cut off, which decides whether a binary parse is safe to attempt.
+        raw = resp.read(max_bytes + 1)
+
+    truncated = len(raw) > max_bytes
+    return RawResponse(url, status, ctype, raw[:max_bytes], truncated)
 
 
 def _http_only_opener(max_redirects: int) -> urllib.request.OpenerDirector:

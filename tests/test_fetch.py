@@ -8,9 +8,9 @@ from __future__ import annotations
 
 import urllib.error
 import urllib.request
-from io import BytesIO
 
 import pytest
+from fakes import http_stub
 
 from reasonable_answer import prompts
 from reasonable_answer.fetch import FetchedSource, SourceFetcher, extract_source_urls
@@ -69,21 +69,8 @@ def test_no_sources_section_yields_nothing():
 # ---------------------------------------------------------------------- fetching
 
 
-def _stub(body: str, *, ctype: str = "text/html", status: int = 200):
-    class _Resp(BytesIO):
-        headers = {"Content-Type": ctype}
-
-        def __init__(self):
-            super().__init__(body.encode())
-            self.status = status
-
-        def __enter__(self):
-            return self
-
-        def __exit__(self, *exc):
-            return False
-
-    return _Resp()
+#: Shared with the seed-ingest tests, which stub the same opener.
+_stub = http_stub
 
 
 PAGE = """<html><head><title>CAP theorem</title>
@@ -200,7 +187,9 @@ def test_byte_cap_bounds_what_is_read_off_the_wire():
     finally:
         _u.OpenerDirector.open = original
 
-    assert read_sizes == [500], "read() must be given the byte cap, not called unbounded"
+    # One byte past the cap, never unbounded: the sentinel is how `http_get` tells a
+    # body that just fits from one that was cut off. Only the cap's worth is kept.
+    assert read_sizes == [501], "read() must be given the byte cap, not called unbounded"
     assert len(result.text) < 1_000
 
 

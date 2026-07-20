@@ -157,6 +157,28 @@ class SearchConfig(BaseModel):
     fetch_max_chars: int = Field(default=6_000, ge=500, le=100_000)
 
 
+class SeedConfig(BaseModel):
+    """Bounds on ingesting a seed report the user supplied.
+
+    Deliberately separate from `SearchConfig.fetch_*`: those bound twelve cited pages
+    *per round*, where a seed is one document that is allowed to be report-sized. No
+    character cap lives here — `Config.max_report_chars` already owns that, and it is
+    enforced on the converted markdown, which is the text that reaches a model.
+    """
+
+    model_config = ConfigDict(extra="forbid")
+
+    #: Allow `--seed <url>` and the web seed-URL field. Turning this off removes the
+    #: field from the form as well as rejecting the parameter.
+    allow_url: bool = True
+    fetch_timeout_seconds: float = Field(default=30.0, gt=0, le=300)
+    #: A real PDF runs to megabytes; the citation fetcher's 400 KB would truncate most.
+    fetch_max_bytes: int = Field(default=4_000_000, ge=10_000, le=50_000_000)
+    #: Uncompressed size cap on a .docx archive, checked before anything is read, so a
+    #: zip bomb arriving from an arbitrary URL cannot be expanded.
+    docx_max_uncompressed_bytes: int = Field(default=50_000_000, ge=100_000)
+
+
 class Roster(BaseModel):
     model_config = ConfigDict(extra="forbid")
 
@@ -260,6 +282,7 @@ class Config(BaseModel):
     budgets: Budgets = Field(default_factory=Budgets)
     search: SearchConfig = Field(default_factory=SearchConfig)
     audition: AuditionConfig = Field(default_factory=AuditionConfig)
+    seed: SeedConfig = Field(default_factory=SeedConfig)
     runs_dir: Path = Path("runs")
     retention_days: int = 14
     #: How often the web server's background sweep content-purges runs past

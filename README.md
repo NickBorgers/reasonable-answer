@@ -32,16 +32,26 @@ make serve     # web interface on http://127.0.0.1:8080
 make run Q="Does a four-day work week increase productivity?"
 ```
 
-With a seed artifact to improve:
+With a seed artifact to improve. The seed does not have to be markdown — a PDF,
+a Word document, a web page, `.txt` or `.html` is converted at ingest:
 
 ```bash
 make run Q="Is this analysis sound?" SEED=draft.md
+make run Q="Is this analysis sound?" SEED=q3-report.pdf
+make run Q="Is this analysis sound?" SEED=https://example.org/whitepaper
 ```
+
+Conversion is best-effort and aims at one thing: recovering the `#` headings that
+critics cite loci against, and the `## Sources` list the evidence lens verifies. Where a
+format carries no heading structure — a bare `.txt`, most PDFs — the seed is accepted
+with a warning rather than rejected, and critics fall back to paragraph-level loci.
+PDF support needs the optional extra: `uv sync --extra ingest`.
 
 Or directly:
 
 ```bash
 uv run ra run -q "your question" --seed draft.md --config config/roster.yaml -v
+uv run ra run -q "your question" --seed https://example.org/report.pdf
 uv run ra doctor
 uv run ra audition
 uv run ra purge <run_id> [--content-only]

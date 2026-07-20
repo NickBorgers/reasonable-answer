@@ -8,6 +8,7 @@ from __future__ import annotations
 
 from collections.abc import Callable
 from dataclasses import dataclass, field
+from io import BytesIO
 from typing import Any
 
 from reasonable_answer.llm import Completion
@@ -92,3 +93,29 @@ class FakeClient:
         if schema is CritiqueOutput:
             return self.critique_fn(alias, user)
         raise AssertionError(f"unexpected schema {schema}")
+
+
+def http_stub(body: bytes | str, *, ctype: str = "text/html", status: int = 200):
+    """A stand-in for an opened http(s) response, for monkeypatching
+    `urllib.request.OpenerDirector.open`.
+
+    The network is stubbed at the opener rather than with an HTTP mock library so the
+    real `fetch._http_only_opener` and `_BoundedRedirects` stay on the path under test.
+    Shared by the citation-fetch and seed-ingest tests, which need the same shape.
+    """
+    raw = body.encode() if isinstance(body, str) else body
+
+    class _Resp(BytesIO):
+        headers = {"Content-Type": ctype}
+
+        def __init__(self):
+            super().__init__(raw)
+            self.status = status
+
+        def __enter__(self):
+            return self
+
+        def __exit__(self, *exc):
+            return False
+
+    return _Resp()
