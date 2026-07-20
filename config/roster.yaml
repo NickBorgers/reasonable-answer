@@ -27,6 +27,11 @@ roster:
   # pass and nothing else: rule 9 is cap-gated and the LLM can only *enable* it.
   orchestrator: gemma4-small
 
+  # minimax-m3 probes non-deterministically: json_schema, json_object and prompt have
+  # each come back across repeated `ra doctor` runs. The mode is pinned once at startup,
+  # so an unlucky probe puts it on tolerant extraction with repair_retries: 1 for the
+  # whole run. It is listed second on both lenses rather than first for that reason —
+  # pick_critic reaches it only after glm-5.2 has already reviewed the artifact.
   critics:
     logic:
       - glm-5.2            # critic-only: highest GPQA of any shipped open model
