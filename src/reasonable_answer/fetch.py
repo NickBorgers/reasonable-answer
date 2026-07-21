@@ -13,7 +13,8 @@ actually falsify:
 **Not an SSRF boundary** (D18). This fetches URLs a model chose, which is exposure by
 construction; the deployment is expected to constrain egress at the network layer. The
 bounds here — timeout, byte cap, redirect cap, http(s) only — exist so one slow or
-enormous page cannot stall or exhaust a run, not as a security control.
+enormous page cannot stall or exhaust a run, not as a security control. One worked way to
+supply that network-layer egress control is in docs/ssrf-egress-isolation.md.
 
 Fetched pages are untrusted third-party text entering a **critic's** context (RA-010),
 and reach only the evidence lens — see docs/isolation.md.
