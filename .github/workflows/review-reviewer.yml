@@ -211,8 +211,17 @@ jobs:
           # length, so every structural violation still reaches ajv below and still fails
           # the run closed. Run from main's checkout against main's schema, like the
           # validator itself: a PR cannot choose how its own artifacts are normalized.
-          node .github/scripts/review/normalize-artifact.mjs \
-            --schema "$MAIN_SCHEMA" --data "$RESULT_JSON"
+          #
+          # Existence check is the same bootstrap shim as the role-enum widening below:
+          # until this script lands on main, the trusted checkout does not have it, and
+          # the introducing PR would fail on MODULE_NOT_FOUND. Skipping normalization
+          # only removes a tolerance — validation below still fails closed.
+          NORMALIZER=".github/scripts/review/normalize-artifact.mjs"
+          if [ -f "$NORMALIZER" ]; then
+            node "$NORMALIZER" --schema "$MAIN_SCHEMA" --data "$RESULT_JSON"
+          else
+            echo "::notice::normalize-artifact.mjs is not on main yet; skipping length normalization (bootstrap)"
+          fi
 
           ROLE_VALUE=$(jq -r '.role' "$RESULT_JSON")
 

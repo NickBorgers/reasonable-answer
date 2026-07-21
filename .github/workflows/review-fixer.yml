@@ -419,8 +419,16 @@ jobs:
           # this stage has already run the agent and may have already pushed. See
           # normalize-artifact.mjs. Length is the only tolerance — every structural
           # violation still reaches ajv below and still fails closed.
-          node .github/scripts/review/normalize-artifact.mjs \
-            --schema "$FIX_SCHEMA" --data "$RESULT_JSON"
+          #
+          # Existence check is a bootstrap shim: until the script lands on main, the
+          # trusted checkout does not have it and the introducing PR would fail on
+          # MODULE_NOT_FOUND. Skipping only removes a tolerance — ajv still fails closed.
+          NORMALIZER=".github/scripts/review/normalize-artifact.mjs"
+          if [ -f "$NORMALIZER" ]; then
+            node "$NORMALIZER" --schema "$FIX_SCHEMA" --data "$RESULT_JSON"
+          else
+            echo "::notice::normalize-artifact.mjs is not on main yet; skipping length normalization (bootstrap)"
+          fi
 
           # Main's schema, never the PR's — a PR cannot redefine the contract its own
           # fixer output is checked against.
