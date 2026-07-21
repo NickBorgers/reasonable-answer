@@ -206,9 +206,30 @@ jobs:
           ISSUE_NUMBER: ${{ github.event.issue.number }}
         run: |
           set -euo pipefail
-          FOUND=$(gh pr list --repo "$REPO" --state open \
-            --search "Resolves #${ISSUE_NUMBER} OR Fixes #${ISSUE_NUMBER} OR Closes #${ISSUE_NUMBER}" \
-            --json number --jq '.[0].number // empty')
+
+          # Anchored match on each open PR's body, NOT `gh pr list --search`.
+          #
+          # That search is full text: it matches a PR that merely mentions the number, in
+          # any context. An "Explicitly out of scope" section saying "Issue #15 —
+          # unrelated" counted as resolving #15. That is not a corner case — out-of-scope
+          # sections are exactly where other issues get named — and #23 demonstrably
+          # matched a search for "Resolves #15" on that basis alone.
+          #
+          # The failure was silent and permanent: the resolver would skip the issue and
+          # comment that a PR already handled it, and every retry would reach the same
+          # conclusion, so the issue could never be worked.
+          #
+          # The `([^0-9]|$)` boundary keeps #15 from matching #150.
+          FOUND=""
+          while IFS= read -r num; do
+            [ -n "$num" ] || continue
+            if gh api "repos/${REPO}/pulls/${num}" --jq '.body // ""' \
+                 | grep -Eiq "^(Resolves|Fixes|Closes) #${ISSUE_NUMBER}([^0-9]|$)"; then
+              FOUND="$num"
+              break
+            fi
+          done < <(gh pr list --repo "$REPO" --state open --limit 100 --json number --jq '.[].number')
+
           if [ -n "$FOUND" ]; then
             echo "An open PR (#${FOUND}) already resolves this issue; nothing to do."
             echo "skip=true" >> "$GITHUB_OUTPUT"
