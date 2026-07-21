@@ -566,3 +566,131 @@ def test_audition_is_disabled_by_default():
     cfg = AuditionConfig()
     assert cfg.enabled is False
     assert cfg.enforce is False
+
+
+# ----------------------------------------------------- startup enforcement
+
+
+def _write_cache(path, roster_obj, identities, verdict_metrics, corpus_hash, reps=3, age_days=0):
+    entries = {}
+    for slot in audition.assignments(roster_obj, identities):
+        entries[audition.cache_key(slot.identity, slot.lens)] = audition.CacheEntry(
+            metrics=verdict_metrics(slot),
+            corpus_hash=corpus_hash,
+            prompt_hash=audition.prompt_hash(),
+            repetitions=reps,
+            recorded_at=time.time() - age_days * 86400,
+        )
+    audition.save_cache(path, entries)
+
+
+def _fit(slot):
+    return audition.Metrics(
+        alias=slot.alias,
+        identity=slot.identity,
+        lens=slot.lens,
+        calls=10,
+        planted_total=4,
+        strict_hits=4,
+        same_lens_hits=4,
+        obvious_total=4,
+        obvious_hits=4,
+        control_runs=2,
+        control_clean_runs=2,
+    )
+
+
+def _silent(slot):
+    return _fit(slot).model_copy(update={"strict_hits": 0, "same_lens_hits": 0, "obvious_hits": 0})
+
+
+@pytest.fixture
+def enforcing_config(tmp_path):
+    from reasonable_answer.config import Config
+
+    return Config(
+        roster=roster(),
+        audition=AuditionConfig(enforce=True, cache_path=tmp_path / "cache.json"),
+        runs_dir=tmp_path / "runs",
+    )
+
+
+def test_enforce_aborts_on_an_unfit_critic(enforcing_config):
+    from reasonable_answer.config import ConfigError
+    from reasonable_answer.graph import _enforce_audition
+
+    corpus = audition.load_fixtures().corpus_hash
+    _write_cache(
+        enforcing_config.audition.cache_path, roster(), IDENTITIES, _silent, corpus
+    )
+    with pytest.raises(ConfigError, match="unfit"):
+        _enforce_audition(enforcing_config, IDENTITIES)
+
+
+def test_enforce_aborts_when_the_cache_is_missing(enforcing_config):
+    """Otherwise enforcement is satisfiable by deleting the cache file — the one
+    failure mode a fail-closed check must not have."""
+    from reasonable_answer.config import ConfigError
+    from reasonable_answer.graph import _enforce_audition
+
+    assert not enforcing_config.audition.cache_path.exists()
+    with pytest.raises(ConfigError, match="no fresh audition"):
+        _enforce_audition(enforcing_config, IDENTITIES)
+
+
+def test_enforce_aborts_on_a_stale_audition(enforcing_config):
+    from reasonable_answer.config import ConfigError
+    from reasonable_answer.graph import _enforce_audition
+
+    corpus = audition.load_fixtures().corpus_hash
+    _write_cache(
+        enforcing_config.audition.cache_path, roster(), IDENTITIES, _fit, corpus, age_days=31
+    )
+    with pytest.raises(ConfigError, match="no fresh audition"):
+        _enforce_audition(enforcing_config, IDENTITIES)
+
+
+def test_enforce_passes_when_every_slot_is_fit_and_fresh(enforcing_config):
+    from reasonable_answer.graph import _enforce_audition
+
+    corpus = audition.load_fixtures().corpus_hash
+    _write_cache(enforcing_config.audition.cache_path, roster(), IDENTITIES, _fit, corpus)
+    assert _enforce_audition(enforcing_config, IDENTITIES) == []
+
+
+def test_without_enforce_an_unfit_critic_only_warns(tmp_path):
+    """The default must never block a run — an operator blocked by an expired
+    audition disables the harness outright, which is worse than a loud warning."""
+    from reasonable_answer.config import Config
+    from reasonable_answer.graph import _enforce_audition
+
+    config = Config(
+        roster=roster(),
+        audition=AuditionConfig(enforce=False, cache_path=tmp_path / "cache.json"),
+        runs_dir=tmp_path / "runs",
+    )
+    corpus = audition.load_fixtures().corpus_hash
+    _write_cache(config.audition.cache_path, roster(), IDENTITIES, _silent, corpus)
+
+    warnings = _enforce_audition(config, IDENTITIES)
+    assert any("unfit" in w for w in warnings)
+
+
+def test_startup_never_spends_calls_on_an_audition(tmp_path, monkeypatch):
+    """A run reads the cache and nothing else. If starting a run could trigger an
+    audition, every run would silently cost |critics| x |fixtures| x repetitions."""
+    from reasonable_answer.config import Config
+    from reasonable_answer.graph import _enforce_audition
+
+    def explode(*args, **kwargs):
+        raise AssertionError("startup must not run an audition")
+
+    monkeypatch.setattr(audition, "run_audition", explode)
+    monkeypatch.setattr(audition, "run_assignment", explode)
+
+    config = Config(
+        roster=roster(),
+        audition=AuditionConfig(cache_path=tmp_path / "cache.json"),
+        runs_dir=tmp_path / "runs",
+    )
+    _enforce_audition(config, IDENTITIES)

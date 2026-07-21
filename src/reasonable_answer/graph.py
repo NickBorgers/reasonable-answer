@@ -13,6 +13,7 @@ from __future__ import annotations
 
 import json
 import logging
+import time
 import uuid
 from concurrent.futures import ThreadPoolExecutor
 from dataclasses import dataclass, field
@@ -20,8 +21,8 @@ from typing import Any, TypedDict
 
 from langgraph.graph import END, START, StateGraph
 
+from . import audition, fetch, prompts, roles, search, triage
 from . import critique as critique_mod
-from . import fetch, prompts, roles, search, triage
 from . import report as report_mod
 from .config import Config, ConfigError, validate_roster_health
 from .controller import acceptance_state, decide, detect_cycle
@@ -112,6 +113,7 @@ def build_runtime(
     client = client or LLMClient(config)
     identities = client.resolve_identities(config.roster.all_aliases)
     warnings = validate_roster_health(config, identities)
+    warnings += _enforce_audition(config, identities)
 
     for alias in config.roster.all_aliases:
         mode = client.probe_structured_output(alias)
@@ -144,6 +146,69 @@ def build_runtime(
         log.warning("roster: %s", warning)
     return Runtime(config=config, client=client, identities=identities, store=store,
                    warnings=warnings, searcher=searcher, fetcher=fetcher)
+
+
+def _enforce_audition(config: Config, identities: dict[str, str]) -> list[str]:
+    """Apply cached audition verdicts at startup. Returns warnings; may fail closed.
+
+    Reads the cache only — never spends an audition's worth of calls. `ra audition`
+    populates it deliberately, so starting a run can never trigger one implicitly.
+
+    With `enforce: false` (the default) an unfit critic is a loud warning. With
+    `enforce: true` it aborts, and so does an assigned critic that is *unaudited or
+    stale* — otherwise enforcement would be satisfiable by deleting the cache file,
+    which is the one failure mode a fail-closed check must not have.
+    """
+    cfg = config.audition
+    try:
+        corpus_hash = audition.load_fixtures().corpus_hash
+    except audition.FixtureError as exc:
+        if cfg.enforce:
+            raise ConfigError(f"fail closed: audition.enforce is set but {exc}") from exc
+        return []
+
+    cache = audition.load_cache(cfg.cache_path)
+    ph = audition.prompt_hash()
+    now = time.time()
+
+    judgements: dict[tuple[str, Lens], audition.Judgement] = {}
+    unfit: list[str] = []
+    unmeasured: list[str] = []
+
+    for slot in audition.assignments(config.roster, identities):
+        entry = cache.get(audition.cache_key(slot.identity, slot.lens))
+        fresh = (
+            entry is not None
+            and entry.matches(corpus_hash, ph, cfg.repetitions)
+            and not entry.is_stale(now, cfg.max_age_days)
+        )
+        if not fresh:
+            unmeasured.append(f"{slot.alias}/{slot.lens.value}")
+            continue
+        judgement = audition.judge(entry.metrics, cfg.thresholds)
+        judgements[(slot.identity, slot.lens)] = judgement
+        if judgement.verdict is audition.Verdict.UNFIT:
+            unfit.append(f"{slot.alias}/{slot.lens.value} ({judgement.reasons[0]})")
+
+    warnings = list(audition.roster_warnings(config.roster, identities, judgements))
+    for slot_desc in unfit:
+        warnings.append(f"audition: {slot_desc} is unfit for the lens it holds")
+
+    if not cfg.enforce:
+        return warnings
+
+    if unfit:
+        raise ConfigError(
+            f"fail closed: audition.enforce is set and these critics are unfit: "
+            f"{unfit}. A lens staffed by them is not being reviewed, whatever the "
+            f"run's counters would say."
+        )
+    if unmeasured:
+        raise ConfigError(
+            f"fail closed: audition.enforce is set but these critic slots have no "
+            f"fresh audition: {unmeasured}. Run `ra audition`, or unset enforce."
+        )
+    return warnings
 
 
 def _build_searcher(config: Config, client: LLMClient) -> search.BraveSearch | None:
