@@ -13,14 +13,16 @@ from __future__ import annotations
 
 import json
 import logging
+import threading
 import uuid
 from concurrent.futures import ThreadPoolExecutor
+from contextlib import closing
 from dataclasses import dataclass, field
 from typing import Any, TypedDict
 
 from langgraph.graph import END, START, StateGraph
-from pydantic import ValidationError
 
+from . import critique as critique_mod
 from . import fetch, prompts, roles, search, triage
 from . import report as report_mod
 from .config import Config, ConfigError, validate_roster_health
@@ -29,7 +31,6 @@ from .llm import LLMClient, MalformedOutputError, ModelCallError
 from .schemas import (
     CleanRecord,
     ControllerInput,
-    CritiqueOutput,
     Decision,
     Defect,
     LensResult,
@@ -374,18 +375,6 @@ def _critique_one(
             attempt=attempt,
         )
 
-    base = LensResult(
-        lens=lens,
-        artifact_hash=artifact_hash,
-        critic_alias=alias,
-        critic_identity=identity,
-        artifact_author_identity=author_identity,
-        attempt=attempt,
-    )
-
-    rendered = report_mod.render_with_loci(report_text)
-    structure = report_mod.parse(report_text)
-
     # Only the evidence lens. Handing fetched pages to logic or completeness would
     # widen what those lenses can see without widening what they may raise, and the
     # extra context is a channel for smuggling material into a scope that has no use
@@ -402,27 +391,19 @@ def _critique_one(
                 failed=sum(1 for s in sources if not s.ok),
             )
 
-    try:
-        output = rt.client.structured(
-            alias,
-            system=prompts.CRITIC_SYSTEM,
-            user=prompts.critic_user(lens, question, rendered, sources),
-            schema=CritiqueOutput,
-            max_tokens=16000,
-        )
-    except (ModelCallError, MalformedOutputError, ValidationError) as exc:
-        return base.model_copy(update={"failed": True, "failure_reason": str(exc)[:400]})
-
-    try:
-        for issue in output.issues:
-            triage.validate_issue(
-                lens, issue, structure, rt.config.require_verbatim_spans
-            )
-    except triage.LensValidationError as exc:
-        # Fail-closed: one bad field fails the whole lens; nothing is silently dropped.
-        return base.model_copy(update={"failed": True, "failure_reason": str(exc)[:400]})
-
-    return base.model_copy(update={"issues": output.issues})
+    return critique_mod.critique_once(
+        rt.client,
+        alias,
+        identity,
+        lens,
+        question,
+        report_text,
+        artifact_hash,
+        author_identity,
+        sources=sources,
+        require_verbatim_spans=rt.config.require_verbatim_spans,
+        attempt=attempt,
+    )
 
 
 def _critique(state: State, rt: Runtime) -> dict:
@@ -819,6 +800,18 @@ class ResumeMismatch(RuntimeError):
     """The stored run was started with different inputs than this invocation."""
 
 
+class GracefulStop(RuntimeError):
+    """The process was asked to shut down and the run stopped at a node boundary.
+
+    Not a failure: the checkpoint is durable and the run is resumable from exactly
+    where it paused. Carries the run id so callers can say how to pick it back up.
+    """
+
+    def __init__(self, message: str, run_id: str) -> None:
+        super().__init__(message)
+        self.run_id = run_id
+
+
 def _checkpointer(rt: Runtime):
     """A per-run SQLite checkpoint next to the audit trail. Best-effort: an
     unavailable checkpointer costs resumability, never correctness."""
@@ -840,6 +833,7 @@ def run(
     run_id: str | None = None,
     checkpointer: Any | None = None,
     client: LLMClient | None = None,
+    stop: threading.Event | None = None,
 ) -> dict:
     rt = build_runtime(config, run_id, client)
     checkpointer = checkpointer if checkpointer is not None else _checkpointer(rt)
@@ -876,7 +870,51 @@ def run(
             log.info("run %s already terminated", rt.store.run_id)
             return {**snapshot.values, "run_dir": str(rt.store.dir), "run_id": rt.store.run_id}
 
-    final = compiled.invoke(initial, config=invoke_config)
+    final = _drive(compiled, initial, invoke_config, rt, stop)
     final["run_dir"] = str(rt.store.dir)
     final["run_id"] = rt.store.run_id
+    return final
+
+
+def _drive(compiled: Any, initial: State | None, invoke_config: dict, rt: Runtime,
+           stop: threading.Event | None) -> dict:
+    """Run the graph, stopping at a node boundary if asked to shut down.
+
+    This is `invoke()` unrolled. Streaming is the only way to observe "a node just
+    completed and its result is checkpointed", which is the one instant where stopping
+    is free — the node's model calls are paid for and persisted, and the resume picks up
+    at the next node. Stopping anywhere else either discards work already paid for or
+    persists a half-finished node as though it were complete.
+
+    `durability="sync"` is deliberate but not a bug fix. The default is `"async"`, which
+    hands the checkpoint write to a background executor awaited as the *next* step runs;
+    closing the stream cleanly still flushes it, because the executor is shut down as the
+    loop's ExitStack unwinds. Both modes were measured here and both keep the work.
+    What `"sync"` removes is the dependency on that teardown ordering — the checkpoint is
+    already durable when we observe the node completing, rather than durable because
+    something else cleans up correctly afterwards. At minutes per node, an inline sqlite
+    write is free, so the weaker guarantee buys nothing.
+
+    Deliberately not finer-grained: `_critique` fans out across lenses, and
+    short-circuiting the ones that have not started yet would checkpoint a partially
+    critiqued round as if it were whole.
+    """
+    final: dict | None = None
+    stream = compiled.stream(initial, config=invoke_config, stream_mode="values",
+                             durability="sync")
+    with closing(stream):
+        for values in stream:
+            final = values
+            if stop is not None and stop.is_set():
+                pending = list(compiled.get_state(invoke_config).next)
+                log.info("pausing run %s at %s for shutdown", rt.store.run_id, pending)
+                rt.store.event("pause", reason="shutdown", next=pending)
+                raise GracefulStop(
+                    f"run '{rt.store.run_id}' paused for shutdown before {pending or 'the end'}; "
+                    f"it resumes from this point",
+                    rt.store.run_id,
+                )
+
+    if final is None:  # pragma: no cover - stream always yields at least the input
+        raise RuntimeError(f"run '{rt.store.run_id}' produced no state")
     return final

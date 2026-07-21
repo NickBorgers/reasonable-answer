@@ -17,3 +17,6 @@ runs/
 
 # The pinned review validator is installed by CI from its committed lockfile.
 .github/scripts/review/validator/node_modules/
+
+# Cached critic-audition verdicts; a property of the deployment, not the repo.
+.ra-audition.json

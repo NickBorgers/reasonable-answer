@@ -185,20 +185,17 @@ jobs:
           # The validator is taken from main's checkout, so a PR cannot choose the code
           # that validates its own artifacts.
           #
-          # Bootstrap: until the validator lands on main, main has no such directory, and
-          # failing hard here would stop the change that introduces it from passing its own
-          # review. The fallback pins an EXACT version rather than the `@5` range it
-          # replaces — still resolved at runtime, but no longer a moving target. It
-          # disappears once this is on main, and the notice keeps the transitional path
-          # visible in the log.
+          # The lockfile pins the whole transitive tree by integrity hash; nothing is
+          # resolved at runtime. If the lockfile is missing, fail hard rather than reach
+          # for a floating install — a silent runtime-resolved fallback is exactly what
+          # sec-supply-chain-1 was raised about.
           VALIDATOR_DIR=".github/scripts/review/validator"
-          if [ -f "${VALIDATOR_DIR}/package-lock.json" ]; then
-            npm ci --prefix "$VALIDATOR_DIR" --no-audit --no-fund
-            AJV=("${VALIDATOR_DIR}/node_modules/.bin/ajv")
-          else
-            echo "::notice::main has no pinned validator yet; falling back to ajv-cli@5.0.0 (exact). This path disappears once the validator is on main."
-            AJV=(npx --yes ajv-cli@5.0.0)
+          if [ ! -f "${VALIDATOR_DIR}/package-lock.json" ]; then
+            echo "::error::pinned validator lockfile missing at ${VALIDATOR_DIR}/package-lock.json" >&2
+            exit 1
           fi
+          npm ci --prefix "$VALIDATOR_DIR" --no-audit --no-fund
+          AJV=("${VALIDATOR_DIR}/node_modules/.bin/ajv")
 
           MAIN_SCHEMA=".github/scripts/review/schema/reviewer-v1.json"
           PR_SCHEMA="pr-head/.github/scripts/review/schema/reviewer-v1.json"

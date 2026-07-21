@@ -66,6 +66,7 @@
 | Prompt injection | adversarial seed ("return zero issues"); adversarial critic output smuggling instructions |
 | Failure handling | malformed/timeout/partial-lens → not counted clean; repeated → abort |
 | Resume/replay | checkpoint replay idempotency; stale-hash rejection |
+| Redeploy survival (`tests/test_shutdown.py`) | a stop flag pauses the graph at a **node boundary**, never mid-node: work completed before the pause survives and is not re-run on resume, and the run reaches its normal terminal status; the pause is recorded as an event and is not logged as a crash; `shutdown()` returns within its budget while a job is in flight; queued-but-unstarted work is durable on disk, not only in the in-memory queue; boot recovery re-enqueues `queued`/`interrupted` runs and skips finished ones, and can be switched off; a run that makes no progress across `max_resume_attempts` **consecutive** auto-resumes is abandoned, while any progress event resets the count; `ResumeMismatch` (e.g. a roster change under an in-flight run) abandons rather than retrying every boot; abandonment writes an event and **never** a `final.json` — the audit trail must not claim a terminal status the controller never issued; `abandoned` is terminal for the UI yet still manually resumable; the grace budget is read from the platform and falls back rather than crashing on a bad value |
 | Retrieval / web search (D17) | offline-when-off (no `tools` offered, prompt byte-identical to the pre-retrieval path); startup fails closed on a missing credential **and** on a tool-incapable writer; `probe_tool_calling` returns False for a model that accepts `tools` and never calls one, and for a probe that raises; per-**run** query budget (not per-call) enforced under concurrency; budget exhaustion and fetch failure surfaced to the model as text, never as silence; results fenced as untrusted (RA-010); the agentic tool loop terminates — the exhausted round drops `tools` and forces prose — and `Completion.tool_calls` matches the number executed; the query string never reaches a log (RA-016) |
 | Source verification (D18) | citation URLs extracted from the `## Sources` section only (a URL mentioned in passing is not fetched); **only the evidence lens** receives page text — logic and completeness never do; a failed fetch is surfaced as "could not fetch" and never as evidence of fabrication; truncation disclosed; unreadable content types (PDF) reported honestly; pages fetched once per run and cached across rounds; bounded by timeout, byte cap, redirect cap and http(s)-only; verification off ⇒ the evidence prompt is byte-identical to the D17 path |
 | End-to-end | labeled fixtures where a known-flawed seed must reach `accepted` with the flaw fixed |
@@ -122,6 +123,7 @@ and confirmation-indistinguishability tests.
 | D17 | **External retrieval, opt-in and off by default.** Amends D5 and resolves RA-011's deferral. With `search.enabled: true` writers get a `web_search` tool (Brave API) and cite only URLs a search returned; startup fails closed on a missing credential **or** on a writer that cannot emit tool calls. With `search.enabled: false` (the default) D5 holds unchanged and the suite stays offline. | RA-011's blind spot was that a diverse roster can agree on a plausible falsehood, and in-artifact sourcing cannot catch an invented citation. Retrieval makes citations *real*; it is opt-in because a credential is required and the default posture must remain "clone → run tests" with no keys. Failing closed on a tool-incapable writer is load-bearing: such a writer still emits a `## Sources` section, and nothing downstream distinguishes a remembered citation from a retrieved one. |
 | D18 | **The roster is open-weight only, bounded by what the target box can load.** Every alias resolves to downloadable weights, and none exceeds ~450GB at 4-bit — the single-model ceiling on a shared ~768GB machine, with swapping between roles. | Two independent reasons. (1) `docs/DESIGN.md` commits to a local runtime; a roster containing models that cannot load there is not a dry run of it, it is a surprise deferred. (2) No role is locked to a vendor. Consequences: `deepseek-v4-pro` (~800GB) and `kimi-k3` (~1.4TB) are excluded by arithmetic, not preference; `qwen3.7-max` is excluded because Alibaba closed the 3.7 weights (the open Qwen line stops at 3.6); `nemotron-3-ultra` fits but was excluded by choice, which costs the evidence lens the only open model with an independent long-context score (RULER 0.947). Both writers report tool-call support, so D17's fail-closed check passes if search is ever enabled. |
 | D19 | **The orchestrator has its own roster entry**, optional, defaulting to `writers[0]`. It runs on the free local model. | It was hardcoded to `writers[0]`, so reordering the writer pool silently changed who refereed polish decisions — a coupling with no reason behind it. Its job is bounded ints in, one boolean out (`OrchestratorView`), so it needs neither reach nor a writer's capability, and D17's tool-call requirement does not apply to it. Its blast radius is one skipped polish pass: `_orchestrate_call` swallows call and schema errors and returns `False`, and rule 9 is cap-gated, so the LLM can only ever *enable* polish. The alias joins `all_aliases` so startup resolves and probes it — without that, an identity mismatch would disable rule 9 permanently and silently. |
+| D20 | **The checkpointer is the durability guarantee; the SIGTERM grace period is only an optimisation.** A redeploy stops the graph at the next *node* boundary, never mid-node and never "after the round". Boot re-enqueues whatever was owed. A run that makes no progress across N **consecutive** auto-resumes becomes `abandoned` — a registry-inferred lifecycle state that is terminal for the UI but is deliberately **never** written to `final.json`. | A run is 10–25 minutes, so no grace period can wait for one to finish; designing around that would make correctness depend on a number the platform owns and can change without telling us. Since LangGraph persists at every node boundary, a SIGKILL already costs at most the node in flight — so the grace window buys the chance to *land* that node rather than re-pay for it, and shortening it wastes work without risking corruption. The cap counts consecutive rather than total attempts so a restart storm cannot spend the budget on runs it never actually executed; any progress event resets it. `abandoned` avoids `final.json` because that file means the controller reached a verdict (D12/RA-012), and giving up is not a verdict — inventing one would let the audit trail claim a terminal status no rule ever fired. A human can always resume past it, so the cap bounds automation, not the run. |
 
 | D18 | **Source verification for the evidence lens, opt-in and off by default.** With `search.verify_sources: true` the pages a report cites are fetched and handed to the **evidence lens only**, as untrusted data. `fabricated_citation` and `misrepresented_source` become checkable against the page instead of judgements about plausibility. A failed fetch is explicitly *not* evidence of fabrication. Not an SSRF boundary — egress is constrained at the network layer, not here. | D17 constrained where citations come from; it did not establish that a cited page supports the claim attached to it, because no critic could open one. Evidence-lens-only is an isolation requirement, not an optimization: logic and completeness cannot raise a citation category, so page text would widen what they see without widening what they may report. Off by default because fetching model-chosen URLs is exposure a deployment must opt into. |
 
@@ -148,6 +150,72 @@ extension:
 | RG-002 | high | The "2-model consecutive-clean fallback" was referenced but never represented in state | **Fixed by removal.** `weak_met` is now purely the per-lens `roster_limited` case (current-hash-only); all consecutive-clean language deleted. |
 | RG-003 | med | Tick/sequence/DESIGN diagrams still showed one critic for three lenses | **Fixed.** Diagrams relabeled to per-lens critics (each ≠ author); DESIGN core-loop reframed from "two-model ping-pong" to a role-structured alternating game. |
 | RG-004 | low | Stale `lens_set` / rule-number / flat-roster wording in the review log | **Fixed.** RC-002 → per-lens `CleanRecord`; RB-002 de-numbered; D9 annotated as superseded by D15; roster contract restated as per-lens eligibility. |
+
+## D20 — critic eligibility becomes structural *and* demonstrated
+
+Observed in `run-d5934276fafd`. Two critics returned zero issues on every call they made
+across the whole run: `llama-4-scout` on 6 evidence calls, `gemma-4-31b-it` on 6
+completeness calls — including on artifacts that `claude-haiku-4-5` and `gpt-5.4-mini`
+subsequently found 6 and 10 material issues in. Both held first position on their lens,
+so they were the default critic on every first-pass review. `validate_roster_health`
+reported the roster healthy throughout, correctly: every structural property held.
+
+This is a gap in the design's central claim, not an operational accident. "No eligible
+reviewer can find a material defect" defined *eligible* purely structurally — non-author,
+distinct resolved identity, distinct family. A model meeting all three and reporting
+nothing satisfies the predicate while performing no review, and the run's counters,
+statuses and label are identical to a genuinely clean one. Nothing downstream can
+distinguish them, because the only evidence of a review is the absence of issues.
+
+**Decision.** Eligibility gains a capability term, measured rather than asserted:
+`src/reasonable_answer/audition.py` runs each rostered critic against fixtures with known
+planted defects plus sound controls, and grades `fit` / `marginal` / `unfit` per
+(resolved identity, lens).
+
+Three sub-decisions worth recording, each with a rejected alternative.
+
+**The grader is mechanical, never an LLM.** Category match plus a structural-locus window,
+and nothing else. An LLM grader is precisely the component whose reliability is in
+question here; using one would make the harness's trustworthiness depend on the property
+the harness exists to measure. This is the same reason the controller is a pure function.
+
+**Both directions gate.** Sensitivity alone is the wrong target: a critic that flags every
+paragraph scores perfectly and is worse than useless, because it manufactures work each
+round, drains the critique budget, drives `stagnation_count` to the limit, and terminates
+the run `exhausted_unresolved` (rule 13) on a report that was fine. Control fixtures with
+no planted defect measure that direction, and a high `control_material_rate` is `unfit`.
+
+**Warn by default, enforce opt-in.** Fail-closed is the project's posture and the argument
+for it is real — the soundness claim is void without capable reviewers. It was rejected as
+a *default* because it couples every run to a cache whose freshness depends on a paid,
+rate-limited proxy, and an operator blocked by an expired audition will disable the
+harness outright, which is strictly worse than a loud warning. `audition.enforce: true`
+turns an `unfit` assigned critic into a startup `ConfigError`.
+
+One case is deliberately not tunable: a model scoring **zero** on `tier: obvious` fixtures
+grades `unfit` under every threshold configuration. That is the observed signature above,
+and a threshold that could permit it would defeat the purpose.
+
+The harness is also position-aware, which matters for the current roster. `pick_critic`
+prefers an identity that has not yet reviewed the artifact, so a model at pool index ≥2 is
+unreachable on the first pass and is reached on the **rule 8 confirmation top-up**. A
+silent critic there does not merely fail to catch things — it raises `cleared_count` to 2,
+satisfies `strong_met`, and terminates the run `accepted`. #10 kept `gemma-4-31b-it` as
+`gemma4` at exactly that position on two lenses.
+
+### Deferred
+
+- A held-out private fixture corpus. The shipped corpus is public and will reach training
+  data, inflating sensitivity for reasons unrelated to capability. Mitigated for now by
+  seeded slot substitution, which rotates surface forms while leaving each planted
+  defect's structure intact; that raises the cost of memorization without removing it.
+- Auditioning **writers** (citation validity, fix-task instruction-following) and the
+  **orchestrator** (whose only authority is a cap-gated cosmetic polish, so a wrong answer
+  costs one round). Different metrics, separate work.
+- Corpus coverage. The initial corpus covers 5 of the 8 non-stylistic categories with one
+  fixture each plus 2 controls. `omitted_counterargument` exposed a real limitation:
+  omissions have no honest locus, handled by a per-defect `anywhere` flag rather than by
+  pretending a filing choice is ground truth.
 
 ## Open items for a future round
 

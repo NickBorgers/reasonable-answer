@@ -62,11 +62,31 @@ jobs:
           path: reviewer-artifacts
 
       # Legitimately absent when the reviewers raised no blockers, when the cycle cap
-      # forbade fixing, or when the fixer failed. `continue-on-error` because all three
-      # are normal outcomes, and judge.mjs treats a missing artifact as "nothing was
-      # fixed" — the fail-closed reading.
+      # forbade fixing, or when the fixer failed — the common case, since most PRs have
+      # no blockers. judge.mjs treats a missing artifact as "nothing was fixed", the
+      # fail-closed reading.
+      #
+      # We probe for the artifact explicitly rather than letting download-artifact fail
+      # under `continue-on-error`: that path emits an `##[error]` annotation on every
+      # clean run, and an error on a healthy run teaches people to ignore errors.
+      - name: Check for the fixer artifact
+        id: fixer_artifact
+        env:
+          GH_TOKEN: ${{ secrets.WORKFLOW_PAT }}
+          REPO: ${{ github.repository }}
+          RUN_ID: ${{ github.run_id }}
+          ARTIFACT_NAME: fixer-${{ inputs.reviewed_sha }}
+        run: |
+          set -euo pipefail
+          if gh api --paginate "repos/${REPO}/actions/runs/${RUN_ID}/artifacts" \
+               --jq '.artifacts[].name' | grep -Fxq "$ARTIFACT_NAME"; then
+            echo "exists=true" >> "$GITHUB_OUTPUT"
+          else
+            echo "exists=false" >> "$GITHUB_OUTPUT"
+          fi
+
       - name: Download the fixer artifact
-        continue-on-error: true
+        if: steps.fixer_artifact.outputs.exists == 'true'
         uses: actions/download-artifact@v4
         with:
           name: fixer-${{ inputs.reviewed_sha }}

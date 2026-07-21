@@ -85,6 +85,14 @@ inputs:
       resume a conversation that does not exist yet fails.
     required: false
     default: 'false'
+  expect_result:
+    description: >
+      Whether the agent must leave a JSON artifact at RESULT_PATH. True for reviewers and
+      the fixer, whose output IS that artifact. False for the resolver, whose deliverable
+      is a pull request — its prompt never asks for JSON, so requiring one made every
+      successful resolver run report failure.
+    required: false
+    default: 'true'
   result_basename:
     description: >
       Basename of the JSON artifact the prompt writes, without extension. Defaults to the
@@ -177,6 +185,7 @@ runs:
         EXTRA_ENV: ${{ inputs.extra_env }}
         SESSION_HOST_DIR: ${{ inputs.session_host_dir }}
         RESULT_BASENAME: ${{ inputs.result_basename }}
+        EXPECT_RESULT_IN: ${{ inputs.expect_result }}
         RESUME: ${{ inputs.resume }}
         REPO: ${{ github.repository }}
         PR_TITLE_B64: ${{ steps.pr-meta.outputs.pr_title_b64 }}
@@ -214,6 +223,7 @@ runs:
           echo "RESULT_PATH=.review-output/${ARTIFACT_BASE}-result.json"
           echo "OUTPUT_LOG_PATH=.review-output/${ARTIFACT_BASE}-output.log"
           echo "AGENT_RESUME=$([ "$RESUME" = "true" ] && echo 1 || echo 0)"
+          echo "EXPECT_RESULT=$([ "$EXPECT_RESULT_IN" = "false" ] && echo 0 || echo 1)"
           echo "REPO=${REPO}"
           echo "PR_TITLE_B64=${PR_TITLE_B64}"
           echo "PR_BODY_B64=${PR_BODY_B64}"

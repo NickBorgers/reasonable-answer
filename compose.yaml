@@ -10,6 +10,12 @@ services:
     build: .
     image: reasonable-answer:latest
     restart: unless-stopped
+    # A run is 10-25 minutes, so no grace period can "wait for it to finish". This
+    # buys enough time for the in-flight node — roughly one model call — to land and
+    # checkpoint, after which the restart resumes the run automatically. Correctness
+    # does not depend on the number: the checkpointer bounds a hard kill to the node in
+    # flight. Shortening it only means re-paying for that node.
+    stop_grace_period: 120s
     ports:
       - "127.0.0.1:8080:8080"
     volumes:
@@ -22,6 +28,14 @@ services:
       # Every concurrent run multiplies load on one proxy; the local models in the
       # roster are the bottleneck the design is built around.
       RA_MAX_CONCURRENT_RUNS: "1"
+      # Must match stop_grace_period above. Every internal deadline derives from it —
+      # the worker's wait for a node boundary nests inside uvicorn's connection drain,
+      # which nests inside this. Deriving them keeps that order when the platform is
+      # retuned; independent constants would eventually invert unnoticed.
+      RA_SHUTDOWN_GRACE_SECONDS: "120"
+      # Interrupted runs are re-enqueued at boot. Set to 0 to park them instead, which
+      # is what you want while debugging a run that crashes the process on startup.
+      # RA_RESUME_ON_BOOT: "0"
       # Only needed if the proxy is behind auth.
       # LITELLM_API_KEY: ${LITELLM_API_KEY}
     healthcheck:

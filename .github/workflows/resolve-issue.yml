@@ -38,7 +38,19 @@ concurrency:
   # fallback keeps the expression total if that is ever absent rather than collapsing
   # every run into one group named `autoresolve-`.
   group: autoresolve-${{ github.event.issue.number || github.run_id }}
-  cancel-in-progress: true
+  # NOT cancel-in-progress.
+  #
+  # This workflow comments on the issue when it finishes, and that comment fires
+  # `issue_comment` — landing a new run in this very group. With cancellation on, the
+  # workflow killed itself on the way out: the run that had just done 5 minutes of agent
+  # work was cancelled by the notification it had posted about its own success.
+  #
+  # Any human comment did the same thing, so a passing remark mid-run destroyed it.
+  #
+  # Queuing instead is safe. The `Check for an existing PR` step makes a second run a
+  # no-op once a PR exists, and the `<agent>-started` label records that an attempt
+  # happened, so duplicates converge rather than pile up.
+  cancel-in-progress: false
 
 permissions:
   contents: read
@@ -289,6 +301,9 @@ jobs:
           base_ref: ${{ github.event.repository.default_branch }}
           cycle: '1'
           timeout_minutes: '60'
+          # The resolver's deliverable is a PR, not a JSON artifact; its prompt never
+          # asks for one. Requiring it made every successful resolver run report failure.
+          expect_result: 'false'
           session_host_dir: ${{ steps.session.outputs.dir }}
           workflow_pat: ${{ secrets.WORKFLOW_PAT }}
           llm_proxy_base_url: ${{ vars.LLM_PROXY_BASE_URL }}
@@ -328,6 +343,29 @@ jobs:
           path: .review-output/resolve-issue-*
           retention-days: 7
           if-no-files-found: warn
+
+      # The container writes its transcript as uid 1000; this runner is a different uid.
+      # `prepare` chmods the directory before the container starts, which does nothing for
+      # files created inside it afterwards — those land 0600, owned by the container user.
+      # `tar` then fails with "Cannot open: Permission denied" on the very files that are
+      # the point of the exercise, the session artifact is never uploaded, and the fixer
+      # silently falls back to cold on every PR the resolver opens.
+      #
+      # Same uid-mismatch class as the workspace ownership reset in review-agent-run, and
+      # it needs the same treatment for the directory that action does not own.
+      - name: Reclaim the author session from the container uid
+        if: always() && steps.existing.outputs.skip != 'true'
+        env:
+          SESSION_DIR: ${{ steps.session.outputs.dir }}
+        run: |
+          set -euo pipefail
+          if [ -n "$SESSION_DIR" ] && [ -d "$SESSION_DIR" ]; then
+            sudo chown -R "$(id -u):$(id -g)" "$SESSION_DIR"
+            chmod -R u+rwX "$SESSION_DIR"
+            echo "Reclaimed $(find "$SESSION_DIR" -type f | wc -l) session file(s)."
+          else
+            echo "No session directory to reclaim."
+          fi
 
       # Pack the conversation for the fixer. Best-effort: an agent that died before
       # writing a session leaves nothing to pack, and that must not fail a run that

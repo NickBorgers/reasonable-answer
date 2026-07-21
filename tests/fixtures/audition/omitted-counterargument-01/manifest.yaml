@@ -1,0 +1,16 @@
+lens: completeness
+tier: moderate
+question: "Should cities adopt congestion pricing?"
+defects:
+  - category: omitted_counterargument
+    locus: {section: 1, paragraph: 1}
+    anywhere: true
+    note: >
+      The report recommends adoption without ever raising distributional incidence — a
+      flat cordon charge is regressive with respect to income, and that is the single
+      most common objection in the literature and the one that has killed schemes
+      politically. Note the fixture is not merely thin: S4 discusses boundary effects and
+      political durability, so a critic cannot score by flagging "needs more detail"
+      generally. `anywhere` is set because an omission has no honest locus; a critic may
+      reasonably anchor it to the recommendation in S1.P1, to the revenue section that
+      ignores who pays, or to the implementation section where it belonged.

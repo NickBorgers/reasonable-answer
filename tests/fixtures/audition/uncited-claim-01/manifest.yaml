@@ -1,0 +1,11 @@
+lens: evidence
+tier: obvious
+question: "Does raising the minimum wage reduce teen employment?"
+defects:
+  - category: uncited_claim
+    locus: {section: 3, paragraph: 1}
+    note: >
+      S3.P1 makes a sweeping empirical claim — "every credible study of the 2021-2023
+      period", a specific threshold, a specific effect size and a specific time window —
+      with no citation at all, in a report where every other empirical paragraph carries
+      one. The contrast with its neighbours is the signal.

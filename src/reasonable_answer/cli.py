@@ -3,18 +3,23 @@
 from __future__ import annotations
 
 import logging
+import time
 from pathlib import Path
 
 import typer
 from rich.console import Console
 from rich.table import Table
 
-from . import search
+from . import audition as audition_mod
+from . import search, shutdown
+from .audition import Assignment as Assignment_t
 from .config import Config, ConfigError, validate_roster_health
+from .graph import GracefulStop
 from .graph import run as run_graph
 from .llm import LLMClient
 from .store import expired_runs
 from .store import purge as purge_run
+from .taxonomy import Lens
 
 app = typer.Typer(add_completion=False, help="reasonable-answer — isolation-pipeline report refiner")
 console = Console()
@@ -39,12 +44,22 @@ def run(
     _setup_logging(verbose)
     config = Config.load(config_path)
     seed_text = seed.read_text() if seed else None
+    # Nothing else owns signals in this command, and in a container `ra` is PID 1 —
+    # which has no default SIGTERM disposition, so without this the signal is discarded
+    # and docker waits out the entire grace period before killing us.
+    shutdown.install_handlers()
 
     try:
-        final = run_graph(config, question=question, seed=seed_text, run_id=run_id)
+        final = run_graph(
+            config, question=question, seed=seed_text, run_id=run_id, stop=shutdown.event()
+        )
     except ConfigError as exc:
         console.print(f"[red]fail closed:[/red] {exc}")
         raise typer.Exit(code=2) from exc
+    except GracefulStop as exc:
+        console.print(f"\n[yellow]paused:[/yellow] {exc}")
+        console.print(f"resume it with: [bold]ra run --run-id {exc.run_id} -q '{question}'[/bold]")
+        raise typer.Exit(code=130) from exc
 
     status = final.get("terminal_status", "aborted")
     colour = {
@@ -75,6 +90,7 @@ def doctor(
     table.add_column("resolved identity")
     table.add_column("roles")
     table.add_column("structured output")
+    table.add_column("audition")
     if config.search.enabled:
         table.add_column("tool calls")
     for alias in config.roster.all_aliases:
@@ -87,7 +103,7 @@ def doctor(
         if alias == config.roster.orchestrator_alias:
             roles_.append("orchestrator")
         mode = client.probe_structured_output(alias)
-        row = [alias, identities[alias], ", ".join(roles_), mode]
+        row = [alias, identities[alias], ", ".join(roles_), mode, _audition_cell(config, identities, alias)]
         if config.search.enabled:
             # Only writers hold the tool today, so a critic's inability to call one
             # is information, not a problem.
@@ -101,6 +117,7 @@ def doctor(
     console.print(table)
 
     warnings = validate_roster_health(config, identities)
+    warnings += _audition_warnings(config, identities)
     for warning in warnings:
         console.print(f"[yellow]warning:[/yellow] {warning}")
     if not warnings:
@@ -152,7 +169,16 @@ def serve(
             f"make sure this interface is not publicly reachable"
         )
     console.print(f"serving on http://{host}:{port}  (runs dir: {config.runs_dir})")
-    uvicorn.run(create_app(config, max_concurrent=concurrent), host=host, port=port)
+    # Deadlines nest: the platform's SIGTERM-to-SIGKILL budget contains uvicorn's
+    # connection drain, which contains the worker's wait for a node boundary. Deriving
+    # all three from one number keeps them in that order when the platform is retuned;
+    # three independent constants would eventually invert without anyone noticing.
+    uvicorn.run(
+        create_app(config, max_concurrent=concurrent),
+        host=host,
+        port=port,
+        timeout_graceful_shutdown=int(shutdown.grace_seconds() * 0.8),
+    )
 
 
 @app.command()
@@ -183,3 +209,230 @@ def expired(config_path: Path | None = typer.Option(None, "--config", "-c")) -> 
 
 if __name__ == "__main__":  # pragma: no cover
     app()
+
+
+@app.command()
+def audition(
+    config_path: Path | None = typer.Option(None, "--config", "-c", help="Roster config YAML."),
+    fixtures_dir: Path | None = typer.Option(None, "--fixtures", help="Fixture corpus dir."),
+    lens_filter: str | None = typer.Option(None, "--lens", help="Audition one lens only."),
+    alias_filter: str | None = typer.Option(None, "--alias", help="Audition one alias only."),
+    force: bool = typer.Option(False, "--force", help="Ignore cached results and re-run."),
+    as_json: bool = typer.Option(False, "--json", help="Emit the report as JSON."),
+    verbose: bool = typer.Option(False, "--verbose", "-v"),
+) -> None:
+    """Measure whether each rostered critic can actually perform its lens.
+
+    Exits non-zero if any model assigned to a critic pool is `unfit` — a lens staffed
+    by such a model is not being reviewed, whatever the run's counters say.
+    """
+    _setup_logging(verbose)
+    config = Config.load(config_path)
+    cfg = config.audition
+    client = LLMClient(config)
+    identities = client.resolve_identities(config.roster.all_aliases)
+
+    try:
+        fixtures = audition_mod.load_fixtures(fixtures_dir)
+    except audition_mod.FixtureError as exc:
+        console.print(f"[red]fixtures:[/red] {exc}")
+        raise typer.Exit(code=2) from exc
+
+    slots = audition_mod.assignments(config.roster, identities)
+    if lens_filter:
+        slots = tuple(s for s in slots if s.lens.value == lens_filter)
+    if alias_filter:
+        slots = tuple(s for s in slots if s.alias == alias_filter)
+    if not slots:
+        console.print("[yellow]no critic slots match those filters[/yellow]")
+        raise typer.Exit(code=0)
+
+    now = time.time()
+    ph = audition_mod.prompt_hash()
+    cache = {} if force else audition_mod.load_cache(cfg.cache_path)
+
+    stale_or_missing = [
+        s
+        for s in slots
+        if not _cache_usable(cache, s, fixtures.corpus_hash, ph, cfg, now)
+    ]
+    if stale_or_missing:
+        calls = len(stale_or_missing) * len(fixtures.fixtures) * cfg.repetitions
+        console.print(
+            f"auditioning {len(stale_or_missing)} slot(s) against "
+            f"{len(fixtures.fixtures)} fixtures x{cfg.repetitions} — up to {calls} calls"
+        )
+        measured = audition_mod.run_audition(
+            client,
+            config.roster,
+            identities,
+            fixtures,
+            cfg,
+            require_verbatim_spans=config.require_verbatim_spans,
+            only=tuple(stale_or_missing),
+        )
+        for metrics in measured:
+            cache[audition_mod.cache_key(metrics.identity, metrics.lens)] = (
+                audition_mod.CacheEntry(
+                    metrics=metrics,
+                    corpus_hash=fixtures.corpus_hash,
+                    prompt_hash=ph,
+                    repetitions=cfg.repetitions,
+                    recorded_at=now,
+                )
+            )
+        audition_mod.save_cache(cfg.cache_path, cache)
+
+    judgements: dict[tuple[str, Lens], audition_mod.Judgement] = {}
+    rows: list[tuple[Assignment_t, audition_mod.Metrics | None, audition_mod.Judgement | None]] = []
+    for slot in slots:
+        entry = cache.get(audition_mod.cache_key(slot.identity, slot.lens))
+        if entry is None or not entry.matches(fixtures.corpus_hash, ph, cfg.repetitions):
+            rows.append((slot, None, None))
+            continue
+        judgement = audition_mod.judge(entry.metrics, cfg.thresholds)
+        judgements[(slot.identity, slot.lens)] = judgement
+        rows.append((slot, entry.metrics, judgement))
+
+    if as_json:
+        console.print_json(
+            data={
+                "corpus_hash": fixtures.corpus_hash,
+                "prompt_hash": ph,
+                "slots": [
+                    {
+                        "alias": s.alias,
+                        "identity": s.identity,
+                        "lens": s.lens.value,
+                        "position": s.position,
+                        "metrics": m.model_dump(mode="json") if m else None,
+                        "verdict": j.verdict.value if j else audition_mod.Status.NOT_AUDITED.value,
+                        "reasons": list(j.reasons) if j else [],
+                    }
+                    for s, m, j in rows
+                ],
+            }
+        )
+    else:
+        _render_audition(rows)
+
+    for warning in audition_mod.roster_warnings(config.roster, identities, judgements):
+        console.print(f"[yellow]warning:[/yellow] {warning}")
+
+    unfit = [s.alias for s, _, j in rows if j and j.verdict is audition_mod.Verdict.UNFIT]
+    if unfit:
+        console.print(f"[red]unfit critics assigned to lens pools: {sorted(set(unfit))}[/red]")
+        raise typer.Exit(code=1)
+    raise typer.Exit(code=0)
+
+
+def _cache_usable(cache, slot, corpus_hash, ph, cfg, now) -> bool:
+    entry = cache.get(audition_mod.cache_key(slot.identity, slot.lens))
+    if entry is None or not entry.matches(corpus_hash, ph, cfg.repetitions):
+        return False
+    return not entry.is_stale(now, cfg.max_age_days)
+
+
+def _render_audition(rows) -> None:
+    table = Table(title="critic audition")
+    for column in ("alias", "lens", "pos", "strict", "lens sens", "obvious", "ctrl/run", "verdict"):
+        table.add_column(column)
+    colour = {
+        audition_mod.Verdict.FIT: "green",
+        audition_mod.Verdict.MARGINAL: "yellow",
+        audition_mod.Verdict.UNFIT: "red",
+        audition_mod.Verdict.INSUFFICIENT: "dim",
+    }
+    for slot, metrics, judgement in rows:
+        if metrics is None or judgement is None:
+            # Never blank: a blank cell reads as a pass.
+            table.add_row(
+                slot.alias, slot.lens.value, str(slot.position + 1), "-", "-", "-", "-",
+                f"[dim]{audition_mod.Status.NOT_AUDITED.value}[/dim]",
+            )
+            continue
+        style = colour[judgement.verdict]
+        table.add_row(
+            slot.alias,
+            slot.lens.value,
+            str(slot.position + 1),
+            f"{metrics.strict_sensitivity:.2f}",
+            f"{metrics.lens_sensitivity:.2f}",
+            f"{metrics.obvious_sensitivity:.2f}",
+            f"{metrics.control_material_rate:.2f}",
+            f"[{style}]{judgement.verdict.value}[/{style}]",
+        )
+    console.print(table)
+    for slot, _, judgement in rows:
+        for reason in judgement.reasons if judgement else ():
+            console.print(f"[yellow]{slot.alias} / {slot.lens.value}:[/yellow] {reason}")
+
+
+def _audition_cells(config: Config, identities: dict[str, str]) -> dict[str, str]:
+    """Per-alias audition summary for `ra doctor`, read from the cache.
+
+    Never returns a blank for a critic: a blank cell reads as a pass, and the whole
+    point of the harness is that an unmeasured critic is *visibly* unmeasured.
+    """
+    slots = audition_mod.assignments(config.roster, identities)
+    try:
+        corpus_hash = audition_mod.load_fixtures().corpus_hash
+    except audition_mod.FixtureError:
+        corpus_hash = None
+    cache = audition_mod.load_cache(config.audition.cache_path)
+    ph = audition_mod.prompt_hash()
+    now = time.time()
+
+    per_alias: dict[str, list[str]] = {}
+    for slot in slots:
+        entry = cache.get(audition_mod.cache_key(slot.identity, slot.lens))
+        if entry is None or corpus_hash is None or not entry.matches(
+            corpus_hash, ph, config.audition.repetitions
+        ):
+            cell = f"[dim]{audition_mod.Status.NOT_AUDITED.value}[/dim]"
+        elif entry.is_stale(now, config.audition.max_age_days):
+            cell = f"[yellow]{audition_mod.Status.STALE.value}[/yellow]"
+        else:
+            verdict = audition_mod.judge(entry.metrics, config.audition.thresholds).verdict
+            style = {
+                audition_mod.Verdict.FIT: "green",
+                audition_mod.Verdict.MARGINAL: "yellow",
+                audition_mod.Verdict.UNFIT: "red",
+                audition_mod.Verdict.INSUFFICIENT: "dim",
+            }[verdict]
+            cell = f"[{style}]{slot.lens.value[:4]}:{verdict.value}[/{style}]"
+        per_alias.setdefault(slot.alias, []).append(cell)
+    return {alias: " ".join(cells) for alias, cells in per_alias.items()}
+
+
+def _audition_cell(config: Config, identities: dict[str, str], alias: str) -> str:
+    # Writers and the orchestrator hold no lens, so "not audited" would be misleading
+    # rather than informative — they are not critics and nothing measures them here.
+    return _audition_cells(config, identities).get(alias, "[dim]n/a[/dim]")
+
+
+def _audition_warnings(config: Config, identities: dict[str, str]) -> list[str]:
+    """Roster-level audition warnings, from cached verdicts only.
+
+    `ra doctor` must not spend an audition's worth of calls, so anything unmeasured is
+    simply absent here and shows as `not audited` in the table.
+    """
+    try:
+        corpus_hash = audition_mod.load_fixtures().corpus_hash
+    except audition_mod.FixtureError:
+        return []
+    cache = audition_mod.load_cache(config.audition.cache_path)
+    ph = audition_mod.prompt_hash()
+    now = time.time()
+
+    judgements: dict[tuple[str, Lens], audition_mod.Judgement] = {}
+    for slot in audition_mod.assignments(config.roster, identities):
+        entry = cache.get(audition_mod.cache_key(slot.identity, slot.lens))
+        if entry is None or not entry.matches(corpus_hash, ph, config.audition.repetitions):
+            continue
+        if entry.is_stale(now, config.audition.max_age_days):
+            continue
+        judgements[(slot.identity, slot.lens)] = audition_mod.judge(
+            entry.metrics, config.audition.thresholds
+        )
+    return audition_mod.roster_warnings(config.roster, identities, judgements)

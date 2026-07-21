@@ -16,8 +16,9 @@ from typing import Any, Literal
 
 from ..taxonomy import LENSES
 
-Status = Literal["queued", "running", "interrupted", "accepted", "converged_unconfirmed",
-                 "exhausted_unresolved", "needs_human_review", "aborted"]
+Status = Literal["queued", "running", "interrupted", "abandoned", "accepted",
+                 "converged_unconfirmed", "exhausted_unresolved", "needs_human_review",
+                 "aborted"]
 
 TERMINAL_STATUSES = {
     "accepted",
@@ -25,6 +26,23 @@ TERMINAL_STATUSES = {
     "exhausted_unresolved",
     "needs_human_review",
     "aborted",
+    # Not a verdict the controller ever issued — the run gave up before reaching one.
+    # Terminal all the same, so the UI stops offering an automatic resume.
+    "abandoned",
+}
+
+#: Events that mean a node actually ran. `startup`, `resume` and `queued` are written on
+#: every attempt whether or not anything progressed, so they cannot count as progress —
+#: see `consecutive_auto_resumes`.
+PROGRESS_EVENTS = {
+    "intake",
+    "generate",
+    "fetch_sources",
+    "critique",
+    "triage",
+    "orchestrate",
+    "control",
+    "finalize",
 }
 
 
@@ -111,11 +129,11 @@ class Registry:
             finished = None
             note = ""
         else:
-            # Events but no final.json and nobody working on it: the process died.
-            # The checkpointer means this is resumable rather than lost.
-            status = "interrupted"
+            # No final.json and nobody working on it. How it stopped is recorded in the
+            # last event, and the three cases are genuinely different: a run that was
+            # never picked up, one parked deliberately by a deploy, and one that died.
+            status, note = self._stopped_state(events)
             finished = None
-            note = "no final result; the run can be resumed"
 
         return RunSummary(
             run_id=run_id,
@@ -126,6 +144,39 @@ class Registry:
             finished_at=finished,
             terminal_note=note,
         )
+
+    @staticmethod
+    def _stopped_state(events: list[dict[str, Any]]) -> tuple[Status, str]:
+        """Why a run without a final result is not running, read off its last event."""
+        last = events[-1].get("kind") if events else None
+        if last == "abandoned":
+            reason = events[-1].get("reason", "")
+            return "abandoned", f"gave up without a verdict: {reason}" if reason else "gave up"
+        if last == "pause":
+            return "interrupted", "paused for a restart; it resumes automatically"
+        if last == "queued":
+            return "queued", "waiting for a worker"
+        # Anything else means the process vanished mid-node. The checkpointer makes that
+        # resumable rather than lost.
+        return "interrupted", "no final result; the run can be resumed"
+
+    def consecutive_auto_resumes(self, run_id: str) -> int:
+        """How many automatic resumes in a row have failed to get anywhere.
+
+        Counting *consecutive* attempts, rather than every attempt ever, is what keeps a
+        restart storm from spending the budget. A container that boots, re-enqueues a
+        run, and is redeployed thirty seconds later should not burn an attempt on a run
+        it never touched — but one that genuinely made progress should start over from
+        zero. Any progress event resets the count.
+        """
+        count = 0
+        for event in self.events(run_id):
+            kind = event.get("kind")
+            if kind == "queued" and event.get("auto"):
+                count += 1
+            elif kind in PROGRESS_EVENTS:
+                count = 0
+        return count
 
     # ------------------------------------------------------------------ parts
 
