@@ -62,8 +62,9 @@ docstring cites an ID, verify the docstring is still true; a stale in-code citat
 
 ## Alignment check and Scope check
 
-Both results must appear **verbatim** in `summary`, as `Alignment check: PASS|FAIL` and
-`Scope check: PASS|FAIL`.
+Both results must appear **verbatim at the START of `summary`**, as `Alignment check: PASS|FAIL`
+and `Scope check: PASS|FAIL`, before any prose. `summary` is capped and an over-long one is
+truncated from the end, so a check line written last is a check line that does not survive.
 
 **Alignment check** (scope MISS — the PR solved an adjacent problem):
 - Quote the load-bearing thing the issue/PR body names: the decision ID, the rule number, the
@@ -122,7 +123,7 @@ Valid JSON conforming exactly to `.github/scripts/review/schema/reviewer-v1.json
   "reviewed_sha": "${REVIEWED_SHA}",
   "cycle": ${CYCLE},
   "decision": "approve | request_changes | comment",
-  "summary": "<one paragraph containing verbatim 'Alignment check: PASS|FAIL' and 'Scope check: PASS|FAIL'>",
+  "summary": "Alignment check: PASS|FAIL. Scope check: PASS|FAIL. <one paragraph, ≤500 chars total>",
   "blocking_issues": [],
   "non_blocking_notes": [],
   "fix_suggestions": [],
@@ -142,7 +143,9 @@ Valid JSON conforming exactly to `.github/scripts/review/schema/reviewer-v1.json
   no surface on it. That is a real and useful finding, and it is what the reviewer above you needs.
   Confirming that a change cannot affect the design's safety properties is part of this job, not an
   admission that the job did not apply.
-- `summary` ≤ 500 chars — the validator hard-fails longer. Detail goes in the arrays.
+- `summary` ≤ 500 chars. Anything past 500 is truncated before the comment is published — you
+  lose the tail, the run does not fail. This is why the two check lines go FIRST: a summary that
+  buries them at the end publishes without them. Detail goes in the arrays.
 - **Blocking ids must be short, kebab-case, prefixed `inv-`, and STABLE across cycles for the same
   underlying problem** (`inv-author-exclusion-1`, `inv-view-leak-1`, `inv-docs-drift-2`). The judge
   namespaces them as `invariant/<id>` and tracks resolution by that key — renaming an id between

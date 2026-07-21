@@ -150,7 +150,7 @@ Write JSON to `$RESULT_PATH`, conforming to `.review-prompt/fix-result-v1.json`:
   "new_sha": null,
   "cycle": ${CYCLE},
   "mode": "author-resume",
-  "summary": "<one paragraph, <=500 chars>",
+  "summary": "<one paragraph, <=500 chars; a longer one is truncated, not rejected — lead with the conclusion>",
   "addressed": [
     { "id": "test/test-gap-1", "how": "<what changed and why it closes the blocker>", "resolution": "code_change", "files": ["tests/..."] },
     { "id": "invariant/inv-drift-2", "how": "<what the reviewer misread and how the body now says it>", "resolution": "body_clarification" }
