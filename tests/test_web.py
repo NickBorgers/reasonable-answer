@@ -38,7 +38,7 @@ def fake_client(identities):
 def client(config, fake_client):
     """A worker whose runner is the real graph but with a fake proxy behind it."""
 
-    def runner(cfg, *, question, seed, run_id):
+    def runner(cfg, *, question, seed, run_id, stop=None):
         return run_graph(cfg, question=question, seed=seed, run_id=run_id, client=fake_client)
 
     worker = RunWorker(config, max_concurrent=1, runner=runner)
@@ -280,7 +280,7 @@ def test_the_worker_caps_concurrency(config):
     running = []
     peak = 0
 
-    def slow_runner(cfg, *, question, seed, run_id):
+    def slow_runner(cfg, *, question, seed, run_id, stop=None):
         nonlocal peak
         running.append(run_id)
         peak = max(peak, len(running))
@@ -300,7 +300,7 @@ def test_the_worker_caps_concurrency(config):
 
 
 def test_a_crashing_run_leaves_the_worker_alive_and_the_run_resumable(config):
-    def exploding(cfg, *, question, seed, run_id):
+    def exploding(cfg, *, question, seed, run_id, stop=None):
         raise RuntimeError("boom")
 
     worker = RunWorker(config, max_concurrent=1, runner=exploding)
@@ -319,14 +319,18 @@ def test_a_crashing_run_leaves_the_worker_alive_and_the_run_resumable(config):
         worker.shutdown()
 
 
-def test_resuming_a_seeded_run_passes_the_seed_back(config):
+def test_resuming_a_seeded_run_passes_the_seed_back(config, monkeypatch):
     """The graph fingerprints question + seed + roster + budgets and refuses a
     checkpoint whose inputs drifted. A resume that forgets the seed therefore looks
     identical to someone changing the question, and every seeded run becomes
-    unresumable — so the seed has to come back off disk."""
+    unresumable — so the seed has to come back off disk.
+
+    Boot recovery is switched off here so the manual endpoint is what gets tested; the
+    automatic path has its own coverage below."""
+    monkeypatch.setenv("RA_RESUME_ON_BOOT", "0")
     seen: list[str | None] = []
 
-    def recording(cfg, *, question, seed, run_id):
+    def recording(cfg, *, question, seed, run_id, stop=None):
         seen.append(seed)
 
     worker = RunWorker(config, max_concurrent=1, runner=recording)
@@ -348,7 +352,7 @@ def test_resuming_a_seeded_run_passes_the_seed_back(config):
 
 
 def test_resuming_an_active_run_does_not_double_run(config):
-    def slow(cfg, *, question, seed, run_id):
+    def slow(cfg, *, question, seed, run_id, stop=None):
         time.sleep(0.5)
 
     worker = RunWorker(config, max_concurrent=1, runner=slow)

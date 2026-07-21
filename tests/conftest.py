@@ -2,6 +2,7 @@ from __future__ import annotations
 
 import pytest
 
+from reasonable_answer import shutdown
 from reasonable_answer.config import Budgets, Config, ProxyConfig, Roster
 from reasonable_answer.schemas import (
     ControllerInput,
@@ -10,6 +11,15 @@ from reasonable_answer.schemas import (
     SeverityCounts,
 )
 from reasonable_answer.taxonomy import LENSES
+
+
+@pytest.fixture(autouse=True)
+def _clean_shutdown_flag():
+    """The stop flag is a module global, so one test that shuts a worker down would
+    otherwise leave every later run pausing immediately at its first node boundary."""
+    shutdown.reset()
+    yield
+    shutdown.reset()
 
 
 @pytest.fixture

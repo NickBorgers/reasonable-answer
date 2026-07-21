@@ -241,6 +241,10 @@ class Config(BaseModel):
     audition: AuditionConfig = Field(default_factory=AuditionConfig)
     runs_dir: Path = Path("runs")
     retention_days: int = 14
+    #: How many times in a row the process may auto-resume a run on startup without it
+    #: making progress. Bounds a run that fails deterministically: without a cap, every
+    #: restart would pick it up, fail the same way, and restart again forever.
+    max_resume_attempts: int = 3
     max_report_chars: int = 60_000
     max_question_chars: int = 4_000
     #: anchor every critic quote to the paragraph it cites, closing the last

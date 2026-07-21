@@ -11,9 +11,10 @@ from rich.console import Console
 from rich.table import Table
 
 from . import audition as audition_mod
-from . import search
+from . import search, shutdown
 from .audition import Assignment as Assignment_t
 from .config import Config, ConfigError, validate_roster_health
+from .graph import GracefulStop
 from .graph import run as run_graph
 from .llm import LLMClient
 from .store import expired_runs
@@ -43,12 +44,22 @@ def run(
     _setup_logging(verbose)
     config = Config.load(config_path)
     seed_text = seed.read_text() if seed else None
+    # Nothing else owns signals in this command, and in a container `ra` is PID 1 —
+    # which has no default SIGTERM disposition, so without this the signal is discarded
+    # and docker waits out the entire grace period before killing us.
+    shutdown.install_handlers()
 
     try:
-        final = run_graph(config, question=question, seed=seed_text, run_id=run_id)
+        final = run_graph(
+            config, question=question, seed=seed_text, run_id=run_id, stop=shutdown.event()
+        )
     except ConfigError as exc:
         console.print(f"[red]fail closed:[/red] {exc}")
         raise typer.Exit(code=2) from exc
+    except GracefulStop as exc:
+        console.print(f"\n[yellow]paused:[/yellow] {exc}")
+        console.print(f"resume it with: [bold]ra run --run-id {exc.run_id} -q '{question}'[/bold]")
+        raise typer.Exit(code=130) from exc
 
     status = final.get("terminal_status", "aborted")
     colour = {
@@ -158,7 +169,16 @@ def serve(
             f"make sure this interface is not publicly reachable"
         )
     console.print(f"serving on http://{host}:{port}  (runs dir: {config.runs_dir})")
-    uvicorn.run(create_app(config, max_concurrent=concurrent), host=host, port=port)
+    # Deadlines nest: the platform's SIGTERM-to-SIGKILL budget contains uvicorn's
+    # connection drain, which contains the worker's wait for a node boundary. Deriving
+    # all three from one number keeps them in that order when the platform is retuned;
+    # three independent constants would eventually invert without anyone noticing.
+    uvicorn.run(
+        create_app(config, max_concurrent=concurrent),
+        host=host,
+        port=port,
+        timeout_graceful_shutdown=int(shutdown.grace_seconds() * 0.8),
+    )
 
 
 @app.command()
