@@ -219,10 +219,20 @@ critique. Intake validates size/format (markdown/text) and normalizes.
 - **Concurrency/limits:** bounded concurrency (the 3 lenses may run in parallel), per-call timeout +
   retry budget, token/context budgeting for the slow local model, backpressure so parallel lenses
   don't overload one proxy/model.
+- **Submission backpressure (RC-007):** concurrency bounds token *spend* but not how many runs may
+  pile up, so submission is also bounded. `RunWorker.submit()` refuses with **HTTP 429** once the
+  queue's waiting depth reaches `max_queue_depth`, and a fixed-window `submit_rate_max` /
+  `submit_rate_window_seconds` limiter caps how fast one caller may open new runs — keyed by the
+  Tailscale identity header when the app is fronted so it is present, otherwise one global bucket.
+  Both checks run **before** any run directory is written, so a refused submission costs no disk.
+  `resume()` and boot-time `recover()` bypass both bounds: they replay work already owed and on disk.
 - **Audit/privacy (concrete):** `runs/<id>/` holds sensitive seed material → least-privilege file
   perms (0700 dir), configurable retention (default: raw reports/critiques purged after N days;
   `OrchestratorView`/decisions retained longer), an explicit `purge <run_id>` command, and LiteLLM
-  proxy request logging **disabled or content-scrubbed** for artifact text.
+  proxy request logging **disabled or content-scrubbed** for artifact text. The web server runs an
+  automatic content-only sweep every `retention_sweep_interval_seconds` (RC-007), reclaiming the
+  bulk of disk past `retention_days` without waiting for a manual `purge`; live runs are skipped and
+  full-directory removal stays the explicit human escape hatch, keeping the decision record longer.
 
 ## Round sequence (one tick)
 

@@ -18,6 +18,7 @@ import queue
 import threading
 import time
 import uuid
+from collections import deque
 from collections.abc import Callable
 from dataclasses import dataclass
 from typing import Any
@@ -29,6 +30,70 @@ from ..graph import run as run_graph
 from ..store import RunStore
 
 log = logging.getLogger(__name__)
+
+
+class SubmissionRejected(RuntimeError):
+    """Base for backpressure refusals — the caller should surface HTTP 429.
+
+    Both subclasses are raised *before* anything is written to disk, so a rejected
+    submission leaves no run directory behind: refusing the work has to mean refusing
+    its footprint too, or the cap would only move the growth from memory onto disk.
+    """
+
+
+class QueueFull(SubmissionRejected):
+    """The queue is already holding `max_queue_depth` runs waiting for a worker."""
+
+
+class RateLimited(SubmissionRejected):
+    """This identity has submitted its allowance for the current window."""
+
+    def __init__(self, retry_after: float) -> None:
+        self.retry_after = max(0.0, retry_after)
+        super().__init__(f"rate limited; retry in {self.retry_after:.0f}s")
+
+
+class RateLimiter:
+    """A fixed-window submission limiter, keyed by caller identity.
+
+    Deliberately in-memory and approximate: this is backpressure against bursts, not
+    a billing meter. The clock is injectable so the limit can be tested without
+    sleeping. `max_events <= 0` disables it entirely (the check always passes).
+    """
+
+    def __init__(
+        self,
+        max_events: int,
+        window_seconds: float,
+        clock: Callable[[], float] = time.monotonic,
+    ) -> None:
+        self._max = max_events
+        self._window = window_seconds
+        self._clock = clock
+        self._hits: dict[str, deque[float]] = {}
+        self._lock = threading.Lock()
+
+    def check_and_record(self, key: str) -> float:
+        """Record a hit and return 0.0 if allowed, else seconds until one frees up.
+
+        A rejected call is *not* recorded, so a client hammering a full window cannot
+        push its own retry-after further out with every failed attempt.
+        """
+        if self._max <= 0 or self._window <= 0:
+            return 0.0
+        now = self._clock()
+        cutoff = now - self._window
+        with self._lock:
+            hits = self._hits.setdefault(key, deque())
+            while hits and hits[0] <= cutoff:
+                hits.popleft()
+            if len(hits) >= self._max:
+                return hits[0] + self._window - now
+            hits.append(now)
+            # Keep the map from growing without bound as identities come and go: an
+            # empty bucket carries no state worth keeping.
+            self._hits = {k: v for k, v in self._hits.items() if v}
+            return 0.0
 
 
 @dataclass
@@ -48,6 +113,7 @@ class RunWorker:
         max_concurrent: int = 1,
         runner: Callable[..., dict] | None = None,
         stop: threading.Event | None = None,
+        rate_limiter: RateLimiter | None = None,
     ) -> None:
         self._config = config
         self._runner = runner or run_graph
@@ -58,6 +124,14 @@ class RunWorker:
         self._stopping = threading.Event()
         # Injectable so tests never touch the process-wide flag.
         self._stop = stop if stop is not None else shutdown.event()
+        # Backpressure (RC-007). The depth cap bounds waiting runs (and the run dirs
+        # each one writes); the rate limiter bounds how fast one caller may open new
+        # runs. Both are enforced on the `submit()` path only — never on `resume()` or
+        # `recover()`, which replay work already owed and on disk.
+        self._max_queue_depth = config.max_queue_depth
+        self._rate_limiter = rate_limiter or RateLimiter(
+            config.submit_rate_max, config.submit_rate_window_seconds
+        )
 
         for n in range(max(1, max_concurrent)):
             # Not daemons: a daemon thread is truncated wherever it happens to be at
@@ -70,7 +144,20 @@ class RunWorker:
 
     # ------------------------------------------------------------- submission
 
-    def submit(self, question: str, seed: str | None = None) -> str:
+    def submit(self, question: str, seed: str | None = None, *, identity: str = "global") -> str:
+        # Backpressure comes first, before the run id and before any disk write. A
+        # refused submission must cost nothing — no queue entry, no run directory —
+        # otherwise the cap that protects memory would still let disk grow unbounded.
+        #
+        # Depth (a server-wide condition) is checked before the rate limit (a per-caller
+        # one), and only then is a rate-limit hit recorded — so a caller turned away by a
+        # full queue does not also burn its own submission allowance on the attempt.
+        if self._max_queue_depth > 0 and self._queue.qsize() >= self._max_queue_depth:
+            raise QueueFull(f"queue is full ({self._max_queue_depth} waiting)")
+        retry_after = self._rate_limiter.check_and_record(identity)
+        if retry_after > 0:
+            raise RateLimited(retry_after)
+
         run_id = f"run-{uuid.uuid4().hex[:12]}"
         # Record the question and the queue entry up front, so the run is both
         # identifiable and *recoverable* the instant it is queued — before the graph has

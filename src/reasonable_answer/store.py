@@ -158,3 +158,31 @@ def expired_runs(root: Path, retention_days: int) -> list[str]:
     return sorted(
         p.name for p in root.iterdir() if p.is_dir() and p.stat().st_mtime < cutoff
     )
+
+
+def sweep_expired(
+    root: Path, retention_days: int, *, skip: set[str] | None = None
+) -> list[str]:
+    """Content-purge every expired run, returning the ids purged.
+
+    This is the automatic counterpart to a manual `purge --content-only`: it drops
+    the bulk (reports/critiques and `final.md`) while keeping the decision record,
+    matching the documented retention posture — content after N days, the signal
+    trail for longer. Runs named in `skip` (anything currently live) are left alone
+    so an in-flight run cannot have its drafts deleted out from under it.
+
+    A content purge rewrites the run directory, so its mtime moves to now and it drops
+    out of `expired_runs` until it ages back in — which is why re-sweeping is cheap and
+    idempotent rather than a repeated rmtree of the same run.
+    """
+    skip = skip or set()
+    purged: list[str] = []
+    for name in expired_runs(root, retention_days):
+        if name in skip:
+            continue
+        try:
+            purge(root, name, content_only=True)
+        except (FileNotFoundError, UnsafeRunId):
+            continue
+        purged.append(name)
+    return purged
