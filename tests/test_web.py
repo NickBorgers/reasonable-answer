@@ -103,6 +103,68 @@ def test_an_oversized_seed_is_rejected(client, config):
     assert response.status_code == 400
 
 
+# ----------------------------------------------------------------- CSRF guard
+
+
+@pytest.mark.parametrize("fetch_site", ["cross-site", "none"])
+def test_a_cross_site_submit_is_refused(client, fetch_site):
+    """A form on an attacker's page auto-submitting a run carries a cross-site (or
+    context-less) Sec-Fetch-Site, which every current browser sends. That request must
+    never start a run."""
+    response = client.post(
+        "/runs",
+        data={"question": "Burn my tokens?"},
+        headers={"sec-fetch-site": fetch_site},
+    )
+    assert response.status_code == 403
+
+
+@pytest.mark.parametrize("fetch_site", ["same-origin", "same-site"])
+def test_a_same_site_submit_is_allowed(client, config, fetch_site):
+    """The app's own form reads same-origin; a sibling host under the same site reads
+    same-site. Both are legitimate and must go through."""
+    response = client.post(
+        "/runs",
+        data={"question": "From our own page?"},
+        headers={"sec-fetch-site": fetch_site},
+        follow_redirects=False,
+    )
+    assert response.status_code == 303
+
+
+def test_a_cross_origin_submit_without_fetch_metadata_is_refused(client):
+    """Older browsers omit Sec-Fetch-Site but still send Origin on a cross-origin POST;
+    a mismatch against the addressed host is refused."""
+    response = client.post(
+        "/runs",
+        data={"question": "Burn my tokens?"},
+        headers={"origin": "http://evil.example"},
+    )
+    assert response.status_code == 403
+
+
+def test_a_mismatched_referer_without_fetch_metadata_is_refused(client):
+    """With neither Sec-Fetch-Site nor Origin, a cross-host Referer is the last signal
+    of a browser-driven cross-site POST."""
+    response = client.post(
+        "/runs",
+        data={"question": "Burn my tokens?"},
+        headers={"referer": "http://evil.example/page"},
+    )
+    assert response.status_code == 403
+
+
+def test_a_cross_site_resume_is_refused(client):
+    """resume() is lower-risk than submit() but still state-changing, so it carries the
+    same guard — and the guard fires before the run is even looked up."""
+    response = client.post(
+        "/runs/run-anything/resume",
+        headers={"sec-fetch-site": "cross-site"},
+        follow_redirects=False,
+    )
+    assert response.status_code == 403
+
+
 # --------------------------------------------------------------------- pages
 
 

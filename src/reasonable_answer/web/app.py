@@ -20,6 +20,7 @@ import os
 from contextlib import asynccontextmanager
 from pathlib import Path
 from typing import Any
+from urllib.parse import urlsplit
 
 from fastapi import FastAPI, Form, HTTPException, Request
 from fastapi.responses import HTMLResponse, PlainTextResponse, RedirectResponse, StreamingResponse
@@ -93,6 +94,7 @@ def create_app(
     def submit(
         request: Request, question: str = Form(...), seed: str = Form("")
     ) -> RedirectResponse:
+        _reject_cross_site(request)
         question = question.strip()
         if not question:
             raise HTTPException(status_code=400, detail="a question is required")
@@ -134,7 +136,8 @@ def create_app(
         )
 
     @app.post("/runs/{run_id}/resume")
-    def resume(run_id: str) -> RedirectResponse:
+    def resume(run_id: str, request: Request) -> RedirectResponse:
+        _reject_cross_site(request)
         summary = _require(registry, worker, run_id)
         # `abandoned` is accepted on purpose: it means automatic recovery gave up, and a
         # human overriding that is the entire point of the escape hatch. A manual resume
@@ -254,6 +257,50 @@ def _check_runs_dir_writable(config: Config) -> None:
             f"sudo chown -R {os.getuid()}:{os.getgid()} <host-path>\n"
             f"A named docker volume avoids this entirely."
         ) from exc
+
+
+def _reject_cross_site(request: Request) -> None:
+    """Refuse browser-driven cross-site POSTs — the CSRF guard for the two
+    state-changing routes.
+
+    A plain HTML form POST triggers no CORS preflight, so the tailnet-only posture and
+    the CSP's `form-action 'self'` (which only constrains forms *this* app serves) do
+    nothing to stop a foreign page from auto-submitting a run to a guessable MagicDNS
+    host and burning a full 10–25-minute run. There is no cookie or session to lean on
+    a SameSite attribute for, so the request context itself is the only signal.
+
+    `Sec-Fetch-Site` is sent by every current browser and is authoritative when present:
+    a form this app served reads `same-origin`, a sibling host under the same site reads
+    `same-site`, and both `cross-site` and `none` are what a foreign page's auto-submit
+    (or a POST with no browsing context) look like. When it is absent — an older browser
+    or a non-browser caller such as curl or the test client — fall back to `Origin`, then
+    `Referer`, compared against the host the client addressed. A browser always sends
+    `Origin` on a cross-origin POST, so a request carrying none of these three headers is
+    not a browser being tricked and is allowed through.
+    """
+    fetch_site = request.headers.get("sec-fetch-site")
+    if fetch_site is not None:
+        if fetch_site not in ("same-origin", "same-site"):
+            raise HTTPException(status_code=403, detail="cross-site request refused")
+        return
+    for header in ("origin", "referer"):
+        value = request.headers.get(header)
+        if value is not None:
+            if not _same_host(value, request):
+                raise HTTPException(status_code=403, detail="cross-site request refused")
+            return
+
+
+def _same_host(candidate_url: str, request: Request) -> bool:
+    """True when `candidate_url`'s host[:port] matches the Host the client addressed.
+
+    Comparison is on `netloc` only: scheme can legitimately differ behind a TLS-
+    terminating proxy, but a mismatched host is exactly the cross-origin case we reject.
+    """
+    host = request.headers.get("host")
+    if not host:
+        return False
+    return urlsplit(candidate_url).netloc == host
 
 
 def _require(registry: Registry, worker: RunWorker, run_id: str) -> RunSummary:
