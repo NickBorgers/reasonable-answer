@@ -79,7 +79,11 @@
           },
           "file": { "type": ["string", "null"] },
           "line": { "type": ["integer", "null"], "minimum": 1 },
-          "message": { "type": "string", "minLength": 1 }
+          "message": { "type": "string", "minLength": 1 },
+          "decision_ref": {
+            "type": ["string", "null"],
+            "description": "Same meaning as on a blocking issue. Present here for the same reason `id` is: the invariant reviewer is told to cite the decision a finding relates to, and citing one on an observation it deliberately chose NOT to block on is correct behaviour, not a mistake. Without this property that artifact failed `additionalProperties` and the whole reviewer died — losing every finding it had, including any blockers, over a note it was right to write."
+          }
         }
       }
     },
