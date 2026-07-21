@@ -133,6 +133,9 @@ budgets:
   cycle_period: 4
   repair_retries: 1
   call_retries: 2
+  # Distinct writers tried for one draft before the run gives up. A model that is
+  # down or answering with nothing gets routed around, not treated as a verdict.
+  writer_attempts: 3
   timeout_seconds: 300
   max_concurrency: 3
 

@@ -249,8 +249,17 @@ class LLMClient:
                 raise ModelCallError(
                     f"identity mismatch: alias '{alias}' was served by '{reported}'"
                 )
+            message = _message_dict(resp.choices[0].message)
+            # A 200 carrying neither prose nor a tool call is a failed call that
+            # forgot to say so — small models in the roster do this intermittently.
+            # It costs a caller its whole run if it escapes as "success", so it is
+            # retried on the same budget as a transport error rather than returned.
+            if not (message.get("content") or "").strip() and not _tool_calls(message):
+                last = ModelCallError(f"{alias}: empty completion")
+                log.warning("call to %s returned empty content (attempt %d)", alias, attempt + 1)
+                continue
             return _Reply(
-                message=_message_dict(resp.choices[0].message),
+                message=message,
                 reported=reported,
                 prompt_tokens=getattr(usage, "prompt_tokens", 0) if usage else 0,
                 completion_tokens=getattr(usage, "completion_tokens", 0) if usage else 0,

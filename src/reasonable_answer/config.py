@@ -70,6 +70,9 @@ class Budgets(BaseModel):
     cycle_period: int = Field(default=4, ge=1, le=100)
     repair_retries: int = Field(default=1, ge=0, le=10)
     call_retries: int = Field(default=2, ge=0, le=10)
+    # How many *distinct* writers a single draft may be asked of before the run dies.
+    # Bounded by the pool: rotating past its end would re-ask the model that failed.
+    writer_attempts: int = Field(default=3, ge=1, le=10)
     timeout_seconds: float = Field(default=300.0, gt=0, le=7200)
     max_concurrency: int = Field(default=3, ge=1, le=16)
 

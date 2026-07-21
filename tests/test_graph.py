@@ -243,3 +243,69 @@ def test_run_directory_is_private(identities, config):
     final = run(config, question="Is it so?", seed=REPORT, client=client)
     mode = client_run_dir(final).stat().st_mode & 0o777
     assert mode == 0o700
+
+
+# ------------------------------------------------------- a dud writer is routed around
+
+
+class DudWriterClient(FakeClient):
+    """A proxy where the named writers answer generation with nothing at all.
+
+    Critique still works — the point is that one bad *writer* must not decide the run.
+    """
+
+    dud_writers: set[str] = set()
+
+    def complete(self, alias, *, system, user, **kwargs):
+        completion = super().complete(alias, system=system, user=user, **kwargs)
+        if alias in self.dud_writers and "YOUR DIMENSION" not in user:
+            return completion.__class__(
+                text="",
+                model_reported=alias,
+                prompt_tokens=0,
+                completion_tokens=0,
+            )
+        return completion
+
+
+def make_dud_client(identities, duds, critique_fn=clean) -> DudWriterClient:
+    client = DudWriterClient(
+        identities=identities,
+        critique_fn=critique_fn,
+        report_fn=lambda n: REPORT,
+    )
+    client.dud_writers = set(duds)
+    return client
+
+
+def events_of(final) -> list[dict]:
+    return [
+        json.loads(line)
+        for line in (client_run_dir(final) / "events.jsonl").read_text().splitlines()
+    ]
+
+
+def test_an_empty_writer_falls_through_to_the_next_one(identities, config):
+    """Run run-4d350e1d27a8 died here: one writer returned nothing and the whole run
+    aborted with the defects of round 1 still open."""
+    client = make_dud_client(identities, duds={"writer-a"})
+    final = run(config, question="Is it so?", seed=REPORT, client=client)
+
+    assert final["terminal_status"] == "accepted"
+    assert not final["fatal"]
+    # The dud never authored anything; the fallback did.
+    assert final["author_identity"] == identities["writer-b"]
+
+    failures = [e for e in events_of(final) if e["kind"] == "generate_failed"]
+    assert failures, "the discarded attempt must stay on the record"
+    assert failures[0]["author"] == identities["writer-a"]
+    assert "empty report" in failures[0]["reason"]
+
+
+def test_a_pool_of_duds_is_still_fatal(identities, config):
+    """Resilience is routing around a bad model, not inventing a report."""
+    client = make_dud_client(identities, duds={"writer-a", "writer-b"})
+    final = run(config, question="Is it so?", seed=REPORT, client=client)
+
+    assert final["fatal"]
+    assert "every eligible writer failed" in final["fatal_reason"]

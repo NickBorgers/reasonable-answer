@@ -264,10 +264,9 @@ def _generate(state: State, rt: Runtime) -> dict:
 
     rotation = state.get("writer_rotation", 0)
     try:
-        alias = roles.next_writer(cfg.roster, rt.identities, last_author, rotation)
+        pool = roles.writer_pool(cfg.roster, rt.identities, last_author)
     except roles.RosterExhausted as exc:
         return {"fatal": True, "fatal_reason": str(exc)}
-    identity = rt.identities[alias]
 
     polish = state.get("polish_next", False)
     defects = [Defect.model_validate(d) for d in state.get("defects", [])]
@@ -285,20 +284,42 @@ def _generate(state: State, rt: Runtime) -> dict:
             "max_tool_rounds": cfg.search.max_tool_rounds,
         }
 
-    try:
-        completion = rt.client.complete(
-            alias,
-            system=prompts.writer_system(rt.search_enabled),
-            user=user,
-            max_tokens=32000,
-            **search_kwargs,
-        )
-    except ModelCallError as exc:
-        return {"fatal": True, "fatal_reason": f"generator {alias} failed: {exc}"}
+    # One dud model must not cost a run that has other writers. Each attempt asks the
+    # *next distinct* eligible writer, so a model that is down, rate-limited, or
+    # answering with nothing is routed around rather than treated as a verdict on the
+    # draft. Only an exhausted pool is fatal.
+    attempts = min(len(pool), cfg.budgets.writer_attempts)
+    alias = ""
+    completion = None
+    last_failure = ""
+    for offset in range(attempts):
+        alias = pool[(rotation + offset) % len(pool)]
+        try:
+            reply = rt.client.complete(
+                alias,
+                system=prompts.writer_system(rt.search_enabled),
+                user=user,
+                max_tokens=32000,
+                **search_kwargs,
+            )
+        except ModelCallError as exc:
+            last_failure = f"generator {alias} failed: {exc}"
+        else:
+            if reply.text.strip():
+                completion = reply
+                rotation += offset
+                break
+            last_failure = f"generator {alias} returned an empty report"
+        # Recorded per attempt: a run that silently changed authors mid-draft is
+        # unauditable, and the roster's weak models are only visible from here.
+        rt.store.event("generate_failed", author=rt.identities[alias], reason=last_failure)
+        log.warning("writer attempt %d/%d: %s", offset + 1, attempts, last_failure)
 
+    if completion is None:
+        return {"fatal": True, "fatal_reason": f"every eligible writer failed; last: {last_failure}"}
+
+    identity = rt.identities[alias]
     text = completion.text.strip()
-    if not text:
-        return {"fatal": True, "fatal_reason": f"generator {alias} returned an empty report"}
     if len(text) > cfg.max_report_chars:
         text = text[: cfg.max_report_chars]
 
