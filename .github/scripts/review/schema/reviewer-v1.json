@@ -83,6 +83,18 @@
           "decision_ref": {
             "type": ["string", "null"],
             "description": "Same meaning as on a blocking issue. Present here for the same reason `id` is: the invariant reviewer is told to cite the decision a finding relates to, and citing one on an observation it deliberately chose NOT to block on is correct behaviour, not a mistake. Without this property that artifact failed `additionalProperties` and the whole reviewer died — losing every finding it had, including any blockers, over a note it was right to write."
+          },
+          "category": {
+            "type": ["string", "null"],
+            "description": "Same meaning as on a blocking issue. Third instance of the same class after `id` and `decision_ref`: blocking_issues and non_blocking_notes describe the same findings at different confidence, so every descriptive field on a blocker eventually shows up on a note, and each one killed a reviewer via `additionalProperties` before being admitted here. `severity` and `source` are admitted below pre-emptively to close the class instead of losing one more reviewer per field."
+          },
+          "severity": {
+            "type": ["string", "null"],
+            "description": "Deliberately NOT the blocker's critical/high/medium enum: a downgraded finding naturally carries values like \"low\" or \"info\", and an enum here would trade the additionalProperties cliff for an enum cliff. Notes are commentary — the judge only consumes blocking_issues — so loose typing costs nothing."
+          },
+          "source": {
+            "type": ["string", "null"],
+            "description": "Same meaning as on a blocking issue; loose-typed for the same reason as `severity` above."
           }
         }
       }
