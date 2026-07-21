@@ -141,7 +141,8 @@ Valid JSON conforming exactly to `.github/scripts/review/schema/reviewer-v1.json
 
 - `decision`: `request_changes` if `blocking_issues[]` is non-empty; `approve` if clean and the role
   applies; `abstain` if this diff has genuinely no security surface.
-- `summary` ≤ 500 chars — the validator hard-fails longer. Detail goes in the arrays.
+- `summary` ≤ 500 chars. Anything past 500 is truncated before the comment is published — you
+  lose the tail, the run does not fail. Lead with the conclusion; detail goes in the arrays.
 - **Blocking ids must be short, kebab-case, prefixed `sec-`, and STABLE across cycles for the same
   underlying problem** (`sec-exposure-1`, `sec-secret-leak-1`, `sec-routing-loss-2`). The judge
   namespaces them as `security/<id>` and tracks resolution by that key — renaming an id between

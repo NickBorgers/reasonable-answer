@@ -167,7 +167,7 @@ Write JSON to `$RESULT_PATH`, conforming to `.review-prompt/fix-result-v1.json`:
   "new_sha": null,
   "cycle": ${CYCLE},
   "mode": "cold",
-  "summary": "<one paragraph, <=500 chars>",
+  "summary": "<one paragraph, <=500 chars; a longer one is truncated, not rejected — lead with the conclusion>",
   "addressed": [
     { "id": "security/sec-secret-leak-1", "how": "<what changed and why it closes the blocker>", "resolution": "code_change", "files": ["src/..."] }
   ],

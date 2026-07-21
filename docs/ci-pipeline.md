@@ -228,6 +228,24 @@ decide whether anything gets pushed. The lockfile pins the transitive tree by in
 hash. `review-reviewer.yml` uses the same pinned validator; it holds no push credential,
 but it does run on a self-hosted runner on the tailnet.
 
+Before ajv runs, both workflows normalize the artifact through
+`.github/scripts/review/normalize-artifact.mjs`, which shortens any string exceeding a
+`maxLength` **main's** schema declares. This exists because an invariant reviewer emitted a
+510-character `summary` against a 500-character cap and lost a full cycle — three minutes of
+agent time and a blocked merge gate — to a ten-character overshoot on a field that only ever
+renders into a PR comment. The prompt already stated the cap. A model cannot count the
+characters it is about to emit, so `maxLength` is a hard cliff on a quantity the producer
+cannot measure, and instructions can reduce the overshoot rate but not eliminate it.
+
+Length is the **only** tolerance. Normalization never adds a missing field, coerces a type,
+or drops an unknown property, so every structural violation still reaches ajv and still fails
+the run closed — a wrong SHA, an invalid decision, or a blocker with no message is a real
+failure and stays one. Each truncation emits a `::warning::` naming the field and both
+lengths, so a prompt that routinely overshoots is visible and gets fixed at the source.
+Truncation cuts from the end, which is why the invariant prompt requires its `Alignment
+check:` and `Scope check:` lines at the **start** of `summary`: the first artifact to hit this
+path would otherwise have published without its scope verdict.
+
 The **host** commits, never the agent — the container runs as uid 1000 against a `.git`
 owned by the runner, and agent-side git writes corrupt the index in ways that surface two
 jobs later. Both fixer prompts forbid touching `.git`; the host-side commit is the other

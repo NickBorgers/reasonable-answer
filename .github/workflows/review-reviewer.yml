@@ -202,6 +202,21 @@ jobs:
 
           MAIN_SCHEMA=".github/scripts/review/schema/reviewer-v1.json"
           PR_SCHEMA="pr-head/.github/scripts/review/schema/reviewer-v1.json"
+
+          # Shorten any string that overshoots a cap the schema declares, BEFORE ajv sees
+          # it. A reviewer once lost a whole cycle to a 510-character summary against a
+          # 500-character cap: three minutes of agent time and a blocked merge gate for a
+          # ten-character overshoot on a field that only ever renders into a PR comment.
+          # The prompt already stated the cap — a model cannot count the characters it is
+          # about to emit, so instructions cannot drive the overshoot rate to zero.
+          #
+          # This is the ONLY tolerance granted. Normalization touches nothing but string
+          # length, so every structural violation still reaches ajv below and still fails
+          # the run closed. Run from main's checkout against main's schema, like the
+          # validator itself: a PR cannot choose how its own artifacts are normalized.
+          node .github/scripts/review/normalize-artifact.mjs \
+            --schema "$MAIN_SCHEMA" --data "$RESULT_JSON"
+
           ROLE_VALUE=$(jq -r '.role' "$RESULT_JSON")
 
           # --spec=draft2020 is required: the schema declares
