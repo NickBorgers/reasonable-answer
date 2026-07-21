@@ -17,14 +17,16 @@ class RosterExhausted(RuntimeError):
     """No eligible model remains for a required role — fatal, fails closed."""
 
 
-def next_writer(
+def writer_pool(
     roster: Roster,
     identities: dict[str, str],
     last_author_identity: str | None,
-    rotation: int,
-) -> str:
-    """Round-robin over the writer pool, never the model that authored the current
-    draft. The next report is always improved by someone who did not write it."""
+) -> list[str]:
+    """Every alias eligible to write the next draft, in roster order.
+
+    Exposed alongside `next_writer` because a caller that wants to *fall back* after a
+    dud model has to know how many distinct candidates exist — rotating past the end
+    of the pool would re-ask the model that just failed."""
     candidates = [
         alias
         for alias in roster.writers
@@ -35,6 +37,18 @@ def next_writer(
             "writer pool contains no model other than the current author; "
             "add a second distinct writer"
         )
+    return candidates
+
+
+def next_writer(
+    roster: Roster,
+    identities: dict[str, str],
+    last_author_identity: str | None,
+    rotation: int,
+) -> str:
+    """Round-robin over the writer pool, never the model that authored the current
+    draft. The next report is always improved by someone who did not write it."""
+    candidates = writer_pool(roster, identities, last_author_identity)
     return candidates[rotation % len(candidates)]
 
 

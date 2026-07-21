@@ -15,6 +15,8 @@ real control flow runs. Offline throughout.
 
 from __future__ import annotations
 
+from types import SimpleNamespace
+
 import pytest
 
 from reasonable_answer.config import Budgets, Config, ProxyConfig, Roster
@@ -248,3 +250,68 @@ def test_completion_defaults_to_zero_tool_calls():
     # Anything constructing a Completion without the field must read as "did not search".
     assert Completion(text="t", model_reported="m", prompt_tokens=0,
                       completion_tokens=0).tool_calls == 0
+
+
+# --------------------------------------------------------- the empty-completion retry
+
+
+def _sdk_response(content, alias="writer-a"):
+    """The shape `_create` reads off the SDK: choices[0].message, usage, model."""
+    return SimpleNamespace(
+        choices=[SimpleNamespace(message={"role": "assistant", "content": content})],
+        usage=SimpleNamespace(prompt_tokens=1, completion_tokens=2),
+        model=alias,
+    )
+
+
+def _sdk_scripted(client: LLMClient, contents: list, record: list | None = None):
+    seq = iter(contents)
+
+    def create(**kwargs):
+        if record is not None:
+            record.append(kwargs)
+        return _sdk_response(next(seq))
+
+    client._client = SimpleNamespace(
+        chat=SimpleNamespace(completions=SimpleNamespace(create=create))
+    )
+
+
+def test_an_empty_completion_is_retried_rather_than_returned(client):
+    """A 200 with no content is a failed call that forgot to say so.
+
+    Returned as success it reaches the caller as a verdict about the *draft*, which is
+    what aborted run-4d350e1d27a8: one empty body from a small model killed the run.
+    """
+    calls: list[dict] = []
+    _sdk_scripted(client, ["", "   ", "REAL REPORT"], record=calls)
+
+    result = client.complete("writer-a", system="s", user="u")
+
+    assert result.text == "REAL REPORT"
+    assert len(calls) == 3  # both empties were retried, not believed
+
+
+def test_empty_completions_still_fail_closed_once_the_budget_is_gone(client):
+    _sdk_scripted(client, ["", "", ""])  # call_retries=2 -> 3 attempts, all empty
+    with pytest.raises(ModelCallError, match="empty completion"):
+        client.complete("writer-a", system="s", user="u")
+
+
+def test_a_tool_call_with_no_prose_is_not_treated_as_empty(client):
+    """An assistant turn that only calls a tool legitimately carries no content."""
+    calls: list[dict] = []
+
+    def create(**kwargs):
+        calls.append(kwargs)
+        return SimpleNamespace(
+            choices=[SimpleNamespace(message=_tool_message())],
+            usage=SimpleNamespace(prompt_tokens=1, completion_tokens=2),
+            model="writer-a",
+        )
+
+    client._client = SimpleNamespace(
+        chat=SimpleNamespace(completions=SimpleNamespace(create=create))
+    )
+    assert client.probe_tool_calling("writer-a") is True
+    assert len(calls) == 1  # not retried as an empty answer
