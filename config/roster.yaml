@@ -14,7 +14,11 @@
 # ~450GB for a single model, with swapping — see docs/DESIGN.md for the footprint table.
 
 proxy:
+  # base_url is the fallback: $RA_PROXY_BASE_URL (or whatever base_url_env names)
+  # overrides it when set, so a container can inject only its proxy URL and keep this
+  # roster authoritative for everything else. Precedence: env > this value > default.
   base_url: https://llm.featherback-mermaid.ts.net/v1
+  base_url_env: RA_PROXY_BASE_URL
   api_key_env: LITELLM_API_KEY
   api_key_fallback: fake-key
 
