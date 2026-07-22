@@ -217,6 +217,54 @@ satisfies `strong_met`, and terminates the run `accepted`. #10 kept `gemma-4-31b
   omissions have no honest locus, handled by a per-defect `anywhere` flag rather than by
   pretending a filing choice is ground truth.
 
+## Security review — 2026-07 (web submission hardening)
+
+| ID | Sev | Finding | Resolution |
+|----|-----|---------|------------|
+| RC-007 | med | Run submission is unbounded in both queue depth and disk footprint. `RunWorker.submit()` enqueued onto a `queue.Queue()` with no `maxsize` and no rate limit, and each submission immediately wrote a persistent run directory. Concurrency bounds token *spend* but not the number of queued runs, the memory they hold, or the run dirs they leave on disk; `recover()` re-enqueues them all on boot. A single burst — a script, or the companion CSRF vector — could create thousands of runs and directories, and `Registry.list()` reads every run dir on each `GET /`. | **Fixed (D21).** `submit()` refuses with HTTP 429 past `max_queue_depth`, and a fixed-window per-identity limiter (`submit_rate_max`/`submit_rate_window_seconds`) throttles bursts. Both checks precede any disk write, so a refusal costs nothing. The web server also runs an automatic content-only retention sweep so disk reclamation no longer waits on a manual `purge`. |
+
+## D21 — submission is bounded, and a refusal costs nothing
+
+The soundness machinery all sits *downstream* of a run existing. Nothing upstream limited
+how many runs could be created: the queue was a `queue.Queue()` with no `maxsize`, no
+per-caller rate limit gated submission, and `submit()` wrote `question.txt` plus a `queued`
+event before enqueuing. Bounded concurrency (default 1) kept token *spend* in check, so the
+gap was invisible in normal use — but a burst could still pin unbounded memory (the queue),
+unbounded disk (one run dir per submission, purged only by a manual CLI step), and make the
+home page progressively slower (`Registry.list()` stats and reads `events.jsonl` for every
+dir on each `GET /`).
+
+**Decision.** Backpressure at submission, with two sub-decisions worth recording.
+
+**A refused submission must leave nothing behind.** The depth and rate checks run *before*
+the run id is minted and before any file is written. A cap that rejected only after writing
+`question.txt` would move the growth from memory onto disk rather than stopping it — the
+disk half of the finding would survive the fix. So the order is load-bearing: check, then
+write, never the reverse.
+
+**The bounds apply to `submit()` only, never to `resume()` or `recover()`.** Those replay
+work already owed and already on disk (D-"surviving a redeploy"): the queue is not the
+record of what is owed. Rate-limiting or depth-rejecting recovery would let a backlog wedge
+the restart path — precisely the runs the checkpointer exists to protect. Depth is also
+checked before the rate limit is *recorded*, so a caller turned away by a full queue does
+not also burn its own per-identity allowance on the attempt.
+
+The rate limiter is keyed by the Tailscale identity header when the app is fronted so the
+header is present, and by a single global bucket otherwise. On the tailnet posture the
+header is trustworthy; a caller reaching the app directly could forge it, but such a caller
+could equally vary it to defeat any per-identity scheme, and the global fallback still
+bounds that case. This is backpressure against bursts, not an auth boundary — the design
+already states there is none here (Tailscale ACLs are the access control).
+
+Retention gains an automatic **content-only** sweep on a timer (`purge --content-only`,
+run for you), matching the documented posture — reports/critiques after N days, the
+decision record for longer. Full-directory removal stays the explicit human `purge`, so the
+audit trail of a run's convergence is never deleted by a background timer. Live runs are
+skipped, so an in-flight run cannot lose its drafts mid-run.
+
+This touches none of the isolation invariants: it is upstream of run creation and moves no
+new data toward any model context. `OrchestratorView` and the controller are untouched.
+
 ## Open items for a future round
 
 - Whether `misrepresented_source` can be meaningfully checked without fetching the source

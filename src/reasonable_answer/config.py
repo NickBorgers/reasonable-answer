@@ -244,10 +244,25 @@ class Config(BaseModel):
     audition: AuditionConfig = Field(default_factory=AuditionConfig)
     runs_dir: Path = Path("runs")
     retention_days: int = 14
+    #: How often the web server's background sweep content-purges runs past
+    #: `retention_days`, so reclaiming disk does not depend on someone running
+    #: `ra purge` by hand. The sweep drops reports/critiques only (the bulk), keeping
+    #: the decision record longer, exactly like `purge --content-only`. Set to 0 to
+    #: turn the automatic sweep off and go back to a manual/cron `purge`.
+    retention_sweep_interval_seconds: float = 3600.0
     #: How many times in a row the process may auto-resume a run on startup without it
     #: making progress. Bounds a run that fails deterministically: without a cap, every
     #: restart would pick it up, fail the same way, and restart again forever.
     max_resume_attempts: int = 3
+    #: Backpressure on submission (RC-007). Concurrency already bounds token *spend*,
+    #: but not how many runs may pile up waiting, nor the run directories each one
+    #: writes on the way in. A cap on the queue's waiting depth turns a burst into
+    #: HTTP 429s instead of unbounded memory and disk. Set to 0 to leave it unbounded.
+    max_queue_depth: int = 32
+    #: Submissions allowed per identity (or globally, if no Tailscale identity header
+    #: is present) inside `submit_rate_window_seconds`. Set to 0 to disable the limit.
+    submit_rate_max: int = 20
+    submit_rate_window_seconds: float = 60.0
     max_report_chars: int = 60_000
     max_question_chars: int = 4_000
     #: anchor every critic quote to the paragraph it cites, closing the last
