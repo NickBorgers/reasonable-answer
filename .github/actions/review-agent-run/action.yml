@@ -318,6 +318,42 @@ runs:
           sudo chown -R "$(id -u):$(id -g)" "$WORKSPACE_HOST"
         fi
 
+    - name: Redact secrets from the agent transcript
+      # `--output-format=stream-json --verbose` streams full tool results and CLI error
+      # text to the output log, and every caller uploads that log as an artifact. The
+      # container's env holds the write-capable PAT and the proxy key, so a tool call or
+      # error that echoed the environment would otherwise persist those values in a
+      # downloadable artifact. Scrub the exact secret values here — after the container
+      # is gone and ownership is back to the runner, before any caller's upload step.
+      #
+      # `always()` because a failed or killed run leaves exactly the transcript most
+      # worth scrubbing. Fail-closed: if perl is unavailable the log is deleted rather
+      # than shipped unredacted. `\Q..\E` matches the value literally, so a secret
+      # containing regex metacharacters is handled correctly.
+      if: always()
+      shell: bash
+      env:
+        WORKSPACE_FOLDER: ${{ inputs.workspace_folder }}
+        WORKFLOW_PAT: ${{ inputs.workflow_pat }}
+        PROXY_KEY: ${{ inputs.llm_proxy_api_key }}
+      run: |
+        set -euo pipefail
+        OUT_DIR="${GITHUB_WORKSPACE}/${WORKSPACE_FOLDER}/.review-output"
+        [ -d "$OUT_DIR" ] || exit 0
+        shopt -s nullglob
+        logs=("$OUT_DIR"/*-output.log)
+        [ "${#logs[@]}" -gt 0 ] || exit 0
+        if ! command -v perl >/dev/null 2>&1; then
+          echo "::warning::perl unavailable for transcript redaction; deleting ${#logs[@]} transcript log(s) rather than risk shipping secrets"
+          rm -f "${logs[@]}"
+          exit 0
+        fi
+        perl -i -pe '
+          BEGIN { @s = grep { defined && length >= 8 } ($ENV{WORKFLOW_PAT}, $ENV{PROXY_KEY}); }
+          for my $x (@s) { s/\Q$x\E/***REDACTED***/g; }
+        ' "${logs[@]}"
+        echo "redaction: scrubbed ${#logs[@]} transcript log(s)"
+
     - name: Clean up staged env file
       if: always()
       shell: bash

@@ -402,19 +402,34 @@ jobs:
           steps.blockers.outputs.count != '0'
           && steps.session.outputs.mode == 'author-resume'
           && steps.run.outcome != 'success'
+        env:
+          REVIEWED_SHA: ${{ inputs.reviewed_sha }}
         run: |
           set -euo pipefail
           echo "::warning::Author-resume fixer did not succeed (outcome=${{ steps.run.outcome }}); falling back to a cold fixer."
 
+          PR_DIR="${GITHUB_WORKSPACE}/${PR_WORKSPACE}"
+          OUT_DIR="${PR_DIR}/.review-output"
+
           # Preserve the resume attempt's transcript and any partial result under a
           # distinct name so the cold run's writes do not clobber it. Both remain under
           # the `fixer-*` glob the artifact upload uses, so the hang stays diagnosable.
-          OUT_DIR="${GITHUB_WORKSPACE}/${PR_WORKSPACE}/.review-output"
           for base in fixer-output.log fixer-result.json; do
             if [ -f "${OUT_DIR}/${base}" ]; then
               mv "${OUT_DIR}/${base}" "${OUT_DIR}/fixer-resume-${base#fixer-}"
             fi
           done
+
+          # Restore the tree to the reviewed SHA before the cold fixer runs. A resume
+          # attempt that timed out or exited nonzero may have left edits behind —
+          # tracked changes, or new untracked files. The cold fixer commits with
+          # `git add -A`, so without this reset those abandoned edits would ride into
+          # the pushed fix under the cold artifact's name: code from a failed path that
+          # no reviewer graded. `.review-output` and `.review-prompt` are gitignored, so
+          # the reset and the clean below leave them — and the transcript just preserved
+          # — untouched.
+          git -C "${PR_DIR}" reset --hard "${REVIEWED_SHA}"
+          git -C "${PR_DIR}" clean -fd
 
           # Swap the resume prompt out for the cold one. Same destination path the
           # primary run read, staged from main's checkout so the PR cannot edit it.
