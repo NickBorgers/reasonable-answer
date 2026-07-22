@@ -48,12 +48,19 @@ case "$CI_AGENT" in
     resume_args=()
     [ "$RESUME" = "1" ] && resume_args=(--continue)
 
+    # --output-format=stream-json emits one JSON event per line as the turn unfolds,
+    # so `tee` captures the transcript incrementally. The default `text` format buffers
+    # and prints only on a clean exit: when a run is killed by `timeout` (SIGTERM) it
+    # flushes nothing, which is why a hung fixer left a 148-byte, transcript-less
+    # artifact and could not be diagnosed. Streaming means even a killed run leaves a
+    # partial log that shows where it stalled. `--verbose` is required alongside it.
     timeout "$TIMEOUT" claude -p \
       --dangerously-skip-permissions \
       --permission-mode=bypassPermissions \
       "${resume_args[@]}" \
       "${model_args[@]}" \
       --verbose \
+      --output-format=stream-json \
       "$PROMPT_BODY" \
       < /dev/null 2>&1 | tee "$OUTPUT_LOG_PATH"
     ;;
