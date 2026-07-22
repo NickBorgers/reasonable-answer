@@ -351,9 +351,16 @@ jobs:
           cp ".github/scripts/review/schema/fix-result-v1.json" "${PR_WORKSPACE}/.review-prompt/"
           cp ".github/scripts/review/schema/reviewer-v1.json" "${PR_WORKSPACE}/.review-prompt/"
 
+      # The primary attempt. In author-resume mode it is bounded and best-effort: a
+      # resumed session that stalls must not burn the whole timeout and leave the PR
+      # with no fix. `continue-on-error` there hands control to the cold fallback below
+      # instead of failing the job; in cold mode there is no fallback, so a failure is
+      # fatal as before. The resume budget is deliberately tighter than the cold one —
+      # a resume that has produced nothing in 25 minutes is hung, not thinking.
       - name: Run the fixer
         id: run
         if: steps.blockers.outputs.count != '0'
+        continue-on-error: ${{ steps.session.outputs.mode == 'author-resume' }}
         uses: ./.github/actions/review-agent-run
         with:
           agent: ${{ steps.session.outputs.agent }}
@@ -366,7 +373,7 @@ jobs:
           reviewed_sha: ${{ inputs.reviewed_sha }}
           base_ref: ${{ inputs.base_ref }}
           cycle: ${{ inputs.cycle }}
-          timeout_minutes: '45'
+          timeout_minutes: ${{ steps.session.outputs.mode == 'author-resume' && '25' || '30' }}
           session_host_dir: ${{ steps.session.outputs.session_dir }}
           resume: ${{ steps.session.outputs.mode == 'author-resume' }}
           extra_env: |
@@ -377,15 +384,107 @@ jobs:
           llm_proxy_openai_base_url: ${{ vars.LLM_PROXY_OPENAI_BASE_URL }}
           llm_proxy_api_key: ${{ vars.AI_API_KEY || 'fake-key' }}
 
+      # ── Cold fallback: only when a resume attempt did not succeed ─────────────
+      #
+      # A resumed author is the better fixer when it works — it answers reviewers from
+      # the conversation that wrote the code. But author-resume has been the failure
+      # mode, not the happy path, and a hung resume that blocks the PR is strictly worse
+      # than a mechanical cold fix. So when the resume attempt does not produce a clean
+      # result, fall through to a fresh cold agent, exactly as the reference pipeline in
+      # hide-my-list does. The cold path is strictly more conservative and always logged.
+      #
+      # `outcome != 'success'` covers both a hard failure (timeout, non-zero exit) and
+      # the composite completing without leaving a result. In cold mode this whole block
+      # is skipped: the primary run already was the cold agent.
+      - name: Fall back to a cold fixer
+        id: fallback
+        if: >-
+          steps.blockers.outputs.count != '0'
+          && steps.session.outputs.mode == 'author-resume'
+          && steps.run.outcome != 'success'
+        run: |
+          set -euo pipefail
+          echo "::warning::Author-resume fixer did not succeed (outcome=${{ steps.run.outcome }}); falling back to a cold fixer."
+
+          # Preserve the resume attempt's transcript and any partial result under a
+          # distinct name so the cold run's writes do not clobber it. Both remain under
+          # the `fixer-*` glob the artifact upload uses, so the hang stays diagnosable.
+          OUT_DIR="${GITHUB_WORKSPACE}/${PR_WORKSPACE}/.review-output"
+          for base in fixer-output.log fixer-result.json; do
+            if [ -f "${OUT_DIR}/${base}" ]; then
+              mv "${OUT_DIR}/${base}" "${OUT_DIR}/fixer-resume-${base#fixer-}"
+            fi
+          done
+
+          # Swap the resume prompt out for the cold one. Same destination path the
+          # primary run read, staged from main's checkout so the PR cannot edit it.
+          mkdir -p "${PR_WORKSPACE}/.review-prompt"
+          cp ".github/scripts/review/prompts/fixer.md" "${PR_WORKSPACE}/.review-prompt/fixer.md"
+
+      - name: Run the cold fixer
+        id: run_cold
+        if: steps.fallback.outcome == 'success'
+        uses: ./.github/actions/review-agent-run
+        with:
+          # The cold path runs claude regardless of which agent authored the PR: there
+          # is no session to resume, so the authoring agent's identity carries no
+          # benefit, and pinning one agent keeps the cold path predictable.
+          agent: claude
+          role: fixer
+          result_basename: fixer
+          prompt_path: .review-prompt/fixer.md
+          image: ${{ vars.CI_IMAGE || format('ghcr.io/nickborgers/{0}-ci:latest', 'reasonable-answer') }}
+          workspace_folder: ${{ env.PR_WORKSPACE }}
+          pr_number: ${{ inputs.pr_number }}
+          reviewed_sha: ${{ inputs.reviewed_sha }}
+          base_ref: ${{ inputs.base_ref }}
+          cycle: ${{ inputs.cycle }}
+          timeout_minutes: '30'
+          # No session mount and resume=false: a fresh conversation, no --continue.
+          resume: 'false'
+          extra_env: |
+            REVIEWER_ARTIFACTS_DIR=.review-output/reviewer-artifacts
+            PR_CONTEXT_PATH=.review-output/pr-context.md
+          workflow_pat: ${{ secrets.WORKFLOW_PAT }}
+          llm_proxy_base_url: ${{ vars.LLM_PROXY_BASE_URL }}
+          llm_proxy_openai_base_url: ${{ vars.LLM_PROXY_OPENAI_BASE_URL }}
+          llm_proxy_api_key: ${{ vars.AI_API_KEY || 'fake-key' }}
+
+      # Which run's output the gates below read, and the mode they must find in it. When
+      # the cold fallback ran, the effective artifact is the cold one and its declared
+      # mode is `cold`; otherwise it is the primary run under the session's own mode. The
+      # result path is deterministic (`fixer-result.json`) because both runs write the
+      # same basename, so it is pinned here rather than read from a run step whose
+      # outputs are absent when that run was killed mid-flight.
+      - name: Resolve the effective fixer result
+        id: fixer
+        if: steps.blockers.outputs.count != '0'
+        env:
+          SESSION_MODE: ${{ steps.session.outputs.mode }}
+          COLD_OUTCOME: ${{ steps.run_cold.outcome }}
+        run: |
+          set -euo pipefail
+          RESULT="${GITHUB_WORKSPACE}/${PR_WORKSPACE}/.review-output/fixer-result.json"
+          if [ "$COLD_OUTCOME" = "success" ]; then
+            MODE="cold"
+          else
+            MODE="$SESSION_MODE"
+          fi
+          {
+            echo "result_json=${RESULT}"
+            echo "effective_mode=${MODE}"
+          } >> "$GITHUB_OUTPUT"
+          echo "Effective fixer result: mode=${MODE}, artifact=${RESULT}"
+
       # ── Gates before anything is pushed ──────────────────────────────────────
 
       - name: Validate the fixer artifact
         if: steps.blockers.outputs.count != '0'
         env:
-          RESULT_JSON: ${{ steps.run.outputs.result_json }}
+          RESULT_JSON: ${{ steps.fixer.outputs.result_json }}
           EXPECTED_SHA: ${{ inputs.reviewed_sha }}
           EXPECTED_CYCLE: ${{ inputs.cycle }}
-          EXPECTED_MODE: ${{ steps.session.outputs.mode }}
+          EXPECTED_MODE: ${{ steps.fixer.outputs.effective_mode }}
         run: |
           set -euo pipefail
 
@@ -479,9 +578,9 @@ jobs:
         if: steps.blockers.outputs.count != '0'
         working-directory: ${{ env.PR_WORKSPACE }}
         env:
-          RESULT_JSON: ${{ steps.run.outputs.result_json }}
+          RESULT_JSON: ${{ steps.fixer.outputs.result_json }}
           CYCLE: ${{ inputs.cycle }}
-          MODE: ${{ steps.session.outputs.mode }}
+          MODE: ${{ steps.fixer.outputs.effective_mode }}
         run: |
           set -euo pipefail
           # The host commits, not the agent. The container runs as uid 1000 against a
