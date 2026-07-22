@@ -1,0 +1,16 @@
+lens: completeness
+tier: moderate
+question: "Why did the downtown revitalization project fail?"
+defects:
+  - category: unexamined_presupposition
+    locus: {section: 1, paragraph: 1}
+    anywhere: true
+    note: >
+      The question presupposes the project failed; the report adopts that framing in its
+      opening sentence and organizes everything as an autopsy — yet its own cited
+      figures (S2) show foot traffic up 22 percent and vacancy down, i.e. the record is
+      mixed and "failure" is contested, which the report never states or examines. The
+      individual claims are accurate and cited, so evidence and logic critics find
+      little; the omission is the failure to surface the premise. `anywhere` is set
+      because an omission of examination has no honest single locus; a critic may anchor
+      it to the framing in S1.P1 or to the conclusion that restates it.

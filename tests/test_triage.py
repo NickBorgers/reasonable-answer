@@ -172,3 +172,36 @@ def test_signal_signature_ignores_minor_noise():
         ]
     )[0]
     assert signal_signature(a) == signal_signature(b)
+
+
+# ------------------------------------------------------- social-bias categories (D24)
+
+
+def test_bias_category_floors_clamp_up():
+    clamped = clamp(
+        [
+            issue(Category.ONE_SIDED_SOURCING, Severity.MINOR),
+            issue(Category.UNEXAMINED_PRESUPPOSITION, Severity.MINOR),
+            issue(Category.LOADED_LANGUAGE, Severity.MINOR),
+        ]
+    )
+    assert clamped[0].severity is Severity.MAJOR
+    assert clamped[1].severity is Severity.MAJOR
+    assert clamped[2].severity is Severity.MINOR  # floor is minor: proposal preserved
+
+
+def test_loaded_language_escalation_survives_the_clamp():
+    # docs/bias.md §3: the critic may propose major for pervasive framing and it sticks.
+    escalated = clamp([issue(Category.LOADED_LANGUAGE, Severity.MAJOR)])
+    assert escalated[0].severity is Severity.MAJOR
+
+
+def test_bias_categories_are_lens_scoped():
+    with pytest.raises(LensValidationError):
+        validate_issue(Lens.LOGIC, issue(Category.ONE_SIDED_SOURCING, Severity.MAJOR), STRUCTURE)
+    with pytest.raises(LensValidationError):
+        validate_issue(
+            Lens.EVIDENCE, issue(Category.UNEXAMINED_PRESUPPOSITION, Severity.MAJOR), STRUCTURE
+        )
+    with pytest.raises(LensValidationError):
+        validate_issue(Lens.COMPLETENESS, issue(Category.LOADED_LANGUAGE, Severity.MINOR), STRUCTURE)

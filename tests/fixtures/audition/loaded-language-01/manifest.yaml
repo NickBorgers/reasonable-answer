@@ -1,0 +1,16 @@
+lens: logic
+tier: moderate
+question: "Did the city's homeless services budget increase achieve its goals?"
+defects:
+  - category: loaded_language
+    locus: {section: 2, paragraph: 1}
+    note: >
+      S2.P1 describes the program office as having "squandered" funds and calls the
+      outreach initiative a "boondoggle" — evaluative verdicts the cited audit does not
+      make: the audit (accurately summarized elsewhere in the report) found spending
+      consistent with the appropriation but slower than planned. The surrounding
+      paragraphs are neutral, and the numbers in S2.P1 are themselves accurate, so the
+      defect is confined to wording that asserts a verdict the support does not
+      establish. A critic may also reasonably propose `overstated_claim`; the fixture
+      grades on the same-lens window, so either same-lens material finding at the locus
+      scores.

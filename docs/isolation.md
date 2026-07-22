@@ -6,12 +6,13 @@ seven research-rooted principles intact.
 
 ## The isolation unit is the context window, not the model
 
-The system fights **two different biases**, and they have different isolation units:
+The system fights **three different biases**, and they have different isolation units:
 
 | bias | cause | isolation unit that fixes it | priority |
 |------|-------|------------------------------|----------|
 | **Social / context drift** — sycophancy, contextual drag, anchoring, in-session self-review | **shared context**: a peer's opinion, prior reasoning, or one's own earlier output in the same window | a **fresh, blind context window** per task | **primary** |
 | **Correlated blind spots** — a model's systematic failure modes | the model itself; the same model repeats/misses the same error even in a fresh context | **model diversity** (distinct model families) | secondary |
+| **Social / content bias** — loaded framing, one-sided source selection, inherited presuppositions | **shared training-corpus and cultural priors** across every model in the roster, plus the question's own framing | **documented observable-text rules** ([bias.md](./bias.md)) enforced as lens categories, on top of decorrelated critic pools | tertiary |
 
 The dominant threat — the whole reason for the seven principles — is **social drift**, and it is
 caused by *shared context*, not by model identity. So the primary isolation boundary is the
@@ -28,6 +29,19 @@ the primary (social) bias; model diversity handles the secondary (blind-spot) bi
 uses **both**. Assigning **each lens its own critic model** (D15 — best model matched per dimension)
 pushes model diversity further: three different models examine the artifact per tick, one per
 dimension, and each dimension is confirmed by a *second* distinct model before strong acceptance.
+
+**Social/content bias is the one bias the first two layers cannot reach.** Fresh contexts remove
+the social trigger and a diverse roster decorrelates *idiosyncratic* failure modes — but loaded
+framing, one-sided sourcing, and inherited presuppositions are **correlated across the whole
+roster**, because every capable model is trained on overlapping corpora and shares broad cultural
+priors, and because the bias often arrives inside the *question* itself. No amount of additional
+reviewers votes away an error they all share. The countermeasure is therefore not another
+isolation unit but an explicit rulebook: [bias.md](./bias.md) defines three observable-text
+categories (`one_sided_sourcing`, `loaded_language`, `unexamined_presupposition`) that critics
+raise like any other defect — span-anchored, severity-floored, and bounded by rules about what a
+bias finding may *not* be (no viewpoint quotas, no intent attribution). Tertiary because it is
+the weakest guarantee of the three: rules catch what they name, and D24 records the known
+residual (a bias the rulebook does not describe passes through).
 
 ## What each role sees vs. never sees
 
