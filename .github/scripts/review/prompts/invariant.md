@@ -15,12 +15,13 @@ diff preserve the design's safety properties, and if it changes one, did it chan
 
 A blocker you cannot tie to a decision or finding ID is usually an opinion. Populate
 `decision_ref` on every `blocking_issues[]` entry. Valid IDs live in `docs/decisions.md`
-(`D1`–`D16`, `RA-001`–`RA-020`, `RB-001`–`RB-010`, `RC-001`–`RC-006`, `RG-001`–`RG-004`) and in
+(`D1`–`D24`, `RA-001`–`RA-020`, `RB-001`–`RB-010`, `RC-001`–`RC-007`, `RG-001`–`RG-004`) and in
 `docs/convergence.md` (`RD-002`, `RH-001`, `RI-001` — cited normatively there but **not** tabulated
 in `decisions.md`; citing them is fine, inventing new ones is not).
 
 **Read before reviewing:** `docs/DESIGN.md`, `docs/isolation.md`, `docs/convergence.md`,
-`docs/architecture.md`, `docs/decisions.md`. Then read the modules the diff touches.
+`docs/architecture.md`, `docs/decisions.md`, `docs/bias.md`. Then read the modules the diff
+touches.
 
 ## The invariant checklist
 
@@ -36,11 +37,12 @@ Walk every row. A row is in play if the diff touches the listed surface.
 | 6 | **`min_ticks` floor + cross-model confirmation before `accepted`.** Rule 4 forbids acceptance before `min_ticks` (on the seed path too). Strong `accepted` requires **every lens** cleared by **≥2 distinct non-author models on the identical current hash**. One clean review is one opinion; at the cap it is `exhausted_unresolved`, never `accepted`. A `roster_limited` lens degrades honestly to `converged_unconfirmed`. | `controller.py` rules 4/7/8/10/11, `roles.py` lens status | D7, D8, D9, D14, D15, RB-001, RB-002, RC-001 | Weak clearance is allowed to reach `accepted`; top-up (rule 8) is made cap-gated again (that is exactly RG-001); a cross-artifact "consecutive clean" mechanism reappears (removed by RG-002). |
 | 7 | **Round identity, hash-keyed evidence, idempotent replay.** Records key on `(run_id, round, artifact_hash, models, lens, attempt, confirm_state)`. Any generation or polish is a new hash and **resets the clean-record set**. Results whose hash doesn't match the current round are rejected. Replay must not fake convergence. | `graph.py` reducers, `schemas.py::CleanRecord`, `store.py` | RA-014, RC-002 | Clean records survive a new hash; a reducer becomes order-dependent or accumulating; stale-hash rejection is loosened to "warn". |
 | 8 | **Prompt-injection boundaries.** Question, seed, every report, and every critique are **untrusted data**. Critique text must never reach the generator as instruction: loci are bounded structural refs, spans are length-limited verbatim quotes (`require_verbatim_spans`), critic provenance is withheld from the generator-facing form. Confirmation is indistinguishable from a normal critique. | `prompts.py`, `triage.py` defect-list build, `schemas.py` bounds, `config.py::require_verbatim_spans` | RA-010, RB-005, RB-007, RB-010, D12 | A free-text field is added to the critic→generator path; a length bound is removed or widened without justification; provenance leaks into the defect list; `confirm_state` becomes visible to the model. |
-| 9 | **Docs-as-spec drift.** *(the check that pays continuously)* | `docs/*.md` + `docs/decisions.md` | — | See below. |
+| 9 | **Bias categories stay observable-text-anchored.** The three social-bias categories (`one_sided_sourcing`, `loaded_language`, `unexamined_presupposition`) are governed by `docs/bias.md`: meanings describe observable text properties, never inferred intent; `loaded_language` floors at `minor`; the other two at `major`; the "what critics must NOT do" rules (no viewpoint quotas, no intent attribution, no both-sides demands) bound the category meanings and lens briefs. | `taxonomy.py` (`Category`, `SEVERITY_FLOOR`, `LENS_CATEGORIES`, `LENS_BRIEF`), `prompts.py::_CATEGORY_MEANING`, `docs/bias.md` | D4, D24, RC-005 | A bias category's meaning or lens brief drifts toward intent inference or viewpoint quotas; a bias floor changes without a `docs/bias.md` change; `bias.md` and `SEVERITY_FLOOR`/`LENS_CATEGORIES` diverge. |
+| 10 | **Docs-as-spec drift.** *(the check that pays continuously)* | `docs/*.md` + `docs/decisions.md` | — | See below. |
 
-## Row 9 — docs-as-spec drift (BLOCKING)
+## Row 10 — docs-as-spec drift (BLOCKING)
 
-If the diff changes the **behavior** of any invariant in rows 1–8 and does **not**:
+If the diff changes the **behavior** of any invariant in rows 1–9 and does **not**:
 
 - update the corresponding normative statement in `docs/DESIGN.md` / `docs/isolation.md` /
   `docs/convergence.md` / `docs/architecture.md`, **and**

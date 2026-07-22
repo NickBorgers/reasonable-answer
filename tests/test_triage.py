@@ -172,3 +172,53 @@ def test_signal_signature_ignores_minor_noise():
         ]
     )[0]
     assert signal_signature(a) == signal_signature(b)
+
+
+# ------------------------------------------------------- social-bias categories (D24)
+
+
+def test_bias_category_floors_clamp_up():
+    clamped = clamp(
+        [
+            issue(Category.ONE_SIDED_SOURCING, Severity.MINOR),
+            issue(Category.UNEXAMINED_PRESUPPOSITION, Severity.MINOR),
+            issue(Category.LOADED_LANGUAGE, Severity.MINOR),
+        ]
+    )
+    assert clamped[0].severity is Severity.MAJOR
+    assert clamped[1].severity is Severity.MAJOR
+    assert clamped[2].severity is Severity.MINOR  # floor is minor: proposal preserved
+
+
+def test_loaded_language_escalation_survives_the_clamp():
+    # docs/bias.md §3: the critic may propose major for pervasive framing and it sticks.
+    escalated = clamp([issue(Category.LOADED_LANGUAGE, Severity.MAJOR)])
+    assert escalated[0].severity is Severity.MAJOR
+
+
+def test_bias_categories_are_lens_scoped():
+    with pytest.raises(LensValidationError):
+        validate_issue(Lens.LOGIC, issue(Category.ONE_SIDED_SOURCING, Severity.MAJOR), STRUCTURE)
+    with pytest.raises(LensValidationError):
+        validate_issue(
+            Lens.EVIDENCE, issue(Category.UNEXAMINED_PRESUPPOSITION, Severity.MAJOR), STRUCTURE
+        )
+    with pytest.raises(LensValidationError):
+        validate_issue(Lens.COMPLETENESS, issue(Category.LOADED_LANGUAGE, Severity.MINOR), STRUCTURE)
+
+
+def test_bias_related_spans_may_describe_a_pattern_not_a_quote():
+    """D24: the bias categories are excluded from IN_ARTIFACT_RELATED, because
+    their related_span describes a pattern (a source cluster, the question's
+    framing) rather than a second quotable span. An honest finding whose
+    related_span is not artifact text must validate cleanly — on every lens."""
+    cases = (
+        (Lens.EVIDENCE, Category.ONE_SIDED_SOURCING),
+        (Lens.LOGIC, Category.LOADED_LANGUAGE),
+        (Lens.COMPLETENESS, Category.UNEXAMINED_PRESUPPOSITION),
+    )
+    for lens, category in cases:
+        described = issue(category, Severity.MINOR).model_copy(
+            update={"related_span": "the question's framing, which the report never examines"}
+        )
+        validate_issue(lens, described, STRUCTURE)  # must not raise

@@ -1,0 +1,19 @@
+lens: evidence
+tier: obvious
+question: "Should the state adopt a school voucher program?"
+defects:
+  - category: one_sided_sourcing
+    locus: {section: 4, paragraph: 1}
+    anywhere: true
+    note: >
+      A contested policy question where every single source — five of five — comes from
+      one advocacy organization or its house publication, and the text
+      never corroborates independently nor acknowledges the imbalance. The citations are
+      individually well-formed and accurately described, so a critic checking only
+      fabrication or misrepresentation finds nothing; the defect is the selection.
+      `anywhere` is set because a sourcing pattern has no honest single locus; a critic
+      may reasonably anchor it to the Sources block or to any of the load-bearing
+      claims that rest on the cluster.
+slots:
+  advocacy_org: ["the Center for Education Freedom", "the School Choice Alliance", "the Foundation for Parental Options"]
+  journal_name: ["Education Freedom Review", "School Choice Quarterly", "Parental Options Journal"]

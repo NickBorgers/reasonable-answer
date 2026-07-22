@@ -68,7 +68,7 @@ runs:
         # A new prompt-bearing or spec-bearing document must be added here.
         is_spec_critical() {
           case "$1" in
-            docs/DESIGN.md|docs/isolation.md|docs/convergence.md|docs/architecture.md|docs/decisions.md) return 0 ;;
+            docs/DESIGN.md|docs/isolation.md|docs/convergence.md|docs/architecture.md|docs/decisions.md|docs/bias.md) return 0 ;;
             docs/ci-pipeline.md|docs/ci-setup.md) return 0 ;;
             .github/scripts/review/prompts/*.md|.github/ci/prompts/*.md) return 0 ;;
             AGENTS.md|CLAUDE.md) return 0 ;;

@@ -57,7 +57,15 @@ WRITER_SYSTEM = (
     "know of a real source for a claim, you weaken the claim or state the uncertainty "
     "in the text rather than inventing support.\n"
     "- You state the strongest genuine counterargument and engage with it.\n"
-    "- You claim exactly as much as your support licenses — no more.\n\n"
+    "- You claim exactly as much as your support licenses — no more.\n"
+    "- You use neutral, precise language: an evaluative characterization is "
+    "attributed to a source or argued in the text, never smuggled in as "
+    "description.\n"
+    "- When the question presupposes something contested, you surface and examine "
+    "the presupposition rather than inheriting it.\n"
+    "- On contested questions you draw sources from more than one outlet or "
+    "viewpoint cluster where genuine sources exist, and you say so plainly when "
+    "they do not.\n\n"
     "Output the report body only: no preamble, no meta-commentary about your process."
 )
 
@@ -276,12 +284,26 @@ _CATEGORY_MEANING: dict[Category, str] = {
         "the cited source plainly does not support the claim as stated"
     ),
     Category.UNCITED_CLAIM: "a material factual claim carries no citation",
+    Category.ONE_SIDED_SOURCING: (
+        "on a contested question, the material claims rest on sources drawn from a "
+        "single outlet, organization, or aligned cluster, and the text shows no "
+        "independent corroboration or acknowledgment of the imbalance"
+    ),
     Category.CONTRADICTED_CLAIM: (
         "the claim contradicts another claim in the report, or a source the report cites"
     ),
     Category.INVALID_INFERENCE: "the conclusion does not follow from the stated premises",
     Category.OVERSTATED_CLAIM: "the claim is stronger than the support offered for it",
+    Category.LOADED_LANGUAGE: (
+        "a descriptor or framing carries an evaluative verdict the cited support "
+        "does not establish — the wording asserts what the text does not argue"
+    ),
     Category.OMITTED_COUNTERARGUMENT: "a material opposing view a careful reader expects is absent",
+    Category.UNEXAMINED_PRESUPPOSITION: (
+        "the report adopts a contested presupposition — inherited from the question "
+        "or introduced by its own framing — as settled fact, without stating or "
+        "examining it"
+    ),
     Category.UNCLEAR_STRUCTURE: "organization or clarity impedes evaluating the argument",
     Category.STYLISTIC: "cosmetic preference only",
 }
