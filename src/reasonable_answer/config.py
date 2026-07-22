@@ -281,6 +281,22 @@ class AuditionConfig(BaseModel):
     thresholds: AuditionThresholds = Field(default_factory=AuditionThresholds)
 
 
+class DisputeConfig(BaseModel):
+    """The writer dispute channel (D25). Off by default: with `enabled: false`
+    every prompt and every state transition is byte-identical to a build without
+    the feature — the D17 offline-when-off pattern."""
+
+    model_config = ConfigDict(extra="forbid")
+
+    enabled: bool = False
+    #: Whole-run adjudication budget. A dispute raised past it is dismissed
+    #: unadjudicated (the defect stands) — the budget bounds spend, not termination.
+    budget: int = Field(default=6, ge=0, le=50)
+    #: Disputes accepted from a single revision pass; the rest are dropped.
+    max_per_pass: int = Field(default=3, ge=1, le=10)
+    arbiter_max_tokens: int = Field(default=4000, ge=500, le=16000)
+
+
 class Config(BaseModel):
     model_config = ConfigDict(extra="forbid")
 
@@ -290,6 +306,7 @@ class Config(BaseModel):
     search: SearchConfig = Field(default_factory=SearchConfig)
     audition: AuditionConfig = Field(default_factory=AuditionConfig)
     seed: SeedConfig = Field(default_factory=SeedConfig)
+    disputes: DisputeConfig = Field(default_factory=DisputeConfig)
     runs_dir: Path = Path("runs")
     retention_days: int = 14
     #: How often the web server's background sweep content-purges runs past
@@ -374,6 +391,23 @@ def validate_roster_health(config: Config, identities: dict[str, str]) -> list[s
                 f"lens '{lens.value}' critic pool shares one model family {sorted(families)} — "
                 f"weak independence (correlated blind spots)"
             )
+
+    # Dispute arbiters (D25) must be neither the disputing writer nor the critic
+    # that raised the finding. Fail OPEN with a warning, not closed: a dispute with
+    # no eligible arbiter is dismissed at runtime and the defect stands — the status
+    # quo ante — so an uncoverable pair costs a privilege, never a safety property.
+    if config.disputes.enabled:
+        all_ids = set(identities.values())
+        for lens in LENSES:
+            for writer in roster.writers:
+                for critic in roster.critics_for(lens):
+                    pair = {identities[writer], identities[critic]}
+                    if not (all_ids - pair):
+                        warnings.append(
+                            f"disputes: no arbiter identity exists when '{writer}' disputes a "
+                            f"'{lens.value}' finding raised by '{critic}' — such disputes will "
+                            f"be dismissed unadjudicated"
+                        )
     return warnings
 
 

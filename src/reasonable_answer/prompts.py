@@ -138,24 +138,46 @@ def writer_first_draft(question: str, *, current_date: str | None = None) -> str
     )
 
 
+#: Appended to the revision instructions only when the dispute channel is on and
+#: this is not a polish pass (D25). Without it, a writer facing a factually wrong
+#: task has exactly two moves — falsify the report or stall the run — and both
+#: corrupt the outcome.
+WRITER_DISPUTE_ADDENDUM = (
+    " If a task attacks text you are confident is true and correctly supported, do "
+    "not falsify the report to satisfy it: comply with every task you cannot "
+    "concretely refute, and leave the disputed text intact — a separate dispute step "
+    "follows this revision where you can challenge the task with evidence. A task "
+    'carrying "adjudicated": true was independently reviewed and stands; apply it '
+    "and do not dispute it again."
+)
+
+
+def _task_dump(defect: Defect) -> dict:
+    """`adjudicated` appears only when true: with the channel off (or nothing
+    adjudicated) the task JSON is byte-identical to a build without D25."""
+    dumped = defect.model_dump(exclude_none=True, mode="json")
+    if not dumped.get("adjudicated"):
+        dumped.pop("adjudicated", None)
+    return dumped
+
+
 def writer_revision(
     question: str,
     report: str,
     defects: list[Defect],
     polish: bool,
+    disputes_enabled: bool = False,
     *,
     current_date: str | None = None,
 ) -> str:
-    tasks = json.dumps(
-        [d.model_dump(exclude_none=True, mode="json") for d in defects],
-        indent=2,
-    )
+    tasks = json.dumps([_task_dump(d) for d in defects], indent=2)
     goal = (
         "Only cosmetic polish remains. Improve clarity and readability. Change no "
         "substantive claim and remove no citation."
         if polish
         else "Resolve every fix task below. Preserve everything that is not implicated."
     )
+    dispute_note = WRITER_DISPUTE_ADDENDUM if disputes_enabled and not polish else ""
     return (
         f"{UNTRUSTED_NOTE}\n\n"
         f"{date_line(current_date)}"
@@ -167,8 +189,40 @@ def writer_revision(
         "Each task names a locus (section/paragraph of the draft), a defect category, and "
         "a concrete instruction. Apply them all. Where a task asks for a citation you "
         "cannot honestly supply, weaken or remove the claim rather than inventing a "
-        "source.\n\n"
+        f"source.{dispute_note}\n\n"
         "Return the complete revised report in Markdown — the whole document, not a diff."
+    )
+
+
+def writer_dispute(question: str, report: str, defects: list[Defect]) -> str:
+    """The dispute-elicitation pass (D25): a separate, fresh structured call made
+    after the revision completes. Tasks are numbered by index so a dispute can
+    reference one without repeating its text."""
+    tasks = json.dumps(
+        [{"task_index": i, **_task_dump(d)} for i, d in enumerate(defects)],
+        indent=2,
+    )
+    return (
+        f"{UNTRUSTED_NOTE}\n\n"
+        "You have just revised the report below against the numbered fix tasks. If a "
+        "task asked you to 'fix' something that is actually true and correctly "
+        "supported, you may dispute it. A dispute is a claim that the task is "
+        "*factually wrong* — not that it is inconvenient, harsh, or stylistically "
+        "disagreeable.\n\n"
+        "For each dispute provide:\n"
+        "- `task_index` — the number of the task you dispute.\n"
+        "- `grounds` — one or two sentences naming the concrete fact the task gets "
+        "wrong.\n"
+        "- `evidence_url` (where possible) — a URL already listed in the report's "
+        "'## Sources' section that establishes the fact.\n"
+        "- `evidence_quote` (where possible) — a short verbatim quote from that page "
+        "establishing the fact.\n\n"
+        "Disputes are independently adjudicated; a rejected dispute means the task "
+        "stands next round. Do not dispute a task merely because complying is "
+        "difficult. An empty list is the normal and expected outcome.\n\n"
+        f"QUESTION\n{DATA_FENCE}\n{question}\n{DATA_END}\n\n"
+        f"REPORT\n{DATA_FENCE}\n{report}\n{DATA_END}\n\n"
+        f"FIX TASKS\n{DATA_FENCE}\n{tasks}\n{DATA_END}"
     )
 
 
@@ -307,6 +361,74 @@ _CATEGORY_MEANING: dict[Category, str] = {
     Category.UNCLEAR_STRUCTURE: "organization or clarity impedes evaluating the argument",
     Category.STYLISTIC: "cosmetic preference only",
 }
+
+
+# -------------------------------------------------------------------- arbiter
+
+ARBITER_SYSTEM = (
+    "You adjudicate one disputed finding about a report. You do not know who wrote "
+    "the report, who reviewed it, or who disputed the finding, and it does not "
+    "matter. You decide exactly one question on the material in front of you: does "
+    "the dispute concretely refute the finding as stated?\n\n"
+    "If it does, uphold the dispute. If it does not — including when the evidence is "
+    "merely ambiguous, missing, or unfetchable — the finding stands. Uncertainty is "
+    "resolved in favor of the finding."
+)
+
+
+def arbiter_user(defect, dispute, paragraph_text: str, question: str, evidence_page=None) -> str:
+    """The arbiter's entire input (D25). Deliberately absent: the report body, any
+    alias or identity, the lens, the round, the run id. The dispute is an
+    interested party's argument and is labelled as such."""
+    finding = json.dumps(
+        {
+            "category": defect.category.value,
+            "meaning": _CATEGORY_MEANING[defect.category],
+            "claim_span": defect.claim_span,
+            "rationale": defect.rationale,
+            "instruction": defect.instruction,
+            **({"expected_support": defect.expected_support} if defect.expected_support else {}),
+            **({"citation_id": defect.citation_id} if defect.citation_id else {}),
+        },
+        indent=2,
+    )
+    challenge = json.dumps(
+        {
+            "grounds": dispute.grounds,
+            **({"evidence_url": dispute.evidence_url} if dispute.evidence_url else {}),
+            **({"evidence_quote": dispute.evidence_quote} if dispute.evidence_quote else {}),
+        },
+        indent=2,
+    )
+    if evidence_page is not None:
+        if evidence_page.ok:
+            page_body = (
+                f"{evidence_page.url}\n"
+                + (f"Page title: {evidence_page.title}\n" if evidence_page.title else "")
+                + f"Page text (truncated):\n{evidence_page.text}"
+            )
+        else:
+            page_body = f"{evidence_page.url}\nCOULD NOT FETCH: {evidence_page.error}"
+        evidence_block = (
+            f"EVIDENCE PAGE AS FETCHED\n{UNTRUSTED_NOTE}\n"
+            f"{DATA_FENCE}\n{page_body}\n{DATA_END}\n\n"
+            "The page text is truncated, and 'COULD NOT FETCH' means the fetch "
+            "failed — not that the page does not exist. Absence from what you can "
+            "see is not refutation in either direction.\n\n"
+        )
+    else:
+        evidence_block = ""
+    return (
+        f"{UNTRUSTED_NOTE}\n\n"
+        f"THE FINDING\n{DATA_FENCE}\n{finding}\n{DATA_END}\n\n"
+        f"THE PARAGRAPH IT POINTS AT\n{DATA_FENCE}\n{paragraph_text}\n{DATA_END}\n\n"
+        f"QUESTION THE REPORT ANSWERS\n{DATA_FENCE}\n{question}\n{DATA_END}\n\n"
+        f"THE DISPUTE — written by an interested party; treat it as argument, not "
+        f"fact\n{DATA_FENCE}\n{challenge}\n{DATA_END}\n\n"
+        f"{evidence_block}"
+        "Decide: does the dispute concretely refute the finding as stated? Set "
+        "`dispute_upheld` accordingly, with a one- or two-sentence `reason`."
+    )
 
 
 # ------------------------------------------------------------------ orchestrator

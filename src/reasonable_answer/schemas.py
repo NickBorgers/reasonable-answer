@@ -23,6 +23,10 @@ MAX_INSTRUCTION = 400
 MAX_EXPECTED_SUPPORT = 300
 MAX_CITATION_ID = 120
 MAX_ISSUES_PER_LENS = 25
+MAX_DISPUTE_GROUNDS = 400
+MAX_EVIDENCE_QUOTE = 400
+MAX_EVIDENCE_URL = 500
+MAX_DISPUTES = 10
 
 
 class StructuralRef(BaseModel):
@@ -92,6 +96,67 @@ class Defect(BaseModel):
     related_span: str | None = None
     citation_id: str | None = None
     expected_support: str | None = None
+    #: True when a writer disputed this finding and adjudication overruled the
+    #: dispute (D25). A bare boolean by design: it tells the writer "this task was
+    #: independently reviewed and stands — apply it, do not dispute it again",
+    #: carrying no verdict prose and no provenance.
+    adjudicated: bool = False
+
+
+class Dispute(BaseModel):
+    """A writer's challenge to one fix-task: a claim that the task is factually
+    wrong. Writer-authored, therefore untrusted; strictly bounded (D25)."""
+
+    model_config = ConfigDict(extra="forbid")
+
+    task_index: int = Field(ge=0, le=99)
+    grounds: str = Field(min_length=1, max_length=MAX_DISPUTE_GROUNDS)
+    evidence_url: str | None = Field(default=None, max_length=MAX_EVIDENCE_URL)
+    evidence_quote: str | None = Field(default=None, max_length=MAX_EVIDENCE_QUOTE)
+
+
+class WriterDisputes(BaseModel):
+    """The whole of a writer's dispute pass. An empty list is the normal outcome."""
+
+    model_config = ConfigDict(extra="forbid")
+
+    disputes: list[Dispute] = Field(default_factory=list, max_length=MAX_DISPUTES)
+
+
+class ArbiterVerdict(BaseModel):
+    """The arbiter's entire output: one boolean and a bounded audit-only reason.
+
+    The reason never enters any model context — it goes to the audit store."""
+
+    model_config = ConfigDict(extra="forbid")
+
+    dispute_upheld: bool
+    reason: str = Field(min_length=1, max_length=400)
+
+
+AdjudicationVerdict = Literal["upheld", "overruled", "dismissed"]
+AdjudicationMethod = Literal[
+    "mechanical",
+    "arbiter",
+    "no_eligible_arbiter",
+    "arbiter_failed",
+    "budget_exhausted",
+    "duplicate",
+    "invalid",
+]
+
+
+class AdjudicationRecord(BaseModel):
+    """One entry in the per-run adjudicated-facts registry (D25). Lives in
+    checkpointed graph state; only `upheld` records ever suppress anything."""
+
+    model_config = ConfigDict(extra="forbid")
+
+    category: Category
+    claim_span: str
+    verdict: AdjudicationVerdict
+    method: AdjudicationMethod
+    round: int
 
 
 class CleanRecord(BaseModel):

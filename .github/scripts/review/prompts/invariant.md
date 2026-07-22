@@ -15,7 +15,7 @@ diff preserve the design's safety properties, and if it changes one, did it chan
 
 A blocker you cannot tie to a decision or finding ID is usually an opinion. Populate
 `decision_ref` on every `blocking_issues[]` entry. Valid IDs live in `docs/decisions.md`
-(`D1`–`D24`, `RA-001`–`RA-020`, `RB-001`–`RB-010`, `RC-001`–`RC-007`, `RG-001`–`RG-004`) and in
+(`D1`–`D25`, `RA-001`–`RA-020`, `RB-001`–`RB-010`, `RC-001`–`RC-007`, `RG-001`–`RG-004`) and in
 `docs/convergence.md` (`RD-002`, `RH-001`, `RI-001` — cited normatively there but **not** tabulated
 in `decisions.md`; citing them is fine, inventing new ones is not).
 
@@ -38,11 +38,12 @@ Walk every row. A row is in play if the diff touches the listed surface.
 | 7 | **Round identity, hash-keyed evidence, idempotent replay.** Records key on `(run_id, round, artifact_hash, models, lens, attempt, confirm_state)`. Any generation or polish is a new hash and **resets the clean-record set**. Results whose hash doesn't match the current round are rejected. Replay must not fake convergence. | `graph.py` reducers, `schemas.py::CleanRecord`, `store.py` | RA-014, RC-002 | Clean records survive a new hash; a reducer becomes order-dependent or accumulating; stale-hash rejection is loosened to "warn". |
 | 8 | **Prompt-injection boundaries.** Question, seed, every report, and every critique are **untrusted data**. Critique text must never reach the generator as instruction: loci are bounded structural refs, spans are length-limited verbatim quotes (`require_verbatim_spans`), critic provenance is withheld from the generator-facing form. Confirmation is indistinguishable from a normal critique. | `prompts.py`, `triage.py` defect-list build, `schemas.py` bounds, `config.py::require_verbatim_spans` | RA-010, RB-005, RB-007, RB-010, D12 | A free-text field is added to the critic→generator path; a length bound is removed or widened without justification; provenance leaks into the defect list; `confirm_state` becomes visible to the model. |
 | 9 | **Bias categories stay observable-text-anchored.** The three social-bias categories (`one_sided_sourcing`, `loaded_language`, `unexamined_presupposition`) are governed by `docs/bias.md`: meanings describe observable text properties, never inferred intent; `loaded_language` floors at `minor`; the other two at `major`; the "what critics must NOT do" rules (no viewpoint quotas, no intent attribution, no both-sides demands) bound the category meanings and lens briefs. | `taxonomy.py` (`Category`, `SEVERITY_FLOOR`, `LENS_CATEGORIES`, `LENS_BRIEF`), `prompts.py::_CATEGORY_MEANING`, `docs/bias.md` | D4, D24, RC-005 | A bias category's meaning or lens brief drifts toward intent inference or viewpoint quotas; a bias floor changes without a `docs/bias.md` change; `bias.md` and `SEVERITY_FLOOR`/`LENS_CATEGORIES` diverge. |
-| 10 | **Docs-as-spec drift.** *(the check that pays continuously)* | `docs/*.md` + `docs/decisions.md` | — | See below. |
+| 10 | **Dispute adjudication is identity-blind and fail-closed toward the finding.** No alias, identity, lens, round, run_id or hash reaches an arbiter prompt; raiser identities feed only deterministic eligibility selection. Nothing is suppressed without an explicit `upheld` record; every inconclusive path (failed fetch, absent quote, no eligible arbiter, arbiter error, spent budget) leaves the finding standing; the registry rules each `(category, normalized span)` key at most once per run; with `disputes.enabled: false` prompts and transitions are byte-identical to a build without the feature. | `dispute.py`, `graph.py::_adjudicate` / `_elicit_disputes`, `triage.py::suppress`, `prompts.py` arbiter prompts | D25, RA-010, RB-008 | An identity/lens/round reaches an arbiter prompt; suppression happens without an `upheld` record; an inconclusive fetch is treated as refutation; the once-per-key rule is dropped; mechanical adjudication accepts a URL the report does not cite; the elicitation failure path becomes fatal. |
+| 11 | **Docs-as-spec drift.** *(the check that pays continuously)* | `docs/*.md` + `docs/decisions.md` | — | See below. |
 
-## Row 10 — docs-as-spec drift (BLOCKING)
+## Row 11 — docs-as-spec drift (BLOCKING)
 
-If the diff changes the **behavior** of any invariant in rows 1–9 and does **not**:
+If the diff changes the **behavior** of any invariant in rows 1–10 and does **not**:
 
 - update the corresponding normative statement in `docs/DESIGN.md` / `docs/isolation.md` /
   `docs/convergence.md` / `docs/architecture.md`, **and**
@@ -141,7 +142,7 @@ Valid JSON conforming exactly to `.github/scripts/review/schema/reviewer-v1.json
   with an error that describes the pipeline rather than the change.
 
   When a diff carries no invariant surface at all — CI plumbing, `.gitignore`, a README typo — that
-  is an `approve` whose summary says so plainly: which files the diff touches, and why rows 1–9 have
+  is an `approve` whose summary says so plainly: which files the diff touches, and why rows 1–11 have
   no surface on it. That is a real and useful finding, and it is what the reviewer above you needs.
   Confirming that a change cannot affect the design's safety properties is part of this job, not an
   admission that the job did not apply.

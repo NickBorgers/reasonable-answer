@@ -118,6 +118,10 @@ def test_defects_carry_no_provenance():
         "related_span",
         "citation_id",
         "expected_support",
+        # D25: a bare boolean — "this task was independently reviewed and stands".
+        # It carries no verdict prose and no provenance; anything beyond a bool
+        # here needs a new decision entry.
+        "adjudicated",
     }
 
 

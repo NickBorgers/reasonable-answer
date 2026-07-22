@@ -220,7 +220,24 @@ force early exit. So the machine always halts.
 deterministic and overrides the orchestrator; the LLM can never skip `min_ticks`, pass the cap, or
 accept with material issues.
 
-### Exact predicates
+### Disputes do not touch the decision table (D25)
+
+The writer dispute channel adds an `adjudicate` node on the one-way `generate → critique` edge
+and **nothing else**: no new `ControllerInput` or `OrchestratorView` field, no new rule, no rule
+reordering. The termination argument above survives unchanged:
+
+* `adjudicate` introduces no new cycle — it can only route forward into `Critiquing`.
+* Its work is bounded: ≤ `disputes.max_per_pass` disputes per generation, a strictly decreasing
+  whole-run `disputes.budget`, and a once-per-key registry that makes repeated disputes free.
+* Suppression of `upheld`-adjudicated findings happens **before** `tally`, so it only *removes*
+  issues from the counts. It can flip a state from material to clean — reaching rules 7–11
+  earlier — but it can never create a generating state at or beyond the cap.
+* A writer that keeps refusing an overruled task converges to the existing terminals: identical
+  drafts trip `cycle_detected` (rule 12), an unchanged signature trips stagnation (rule 13).
+  The dispute budget bounds *spend*, not termination — termination was never its job.
+
+`round` still advances only in the generate node; rules 4/9/14 remain the only generating rules
+and keep their gates (RI-001, RH-001).
 
 - **material issue:** severity ≥ floor (`major`).
 - **signal-stagnation:** the per-category `{blocking, major}` multiset is unchanged for `K`
