@@ -205,3 +205,20 @@ def test_bias_categories_are_lens_scoped():
         )
     with pytest.raises(LensValidationError):
         validate_issue(Lens.COMPLETENESS, issue(Category.LOADED_LANGUAGE, Severity.MINOR), STRUCTURE)
+
+
+def test_bias_related_spans_may_describe_a_pattern_not_a_quote():
+    """D24: the bias categories are excluded from IN_ARTIFACT_RELATED, because
+    their related_span describes a pattern (a source cluster, the question's
+    framing) rather than a second quotable span. An honest finding whose
+    related_span is not artifact text must validate cleanly — on every lens."""
+    cases = (
+        (Lens.EVIDENCE, Category.ONE_SIDED_SOURCING),
+        (Lens.LOGIC, Category.LOADED_LANGUAGE),
+        (Lens.COMPLETENESS, Category.UNEXAMINED_PRESUPPOSITION),
+    )
+    for lens, category in cases:
+        described = issue(category, Severity.MINOR).model_copy(
+            update={"related_span": "the question's framing, which the report never examines"}
+        )
+        validate_issue(lens, described, STRUCTURE)  # must not raise
