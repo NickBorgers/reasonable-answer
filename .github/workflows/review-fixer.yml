@@ -14,11 +14,13 @@ name: Review pipeline — fixer
 #   author-resume — the agent that wrote this PR is resumed with its conversation
 #                   intact, so it answers reviewers with the reasoning that produced
 #                   the code and can push back on a misread instead of patching it.
-#   cold          — no session available; a fresh agent applies only mechanically-safe
-#                   fixes behind an explicit gate.
+#   cold          — no session available; a fresh agent applies fixes it can ground in
+#                   the repository's existing content, the PR's reconstructed intent,
+#                   and the reviewer's finding (D23), and skips what would be invention.
 #
 # Falling back from the first to the second is always safe and always logged. The cold
-# path is strictly more conservative.
+# path stays the more conservative one: it works from recorded intent rather than
+# remembered intent, and it can never claim `body_clarification`.
 
 on:
   workflow_call:
@@ -231,8 +233,9 @@ jobs:
 
       # ── Context reconstruction ───────────────────────────────────────────────
       # For a resumed author this is redundant — it already holds all of it. For a cold
-      # fixer it is the difference between "apply the mechanical fixes" and "understand
-      # what this PR was for".
+      # fixer it is load-bearing: reconstructed intent is one of the grounds (D23) its
+      # judgment is required to anchor in, and the difference between patching blind and
+      # understanding what this PR was for.
       #
       # This is the common case, not the fallback. Author-resume only ever fires on PRs
       # that resolve-issue.yml opened; a PR a human (or a coding agent on a laptop) opens
@@ -389,9 +392,9 @@ jobs:
       # A resumed author is the better fixer when it works — it answers reviewers from
       # the conversation that wrote the code. But author-resume has been the failure
       # mode, not the happy path, and a hung resume that blocks the PR is strictly worse
-      # than a mechanical cold fix. So when the resume attempt does not produce a clean
+      # than a cold fix. So when the resume attempt does not produce a clean
       # result, fall through to a fresh cold agent, exactly as the reference pipeline in
-      # hide-my-list does. The cold path is strictly more conservative and always logged.
+      # hide-my-list does. The cold path is the more conservative one and always logged.
       #
       # `outcome != 'success'` covers both a hard failure (timeout, non-zero exit) and
       # the composite completing without leaving a result. In cold mode this whole block
