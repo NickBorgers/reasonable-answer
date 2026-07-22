@@ -41,20 +41,30 @@ if (!REVIEWER_DIR || !VERDICT_OUTPUT_PATH) {
   process.exit(2);
 }
 
-// Reviewer artifacts arrive as `reviewer-<role>-<sha>/<role>-result.json`.
+// Reviewer artifacts arrive as `reviewer-<role>-<sha>/<role>-result.json`, downloaded
+// into REVIEWER_DIR. `actions/download-artifact` only creates that directory when its
+// pattern matched at least one artifact, so when every reviewer was skipped — e.g. each
+// reviewer's Guard concluded ok=false because PR Validation failed on the reviewed SHA —
+// the directory never exists. Probing for it keeps `readdirSync` from throwing a raw
+// ENOENT that would kill the job with no verdict on the commit status and nothing to
+// explain the burned cycle; the wholly-absent case is turned into a fail-closed NO-GO
+// verdict below, the same direction as every other "cannot trust the inputs" path.
+const reviewerDirExists = existsSync(REVIEWER_DIR);
 const reviewers = [];
-for (const entry of readdirSync(REVIEWER_DIR, { withFileTypes: true })) {
-  if (!entry.isDirectory()) continue;
-  const dir = join(REVIEWER_DIR, entry.name);
-  const candidate = readdirSync(dir).find((f) => f.endsWith("-result.json"));
-  if (!candidate) continue;
-  try {
-    reviewers.push(JSON.parse(readFileSync(join(dir, candidate), "utf8")));
-  } catch (err) {
-    // A malformed artifact must not be silently dropped — dropping it could turn a
-    // reviewer's blockers into a GO. Fail the job instead.
-    console.error(`judge.mjs: could not parse ${join(dir, candidate)}: ${err.message}`);
-    process.exit(1);
+if (reviewerDirExists) {
+  for (const entry of readdirSync(REVIEWER_DIR, { withFileTypes: true })) {
+    if (!entry.isDirectory()) continue;
+    const dir = join(REVIEWER_DIR, entry.name);
+    const candidate = readdirSync(dir).find((f) => f.endsWith("-result.json"));
+    if (!candidate) continue;
+    try {
+      reviewers.push(JSON.parse(readFileSync(join(dir, candidate), "utf8")));
+    } catch (err) {
+      // A malformed artifact must not be silently dropped — dropping it could turn a
+      // reviewer's blockers into a GO. Fail the job instead.
+      console.error(`judge.mjs: could not parse ${join(dir, candidate)}: ${err.message}`);
+      process.exit(1);
+    }
   }
 }
 
@@ -95,11 +105,26 @@ if (FIX_RESULT_PATH && existsSync(FIX_RESULT_PATH)) {
   }
 }
 
-// A reviewer that failed publishes no artifact, so it would simply be absent from the
-// set and aggregate() would report that "all reviewers cleared" on the strength of the
-// survivors. See expected-roles.mjs for why that is the wrong direction to fail in.
-const missingRoles = checkExpectedRoles(reviewers, EXPECTED_ROLES ? JSON.parse(EXPECTED_ROLES) : []);
-const verdict = missingRoles ?? aggregate(reviewers, fixResult);
+// A wholly-absent reviewer directory means every reviewer was skipped — nothing ran, so
+// there is no set to aggregate and no per-role artifact to miss. Treat it as the
+// fail-closed pipeline error it is, with a reason the finalize comment can render, rather
+// than leaning on the generic empty-set message: the operator needs the hint that the
+// reviews were skipped, not just that the set was empty.
+let verdict;
+if (!reviewerDirExists) {
+  verdict = {
+    verdict: "NO-GO",
+    category: "pipeline_error",
+    reasons: ["pipeline could not trust its inputs: no reviewer artifacts (reviews skipped?)"],
+    unaddressed_blocker_ids: [],
+  };
+} else {
+  // A reviewer that failed publishes no artifact, so it would simply be absent from the
+  // set and aggregate() would report that "all reviewers cleared" on the strength of the
+  // survivors. See expected-roles.mjs for why that is the wrong direction to fail in.
+  const missingRoles = checkExpectedRoles(reviewers, EXPECTED_ROLES ? JSON.parse(EXPECTED_ROLES) : []);
+  verdict = missingRoles ?? aggregate(reviewers, fixResult);
+}
 
 console.log(JSON.stringify(verdict, null, 2));
 writeFileSync(VERDICT_OUTPUT_PATH, JSON.stringify(verdict, null, 2) + "\n");

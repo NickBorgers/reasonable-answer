@@ -66,6 +66,16 @@ guessing whenever it cannot trust its inputs: reviewer artifacts spanning multip
 an empty reviewer set, or every reviewer abstaining. It has unit tests, which
 `pr-validation.yml` runs whenever `.github/scripts/review/**` changes.
 
+The judge fails closed on its own inputs too, not just the aggregator's. When every
+reviewer was skipped — each reviewer's Guard concluded `ok=false`, e.g. because PR
+Validation failed on the reviewed SHA — no reviewer artifact is uploaded, and
+`download-artifact` leaves the `reviewer-artifacts` directory wholly absent rather than
+empty. `judge.mjs` treats that as a `pipeline_error` NO-GO (`pipeline could not trust its
+inputs: no reviewer artifacts (reviews skipped?)`) instead of letting `readdirSync` die
+with a raw `ENOENT`. The distinction matters operationally: a crash publishes no verdict,
+so the merge gate stays un-green with nothing to say why and the cycle burns silently,
+whereas a NO-GO verdict is recorded on the SHA and the finalize comment can explain it.
+
 `judge.mjs` reads the fixer's artifact when one exists. When it does not — no blockers to
 fix, the cycle cap forbade fixing, or the fixer failed — it synthesizes the no-op fix
 result rather than relaxing the aggregator, so the epoch checks stay live and every
