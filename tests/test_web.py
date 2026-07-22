@@ -154,6 +154,31 @@ def test_a_mismatched_referer_without_fetch_metadata_is_refused(client):
     assert response.status_code == 403
 
 
+def test_a_matching_origin_without_fetch_metadata_is_allowed(client):
+    """The fallback's allow arm: an older browser that omits Sec-Fetch-Site but sends
+    an Origin matching the addressed host is a legitimate same-origin POST and must go
+    through — this is the path that keeps such browsers working at all."""
+    response = client.post(
+        "/runs",
+        data={"question": "From an older browser?"},
+        headers={"origin": "http://testserver"},
+        follow_redirects=False,
+    )
+    assert response.status_code == 303
+
+
+def test_a_matching_referer_without_fetch_metadata_is_allowed(client):
+    """Same allow arm one signal further down: no Sec-Fetch-Site, no Origin, but a
+    Referer on the addressed host. Still a legitimate same-origin POST."""
+    response = client.post(
+        "/runs",
+        data={"question": "From an older browser?"},
+        headers={"referer": "http://testserver/"},
+        follow_redirects=False,
+    )
+    assert response.status_code == 303
+
+
 def test_a_cross_site_resume_is_refused(client):
     """resume() is lower-risk than submit() but still state-changing, so it carries the
     same guard — and the guard fires before the run is even looked up."""
