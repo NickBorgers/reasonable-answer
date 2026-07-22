@@ -38,6 +38,9 @@ services:
       # RA_RESUME_ON_BOOT: "0"
       # Only needed if the proxy is behind auth.
       # LITELLM_API_KEY: ${LITELLM_API_KEY}
+      # Required while the mounted roster has search.enabled: true — startup fails
+      # closed without it. brave.token does not exist inside the container.
+      BRAVE_SEARCH_API_KEY: ${BRAVE_SEARCH_API_KEY}
     healthcheck:
       test: ["CMD", "python", "-c", "import urllib.request;urllib.request.urlopen('http://127.0.0.1:8080/healthz',timeout=2)"]
       interval: 30s

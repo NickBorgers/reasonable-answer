@@ -243,6 +243,17 @@ def test_the_opener_has_no_handler_for_other_schemes():
     assert "HTTPHandler" in names and "HTTPSHandler" in names
 
 
+def test_the_opener_honours_environment_proxies(monkeypatch):
+    """The egress-isolation deployment's only internet path is HTTP(S)_PROXY
+    (docs/ssrf-egress-isolation.md); the opener must route through it, and the
+    handler must be the env-reading kind rather than one pinned at import time."""
+    from reasonable_answer.fetch import _http_only_opener
+
+    monkeypatch.setenv("HTTPS_PROXY", "http://egress-proxy:3128")
+    proxies = [h for h in _http_only_opener(3).handlers if type(h).__name__ == "ProxyHandler"]
+    assert proxies and proxies[0].proxies.get("https") == "http://egress-proxy:3128"
+
+
 def test_redirect_cap_is_wired_through():
     from reasonable_answer.fetch import _http_only_opener
 

@@ -214,6 +214,11 @@ def _http_only_opener(max_redirects: int) -> urllib.request.OpenerDirector:
     """
     opener = urllib.request.OpenerDirector()
     for handler in (
+        # No-arg ProxyHandler reads HTTP_PROXY/HTTPS_PROXY/NO_PROXY from the
+        # environment. The egress-isolation deployment (docs/ssrf-egress-isolation.md)
+        # puts this process on a network whose only internet path is that proxy;
+        # without this handler every fetch there dead-ends instead of egressing.
+        urllib.request.ProxyHandler(),
         urllib.request.HTTPHandler(),
         urllib.request.HTTPSHandler(),
         urllib.request.HTTPDefaultErrorHandler(),
