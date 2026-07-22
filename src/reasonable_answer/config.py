@@ -91,8 +91,26 @@ class ProxyConfig(BaseModel):
     model_config = ConfigDict(extra="forbid")
 
     base_url: str = "https://llm.featherback-mermaid.ts.net/v1"
+    #: Env var whose value, when set and non-empty, overrides `base_url`. Mirrors
+    #: `api_key_env` (D21): a containerized deployment can inject only the proxy URL
+    #: — e.g. a Docker-bridge DNS name the baked Tailscale URL cannot resolve — and
+    #: leave the baked roster authoritative for models, critics, search, and budgets.
+    #: Precedence: env value > roster file value > built-in default.
+    base_url_env: str = "RA_PROXY_BASE_URL"
     api_key_env: str = "LITELLM_API_KEY"
     api_key_fallback: str = "fake-key"
+
+    @model_validator(mode="after")
+    def _apply_base_url_env(self) -> ProxyConfig:
+        # Resolved once at load, unlike `api_key` (a property): the file value is the
+        # fallback, never the effective value, so nothing downstream reads a base_url
+        # the env was meant to override. Unset, empty, or whitespace-only (the shape an
+        # exported-but-blank var takes in a .env/compose file) leaves the file value; a
+        # URL never carries surrounding whitespace, so a set value is trimmed.
+        override = os.environ.get(self.base_url_env, "").strip()
+        if override:
+            self.base_url = override
+        return self
 
     @property
     def api_key(self) -> str:
