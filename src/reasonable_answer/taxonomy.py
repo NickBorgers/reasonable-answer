@@ -113,6 +113,10 @@ LENS_BRIEF: dict[Lens, str] = {
     Lens.COMPLETENESS: (
         "Assess only coverage and organization: whether a material opposing view or "
         "counterargument that a careful reader would expect is absent, and whether "
-        "the organization of the report impedes evaluating its argument."
+        "the organization of the report impedes evaluating its argument. An omission "
+        "must be fixable within the report itself: adding the missing perspective, "
+        "weakening the affected claim, or stating the limitation explicitly are each "
+        "acceptable resolutions. Never demand a specific external document, dataset, "
+        "or record as the only acceptable fix."
     ),
 }

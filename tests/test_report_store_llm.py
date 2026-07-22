@@ -181,3 +181,7 @@ def test_shipped_config_loads_and_is_healthy_in_shape():
     assert cfg.roster.writers
     for lens_pool in cfg.roster.critics.values():
         assert len(lens_pool) >= 2
+    # The shipped deployment opts into retrieval and source verification (the code
+    # defaults stay False); pin it so the posture can't regress silently.
+    assert cfg.search.enabled is True
+    assert cfg.search.verify_sources is True

@@ -40,7 +40,8 @@ The report **carries its own citations**; the evidence lens challenges any mater
 any on-its-face `misrepresented_source`, and any `fabricated_citation`. Citations must be
 well-formed/resolvable in format.
 
-**Retrieval is opt-in and off by default (D17).** The two postures differ in what a citation *is*:
+**Retrieval is opt-in and off by default in code (D17); the shipped `config/roster.yaml` opts in
+(D22).** The two postures differ in what a citation *is*:
 
 * **`search.enabled: false` (default)** — no external retrieval, exactly as D5 specifies. A diverse
   roster can still share a factual blind spot, and a citation is whatever the writer recalled.
@@ -54,7 +55,8 @@ well-formed/resolvable in format.
 **Retrieval alone does not make the report fact-checked.** It constrains where citations come from;
 it does not establish that a cited page *supports the specific claim attached to it*.
 
-**Source verification (D18), also opt-in and off by default.** With `search.verify_sources: true`
+**Source verification (D18), also opt-in and off by default in code; the shipped roster opts in
+(D22).** With `search.verify_sources: true`
 the pages the report cites are fetched and handed to the **evidence lens only**, as untrusted data.
 Two categories change character:
 
@@ -71,6 +73,16 @@ offline; the critic is told the difference explicitly, because treating "could n
 not exist" would manufacture `blocking` defects out of transient network conditions. Page text is
 truncated and the critic is told so, so a claim it cannot see is not read as a claim the page
 contradicts.
+
+**Every prompt carries the run's date (D22).** A date-plausibility judgement ("this citation is
+future-dated, so it must be fabricated") is only as good as the judge's sense of what day it is —
+and without grounding, that sense is the critic model's training-data recency. Run
+`run-75eb136b9bfb` stagnated to `needs_human_review` because the evidence lens repeatedly flagged
+legitimate current-year citations, including one dated the previous day, as "future-dated"
+blocking fabrications the writer could never resolve. The date is captured once at intake
+(`run_date`, UTC) and injected into every writer and critic prompt, so a confirmation critique
+stays byte-identical even across midnight (RB-010). It is deliberately absent from the audition
+prompt-hash surface: it is run context, not lens semantics.
 
 Even with both options on, the output is *consensus-reviewed with verified sourcing* — **not
 fact-checked**. Verification establishes that a cited page exists and says something compatible

@@ -50,18 +50,20 @@ roster:
       - glm-5.2
       - gemma4
 
-# Web search for writers. Off by default so a checkout with no API key behaves
-# exactly as it always has.
+# Web search for writers. The code default is off; THIS deployment opts in so
+# completeness demands like "cite the specific budget vote" are satisfiable instead
+# of stagnating the run (run-75eb136b9bfb).
 #
-# When enabled, startup is fail-closed twice over: no credential is fatal, and so is
-# a writer that cannot emit tool calls — that writer would still be told to produce a
-# '## Sources' section and would fill it from memory, and nothing downstream can tell
-# a remembered citation from a retrieved one.
+# Startup is fail-closed twice over: no credential is fatal, and so is a writer that
+# cannot emit tool calls — that writer would still be told to produce a '## Sources'
+# section and would fill it from memory, and nothing downstream can tell a remembered
+# citation from a retrieved one. A contributor without a key sets `enabled: false`
+# locally or points $RA_CONFIG at another roster.
 #
 # Credential: $BRAVE_SEARCH_API_KEY (prod) or ./brave.token (local, gitignored).
 # Key from https://api-dashboard.search.brave.com/app/keys — the "Data for AI" SKU.
 search:
-  enabled: false
+  enabled: true
   api_key_env: BRAVE_SEARCH_API_KEY
   token_file: brave.token
   max_results: 5
@@ -78,8 +80,12 @@ search:
   # a report with real citations can be verified whether or not we retrieved them.
   #
   # This fetches URLs a model chose. That is SSRF exposure by construction and is
-  # expected to be constrained at the network layer, not here.
-  verify_sources: false
+  # expected to be constrained at the network layer, not here — deploy behind the
+  # egress-isolation pattern in docs/ssrf-egress-isolation.md.
+  #
+  # On in this deployment: an "on its face" fabricated_citation judgement is a
+  # model-prior guess (and a blocking one), while a fetch is a checkable fact.
+  verify_sources: true
   max_sources: 12
   fetch_timeout_seconds: 15.0
   fetch_max_bytes: 400000

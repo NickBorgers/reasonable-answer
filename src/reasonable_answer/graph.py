@@ -49,6 +49,9 @@ class State(TypedDict, total=False):
     question: str
     seed: str | None
     fingerprint: str
+    #: Captured once at intake so every prompt in the run carries the same date
+    #: (RB-010: confirmation critiques stay byte-identical across midnight).
+    run_date: str
 
     report: str
     artifact_hash: str
@@ -188,6 +191,13 @@ def _build_searcher(config: Config, client: LLMClient) -> search.BraveSearch | N
 # --------------------------------------------------------------------- intake
 
 
+def _today() -> str:
+    """Monkeypatch point for tests; UTC so a run's date is host-timezone-independent."""
+    from datetime import datetime, timezone
+
+    return datetime.now(timezone.utc).date().isoformat()
+
+
 def _intake(state: State, rt: Runtime) -> dict:
     question = (state.get("question") or "").strip()
     seed = (state.get("seed") or "").strip() or None
@@ -207,6 +217,7 @@ def _intake(state: State, rt: Runtime) -> dict:
     base: dict = {
         "question": question,
         "seed": seed,
+        "run_date": _today(),
         "round": 0,
         "hash_history": [],
         "writer_rotation": 0,
@@ -243,9 +254,9 @@ def _intake(state: State, rt: Runtime) -> dict:
             "round": 1,
         }
         rt.store.report(1, h, seed, "seed")
-        rt.store.event("intake", path="seed", artifact_hash=h)
+        rt.store.event("intake", path="seed", artifact_hash=h, run_date=base["run_date"])
     else:
-        rt.store.event("intake", path="question")
+        rt.store.event("intake", path="question", run_date=base["run_date"])
     return base
 
 
@@ -271,10 +282,15 @@ def _generate(state: State, rt: Runtime) -> dict:
     polish = state.get("polish_next", False)
     defects = [Defect.model_validate(d) for d in state.get("defects", [])]
 
+    # .get(): a checkpoint from before run_date existed resumes dateless, which is
+    # exactly the prior behavior.
+    run_date = state.get("run_date")
     if state.get("report"):
-        user = prompts.writer_revision(state["question"], state["report"], defects, polish)
+        user = prompts.writer_revision(
+            state["question"], state["report"], defects, polish, current_date=run_date
+        )
     else:
-        user = prompts.writer_first_draft(state["question"])
+        user = prompts.writer_first_draft(state["question"], current_date=run_date)
 
     search_kwargs: dict[str, Any] = {}
     if rt.search_enabled:
@@ -375,6 +391,7 @@ def _critique_one(
     author_identity: str,
     used: set[str],
     attempt: int,
+    run_date: str | None = None,
 ) -> LensResult:
     """One lens, one fresh context. Failure is recorded as a *failed lens*, never as
     'no issues found' — a failed review can never manufacture a clean record."""
@@ -424,6 +441,7 @@ def _critique_one(
         sources=sources,
         require_verbatim_spans=rt.config.require_verbatim_spans,
         attempt=attempt,
+        current_date=run_date,
     )
 
 
@@ -438,6 +456,8 @@ def _critique(state: State, rt: Runtime) -> dict:
     used = {k: set(v) for k, v in used_raw.items()}
     results = dict(state.get("lens_results", {}))
 
+    run_date = state.get("run_date")
+
     def work(lens: Lens) -> LensResult:
         attempt = 1 + len(used.get(lens.value, set()))
         return _critique_one(
@@ -449,6 +469,7 @@ def _critique(state: State, rt: Runtime) -> dict:
             author_identity,
             used.get(lens.value, set()),
             attempt,
+            run_date=run_date,
         )
 
     with ThreadPoolExecutor(max_workers=rt.config.budgets.max_concurrency) as pool:
@@ -741,7 +762,11 @@ def _finalize(state: State, rt: Runtime) -> dict:
         "warnings": state.get("warnings", []),
         "note": Decision.model_validate(state["decision"]).note if state.get("decision") else "",
         "label": (
-            "consensus-reviewed with in-artifact sourcing (no external retrieval in v1)"
+            "consensus-reviewed with verified sourcing"
+            if rt.verify_sources
+            else "consensus-reviewed with retrieved sourcing"
+            if rt.search_enabled
+            else "consensus-reviewed with in-artifact sourcing (no external retrieval)"
         ),
     }
     rt.store.final(text, summary)
