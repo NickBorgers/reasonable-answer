@@ -92,6 +92,29 @@ def test_every_model_call_in_a_run_carries_the_intake_date(
     assert len(dates) == 1
 
 
+def test_seed_path_intake_event_carries_the_run_date(identities, config, monkeypatch):
+    """Both intake arms stamp `run_date` on their audit event; the seed path is the
+    one no other test reaches."""
+    import json
+
+    monkeypatch.setattr(graph, "_today", lambda: DATE)
+    client = FakeClient(
+        identities=identities,
+        critique_fn=clean,
+        report_fn=lambda n: REPORT,
+    )
+    final = run(config, question="Is it so?", seed=REPORT, client=client)
+    assert final["terminal_status"] == "accepted"
+
+    events_path = config.runs_dir / final["run_id"] / "events.jsonl"
+    intakes = [
+        e for e in map(json.loads, events_path.read_text().splitlines())
+        if e["kind"] == "intake"
+    ]
+    assert intakes and intakes[0]["path"] == "seed"
+    assert intakes[0]["run_date"] == DATE
+
+
 def test_pre_date_checkpoints_degrade_to_dateless_prompts(identities, config):
     """A checkpoint from before run_date existed must resume with the prior
     behavior, not crash. _generate and _critique read state with .get()."""

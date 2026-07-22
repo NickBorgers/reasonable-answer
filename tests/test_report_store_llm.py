@@ -181,7 +181,9 @@ def test_shipped_config_loads_and_is_healthy_in_shape():
     assert cfg.roster.writers
     for lens_pool in cfg.roster.critics.values():
         assert len(lens_pool) >= 2
-    # The shipped deployment opts into retrieval and source verification (the code
-    # defaults stay False); pin it so the posture can't regress silently.
+    # The shipped deployment opts into retrieval only (the code defaults stay False).
+    # Verification fetches model-chosen URLs and needs a network-layer egress boundary
+    # this repo deliberately does not ship (docs/ssrf-egress-isolation.md), so it stays
+    # off. Pin both so the posture can't drift silently in either direction.
     assert cfg.search.enabled is True
-    assert cfg.search.verify_sources is True
+    assert cfg.search.verify_sources is False

@@ -55,8 +55,10 @@ well-formed/resolvable in format.
 **Retrieval alone does not make the report fact-checked.** It constrains where citations come from;
 it does not establish that a cited page *supports the specific claim attached to it*.
 
-**Source verification (D18), also opt-in and off by default in code; the shipped roster opts in
-(D22).** With `search.verify_sources: true`
+**Source verification (D18), also opt-in and off by default — including in the shipped roster,
+which enables retrieval only (D22): verification fetches model-chosen URLs, and the egress
+boundary that makes that safe is a deployment concern outside this repo
+(docs/ssrf-egress-isolation.md).** With `search.verify_sources: true`
 the pages the report cites are fetched and handed to the **evidence lens only**, as untrusted data.
 Two categories change character:
 

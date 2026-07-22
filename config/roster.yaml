@@ -80,12 +80,13 @@ search:
   # a report with real citations can be verified whether or not we retrieved them.
   #
   # This fetches URLs a model chose. That is SSRF exposure by construction and is
-  # expected to be constrained at the network layer, not here — deploy behind the
-  # egress-isolation pattern in docs/ssrf-egress-isolation.md.
-  #
-  # On in this deployment: an "on its face" fabricated_citation judgement is a
-  # model-prior guess (and a blocking one), while a fetch is a checkable fact.
-  verify_sources: true
+  # constrained at the network layer, not here — and that boundary is a deployment
+  # concern, deliberately not implemented in this repo (docs/ssrf-egress-isolation.md
+  # describes one worked pattern). So the shipped roster leaves verification OFF:
+  # flip it on only in a deployment that has such an egress boundary in place.
+  # When it is on, an "on its face" fabricated_citation judgement stops being a
+  # model-prior guess (and a blocking one) and becomes a checkable fact.
+  verify_sources: false
   max_sources: 12
   fetch_timeout_seconds: 15.0
   fetch_max_bytes: 400000

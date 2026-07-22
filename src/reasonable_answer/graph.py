@@ -18,6 +18,7 @@ import uuid
 from concurrent.futures import ThreadPoolExecutor
 from contextlib import closing
 from dataclasses import dataclass, field
+from datetime import UTC
 from typing import Any, TypedDict
 
 from langgraph.graph import END, START, StateGraph
@@ -193,9 +194,9 @@ def _build_searcher(config: Config, client: LLMClient) -> search.BraveSearch | N
 
 def _today() -> str:
     """Monkeypatch point for tests; UTC so a run's date is host-timezone-independent."""
-    from datetime import datetime, timezone
+    from datetime import datetime
 
-    return datetime.now(timezone.utc).date().isoformat()
+    return datetime.now(UTC).date().isoformat()
 
 
 def _intake(state: State, rt: Runtime) -> dict:
