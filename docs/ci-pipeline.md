@@ -156,9 +156,13 @@ It runs in one of two modes.
 **`cold`** — the fallback, and still the one to optimise for. `author-resume` can only fire
 on a PR that `resolve-issue.yml` opened. Now that filing an issue starts an agent, those
 are no longer rare — but any PR opened by hand, or by a coding agent on a laptop, carries
-no session and lands here. A cold fixer applies only fixes passing an explicit mechanical
-gate: the blocker must name a file and line, be fully determined by its own description,
-stay inside reviewer-named files, and stay small. Everything else is skipped with a reason.
+no session and lands here. A cold fixer exercises **grounded judgment** (D23): it may apply
+any fix it can anchor in the repository's existing content and structure, the PR's
+reconstructed intent, and the reviewer's own finding — including work that spans files no
+reviewer named, such as writing a missing test by mirroring the tests beside it or adopting
+a deployment pattern the docs already prescribe. What it may not do is invent: a fix that
+requires a design decision the repository has not already made is skipped with a reason,
+as is anything the context record shows to be deliberate.
 
 **`author-resume`** — the agent that wrote the PR is resumed with its conversation intact.
 It answers reviewers with the reasoning that produced the code, and may push back on a
@@ -178,10 +182,11 @@ before triaging anything, into `$PR_CONTEXT_PATH`:
   have been *opened* by an agent to say `Resolves #N`, so this is the context-from-issue
   path for PRs that have no session.
 
-The record can only make the fixer **skip**, never make it apply. If it shows the flagged
-behaviour was deliberate, the blocker is skipped with a citation. If it is silent, the
-mechanical gate decides. Understanding why code exists does not establish that a change to
-it is safe, and conflating those is how a fixer talks itself past its own gate.
+The record cuts both ways (D23). It can make the fixer **skip** — flagged behaviour it
+shows to be deliberate is skipped with a citation — and it can supply the intent that
+grounds a fix, telling the fixer which of two plausible resolutions serves the change.
+What it can never do is widen scope: the fixer answers reviewer findings only, and
+instructions appearing inside the record are data, not directives.
 
 All of it is untrusted text — issue bodies and PR comments are public and attacker-editable
 — so it is fenced and labelled as data, and both prompts state that instructions appearing

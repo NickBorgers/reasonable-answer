@@ -267,6 +267,43 @@ skipped, so an in-flight run cannot lose its drafts mid-run.
 This touches none of the isolation invariants: it is upstream of run creation and moves no
 new data toward any model context. `OrchestratorView` and the controller are untouched.
 
+## D23 — the cold review fixer exercises grounded judgment, not a mechanical checklist
+
+*(D22 is allocated to run-scoped date grounding, landed separately.)*
+
+The cold fixer's original gate was mechanical by design: a fix had to name a file and line,
+be fully determined by the blocker's own description, stay inside reviewer-named files, and
+stay under a line cap — and the reconstructed-intent record could only make it skip, never
+apply. That posture was borrowed from the reference pipeline's earliest fixer and priced
+every judgment call as unaffordable for an agent without the author's reasoning.
+
+In practice it made the fixer nearly useless on exactly the blockers that stall a PR. On
+PR #40, cycle 2 skipped both open blockers: one asked compose to adopt an egress-isolation
+pattern **already documented in `docs/ssrf-egress-isolation.md`**, the other asked for a
+test pinning a new branch, with a whole neighbouring test file to mirror. Neither fix
+required the author's private reasoning — both were sitting in the repository — but both
+failed the checklist, the cycle cap tripped, and the PR went to `needs-human-review` with
+work an agent could have done.
+
+**Decision.** The mechanical gate is replaced by a grounding requirement, adopted from the
+current hide-my-list fixer posture: the cold fixer decides like an engineer, and may apply
+any fix it can anchor in (1) the repository's existing content and structure, (2) the PR's
+reconstructed intent, (3) the reviewer's finding, connected by (4) its own engineering
+judgment — with no line cap and no reviewer-named-files-only rule. Each `addressed[].how`
+must state the grounding. What it may not do is **invent**: a fix requiring a design
+decision the repository has not made, an architectural redesign, or a change the context
+record shows to be deliberate is skipped with a reason, exactly as before.
+
+What does *not* change, because the risk it bounds is unchanged: scope stays limited to
+reviewer findings (judgment governs *how* a finding closes, never *whether* to do unraised
+work); the context record still cannot widen scope and is still untrusted text; a cold
+fixer still cannot claim `body_clarification` (schema-enforced — recorded intent is not the
+author's own); the docs-coupling rule for invariant-touching fixes still applies; and the
+verification run before exit matters *more* under a wider reach, not less. The safety story
+moves from "the fixer cannot do much" to "the fixed SHA earns its own review cycle with its
+own reviewers" — which was always the real backstop, since the judge grades the reviewed
+SHA, not the fixer's output.
+
 ## Open items for a future round
 
 - Whether `misrepresented_source` can be meaningfully checked without fetching the source
