@@ -291,10 +291,15 @@ def test_an_unreadable_pdf_is_a_clean_error():
 
 
 def _config(**overrides):
-    """A Config with a minimal valid roster — only the `seed` block matters here."""
+    """A Config with a minimal valid roster — only the `seed` block matters here.
+
+    URL seeds are opt-in (off by default, like search); these tests exercise the
+    conversion mechanics, so they opt in unless a test overrides it to probe the gate.
+    """
     from reasonable_answer.config import Config
     from reasonable_answer.taxonomy import LENSES
 
+    overrides.setdefault("allow_url", True)
     return Config.model_validate(
         {
             "roster": {"writers": ["w"], "critics": {lens.value: ["c"] for lens in LENSES}},
@@ -332,6 +337,14 @@ def test_a_url_seed_is_fetched_and_converted(monkeypatch):
 def test_url_seeds_can_be_disabled():
     with pytest.raises(IngestError, match="disabled"):
         ingest.from_url("https://example.org/r", config=_config(allow_url=False))
+
+
+def test_url_seeds_are_off_by_default():
+    """The D17/D18 posture (D24): fetching a caller-chosen URL is exposure a
+    deployment must opt into, so a bare config refuses it."""
+    from reasonable_answer.config import SeedConfig
+
+    assert SeedConfig().allow_url is False
 
 
 def test_a_truncated_binary_seed_is_fatal(monkeypatch):

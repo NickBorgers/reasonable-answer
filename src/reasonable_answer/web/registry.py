@@ -222,9 +222,11 @@ class Registry:
     def seed(self, run_id: str) -> str | None:
         """The converted markdown the run was seeded with, or None if it was not.
 
-        Read back on resume because the seed is part of the run's fingerprint. This is
-        the same text `graph` hashed — `ingest` converts at the edge, before the store
-        is written — so no re-fetch and no re-conversion is involved.
+        Read back on resume because the graph fingerprints `question + seed + roster +
+        budgets` and refuses a checkpoint whose inputs have drifted — a resume that
+        forgets the seed looks exactly like someone changing the question mid-run.
+        This is the same text `graph` hashed — `ingest` converts at the edge, before
+        the store is written — so no re-fetch and no re-conversion is involved.
         """
         path = self.dir(run_id) / "seed.md"
         return path.read_text() if path.exists() else None
@@ -232,16 +234,6 @@ class Registry:
     def question(self, run_id: str) -> str:
         path = self.dir(run_id) / "question.txt"
         return path.read_text().strip() if path.exists() else "(question not recorded)"
-
-    def seed(self, run_id: str) -> str | None:
-        """The seed the run was started with, or None if it began from a question alone.
-
-        Resuming needs this: the graph fingerprints `question + seed + roster + budgets`
-        and refuses a checkpoint whose inputs have drifted, so a resume that forgets the
-        seed looks exactly like someone changing the question mid-run.
-        """
-        path = self.dir(run_id) / "seed.md"
-        return path.read_text() if path.exists() else None
 
     def drafts(self, run_id: str) -> list[tuple[str, str]]:
         """(filename, body) for every draft, oldest first."""

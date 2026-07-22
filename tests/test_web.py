@@ -393,7 +393,7 @@ def test_the_worker_caps_concurrency(config):
 
 
 def test_a_crashing_run_leaves_the_worker_alive_and_the_run_resumable(config):
-    def exploding(cfg, *, question, seed, run_id, stop=None):
+    def exploding(cfg, *, question, seed, run_id, stop=None, **_):
         raise RuntimeError("boom")
 
     worker = RunWorker(config, max_concurrent=1, runner=exploding)
@@ -423,7 +423,7 @@ def test_resuming_a_seeded_run_passes_the_seed_back(config, monkeypatch):
     monkeypatch.setenv("RA_RESUME_ON_BOOT", "0")
     seen: list[str | None] = []
 
-    def recording(cfg, *, question, seed, run_id, stop=None):
+    def recording(cfg, *, question, seed, run_id, stop=None, **_):
         seen.append(seed)
 
     worker = RunWorker(config, max_concurrent=1, runner=recording)
@@ -445,7 +445,7 @@ def test_resuming_a_seeded_run_passes_the_seed_back(config, monkeypatch):
 
 
 def test_resuming_an_active_run_does_not_double_run(config):
-    def slow(cfg, *, question, seed, run_id, stop=None):
+    def slow(cfg, *, question, seed, run_id, stop=None, **_):
         time.sleep(0.5)
 
     worker = RunWorker(config, max_concurrent=1, runner=slow)
@@ -519,7 +519,7 @@ def test_submit_is_rejected_when_the_queue_is_full_and_leaves_no_run_dir(config)
     the memory cap is also a disk cap."""
     gate = threading.Event()
 
-    def blocking(cfg, *, question, seed, run_id, stop=None):
+    def blocking(cfg, *, question, seed, run_id, stop=None, **_):
         gate.wait(timeout=5)
 
     cfg = config.model_copy(update={"max_queue_depth": 2, "submit_rate_max": 0})
@@ -543,7 +543,7 @@ def test_recover_and_resume_bypass_the_queue_cap(config):
     and on disk, or a backlog could wedge recovery after a restart."""
     gate = threading.Event()
 
-    def blocking(cfg, *, question, seed, run_id, stop=None):
+    def blocking(cfg, *, question, seed, run_id, stop=None, **_):
         gate.wait(timeout=5)
 
     cfg = config.model_copy(update={"max_queue_depth": 1, "submit_rate_max": 0})
@@ -606,7 +606,7 @@ def _post(c, question: str, headers: dict | None = None) -> int:
 def test_a_full_queue_surfaces_a_429(config):
     gate = threading.Event()
 
-    def blocking(cfg, *, question, seed, run_id, stop=None):
+    def blocking(cfg, *, question, seed, run_id, stop=None, **_):
         gate.wait(timeout=5)
 
     cfg = config.model_copy(update={"max_queue_depth": 1, "submit_rate_max": 0})
@@ -715,9 +715,23 @@ def test_the_sweeper_is_disabled_when_the_interval_is_not_positive(config):
 # ------------------------------------------------------------------- seed ingest
 
 
-def test_the_form_never_accepts_a_filesystem_path(client):
+def test_url_seeds_are_refused_by_default(client):
+    """The gate itself: `seed.allow_url` defaults to off, because a URL seed turns the
+    unauthenticated web UI into a read proxy for whatever the host can reach. A
+    deployment enables it only behind a network-layer egress boundary."""
+    response = client.post(
+        "/runs",
+        data={"question": "Q?", "seed_url": "https://example.org/r"},
+        follow_redirects=False,
+    )
+    assert response.status_code == 400
+    assert "disabled" in response.json()["detail"]
+
+
+def test_the_form_never_accepts_a_filesystem_path(client, config):
     """The web layer must not read local files on a request's say-so. There is no
     `seed_path` field, and a path in `seed_url` is refused by the scheme check."""
+    config.seed.allow_url = True
     for value in ("/etc/passwd", "file:///etc/passwd", "../../secret.md"):
         response = client.post(
             "/runs", data={"question": "Q?", "seed_url": value}, follow_redirects=False
@@ -739,6 +753,7 @@ def test_text_and_url_seeds_are_mutually_exclusive(client):
 def test_a_url_seed_is_fetched_converted_and_becomes_round_one(client, config, monkeypatch):
     from fakes import http_stub
 
+    config.seed.allow_url = True
     page = "<h1>Draft</h1><p>An existing claim.</p><h2>Sources</h2><p>https://example.org/a</p>"
     monkeypatch.setattr(
         urllib.request.OpenerDirector, "open", lambda self, *a, **k: http_stub(page)
@@ -756,9 +771,11 @@ def test_a_url_seed_is_fetched_converted_and_becomes_round_one(client, config, m
     assert "<h1>" not in seed
 
 
-def test_a_dead_seed_url_fails_at_submit_not_in_a_worker(client, monkeypatch):
+def test_a_dead_seed_url_fails_at_submit_not_in_a_worker(client, config, monkeypatch):
     """Blocking the request is the point: the user learns immediately, instead of the
     run dying a minute later with nothing but a log line."""
+    config.seed.allow_url = True
+
     def boom(*a, **k):
         raise OSError("connection refused")
 
@@ -781,10 +798,10 @@ def test_pasted_html_is_converted_rather_than_shown_to_critics_raw(client, confi
     assert Registry(config.runs_dir).seed(run_id).startswith("# Pasted")
 
 
-def test_the_url_field_disappears_when_url_seeds_are_disabled(config):
+def test_the_url_field_is_hidden_unless_url_seeds_are_enabled(config):
     from reasonable_answer.web.render import render_index
 
-    config.seed.allow_url = False
+    # Off is the default posture, so the bare config must not render the field.
     assert 'name="seed_url"' not in render_index([], queue_depth=0, config=config)
     config.seed.allow_url = True
     assert 'name="seed_url"' in render_index([], queue_depth=0, config=config)

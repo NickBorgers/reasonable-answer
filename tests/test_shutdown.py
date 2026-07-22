@@ -148,7 +148,7 @@ def test_shutdown_returns_while_a_job_is_still_running(config):
     waited out its timeout, and abandoned the thread mid-node."""
     entered = threading.Event()
 
-    def watches_the_flag(cfg, *, question, seed, run_id, stop=None):
+    def watches_the_flag(cfg, *, question, seed, run_id, stop=None, **_):
         entered.set()
         stop.wait(timeout=10)  # stands in for a node that notices the boundary
 
@@ -166,7 +166,7 @@ def test_shutdown_leaves_queued_work_on_disk_for_the_next_process(config):
     """Anything still in the queue is owed, not lost: it is already an event on disk."""
     # Threads are non-daemon now, so a runner that outlives the assertions would leave a
     # live thread behind: it watches the stop flag instead of sleeping through it.
-    def waits_for_the_flag(cfg, *, question, seed, run_id, stop=None):
+    def waits_for_the_flag(cfg, *, question, seed, run_id, stop=None, **_):
         stop.wait(timeout=10)
 
     worker = RunWorker(config, max_concurrent=1, runner=waits_for_the_flag)
@@ -182,7 +182,7 @@ def test_shutdown_leaves_queued_work_on_disk_for_the_next_process(config):
 
 
 def test_a_graceful_stop_is_not_logged_as_a_crash(config, caplog):
-    def pauses(cfg, *, question, seed, run_id, stop=None):
+    def pauses(cfg, *, question, seed, run_id, stop=None, **_):
         raise GracefulStop("paused", run_id)
 
     worker = RunWorker(config, max_concurrent=1, runner=pauses)
@@ -202,7 +202,7 @@ def test_a_graceful_stop_is_not_logged_as_a_crash(config, caplog):
 def test_boot_recovery_re_enqueues_an_interrupted_run(config):
     seen: list[str] = []
 
-    def recording(cfg, *, question, seed, run_id, stop=None):
+    def recording(cfg, *, question, seed, run_id, stop=None, **_):
         seen.append(run_id)
 
     _interrupted_run(config, "run-orphan")
@@ -315,7 +315,7 @@ def test_inputs_that_drifted_abandon_the_run_instead_of_looping(config):
     on every boot until it burned the whole cap."""
     from reasonable_answer.graph import ResumeMismatch
 
-    def drifted(cfg, *, question, seed, run_id, stop=None):
+    def drifted(cfg, *, question, seed, run_id, stop=None, **_):
         raise ResumeMismatch("roster changed")
 
     _interrupted_run(config, "run-drifted")

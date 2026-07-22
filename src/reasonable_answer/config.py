@@ -170,7 +170,14 @@ class SeedConfig(BaseModel):
 
     #: Allow `--seed <url>` and the web seed-URL field. Turning this off removes the
     #: field from the form as well as rejecting the parameter.
-    allow_url: bool = True
+    #:
+    #: Off by default, like `search.enabled` and `search.verify_sources` (D17/D18):
+    #: a URL seed makes the server fetch a caller-chosen URL and hand the body back
+    #: as the run's first report, which on the unauthenticated web UI is a read
+    #: proxy into whatever the host can reach. The network-layer egress boundary
+    #: that makes that acceptable is a deployment concern outside this repo
+    #: (docs/ssrf-egress-isolation.md) — enable this only behind one.
+    allow_url: bool = False
     fetch_timeout_seconds: float = Field(default=30.0, gt=0, le=300)
     #: A real PDF runs to megabytes; the citation fetcher's 400 KB would truncate most.
     fetch_max_bytes: int = Field(default=4_000_000, ge=10_000, le=50_000_000)
