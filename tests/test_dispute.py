@@ -471,8 +471,15 @@ def test_an_overruled_dispute_marks_the_defect_and_the_writer_complies(tmp_path)
 def test_a_malformed_dispute_pass_degrades_to_no_disputes(tmp_path):
     from reasonable_answer.llm import MalformedOutputError
 
+    # A real MalformedOutputError message is built from schema-validation text that
+    # echoes the REJECTED INPUT — the writer's dispute grounds and evidence quotes,
+    # which are report-derived (private) content. This sentinel stands in for that
+    # leaked span text: sec-audit-privacy-1 requires it never reach events.jsonl,
+    # which `ra purge --content-only` intentionally RETAINS.
+    LEAKED_SPAN = "SECRET-DISPUTE-GROUNDS-the-senator-privately-said-x"
+
     def broken(_alias, _user):
-        raise MalformedOutputError("nonsense")
+        raise MalformedOutputError(f"alias: schema violation after repair: {LEAKED_SPAN}")
 
     client = FakeClient(
         identities=IDENTITIES,
@@ -483,13 +490,17 @@ def test_a_malformed_dispute_pass_degrades_to_no_disputes(tmp_path):
     result = run(make_config(tmp_path), "Did the senator launch a campaign?", client=client)
     # no adjudication happened, so the false positive stands — the status quo
     assert result["terminal_status"] in ("needs_human_review", "exhausted_unresolved")
-    events = [
-        json.loads(line)
-        for line in (
-            (tmp_path / "runs" / result["run_id"] / "events.jsonl").read_text().splitlines()
-        )
-    ]
-    assert any(e["kind"] == "dispute_pass_failed" for e in events)
+    raw_events = (tmp_path / "runs" / result["run_id"] / "events.jsonl").read_text()
+    # The retained audit log must never carry the rejected-input text.
+    assert LEAKED_SPAN not in raw_events
+    events = [json.loads(line) for line in raw_events.splitlines()]
+    failed = [e for e in events if e["kind"] == "dispute_pass_failed"]
+    assert failed, "the failure must still be recorded as a signal"
+    for e in failed:
+        # Only a non-content-bearing reason: the exception type name, never str(exc).
+        assert e.get("error_type") == "MalformedOutputError"
+        assert "reason" not in e
+        assert all(LEAKED_SPAN not in str(v) for v in e.values())
 
 
 def test_a_failed_arbiter_leaves_the_finding_standing(tmp_path):

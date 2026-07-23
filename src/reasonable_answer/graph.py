@@ -453,7 +453,13 @@ def _elicit_disputes(
             max_tokens=8000,
         )
     except (ModelCallError, MalformedOutputError) as exc:
-        rt.store.event("dispute_pass_failed", reason=str(exc)[:400])
+        # Record only the exception TYPE — never `str(exc)`. A MalformedOutputError's
+        # message is built from schema-validation text that echoes the REJECTED INPUT
+        # (the writer's dispute grounds and evidence quotes), which is report-derived
+        # (private) content; a ModelCallError message can likewise carry model I/O.
+        # events.jsonl is RETAINED by `ra purge --content-only` (D25), so any
+        # exception-derived string here would leak artifact text past a content purge.
+        rt.store.event("dispute_pass_failed", error_type=type(exc).__name__)
         return []
     accepted = dispute_mod.validate_disputes(raw, defects, rt.config.disputes.max_per_pass)
     return [
