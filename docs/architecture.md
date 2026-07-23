@@ -50,7 +50,7 @@ Invariants (enforced in code, covered by tests):
 
 | Node | Reads | Produces | Model | Trust model |
 |------|-------|----------|-------|-------------|
-| **intake** | raw input | normalized `question` / `seed`; routing | none | deterministic |
+| **intake** | question + **markdown** seed | normalized `question` / `seed`; routing | none | deterministic |
 | **generate** | question + latest report + **defect list** | next report (with citations) | non-author (alternating) | LLM (untrusted output) |
 | **critique** | report + question + **one lens** + taxonomy | `Issue[]` per lens | per-lens non-author model | LLM (untrusted output) |
 | **triage** | this tick's `Issue[]` | `OrchestratorView` + `DefectList` | none — **mechanical** | deterministic |
@@ -199,7 +199,16 @@ flowchart TD
 ```
 
 `min_ticks` applies on the seed path too — a provided report is never accepted on its first
-critique. Intake validates size/format (markdown/text) and normalizes.
+critique. Intake validates size and normalizes.
+
+**Format conversion happens at the edge, not here.** `intake` requires markdown, because
+`report.parse` builds the `[S<n>.P<m>]` loci from `#` headings and `fetch.extract_source_urls`
+reads only a markdown `## Sources` section. The CLI and the web layer therefore run
+`ingest` (PDF, `.docx`, HTML, `.txt`, or an http(s) URL → markdown) *before* calling
+`graph.run`, so that the text hashed into the resume fingerprint is byte-for-byte the text
+that is stored, critiqued and revised — one artifact, one identity. A seed whose format
+carried no headings is accepted with a warning; the warning rides the run's existing
+`warnings` channel, and the format and origin are recorded on the `intake` event.
 
 ## Operational requirements (RA-015, RA-016, RA-017)
 

@@ -104,6 +104,15 @@ def render_index(runs: list[RunSummary], queue_depth: int, config: Config) -> st
         if queue_depth
         else ""
     )
+    # Omitted entirely when URL seeds are off, so the form never offers something the
+    # handler will reject.
+    seed_url_field = (
+        """<label for="seed_url">&hellip;or a URL <span class="hint">a web page, PDF or
+      .docx to fetch and convert</span></label>
+    <input type="url" id="seed_url" name="seed_url" placeholder="https://example.org/report.pdf">"""
+        if config.seed.allow_url
+        else ""
+    )
     body = f"""
 <section class="panel">
   <h1>Ask a question</h1>
@@ -117,7 +126,8 @@ def render_index(runs: list[RunSummary], queue_depth: int, config: Config) -> st
     <label for="seed">Seed report <span class="hint">optional &mdash; an existing draft to improve
       instead of starting from scratch</span></label>
     <textarea id="seed" name="seed" rows="5" maxlength="{config.max_report_chars}"
-      placeholder="# An existing draft in Markdown&#10;&#10;Leave empty to write from scratch."></textarea>
+      placeholder="Paste a draft &mdash; Markdown or HTML.&#10;&#10;Leave empty to write from scratch."></textarea>
+    {seed_url_field}
     <button type="submit">Start run</button>
   </form>
   {depth}

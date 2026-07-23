@@ -22,6 +22,12 @@ web = [
     # pulls it in: the web layer uses it directly and must not depend on that accident.
     "markdown-it-py>=3.0",
 ]
+# PDF seed reports. Optional because it is the only format that needs a dependency at
+# all — HTML, .docx and .txt convert on the standard library — so the core install
+# stays lean and a missing pypdf is reported as an actionable message, not an
+# ImportError. Pure Python and BSD-3: no system libraries, no compiled wheels.
+ingest = ["pypdf>=5.1.0"]
+all = ["reasonable-answer[web,ingest]"]
 
 [project.scripts]
 ra = "reasonable_answer.cli:app"
@@ -32,6 +38,8 @@ dev = [
     "pytest>=8.3.0",
     "pytest-cov>=6.0.0",
     "ruff>=0.9.0",
+    # So CI exercises the PDF path; the tests that need it skip without it.
+    "pypdf>=5.1.0",
 ]
 
 [build-system]

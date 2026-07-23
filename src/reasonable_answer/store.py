@@ -80,7 +80,18 @@ class RunStore:
         produced anything."""
         self._write(Path("question.txt"), question)
         if seed:
-            self._write(Path("seed.md"), seed)
+            self.seed(seed)
+
+    def seed(self, seed: str) -> str:
+        """The seed exactly as the graph will hash it — already markdown, since
+        `ingest` converts at the edge.
+
+        Its own file rather than only `reports/r01-*.md`, because that one carries an
+        `<!-- author -->` header and so is not byte-identical to what was hashed.
+        Resume needs the exact bytes back to reproduce `_run_fingerprint`.
+        """
+        self._write(Path("seed.md"), seed)
+        return seed
 
     def report(self, round_no: int, artifact_hash: str, text: str, author: str) -> None:
         name = f"r{round_no:02d}-{artifact_hash[:12]}.md"

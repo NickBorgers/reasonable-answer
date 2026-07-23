@@ -11,7 +11,7 @@ from rich.console import Console
 from rich.table import Table
 
 from . import audition as audition_mod
-from . import search, shutdown
+from . import ingest, search, shutdown
 from .audition import Assignment as Assignment_t
 from .config import Config, ConfigError, validate_roster_health
 from .graph import GracefulStop
@@ -35,7 +35,14 @@ def _setup_logging(verbose: bool) -> None:
 @app.command()
 def run(
     question: str = typer.Option(..., "--question", "-q", help="The question to answer."),
-    seed: Path | None = typer.Option(None, "--seed", "-s", help="Optional seed report (markdown)."),
+    # Deliberately `str`, not `Path`: `Path("https://a/b")` normalises to 'https:/a/b'
+    # and silently eats the slash, so a URL seed would be corrupted before it was read.
+    seed: str | None = typer.Option(
+        None,
+        "--seed",
+        "-s",
+        help="Optional seed report: .md, .txt, .html, .pdf, .docx, or an http(s) URL.",
+    ),
     config_path: Path | None = typer.Option(None, "--config", "-c", help="Roster config YAML."),
     run_id: str | None = typer.Option(None, "--run-id", help="Reuse a run id (resumes its dir)."),
     verbose: bool = typer.Option(False, "--verbose", "-v"),
@@ -43,7 +50,18 @@ def run(
     """Refine a report until no eligible reviewer can find a material defect."""
     _setup_logging(verbose)
     config = Config.load(config_path)
-    seed_text = seed.read_text() if seed else None
+    # Convert at the edge, so the graph only ever sees markdown and the text that is
+    # hashed into the resume fingerprint is the text that gets stored and critiqued.
+    ingested = None
+    if seed:
+        try:
+            ingested = ingest.from_seed_arg(seed, config=config)
+        except ingest.IngestError as exc:
+            console.print(f"[red]cannot use that seed:[/red] {exc}")
+            raise typer.Exit(code=2) from exc
+        for warning in ingested.warnings:
+            console.print(f"[yellow]warning:[/yellow] {warning}")
+
     # Nothing else owns signals in this command, and in a container `ra` is PID 1 —
     # which has no default SIGTERM disposition, so without this the signal is discarded
     # and docker waits out the entire grace period before killing us.
@@ -51,7 +69,14 @@ def run(
 
     try:
         final = run_graph(
-            config, question=question, seed=seed_text, run_id=run_id, stop=shutdown.event()
+            config,
+            question=question,
+            seed=ingested.markdown if ingested else None,
+            run_id=run_id,
+            stop=shutdown.event(),
+            seed_format=ingested.format if ingested else None,
+            seed_source=ingested.source if ingested else None,
+            seed_warnings=list(ingested.warnings) if ingested else None,
         )
     except ConfigError as exc:
         console.print(f"[red]fail closed:[/red] {exc}")

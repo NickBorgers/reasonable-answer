@@ -102,6 +102,11 @@ class Job:
     question: str
     seed: str | None
     resume: bool = False
+    #: Provenance from `ingest`, carried so the graph can record it on the intake
+    #: event. Empty on a resume: the seed is replayed from disk, already converted.
+    seed_format: str | None = None
+    seed_source: str | None = None
+    seed_warnings: tuple[str, ...] = ()
 
 
 class RunWorker:
@@ -144,7 +149,17 @@ class RunWorker:
 
     # ------------------------------------------------------------- submission
 
-    def submit(self, question: str, seed: str | None = None, *, identity: str = "global") -> str:
+    def submit(
+        self,
+        question: str,
+        seed: str | None = None,
+        *,
+        identity: str = "global",
+        seed_format: str | None = None,
+        seed_source: str | None = None,
+        seed_warnings: tuple[str, ...] = (),
+    ) -> str:
+        """`seed` is markdown — `web.app` converts at the edge via `ingest`."""
         # Backpressure comes first, before the run id and before any disk write. A
         # refused submission must cost nothing — no queue entry, no run directory —
         # otherwise the cap that protects memory would still let disk grow unbounded.
@@ -170,7 +185,16 @@ class RunWorker:
         store.event("queued", attempt=1, auto=False)
         with self._lock:
             self._status[run_id] = "queued"
-        self._queue.put(Job(run_id=run_id, question=question, seed=seed))
+        self._queue.put(
+            Job(
+                run_id=run_id,
+                question=question,
+                seed=seed,
+                seed_format=seed_format,
+                seed_source=seed_source,
+                seed_warnings=seed_warnings,
+            )
+        )
         log.info("queued %s", run_id)
         return run_id
 
@@ -296,6 +320,9 @@ class RunWorker:
                     seed=job.seed,
                     run_id=job.run_id,
                     stop=self._stop,
+                    seed_format=job.seed_format,
+                    seed_source=job.seed_source,
+                    seed_warnings=list(job.seed_warnings),
                 )
                 log.info("%s finished in %.0fs", job.run_id, time.time() - started)
             except GracefulStop:

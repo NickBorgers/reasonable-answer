@@ -219,19 +219,21 @@ class Registry:
         path = self.dir(run_id) / "final.md"
         return path.read_text() if path.exists() else None
 
-    def question(self, run_id: str) -> str:
-        path = self.dir(run_id) / "question.txt"
-        return path.read_text().strip() if path.exists() else "(question not recorded)"
-
     def seed(self, run_id: str) -> str | None:
-        """The seed the run was started with, or None if it began from a question alone.
+        """The converted markdown the run was seeded with, or None if it was not.
 
-        Resuming needs this: the graph fingerprints `question + seed + roster + budgets`
-        and refuses a checkpoint whose inputs have drifted, so a resume that forgets the
-        seed looks exactly like someone changing the question mid-run.
+        Read back on resume because the graph fingerprints `question + seed + roster +
+        budgets` and refuses a checkpoint whose inputs have drifted — a resume that
+        forgets the seed looks exactly like someone changing the question mid-run.
+        This is the same text `graph` hashed — `ingest` converts at the edge, before
+        the store is written — so no re-fetch and no re-conversion is involved.
         """
         path = self.dir(run_id) / "seed.md"
         return path.read_text() if path.exists() else None
+
+    def question(self, run_id: str) -> str:
+        path = self.dir(run_id) / "question.txt"
+        return path.read_text().strip() if path.exists() else "(question not recorded)"
 
     def drafts(self, run_id: str) -> list[tuple[str, str]]:
         """(filename, body) for every draft, oldest first."""
@@ -256,7 +258,9 @@ class Registry:
             kind = event.get("kind")
             if kind == "intake" and event.get("path") == "seed":
                 current = 1
-                rounds.setdefault(1, RoundSnapshot(round=1, writer="(seed)"))
+                fmt = event.get("seed_format")
+                label = f"(seed: {fmt})" if fmt and fmt != "markdown" else "(seed)"
+                rounds.setdefault(1, RoundSnapshot(round=1, writer=label))
                 rounds[1].artifact_hash = event.get("artifact_hash")
             elif kind == "generate":
                 current += 1
