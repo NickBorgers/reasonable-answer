@@ -7,8 +7,9 @@ Takes a question (and optionally a seed report) and produces a higher-quality re
 argument is *sound* — where "sound" means **no eligible reviewer can find a material defect**,
 not that anyone asserted it was good.
 
-The design is in [docs/](./docs/); start with [docs/DESIGN.md](./docs/DESIGN.md). This README is
-about running it.
+New here? Start with [docs/concepts.md](./docs/concepts.md) — the approachable tour of *why* the
+system is shaped this way. The design specs are in [docs/](./docs/), hub at
+[docs/DESIGN.md](./docs/DESIGN.md). This README is about running it.
 
 ## How it works, in one paragraph
 

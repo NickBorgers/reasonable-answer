@@ -79,7 +79,7 @@ flowchart TB
 ```mermaid
 flowchart LR
     P1["#1 only report + defect list forwarded"] --> E1["no reasoning/verdicts in context<br/>→ no contextual drag"]
-    P2["#2 critics blind to each other & prior critiques"] --> E2["no social trigger → no sycophancy"]
+    P2["#2 critics blind to each other &amp; prior critiques"] --> E2["no social trigger → no sycophancy"]
     P3["#3 authorship + tick hidden from critics"] --> E3["blind evaluation → judge work, not author"]
     P4["#4 one lens per critic"] --> E4["orthogonal coverage, no drift"]
     P5["#5 alternating refinement, never debate"] --> E5["no MAD social pressure"]
