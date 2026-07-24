@@ -161,9 +161,12 @@ it — each one, again, a guard against a known LLM failure mode:
   carry a new text to acceptance.
 - **Search and source verification.** Writers can be given a real web-search tool, so cited URLs
   are ones a search actually returned rather than remembered (LLM memory is where fabricated
-  citations come from). Optionally the system fetches the cited pages and hands them to the
-  evidence lens, turning "does this source say that?" from a plausibility guess into a check
-  against the page.
+  citations come from). With the full feature set enabled, the system also fetches the cited
+  pages and hands them to the evidence lens, turning "does this source say that?" from a
+  plausibility guess into a check against the page. (The shipped config leaves that last switch
+  off only because fetching model-chosen URLs needs a network egress boundary the deployment must
+  provide — see [ssrf-egress-isolation.md](./ssrf-egress-isolation.md); with one in place, it
+  belongs on.)
 - **Date grounding.** Every prompt carries the run's actual date, because a model's sense of
   "now" is frozen at its training cutoff — without this, critics have flagged legitimate current
   citations as impossible future-dated fabrications.
