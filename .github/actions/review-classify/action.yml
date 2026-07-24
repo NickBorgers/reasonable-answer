@@ -8,7 +8,9 @@ description: >
   Emits a JSON array of role names. `invariant` always applies: this project's safety
   properties are the reason the pipeline exists, and a review set that could come back
   empty would hit the aggregator's all-abstain fail-closed branch instead of reviewing
-  anything.
+  anything. `docs` applies to every non-empty diff for the mirror-image reason: drift
+  between the docs and the code can originate on either side of that boundary, so there
+  is no file class whose change provably cannot stale a document.
 
 inputs:
   base_sha:
@@ -113,8 +115,9 @@ runs:
           esac
         done <<< "$FILES"
 
-        # invariant always runs.
-        roles='"invariant"'
+        # invariant always runs; docs runs on every non-empty diff (drift can start on
+        # either side of the docs/code boundary, so no file class is exempt).
+        roles='"invariant","docs"'
         if [ "$docs_only" = false ] && [ "$want_security" = true ]; then
           roles="${roles},\"security\""
         fi
