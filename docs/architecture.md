@@ -52,8 +52,9 @@ Invariants (enforced in code, covered by tests):
 |------|-------|----------|-------|-------------|
 | **intake** | question + **markdown** seed | normalized `question` / `seed`; routing | none | deterministic |
 | **generate** | question + latest report + **defect list** | next report (with citations) | non-author (alternating) | LLM (untrusted output) |
+| **adjudicate** *(D25, opt-in)* | pending disputes + finding + one paragraph | `AdjudicationRecord[]` | mechanical fetch-check, else an arbiter ≠ disputer ≠ raiser | mechanical, or LLM inside a closed 2-field schema |
 | **critique** | report + question + **one lens** + taxonomy | `Issue[]` per lens | per-lens non-author model | LLM (untrusted output) |
-| **triage** | this tick's `Issue[]` | `OrchestratorView` + `DefectList` | none — **mechanical** | deterministic |
+| **triage** | this tick's `Issue[]` (minus **upheld-adjudication suppressions**, D25) | `OrchestratorView` + `DefectList` | none — **mechanical** | deterministic |
 | **orchestrate** | `OrchestratorView` **only** | recommendation (minor-polish judgment) | LLM, blind | LLM inside guardrails |
 | **controller** | `ControllerInput` | decision + terminal status | none | **deterministic — owns termination** |
 | **finalize** | best report + history | final report + terminal status + audit trail | none | deterministic |
@@ -116,6 +117,8 @@ failed lens" vs. "unknown categories dropped") is resolved **in favor of fail-cl
 | Unknown enum / invalid or over-length field in any issue | **fails the entire lens** — never silently dropped |
 | Malformed / schema-violating critic output | up to *R* bounded repair retries; then lens **failed** |
 | Any **failed lens** in a tick | `lenses_failed > 0` ⇒ review incomplete ⇒ controller rule 2 (re-critique); budget exhausted ⇒ rule 3 `fatal` → `aborted` |
+| A **dispute** cannot be adjudicated (no eligible arbiter, arbiter down/malformed, budget spent) | recorded `dismissed` with the concrete method; **the finding stands** — every non-`upheld` path is the status quo ante (D25) |
+| The **dispute-elicitation** call fails or returns garbage | `dispute_pass_failed` event; the revision proceeds with no disputes — never fatal (D25) |
 | Per-call timeout | retry within budget; exhausted ⇒ `fatal` |
 | Empty `Issue[]` | counts as clean **only if** all lenses completed successfully |
 | Generator failure | retry within budget; exhausted ⇒ `fatal` |

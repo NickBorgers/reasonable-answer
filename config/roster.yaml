@@ -92,6 +92,22 @@ search:
   fetch_max_bytes: 400000
   fetch_max_chars: 6000
 
+# Writer dispute channel (D25, docs/decisions.md). Lets a writer challenge a fix-task
+# it believes is factually wrong instead of falsifying the report to satisfy it —
+# the failure mode of run-75eb136b9bfb, where critics with stale knowledge demanded
+# "corrections" of true recent dates. Adjudication is mechanical-first (the cited
+# page settles a citation dispute, when verify_sources is on) with an identity-blind
+# arbiter fallback; every inconclusive path leaves the finding standing.
+#
+# Off by default: with `enabled: false` every prompt and state transition is
+# byte-identical to a build without the feature.
+disputes:
+  enabled: false
+  # Whole-run adjudication budget; disputes past it are dismissed unadjudicated.
+  budget: 6
+  # Disputes accepted from one revision pass.
+  max_per_pass: 3
+
 # Critic auditioning (docs/architecture.md). Measures whether each rostered critic can
 # actually find a planted defect and stay quiet on a sound report — the question neither
 # `validate_roster_health` nor `ra doctor`'s probes ask.

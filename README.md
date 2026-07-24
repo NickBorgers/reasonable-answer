@@ -190,6 +190,15 @@ not that the roster chose good sources. With verification off, whether a source 
 attached to it is unverified entirely. (See D5/D17/D18 in [decisions.md](docs/decisions.md) and the
 evidence section of [convergence.md](docs/convergence.md).)
 
+**Writer disputes (optional, off by default).** Set `disputes.enabled: true` and a writer that
+believes a fix-task is factually wrong can dispute it with evidence instead of falsifying the
+report to satisfy it. A citation dispute whose quote checks out against the cited page (with
+`verify_sources` on) is upheld mechanically; anything else goes to a fresh-context arbiter model
+that is neither the writer nor the critic that raised the finding, and that defaults to the
+finding when uncertain. Upheld disputes suppress the re-raised finding for the rest of the run
+(auditable in `events.jsonl`); everything else leaves the finding standing. See D25 in
+[decisions.md](docs/decisions.md).
+
 A critic's quote fields (`claim_span`, `related_span`) are verified to be verbatim text from
 the artifact, so a critic cannot smuggle invented text to the next writer that way. Its
 `rationale` and `instruction` are still critic-authored prose; they are length-bounded, carry no
@@ -207,6 +216,7 @@ final.json            terminal status, clean records, outstanding defects, warni
 events.jsonl          every stage: startup, intake, generate, critique, triage, control
 reports/              every draft, with its author
 critiques/            every lens result, with provenance
+disputes/             every writer dispute, with its grounds (when enabled)
 signals/views.jsonl   what the blind orchestrator saw, per round
 signals/decisions.jsonl  which rule fired, per round
 ```
@@ -232,6 +242,7 @@ src/reasonable_answer/
   prompts.py     all prompts; untrusted data is fenced, roles never leak
   report.py      structural loci and artifact hashing
   triage.py      mechanical: floors, counts, defect list, clean records
+  dispute.py     writer disputes: mechanical adjudication, arbiter eligibility
   controller.py  the 14-rule ordered stop decision — pure, deterministic, total
   graph.py       the LangGraph loop
   store.py       audit trail and retention

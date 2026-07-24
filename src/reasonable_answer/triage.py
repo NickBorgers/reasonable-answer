@@ -109,11 +109,18 @@ def clamp(issues: list[RawIssue]) -> list[RawIssue]:
     return out
 
 
-def to_defects(results: list[LensResult]) -> list[Defect]:
+def to_defects(
+    results: list[LensResult], overruled: set[tuple[str, str]] | None = None
+) -> list[Defect]:
     """The generator-facing handoff. Provenance (lens, model) is dropped here —
-    it lives on in the audit store only (principle 3)."""
+    it lives on in the audit store only (principle 3).
+
+    `overruled` holds registry keys (category, normalized claim_span) of defects a
+    writer disputed and lost (D25): those are marked `adjudicated=True` so the next
+    writer is told the task was independently reviewed and stands."""
     defects: list[Defect] = []
     seen: set[tuple] = set()
+    overruled = overruled or set()
     for result in sorted(results, key=lambda r: r.lens.value):
         if result.failed:
             continue
@@ -135,11 +142,65 @@ def to_defects(results: list[LensResult]) -> list[Defect]:
                     related_span=issue.related_span,
                     citation_id=issue.citation_id,
                     expected_support=issue.expected_support,
+                    adjudicated=(issue.category.value, _normalize(issue.claim_span))
+                    in overruled,
                 )
             )
     order = {Severity.BLOCKING: 0, Severity.MAJOR: 1, Severity.MINOR: 2}
     defects.sort(key=lambda d: (order[d.severity], d.locus.section, d.locus.paragraph))
     return defects
+
+
+def suppress(
+    results: list[LensResult], keys: set[tuple[str, str]]
+) -> tuple[list[LensResult], list[dict]]:
+    """Drop issues matching upheld adjudication keys (D25) — applied ONCE, before
+    `tally`, `clean_records`, `to_defects` and `signal_signature`, so counts,
+    clearance and fix-tasks all see the same filtered stream.
+
+    Failed lenses pass through untouched: suppression must never turn an
+    incomplete review into a countable one (rule 2 semantics). Every suppression
+    is returned for logging — a silent suppression would be an invisible hole in
+    the audit trail."""
+    if not keys:
+        return results, []
+    filtered: list[LensResult] = []
+    suppressed: list[dict] = []
+    for result in results:
+        if result.failed:
+            filtered.append(result)
+            continue
+        kept: list[RawIssue] = []
+        for issue in result.issues:
+            key = (issue.category.value, _normalize(issue.claim_span))
+            if key in keys:
+                suppressed.append(
+                    {
+                        "lens": result.lens.value,
+                        "category": issue.category.value,
+                        "locus": str(issue.locus),
+                    }
+                )
+            else:
+                kept.append(issue)
+        filtered.append(result.model_copy(update={"issues": kept}))
+    return filtered, suppressed
+
+
+def defect_provenance(results: list[LensResult]) -> dict[str, list[str]]:
+    """Registry key -> sorted raising critic identities, for surviving material
+    issues. Audit-side only: consumed by arbiter *eligibility* (deterministic
+    code), never by any prompt (D25)."""
+    provenance: dict[str, set[str]] = {}
+    for result in results:
+        if result.failed:
+            continue
+        for issue in clamp(result.issues):
+            if issue.category is Category.STYLISTIC or not is_material(issue.severity):
+                continue
+            cat, span = issue.category.value, _normalize(issue.claim_span)
+            provenance.setdefault(f"{cat}|{span}", set()).add(result.critic_identity)
+    return {k: sorted(v) for k, v in provenance.items()}
 
 
 def tally(results: list[LensResult]) -> tuple[dict[str, SeverityCounts], SeverityCounts]:

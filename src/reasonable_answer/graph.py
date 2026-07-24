@@ -24,20 +24,24 @@ from typing import Any, TypedDict
 from langgraph.graph import END, START, StateGraph
 
 from . import critique as critique_mod
+from . import dispute as dispute_mod
 from . import fetch, prompts, roles, search, triage
 from . import report as report_mod
 from .config import Config, ConfigError, validate_roster_health
 from .controller import acceptance_state, decide, detect_cycle
 from .llm import LLMClient, MalformedOutputError, ModelCallError
 from .schemas import (
+    AdjudicationRecord,
     CleanRecord,
     ControllerInput,
     Decision,
     Defect,
+    Dispute,
     LensResult,
     OrchestratorRecommendation,
     OrchestratorView,
     SeverityCounts,
+    WriterDisputes,
 )
 from .store import RunStore
 from .taxonomy import LENSES, Lens
@@ -74,6 +78,13 @@ class State(TypedDict, total=False):
     used_critics: dict[str, list[str]]
     clean_records: list[dict]
     defects: list[dict]
+
+    # Dispute channel (D25). The registry lives here — checkpointed state — so it
+    # survives resume, and a content purge cannot break a live run.
+    pending_disputes: list[dict]
+    adjudications: list[dict]
+    dispute_budget_remaining: int
+    defect_provenance: dict[str, list[str]]
 
     view: dict
     decision: dict
@@ -115,6 +126,10 @@ class Runtime:
     @property
     def verify_sources(self) -> bool:
         return self.fetcher is not None
+
+    @property
+    def disputes_enabled(self) -> bool:
+        return self.config.disputes.enabled
 
 
 def build_runtime(
@@ -248,6 +263,10 @@ def _intake(state: State, rt: Runtime) -> dict:
         # that carried no headings, a truncated page — arrives here as text and joins
         # the run's own warnings rather than getting its own channel.
         "warnings": [*rt.warnings, *(state.get("seed_warnings") or [])],
+        "pending_disputes": [],
+        "adjudications": [],
+        "dispute_budget_remaining": cfg.disputes.budget if cfg.disputes.enabled else 0,
+        "defect_provenance": {},
     }
 
     if seed:
@@ -309,7 +328,12 @@ def _generate(state: State, rt: Runtime) -> dict:
     run_date = state.get("run_date")
     if state.get("report"):
         user = prompts.writer_revision(
-            state["question"], state["report"], defects, polish, current_date=run_date
+            state["question"],
+            state["report"],
+            defects,
+            polish,
+            rt.disputes_enabled,
+            current_date=run_date,
         )
     else:
         user = prompts.writer_first_draft(state["question"], current_date=run_date)
@@ -380,6 +404,8 @@ def _generate(state: State, rt: Runtime) -> dict:
         searches=completion.tool_calls,
     )
 
+    pending_disputes = _elicit_disputes(state, rt, alias, text, defects, polish)
+
     return {
         "report": text,
         "artifact_hash": h,
@@ -398,6 +424,162 @@ def _generate(state: State, rt: Runtime) -> dict:
         "defects": [],
         "polish_next": False,
         "pending_lenses": [lens.value for lens in LENSES],
+        "pending_disputes": pending_disputes,
+    }
+
+
+def _elicit_disputes(
+    state: State, rt: Runtime, alias: str, revised: str, defects: list[Defect], polish: bool
+) -> list[dict]:
+    """The dispute-elicitation pass (D25): one separate structured call to the
+    writer that just revised. Self-contained entries (full Defect + Dispute) so a
+    resume between generate and adjudicate loses nothing when `defects` resets.
+
+    Never fatal: any failure degrades to 'no disputes' and the run proceeds
+    exactly as it would with the channel off."""
+    if (
+        not rt.disputes_enabled
+        or polish
+        or not defects
+        or state.get("dispute_budget_remaining", 0) <= 0
+    ):
+        return []
+    try:
+        raw = rt.client.structured(
+            alias,
+            system=prompts.writer_system(False),
+            user=prompts.writer_dispute(state["question"], revised, defects),
+            schema=WriterDisputes,
+            max_tokens=8000,
+        )
+    except (ModelCallError, MalformedOutputError) as exc:
+        # Record only the exception TYPE — never `str(exc)`. A MalformedOutputError's
+        # message is built from schema-validation text that echoes the REJECTED INPUT
+        # (the writer's dispute grounds and evidence quotes), which is report-derived
+        # (private) content; a ModelCallError message can likewise carry model I/O.
+        # events.jsonl is RETAINED by `ra purge --content-only` (D25), so any
+        # exception-derived string here would leak artifact text past a content purge.
+        rt.store.event("dispute_pass_failed", error_type=type(exc).__name__)
+        return []
+    accepted = dispute_mod.validate_disputes(raw, defects, rt.config.disputes.max_per_pass)
+    return [
+        {"defect": d.model_dump(mode="json"), "dispute": dis.model_dump(mode="json")}
+        for dis, d in accepted
+    ]
+
+
+# ----------------------------------------------------------------- adjudicate
+
+
+def _paragraph_containing(structure, span: str) -> str:
+    """The defect's locus indexes the *previous* draft, but the revised draft is
+    what the run now holds — so the arbiter's context paragraph is found by span
+    (the writer was told to leave disputed text intact). Falls back to the span
+    itself when the text moved."""
+    needle = triage._normalize(span)
+    if needle:
+        for p in structure.paragraphs:
+            if needle in triage._normalize(p.text):
+                return p.text
+    return span
+
+
+def _adjudicate(state: State, rt: Runtime) -> dict:
+    """Rule on the writer's disputes (D25). A passthrough when there are none.
+
+    Every path that is not an explicit `upheld` leaves the finding standing; only
+    upheld records ever suppress anything downstream. This node re-runs cleanly on
+    resume: `pending_disputes` is self-contained and the once-per-key registry
+    makes replayed entries free duplicates."""
+    pending = state.get("pending_disputes") or []
+    if not pending:
+        return {}
+
+    records = [AdjudicationRecord.model_validate(r) for r in state.get("adjudications", [])]
+    ruled_keys = {dispute_mod.registry_key(r.category, r.claim_span) for r in records}
+    budget = state.get("dispute_budget_remaining", 0)
+    provenance = state.get("defect_provenance", {})
+    report_text = state["report"]
+    structure = report_mod.parse(report_text)
+    round_no = state.get("round", 0)
+    disputer = state.get("author_identity", "(none)")
+
+    for seq, entry in enumerate(pending, 1):
+        defect = Defect.model_validate(entry["defect"])
+        challenge = Dispute.model_validate(entry["dispute"])
+        key = dispute_mod.registry_key(defect.category, defect.claim_span)
+        # Content record first (purgeable dir): the full grounds are auditable
+        # while the run is retained, and droppable with the other content.
+        rt.store.dispute(
+            round_no, seq, {"defect": entry["defect"], "dispute": entry["dispute"]}
+        )
+
+        if key in ruled_keys:
+            verdict, method = "dismissed", "duplicate"
+        elif budget <= 0:
+            verdict, method = "dismissed", "budget_exhausted"
+        else:
+            budget -= 1
+            mechanical = dispute_mod.adjudicate_mechanical(
+                challenge, defect, report_text, rt.fetcher
+            )
+            if mechanical is True:
+                verdict, method = "upheld", "mechanical"
+            else:
+                raisers = set(provenance.get(f"{key[0]}|{key[1]}", []))
+                arbiters = dispute_mod.eligible_arbiters(
+                    rt.config.roster, rt.identities, disputer, raisers
+                )
+                if not arbiters:
+                    verdict, method = "dismissed", "no_eligible_arbiter"
+                else:
+                    page = None
+                    if (
+                        rt.fetcher is not None
+                        and challenge.evidence_url
+                        and challenge.evidence_url in fetch.extract_source_urls(report_text)
+                    ):
+                        page = rt.fetcher.fetch(challenge.evidence_url)
+                    try:
+                        ruling = dispute_mod.adjudicate_one(
+                            rt.client,
+                            arbiters[0],
+                            defect,
+                            challenge,
+                            _paragraph_containing(structure, defect.claim_span),
+                            state["question"],
+                            evidence_page=page,
+                            max_tokens=rt.config.disputes.arbiter_max_tokens,
+                        )
+                    except (ModelCallError, MalformedOutputError):
+                        verdict, method = "dismissed", "arbiter_failed"
+                    else:
+                        verdict = "upheld" if ruling.dispute_upheld else "overruled"
+                        method = "arbiter"
+
+        ruled_keys.add(key)
+        records.append(
+            AdjudicationRecord(
+                category=defect.category,
+                claim_span=defect.claim_span,
+                verdict=verdict,  # type: ignore[arg-type]
+                method=method,  # type: ignore[arg-type]
+                round=round_no,
+            )
+        )
+        # Signal-only: no spans, no grounds — events.jsonl outlives a content purge.
+        rt.store.event(
+            "adjudication",
+            category=defect.category.value,
+            verdict=verdict,
+            method=method,
+            round=round_no,
+        )
+
+    return {
+        "adjudications": [r.model_dump(mode="json") for r in records],
+        "dispute_budget_remaining": budget,
+        "pending_disputes": [],
     }
 
 
@@ -523,6 +705,17 @@ def _triage(state: State, rt: Runtime) -> dict:
     results = [LensResult.model_validate(r) for r in state["lens_results"].values()]
     artifact_hash = state["artifact_hash"]
 
+    # Suppression (D25) is applied ONCE, here, before anything is counted — so
+    # tally, clean records, defects and the stagnation signature all see the same
+    # filtered stream. Only `upheld` adjudications suppress.
+    adjudications = [
+        AdjudicationRecord.model_validate(r) for r in state.get("adjudications", [])
+    ]
+    upheld = dispute_mod.suppression_keys(adjudications)
+    results, suppressed = triage.suppress(results, upheld)
+    for entry in suppressed:
+        rt.store.event("suppression", artifact_hash=artifact_hash, **entry)
+
     lenses_failed = sum(1 for r in results if r.failed) + (len(LENSES) - len(results))
     per_category, totals = triage.tally(results)
     material = triage.material_count(totals)
@@ -572,7 +765,8 @@ def _triage(state: State, rt: Runtime) -> dict:
         cycle_detected=detect_cycle(state.get("hash_history", []), cfg.budgets.cycle_period),
     )
 
-    defects = [d.model_dump(mode="json") for d in triage.to_defects(results)]
+    overruled = dispute_mod.overruled_keys(adjudications)
+    defects = [d.model_dump(mode="json") for d in triage.to_defects(results, overruled)]
     rt.store.view(round_no, view)
     rt.store.event(
         "triage",
@@ -604,6 +798,9 @@ def _triage(state: State, rt: Runtime) -> dict:
         "prev_signature": signature,
         "stagnation_count": stagnation,
         "scoreboard": scoreboard,
+        # Audit-side raiser identities per surviving material issue: consumed only
+        # by arbiter *eligibility* (deterministic code), never by any prompt (D25).
+        "defect_provenance": triage.defect_provenance(results),
     }
 
 
@@ -803,6 +1000,7 @@ def build_graph(rt: Runtime):
     graph = StateGraph(State)
     graph.add_node("intake", lambda s: _intake(s, rt))
     graph.add_node("generate", lambda s: _generate(s, rt))
+    graph.add_node("adjudicate", lambda s: _adjudicate(s, rt))
     graph.add_node("critique", lambda s: _critique(s, rt))
     graph.add_node("triage", lambda s: _triage(s, rt))
     graph.add_node("orchestrate", lambda s: _orchestrate(s, rt))
@@ -815,11 +1013,15 @@ def build_graph(rt: Runtime):
     )
     # A dead generator still terminates *through* the controller, so the run gets a
     # recorded rule-1 decision and a normal audit trail rather than a silent exit.
+    # The adjudicate node sits on the one-way generate→critique edge (D25): it
+    # introduces no new cycle, and a shutdown between the two nodes resumes here
+    # with `pending_disputes` intact.
     graph.add_conditional_edges(
         "generate",
-        lambda s: "control" if s.get("fatal") else "critique",
-        {"critique": "critique", "control": "control"},
+        lambda s: "control" if s.get("fatal") else "adjudicate",
+        {"adjudicate": "adjudicate", "control": "control"},
     )
+    graph.add_edge("adjudicate", "critique")
     graph.add_edge("critique", "triage")
     graph.add_edge("triage", "orchestrate")
     graph.add_edge("orchestrate", "control")
@@ -842,7 +1044,7 @@ def _recursion_limit(config: Config) -> int:
     """
     b = config.budgets
     laps = b.hard_cap + b.polish_cap + b.critique_attempts + b.confirmation_attempts + 2
-    return max(100, laps * 5 + 10)
+    return max(100, laps * 6 + 10)
 
 
 def _run_fingerprint(config: Config, question: str, seed: str | None) -> str:

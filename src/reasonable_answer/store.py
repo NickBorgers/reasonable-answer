@@ -21,7 +21,7 @@ from typing import Any
 from pydantic import BaseModel
 
 #: purged by `ra purge --content`; retained longer than the signal record
-CONTENT_DIRS = ("reports", "critiques")
+CONTENT_DIRS = ("reports", "critiques", "disputes")
 
 #: A run id becomes a filesystem path and, via `purge`, an rmtree target. Anything
 #: outside this alphabet — separators, `..`, absolute paths — is rejected outright.
@@ -106,6 +106,13 @@ class RunStore:
             Path("critiques") / name,
             json.dumps(payload.model_dump(mode="json"), indent=2),
         )
+
+    def dispute(self, round_no: int, sequence: int, payload: dict[str, Any]) -> None:
+        """Dispute grounds and claim spans are report-derived content, so they live
+        in a purgeable content dir — never in events.jsonl, which survives
+        `purge --content-only` (D25)."""
+        name = f"r{round_no:02d}-{sequence:02d}.json"
+        self._write(Path("disputes") / name, json.dumps(payload, indent=2, default=str))
 
     def view(self, round_no: int, view: BaseModel) -> None:
         self._append(

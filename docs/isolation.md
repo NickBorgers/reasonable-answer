@@ -59,6 +59,10 @@ flowchart TB
         Oin["SEES: OrchestratorView (category × severity counts, bounded ints/enums)"]
         Ono["NEVER: report text · defect text · citations · run_id/hash/model-ids"]
     end
+    subgraph ARB["Arbiter (D25, opt-in) — fresh context, ≠ disputer, ≠ raiser"]
+        Ain["SEES: one finding (depersonalized) + the paragraph it points at + question + the dispute (labelled interested-party argument) + fetched evidence page"]
+        Ano["NEVER: report body · any alias/identity · the lens · the round · run_id/hash · other findings"]
+    end
     subgraph CT["Controller (deterministic)"]
         CTin["SEES: ControllerInput (OrchestratorView + round/hashes/model-ids/budgets)"]
         CTno["NEVER: report content"]
@@ -173,6 +177,18 @@ Mitigations, by boundary:
   `confirm_state` label is applied after output, fresh context, no cache reuse — RB-010), so a
   critic cannot flip to a biased binary verdict "because it knows it's confirming."
 - **Tests** include adversarial seeds and adversarial critic outputs.
+
+**Dispute prose (D25)** is a further member of the untrusted list, and an adversarially
+*interested* one: the writer authoring a dispute has a direct stake in the verdict. Three things
+bound it. The dispute enters the arbiter's context fenced and explicitly labelled as an
+interested party's argument, never as fact. The arbiter's output channel is a closed two-field
+schema — one boolean plus a bounded `reason` that goes to the audit store only, so no free text
+authored under a dispute's influence ever reaches another model's context; the only writer-facing
+residue of the whole channel is the bare `Defect.adjudicated` boolean. And the mechanical path
+accepts evidence only from a URL the report already cites, so a writer cannot steer adjudication
+at a page the critics never had access to. The arbiter also runs identity-blind in both
+directions: raising-critic identities are consumed by *eligibility selection* (deterministic
+code) and never interpolated into any prompt.
 
 ## Signal leakage / noninterference (RA-009, RB-008)
 

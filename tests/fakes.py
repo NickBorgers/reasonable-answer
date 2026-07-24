@@ -12,7 +12,12 @@ from io import BytesIO
 from typing import Any
 
 from reasonable_answer.llm import Completion
-from reasonable_answer.schemas import CritiqueOutput, OrchestratorRecommendation
+from reasonable_answer.schemas import (
+    ArbiterVerdict,
+    CritiqueOutput,
+    OrchestratorRecommendation,
+    WriterDisputes,
+)
 
 
 @dataclass
@@ -40,6 +45,11 @@ class FakeClient:
     tool_capable: dict[str, bool] = field(default_factory=dict)
     #: every tool-result string the fake handed back to a "model"
     tool_results: list[str] = field(default_factory=list)
+    #: callable(alias, user) -> WriterDisputes; None means "no disputes raised"
+    dispute_fn: Any | None = None
+    #: callable(alias, user) -> ArbiterVerdict; None means an arbiter call is a
+    #: test error (the run under test was not expected to reach one)
+    arbiter_fn: Any | None = None
 
     # ---- the LLMClient surface the graph uses -----------------------------
 
@@ -92,6 +102,14 @@ class FakeClient:
             )
         if schema is CritiqueOutput:
             return self.critique_fn(alias, user)
+        if schema is WriterDisputes:
+            if self.dispute_fn is None:
+                return WriterDisputes(disputes=[])
+            return self.dispute_fn(alias, user)
+        if schema is ArbiterVerdict:
+            if self.arbiter_fn is None:
+                raise AssertionError("unexpected arbiter call")
+            return self.arbiter_fn(alias, user)
         raise AssertionError(f"unexpected schema {schema}")
 
 
