@@ -1,0 +1,58 @@
+# The roster baked into the image (Dockerfile -> /etc/ra/roster.yaml, $RA_CONFIG).
+#
+# Its one job is to be the configuration a `docker run` with no volume, no config
+# mount and no network can still BOOT on. That is what scripts/smoke-test-image.sh
+# proves on every PR, and it is what someone pulling the published image gets before
+# they have written any config of their own.
+#
+# So every opt-in that needs a reachable proxy, a credential, or outbound egress is
+# left at its code default (off) here, and nothing below sets one. Concretely:
+#
+#   search.enabled   — needs a Brave key
+#   refine.enabled   — joins startup identity resolution and structured-output
+#                      probing, so the web server cannot boot without the proxy
+#                      (see config/roster.yaml's refine comment for that trade)
+#   disputes/audition — cost proxy calls
+#
+# THIS DEPLOYMENT's opt-ins live in config/roster.yaml, which compose.yaml mounts
+# over this file at /etc/ra/roster.yaml. That is the roster to edit when changing
+# what the running service does. This one changes only when the model lineup does —
+# tests/test_config.py asserts the two lineups stay identical, because an image whose
+# default roster names models the deployment no longer uses is worse than no default.
+#
+# Everything not named here is a code default (budgets, retention, runs_dir).
+
+proxy:
+  # A pull of the published image has no tailnet, so this is only a fallback: the
+  # container sets $RA_PROXY_BASE_URL. Precedence: env > this value > default.
+  base_url: https://llm.featherback-mermaid.ts.net/v1
+  base_url_env: RA_PROXY_BASE_URL
+  api_key_env: LITELLM_API_KEY
+  api_key_fallback: fake-key
+
+# Identical to config/roster.yaml's lineup — see the note above. The per-alias
+# reasoning (why glm-5.2 is critic-only, why minimax-m3 is never first) is documented
+# there rather than duplicated here, since duplicated prose is what actually drifts.
+roster:
+  writers:
+    - mistral-large-3
+    - deepseek-v4-flash
+
+  orchestrator: gemma4-small
+
+  critics:
+    logic:
+      - glm-5.2
+      - minimax-m3
+      - mistral-large-3
+    evidence:
+      - glm-5.2
+      - minimax-m3
+      - gemma4
+    completeness:
+      - mistral-large-3
+      - glm-5.2
+      - gemma4
+
+runs_dir: runs
+retention_days: 14

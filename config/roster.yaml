@@ -187,6 +187,10 @@ budgets:
 # chose (a schema-incapable alias must not surface on a user's first pause) — set
 # `enabled: false` if browsing past runs during a proxy outage matters more.
 #
+# That boot dependency is also why this file is no longer the one baked into the image:
+# config/roster.default.yaml is, and it leaves refinement off so the image still starts
+# with nothing mounted and no network. compose.yaml mounts THIS file over it.
+#
 # `alias` is left empty, so refinement uses the orchestrator alias (gemma4-small):
 # local, free, already resolved and probed at startup, and orchestrator-class judgment
 # is exactly the shape of this task. Naming a different alias here would only buy real

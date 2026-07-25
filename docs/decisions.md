@@ -534,7 +534,14 @@ prompt-policy guardrails, the highest-risk transform (`question_behind_the_quest
 disabled, and per-run auditability via `refinement.json`, but not eliminated as a possibility. An
 expired or evicted offer record downgrades an honest, unforged selection to `unverified`
 provenance — indistinguishable, downstream, from a forged one; the cost is a slightly less
-informative audit trail, never a false one.
+informative audit trail, never a false one. Enabling refinement also makes the proxy a **boot**
+dependency of the web server rather than only a run dependency — the refine alias joins startup
+identity resolution and structured-output probing, so an unreachable proxy stops the UI coming up
+at all. That is the intended fail-closed trade (a schema-incapable alias must not first surface on
+a user's pause), and it is why the roster baked into the image and the wheel is
+`config/roster.default.yaml`, which leaves refinement off so the image still boots with no network
+and no credential; `config/roster.yaml`, mounted over it by `compose.yaml`, is where this
+deployment opts in.
 
 ## Open items for a future round
 
