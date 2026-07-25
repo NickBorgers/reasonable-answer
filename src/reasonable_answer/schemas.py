@@ -281,3 +281,53 @@ class Decision(BaseModel):
     recritique_lenses: list[Lens] = Field(default_factory=list)
     polish: bool = False
     note: str = ""
+
+
+# --------------------------------------------------------------- question refinement
+
+#: The six bounded reframe transforms (docs/question-refinement.md's taxonomy table).
+#: `question_behind_the_question` ships disabled (RefineConfig default) — it is the
+#: only transform that authorizes the model to infer an unstated concern, so it stays
+#: off until a paired-fixture audition passes (D26).
+REFINE_TRANSFORMS = (
+    "split_the_either_or",
+    "check_the_premise_first",
+    "name_the_outcome",
+    "surface_the_real_goal",
+    "ask_whats_answerable",
+    "question_behind_the_question",
+)
+
+MAX_REFINE_LABEL = 40
+MAX_REFINE_QUESTION = 200
+
+RefineTransform = Literal[
+    "split_the_either_or",
+    "check_the_premise_first",
+    "name_the_outcome",
+    "surface_the_real_goal",
+    "ask_whats_answerable",
+    "question_behind_the_question",
+]
+
+
+class RefinementSuggestion(BaseModel):
+    """One reframe chip, as the model must emit it. Deterministic post-validation
+    (web/refine.py) applies stricter checks on top of this — an in-schema-bounds
+    entry can still be dropped for e.g. missing a trailing '?' or duplicating
+    another suggestion."""
+
+    model_config = ConfigDict(extra="forbid")
+
+    transform: RefineTransform
+    label: str = Field(min_length=1, max_length=MAX_REFINE_LABEL)
+    question: str = Field(min_length=1, max_length=MAX_REFINE_QUESTION)
+
+
+class RefinementSuggestions(BaseModel):
+    """The whole of a refine call's output. An empty list is the expected, common
+    outcome for a well-posed question — never treated as a schema failure."""
+
+    model_config = ConfigDict(extra="forbid")
+
+    suggestions: list[RefinementSuggestion] = Field(default_factory=list, max_length=3)

@@ -1,10 +1,9 @@
 # Question refinement — pre-run reframing suggestions
 
-> **Status:** Proposed design, grounded in the production runs at
+> **Status:** Implemented; this is decision **D26** in [decisions.md](./decisions.md).
+> Grounded in the production runs at
 > https://reasonable-answer.featherback-mermaid.ts.net/ as of 2026-07-24.
 > Revised 2026-07-25 after an adversarial design review (findings QR-001–017).
-> Not yet implemented. On implementation this becomes decision **D26** in
-> [decisions.md](./decisions.md) (bump the invariant allowlist accordingly).
 
 ## What it is
 
@@ -146,11 +145,14 @@ inside the graph.
   semaphore, constructed with injected `LLMClient`, clock, and config. The
   route stays thin: request validation in, JSON out. The service gets
   explicit startup/shutdown hooks alongside the worker's.
-- **Prompt** (`prompts.py`): `REFINE_SYSTEM` + `refine_user(question)`. The
+- **Prompt** (`prompts.py`): `refine_system(enabled_transforms)` +
+  `refine_user(question)`. The
   question is fenced with `DATA_FENCE`/`UNTRUSTED_NOTE` exactly like every
   other model-facing input (RA-010). The system prompt encodes the taxonomy
   above, the prompt-policy guardrails below, and an explicit instruction that
   returning zero suggestions is the correct output for a well-posed question.
+  It is composed from the *enabled* subset only, so a disabled transform is
+  never even described to the model.
 - **Schema and validation** (`schemas.py`): `RefinementSuggestions` — list of
   `{transform: <enum of the six>, label: str≤40, question: str≤200}` —
   validated via `LLMClient.structured` (`llm.py:318-359`), called with a
@@ -309,14 +311,16 @@ do", applied to suggestions; fixture-tested per transform):
 - Not a rewrite of the critic-side machinery: `unexamined_presupposition`
   stays as the downstream backstop for whatever framing survives to a run.
 
-## Implementation checklist
+## Implementation map
+
+The design above is normative; this section maps it to where it landed, not to remaining work.
 
 1. `config.py`: `RefineConfig` (`extra="forbid"`, bounded fields, default
    off) + prod config enablement; startup alias resolution/probing when
    enabled.
 2. `web/refine.py`: `RefinementService` (LLM call, validation, TTL cache,
    offer records, limiter, semaphore) with injected dependencies.
-3. `prompts.py`: `REFINE_SYSTEM`, `refine_user` (fenced).
+3. `prompts.py`: `refine_system(enabled_transforms)`, `refine_user` (fenced).
 4. `schemas.py`: `RefinementSuggestions`.
 5. `web/app.py`: `POST /refine` (+ `_reject_cross_site`, validation, shed
    behavior); extend `POST /runs` to validate offer claims.
@@ -325,10 +329,10 @@ do", applied to suggestions; fixture-tested per transform):
 7. `web/worker.py` / `store.py`: `refinement.json` writer (purgeable) +
    non-content `refinement` event in `events.jsonl`.
 8. Docs: `## D26` section in `decisions.md` (problem / mechanism /
-   alternatives rejected / isolation accounting / known residuals), bump the
-   `D1`–`D25` allowlist in `.github/scripts/review/prompts/invariant.md:18`
-   to `D26`, register this file in `DESIGN.md`'s Document map, cross-reference
-   from `bias.md §4`.
+   alternatives rejected / isolation accounting / known residuals), the
+   valid-ID allowlist in `.github/scripts/review/prompts/invariant.md` bumped
+   to `D1`–`D26`, this file registered in `DESIGN.md`'s Document map, and a
+   cross-reference from `bias.md §4`.
 9. Tests:
    - Service unit tests: schema + deterministic validation (each rule),
      zero-suggestion path, cache hit/expiry/eviction, coalesced concurrent
