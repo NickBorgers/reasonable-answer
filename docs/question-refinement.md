@@ -2,6 +2,7 @@
 
 > **Status:** Proposed design, grounded in the production runs at
 > https://reasonable-answer.featherback-mermaid.ts.net/ as of 2026-07-24.
+> Revised 2026-07-25 after an adversarial design review (findings QR-001–017).
 > Not yet implemented. On implementation this becomes decision **D26** in
 > [decisions.md](./decisions.md) (bump the invariant allowlist accordingly).
 
@@ -50,19 +51,37 @@ cheaply act on it: the asker, before the run starts.
    (`render_index`, `web/render.py:116-153`).
 2. Inline JS debounces: after ~1.5 s of typing pause and ≥ 20 characters, it
    `fetch()`es `POST /refine` with the current text (same-origin; permitted by
-   the existing CSP, `connect-src 'self'`).
+   the existing CSP, `connect-src 'self'`). Each request aborts any in-flight
+   predecessor (`AbortController`) and carries the exact text it was issued
+   for; a response is applied only if that text still matches the textarea,
+   so a slow response for stale text can never replace fresher chips.
 3. Response is either empty (nothing renders — the common case for well-posed
-   questions) or 1–3 suggestions. Each renders as a chip below the textarea:
-   a short intent label plus the reframed question, e.g.
+   questions) or an **offer**: an opaque `offer_id` plus 1–3 suggestions. Each
+   renders as a chip below the textarea: a short intent label plus the
+   reframed question, e.g.
    > **check the premise first** — Is it actually illegal to relocate opossums in Texas, and if so what are my lawful options?
-4. Tapping a chip replaces the textarea content and keeps focus there; the user
-   can edit further. Chips stay visible so they can switch back (the original
-   wording is retained as the first chip once any swap happens).
+4. Tapping a chip replaces the textarea content and keeps focus there. On the
+   first swap within an offer, the text the user had at that moment is
+   captured as the **restore text** and prepended as a chip, so switching back
+   is one tap. Manually editing the textarea clears the selection (the
+   provenance fields reset to "no suggestion chosen") but leaves the chips
+   visible. A new offer (from a later pause) replaces chips and restore text
+   wholesale.
 5. "Start run" works at every moment, with whatever text is in the box. If the
-   refine call is slow or errors, no chips appear and nothing else changes.
-6. On submit, the form carries two extra hidden fields: the question as
-   originally typed and the id of the chosen suggestion (if any), so the run
-   record shows what refinement did.
+   refine call is slow, sheds load, or errors, no chips appear and nothing
+   else changes.
+6. On submit, the form carries two extra hidden fields: `refine_offer_id` and
+   `refine_selected` (index, or empty for "typed/edited"). These are claims,
+   not evidence: the server validates them against its own offer record
+   (below) and copies provenance from that record, never from the client.
+   Client-side, the page also enforces a refinement budget: at most 5
+   **request attempts** per page load — the counter increments before
+   dispatch and counts every outcome (non-empty, empty, failed, shed, or
+   aborted after dispatch), so degraded responses cannot extend the budget —
+   and after a completed request a new one is issued only when
+   the text has changed by more than a trivial edit — Levenshtein distance
+   ≥ 12 between the whitespace-normalized (trimmed, runs of whitespace
+   collapsed) new text and the last requested text.
 
 Why debounced-ambient rather than an interstitial after "Start run": an
 interstitial makes every user pay a confirmation click to benefit the minority
@@ -89,7 +108,15 @@ question is about, only *how it is posed*.
 
 The last row is the model of gentleness for the whole feature: when the
 literal question is answerable, it stays available untouched; the suggestion
-sits beside it, not over it.
+sits beside it, not over it. It is also the transform with the strongest
+steering surface — it authorizes the model to infer an unstated concern — so
+it carries extra constraints: the adjacent question must itself be factual and
+answerable, must not presume causes or attribute beliefs to populations beyond
+what is verifiable, and may only ever appear *in addition to* the unchanged
+literal question. This transform ships **disabled** and is enabled only after
+a paired-fixture audition passes: mirror questions posed from opposing
+framings must yield mirror suggestions (the same deferred methodology as
+D24's bias-correlation audition).
 
 ## Mechanism
 
@@ -98,77 +125,181 @@ and the seed-ingestion precedent (PR #25) of edge-side transformation that is
 audited but never routes — refinement lives entirely at the web edge, never
 inside the graph.
 
-- **Config** (`config.py`): `refine.enabled` (default `false`), `refine.alias`
-  (default: the orchestrator alias — already the designated lightweight
-  judgment model), `refine.max_suggestions` (default 3). Excluded from the
-  resume fingerprint.
+- **Config** (`config.py`): a `RefineConfig` model with `extra="forbid"` and
+  bounded fields — `enabled: bool = False`, `alias: str` (default: the
+  orchestrator alias), `max_suggestions: int` (1–3), `timeout_seconds: float`
+  (0.5–15, default 5), `cache_entries: int` (16–4096, default 256),
+  `cache_ttl_seconds: int` (60–86400, default 900), `rate_max: int` (1–100,
+  default 10) / `rate_window_seconds: int` (1–3600, default 60) as separate
+  refinement limits, `concurrency: int` (1–4, default 2),
+  `offer_entries: int` (64–8192, default 512) / `offer_ttl_seconds: int`
+  (300–7200, default 1800), `orphan_linger_seconds: int` (0–300, default
+  30), and
+  `enabled_transforms: set[str]` (defaults to all except
+  `question_behind_the_question`). Excluded from the resume fingerprint.
+  When `enabled`, the effective alias participates in startup identity
+  resolution and structured-output capability probing exactly like roster
+  aliases (`llm.resolve_identities`) — a bad or schema-incapable alias fails
+  at startup, not on the first user request.
+- **Service** (`web/refine.py`, new): a `RefinementService` owning the LLM
+  call, validation, cache, offer records, rate limiter, and concurrency
+  semaphore, constructed with injected `LLMClient`, clock, and config. The
+  route stays thin: request validation in, JSON out. The service gets
+  explicit startup/shutdown hooks alongside the worker's.
 - **Prompt** (`prompts.py`): `REFINE_SYSTEM` + `refine_user(question)`. The
   question is fenced with `DATA_FENCE`/`UNTRUSTED_NOTE` exactly like every
   other model-facing input (RA-010). The system prompt encodes the taxonomy
-  above, the guardrails below, and an explicit instruction that returning zero
-  suggestions is the correct output for a well-posed question.
-- **Schema** (`schemas.py`): `RefinementSuggestions` — list of
+  above, the prompt-policy guardrails below, and an explicit instruction that
+  returning zero suggestions is the correct output for a well-posed question.
+- **Schema and validation** (`schemas.py`): `RefinementSuggestions` — list of
   `{transform: <enum of the six>, label: str≤40, question: str≤200}` —
-  validated via `LLMClient.structured` (`llm.py:318-359`), which already
-  handles the capability ladder and bounded repair retries.
+  validated via `LLMClient.structured` (`llm.py:318-359`), called with a
+  small `max_tokens` (~700), at most **one** repair retry, and — because the
+  client is synchronous — a **provider-level request timeout**
+  (`timeout_seconds` passed through to the underlying OpenAI/LiteLLM request),
+  not merely a wrapper deadline. What that timeout guarantees is **client
+  occupancy**: the connection is closed and the concurrency permit is held
+  until the underlying call actually ends, never released early on HTTP-side
+  degradation. Whether the upstream backend stops generating on disconnect is
+  a LiteLLM/backend property the design does not assume, and without verified
+  cancellation no client-side mechanism can *guarantee* a ceiling on
+  aggregate backend work. The guarantees are therefore layered honestly:
+  `concurrency` is a hard ceiling on live client calls; a timed-out call's
+  permit is additionally held for an orphan-linger window
+  (`orphan_linger_seconds`, 0–300, default 30) as a **best-effort** damper on
+  orphan accumulation — most ~700-token generations finish well inside it,
+  but a stalled backend can outlive any window; and `max_tokens` bounds each
+  orphaned generation's output. Deployments that need a strict aggregate
+  guarantee get it by isolation, not lingering: point `refine.alias` at a
+  dedicated backend/resource pool (linger may then be set to 0 if that
+  backend's disconnect-cancellation is verified). Malformed or timed-out
+  output is treated as an empty result. On top of schema validation the service applies deterministic
+  checks per entry — transform is in `enabled_transforms`, length caps,
+  ends with `?`, no control characters, no duplicates, count ≤
+  `max_suggestions` — and silently drops entries that fail.
 - **Route** (`web/app.py`): `POST /refine`. Same-origin enforcement via
-  `_reject_cross_site` (it is a state-less POST, but keeping the CSRF check
-  uniform is cheaper than explaining an exception). Applies the same
-  `max_question_chars` validation as `POST /runs`. Returns JSON. Server-side:
-  a small LRU cache keyed on the question hash (~15 min) so retyping and
-  multiple pauses don't multiply LLM calls, and a per-IP rate limit reusing
-  the worker backpressure conventions.
+  `_reject_cross_site` (keeping the CSRF check uniform is cheaper than
+  explaining an exception). Applies the same `max_question_chars` validation
+  as `POST /runs`. Rate limiting reuses the existing `_identity(request)`
+  semantics and `RateLimiter` class with the refinement-specific limits —
+  identity-keyed like `/runs`, not IP-keyed. A concurrency semaphore
+  (`refine.concurrency`) bounds simultaneous LLM calls; when it is saturated
+  or the deadline cannot be met, the endpoint returns an empty result
+  immediately (shed load, never queue). Refinement shares the LiteLLM proxy
+  with runs, so its resource claim is stated honestly: not "zero impact" but
+  a **small fixed ceiling on live client calls** — at most `concurrency`
+  in-flight completions of ≤ ~700 tokens each, never queued. Deployments that
+  want strictly zero contention with run traffic should point `refine.alias`
+  at an alias **routed to a dedicated backend/resource pool** — a different
+  alias name alone proves nothing about isolation and can even add contention
+  via model swapping; any finer-grained prioritization between refinement and
+  run traffic is the proxy's scheduling concern, not this service's.
+- **Cache**: a bounded, thread-safe TTL cache inside the service, keyed by
+  (normalized question text, prompt/schema version, effective alias,
+  `max_suggestions`, `enabled_transforms`). Validated successes are cached
+  **including empty results**; failures are not. Identical in-flight misses
+  are coalesced so simultaneous requests for the same text cost one
+  completion. Serving a cache hit still mints a fresh offer record.
+- **Offer records**: every non-empty response is recorded server-side before
+  it is returned: `{offer_id, question_at_offer, suggestions, created_at}`,
+  held in an in-memory map bounded by `offer_entries` with TTL
+  `offer_ttl_seconds` and LRU eviction when full. `offer_id` is
+  `secrets.token_urlsafe(24)` — a fixed 32-character URL-safe token. At
+  submit, the claimed id is validated against that exact format and length
+  **before** any lookup; a malformed value short-circuits to a constant
+  `unverified` status and the supplied bytes are never written to
+  `events.jsonl` or anywhere else.
+  At submit, `refine_offer_id`/`refine_selected` are looked up: provenance is
+  marked `verified` only when the offer exists, the index is valid, **and the
+  submitted question (after the same trim applied by `POST /runs`) is exactly
+  equal to that suggestion's text** — a valid offer id alone proves nothing
+  about the question that actually ran. On any mismatch, or if the offer is
+  missing (expired, evicted, restart), the run proceeds normally, the event
+  records an `unverified` claim, and no chosen-suggestion content is recorded
+  as applied. Client-submitted text is never trusted as provenance.
+- **Record and retention** (`web/worker.py`, `store.py`): full refinement
+  content — question at offer, suggestions offered, chosen text — is written
+  to `runs/<run_id>/refinements/refinement.json`, with `refinements` added to
+  `CONTENT_DIRS` so the existing directory-level `purge()` removes it
+  alongside reports and critiques (the purge mechanism only handles
+  directories, so a root-level file would silently escape it). `events.jsonl` (which survives purges) gets only non-content
+  signal: `{offer_id, transform, selected_index, question_sha256,
+  original_sha256, provenance: verified|unverified|none}`. `question.txt`
+  continues to hold exactly the question that ran, per the
+  resume-fingerprint rule.
 - **Rendering** (`web/render.py`): chips container + debounce/fetch/swap JS
   added to the index page. Inline script is CSP-compatible
-  (`script-src 'unsafe-inline'`). No framework, matching the hand-written
-  HTML convention.
-- **Record** (`web/worker.py`, `store.py`): `submit()` gains
-  `original_question`/`refinement_choice` passthrough; store a
-  `refinement` event in `events.jsonl` with
-  `{original, chosen, transform, suggestions_offered}`. Safe there — it is the
-  user's own text, already persisted verbatim in `question.txt` (which, per
-  the resume-fingerprint rule, always holds the question that actually ran).
+  (`script-src 'unsafe-inline'`). All model-derived values (labels,
+  questions) are inserted with `createElement`/`textContent` only —
+  `innerHTML` is prohibited for any model- or user-derived string, since the
+  CSP's `'unsafe-inline'` would make DOM XSS exploitable. No framework,
+  matching the hand-written HTML convention. With `refine.enabled = false`
+  the rendered index page is byte-identical to today's.
 
 ## Guardrails: gentle, not corrective
 
-These are the product constraints; the first four map directly onto
-[bias.md §6](./bias.md)'s "what critics must NOT do", applied to suggestions:
+Two distinct layers. **Enforced** means deterministic server-side validation;
+**prompt policy** means best-effort instructions whose adherence is tested
+statistically with fixtures, not assumed.
 
-1. **No meta-commentary on screen.** Chips never say "your question is
+Enforced:
+
+1. **Bounded output.** ≤ 200 characters per suggestion, phrased as a question
+   (ends with `?`), a valid transform label from the enabled set, no control
+   characters, no duplicates, at most `max_suggestions` chips.
+2. **The original always wins ties.** Never auto-replace, never block "Start
+   run", never require a choice. After any swap, the restore text (what the
+   user had at first swap) remains available as a chip; manual edits clear
+   the selection provenance.
+3. **Silence on failure.** Any validation, timeout, or capacity problem
+   degrades to zero suggestions.
+
+Prompt policy (mapped onto [bias.md §6](./bias.md)'s "what critics must NOT
+do", applied to suggestions; fixture-tested per transform):
+
+4. **No meta-commentary on screen.** Chips never say "your question is
    loaded/biased." The label names the *move* ("check the premise first"),
    never the flaw.
-2. **No steering.** A suggestion may not embed a verdict, flip the question's
+5. **No steering.** A suggestion may not embed a verdict, flip the question's
    valence, or demand both-sides framing. It opens the question; it does not
    answer it.
-3. **Preserve the subject.** The user's entities and topic survive every
+6. **Preserve the subject.** The user's entities and topic survive every
    transform. "What is Talarico's record…" — never "Why do people
    mischaracterize politicians' records?"
-4. **Silence is the default.** Zero suggestions is a first-class, expected
+7. **Silence is the default.** Zero suggestions is a first-class, expected
    output. Showing chips for every question destroys the magic and turns the
    feature into a nag.
-5. **The original always wins ties.** Never auto-replace, never block "Start
-   run", never require a choice. After any swap, the original wording remains
-   available as a chip.
-6. **Bounded rewrites.** ≤ 200 characters, phrased as a question, at most one
-   transform per suggestion, at most three suggestions.
+8. **One transform per suggestion.**
 
 ## Failure modes and costs
 
-- Refine endpoint slow/erroring → no chips, run flow untouched. The feature can
-  only add value, never subtract availability.
-- Cost: one small structured completion per distinct question typed (cached),
-  on the orchestrator-class alias — negligible next to a 10–25-minute run, and
-  strongly positive whenever it averts a framing-driven exhaustion.
+- Refine endpoint slow, saturated, or erroring → no chips, and the run
+  *control flow* is untouched. At the resource level the guarantee is a small
+  fixed ceiling on live client calls, not zero: at most `concurrency` short
+  completions in flight, shed (never queued) beyond that. Zero contention is
+  a deployment property — an alias routed to a dedicated backend/resource
+  pool — not something any alias name or client-side control can provide.
+- Cost: bounded on both sides. Client: ≤ 5 request attempts per page load
+  (counted at dispatch, regardless of outcome), meaningful edit distance
+  required between requests. Server: identity-keyed rate
+  limits, TTL cache (including cached empties), coalesced in-flight misses,
+  ~700-token completions on the orchestrator-class alias. Negligible next to
+  a 10–25-minute run, and strongly positive whenever it averts a
+  framing-driven exhaustion.
 - Prompt-injection surface: the question is already treated as untrusted
-  everywhere downstream; the refine prompt fences it identically. Worst case
-  is a bad suggestion the user must actively tap, with the original one
-  keystroke away.
+  everywhere downstream; the refine prompt fences it identically. Model
+  output is schema-validated, deterministically filtered, and rendered via
+  `textContent` only. Worst case is a bad suggestion the user must actively
+  tap, with the restore chip one tap away.
+- Forged provenance: submit-time refinement fields are claims validated
+  against server-side offer records; an attacker (or a confused client) can
+  at most cause an `unverified` provenance mark, never a fabricated audit
+  trail.
 - Bias surface: the suggester could itself introduce spin. Mitigations: the
-  transform enum (no free-form rewriting rationale), guardrails 2–3 in the
-  system prompt, and the refinement event record making every offered
-  suggestion auditable per run. A future paired-fixture audition (mirror
-  questions from opposing framings should yield mirror suggestions) is the
-  same deferred idea as D24's bias-correlation audition.
+  transform enum (no free-form rewriting rationale), prompt-policy guardrails
+  5–6, the highest-risk transform disabled until its paired-fixture audition
+  passes, and `refinement.json` making every offered suggestion auditable
+  per run.
 
 ## Non-goals
 
@@ -180,18 +311,50 @@ These are the product constraints; the first four map directly onto
 
 ## Implementation checklist
 
-1. `config.py` flag block (default off) + prod config enablement.
-2. `prompts.py`: `REFINE_SYSTEM`, `refine_user` (fenced).
-3. `schemas.py`: `RefinementSuggestions`.
-4. `web/app.py`: `POST /refine` (+ `_reject_cross_site`, validation, cache,
-   rate limit); extend `POST /runs` form fields.
-5. `web/render.py`: chips UI + debounce JS on the index page.
-6. `web/worker.py` / `store.py`: refinement event on submit.
-7. Docs: `## D26` section in `decisions.md` (problem / mechanism /
+1. `config.py`: `RefineConfig` (`extra="forbid"`, bounded fields, default
+   off) + prod config enablement; startup alias resolution/probing when
+   enabled.
+2. `web/refine.py`: `RefinementService` (LLM call, validation, TTL cache,
+   offer records, limiter, semaphore) with injected dependencies.
+3. `prompts.py`: `REFINE_SYSTEM`, `refine_user` (fenced).
+4. `schemas.py`: `RefinementSuggestions`.
+5. `web/app.py`: `POST /refine` (+ `_reject_cross_site`, validation, shed
+   behavior); extend `POST /runs` to validate offer claims.
+6. `web/render.py`: chips UI + debounce/abort/swap JS (`textContent`-only
+   DOM construction).
+7. `web/worker.py` / `store.py`: `refinement.json` writer (purgeable) +
+   non-content `refinement` event in `events.jsonl`.
+8. Docs: `## D26` section in `decisions.md` (problem / mechanism /
    alternatives rejected / isolation accounting / known residuals), bump the
    `D1`–`D25` allowlist in `.github/scripts/review/prompts/invariant.md:18`
    to `D26`, register this file in `DESIGN.md`'s Document map, cross-reference
    from `bias.md §4`.
-8. Tests: schema validation, zero-suggestion path, CSRF rejection, cache hit,
-   submit-with-refinement event shape; prompt fixtures for each of the six
-   transforms using the production questions above.
+9. Tests:
+   - Service unit tests: schema + deterministic validation (each rule),
+     zero-suggestion path, cache hit/expiry/eviction, coalesced concurrent
+     identical misses, timeout and semaphore-saturation shedding (permit held
+     until the underlying client call terminates, then through the
+     orphan-linger window on timeout — asserting client-call termination and
+     permit lifetime, not upstream cancellation, which is only tested via
+     backend observation in deployments that claim it), offer expiry/restart
+     → `unverified` provenance, disabled transform filtered.
+   - Route tests: CSRF rejection, rate-limit by identity, forged/expired
+     offer claims on `POST /runs`, valid offer id with a submitted question
+     that does not exactly equal the selected suggestion → `unverified`,
+     malformed/oversized `refine_offer_id` → constant `unverified` with the
+     supplied value never persisted, oversized question, offer-map LRU
+     eviction at `offer_entries`.
+   - Edit-distance gate: normalized-Levenshtein threshold behavior for
+     insertions, deletions, substitutions, and short substantive edits.
+   - Rendering/JS integration tests: stale-response race (slow old response
+     must not clobber new chips), edit-after-selection clears provenance,
+     submit while refinement pending, adversarial HTML/event-handler payloads
+     in suggestion fields render inert, `refine.enabled = false` produces
+     byte-identical index HTML.
+   - Store tests: `refinement.json` purged by content purge; `events.jsonl`
+     entry contains hashes and no content.
+   - Startup test: enabled config with unknown/schema-incapable alias fails
+     at boot.
+   - Prompt fixtures: each enabled transform against the production
+     questions above, plus paired ideological mirror fixtures gating
+     `question_behind_the_question`.
