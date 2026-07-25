@@ -22,11 +22,12 @@ from pathlib import Path
 from typing import Any
 from urllib.parse import urlsplit
 
-from fastapi import FastAPI, Form, HTTPException, Request
+from fastapi import FastAPI, Form, HTTPException, Request, Response
 from fastapi.responses import HTMLResponse, PlainTextResponse, RedirectResponse, StreamingResponse
 
 from .. import ingest, shutdown
 from ..config import Config, ConfigError
+from . import assets as static_assets
 from .registry import Registry, RunSummary
 from .render import render_index, render_report, render_run, render_run_progress
 from .retention import RetentionSweeper
@@ -82,6 +83,9 @@ def create_app(
     app.state.config = config
     app.state.worker = worker
     app.state.registry = registry
+    # Read once here rather than per request: these files do not change while the process
+    # runs, and resolving them at startup means a missing one is a 404 rather than a 500.
+    app.state.assets = assets = static_assets.load()
 
     # ------------------------------------------------------------------ pages
 
@@ -165,7 +169,13 @@ def create_app(
         return RedirectResponse(url=f"/runs/{run_id}", status_code=303)
 
     @app.get("/runs/{run_id}", response_class=HTMLResponse)
-    def run_detail(run_id: str) -> str:
+    def run_detail(run_id: str, response: Response) -> str:
+        # A run page is a snapshot of something still moving. Installed as a standalone app
+        # this leans on the HTTP cache and the back-forward cache far harder than a browser
+        # tab does, and showing a finished run as still running is the one output this
+        # interface must not produce. The service worker refuses to cache these too; this is
+        # the same rule stated at the layer below it.
+        response.headers["Cache-Control"] = "no-store"
         summary = _require(registry, worker, run_id)
         return render_run(
             summary=summary,
@@ -194,9 +204,10 @@ def create_app(
     # ------------------------------------------------------------- fragments
 
     @app.get("/runs/{run_id}/progress", response_class=HTMLResponse)
-    def progress(run_id: str) -> str:
+    def progress(run_id: str, response: Response) -> str:
         """The live region, re-rendered. Kept separate from the page so the SSE
         stream can push it without a reload."""
+        response.headers["Cache-Control"] = "no-store"
         summary = _require(registry, worker, run_id)
         return render_run_progress(
             summary=summary,
@@ -277,7 +288,50 @@ def create_app(
     def healthz() -> str:
         return "ok"
 
+    # ------------------------------------------------------- installable-app assets
+    #
+    # Four hand-written routes rather than a `StaticFiles` mount. The reason is the rule
+    # stated above `submit`: no code path here builds a `Path` out of request data. A mount
+    # would; these do not — see `web/assets.py`, where the filenames are literals and a
+    # request string is only ever a dictionary key.
+
+    @app.get(static_assets.MANIFEST_PATH)
+    def manifest() -> Response:
+        return _asset_response(assets.manifest, "public, max-age=3600")
+
+    @app.get(static_assets.OFFLINE_PATH, response_class=HTMLResponse)
+    def offline() -> Response:
+        return _asset_response(assets.offline, "public, max-age=3600")
+
+    @app.get(static_assets.SERVICE_WORKER_PATH)
+    def service_worker() -> Response:
+        if not assets.service_worker:
+            raise HTTPException(status_code=404, detail="no service worker")
+        # Served from the root so its scope is the whole origin; the header says so
+        # explicitly as well, which costs nothing and survives the file being moved.
+        # `no-cache` means the browser revalidates on every navigation, so a fix to this
+        # file reaches an installed app immediately rather than whenever a cache expires.
+        return Response(
+            assets.service_worker,
+            media_type="text/javascript",
+            headers={"Cache-Control": "no-cache", "Service-Worker-Allowed": "/"},
+        )
+
+    @app.get(static_assets.ICONS_PREFIX + "{name}")
+    def icon(name: str) -> Response:
+        # `name` indexes a fixed table; it is never joined onto a path. Traversal, encoded
+        # separators and absolute paths are therefore misses like any other unknown name.
+        return _asset_response(assets.icons.get(name), "public, max-age=604800")
+
     return app
+
+
+def _asset_response(asset: static_assets.Asset | None, cache_control: str) -> Response:
+    if asset is None:
+        raise HTTPException(status_code=404, detail="no such asset")
+    return Response(
+        asset.body, media_type=asset.media_type, headers={"Cache-Control": cache_control}
+    )
 
 
 def _check_runs_dir_writable(config: Config) -> None:
