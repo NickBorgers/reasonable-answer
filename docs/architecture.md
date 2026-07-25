@@ -194,7 +194,7 @@ content). The controller may see identifiers (it is deterministic and still blin
 
 ```mermaid
 flowchart TD
-    IN["input"] --> Q{question? seed?}
+    IN["input"] --> Q{"question? seed?"}
     Q -->|question only| A["generate R1 from question"]
     Q -->|seed + question| C["seed = R1; question = evaluation anchor"]
     Q -->|seed only| B["v1: REQUIRE an explicit question (reject if absent).<br/>Question inference is deferred behind an opt-in flag"]
@@ -260,7 +260,7 @@ sequenceDiagram
 
     C->>K: critique Rₙ (question + lens ×3) — identical interface for normal & confirm critiques
     Note over K: fresh context per lens, blind to each other, author, and confirm-state
-    K-->>T: Issue[] (closed schema; unknown field ⇒ lens fails)
+    K-->>T: Issue[] (closed schema, unknown field ⇒ lens fails)
     T-->>C: OrchestratorView (counts) + ControllerInput (ids)
     T-->>G: DefectList (fix-tasks) — held for next generate
     C->>O: OrchestratorView only

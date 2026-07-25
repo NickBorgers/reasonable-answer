@@ -95,7 +95,7 @@ flowchart TD
     G1 --> CRIT["critique current report<br/>3 blind lenses · each a NON-AUTHOR per-lens critic model"]
     CRIT --> SUM["triage → OrchestratorView<br/>(category × severity counts only)"]
     SUM --> CTRL{"controller<br/>deterministic guardrails +<br/>blind LLM orchestrator<br/>reads OrchestratorView ONLY"}
-    CTRL -->|"material issues, or round < min"| GEN["generate next report<br/>generator = a non-author writer<br/>inputs: question + latest report + structured defect list"]
+    CTRL -->|"material issues, or round &lt; min"| GEN["generate next report<br/>generator = a non-author writer<br/>inputs: question + latest report + structured defect list"]
     GEN --> CRIT
     CTRL -->|"clean → top up per-lens clearance"| CONF["acceptance path (per-lens)<br/>each lens cleared by 2 distinct non-author models on the SAME report"]
     CONF -->|"every lens strongly-cleared"| ACC["terminal: accepted"]
@@ -148,6 +148,9 @@ can't game because none can see the whole board.
 
 ## Document map
 
+- **[concepts.md](./concepts.md)** — the approachable tour: what LLMs are good and bad at, and
+  how the multi-lens / multi-model / multi-tick design presses the strengths against the
+  weaknesses. Start here if this document feels dense.
 - **[architecture.md](./architecture.md)** — the LangGraph graph, node roles, writer/critic
   role-assignment, structural isolation, failure handling, versioning, sequence diagram.
 - **[isolation.md](./isolation.md)** — what each agent sees / never sees; the structural
