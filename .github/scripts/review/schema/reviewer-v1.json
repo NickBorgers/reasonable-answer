@@ -22,7 +22,7 @@
     "role": {
       "type": "string",
       "description": "Adding a role here is a two-step change: reviewer artifacts are validated against main's copy of this schema, so the new value must be merged to main before a PR can emit it.",
-      "enum": ["invariant", "security", "test"]
+      "enum": ["invariant", "security", "test", "docs"]
     },
     "reviewed_sha": {
       "type": "string",

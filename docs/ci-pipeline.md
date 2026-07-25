@@ -34,7 +34,8 @@ must carry the `live` marker, and CI always passes `-m "not live"`.
 review-entry            authorize · fork-reject · resolve SHA · prior-GO check · dedup claim
   └─ review-pipeline    gather (cycle, inherit, cap, classify)
        ├─ invariant     Claude    ─┐
-       ├─ security      Codex      ├─ read-only, each emits a JSON artifact
+       ├─ docs          Codex      ├─ read-only, each emits a JSON artifact
+       ├─ security      Codex      │
        ├─ test          Claude    ─┘
        ├─ fix           the ONLY branch-writing stage; skipped on the last cycle
        ├─ judge         deterministic, from main, contents: read
@@ -270,16 +271,18 @@ cycle control uses to tell machine pushes from human ones.
 Unlike the design this borrows from, the fixer does **not** claim `review/pipeline` on the
 SHA it just pushed. That claim would suppress the `synchronize` event — but in this graph
 that event *is* cycle 2, the one that reviews the fix. The contention it guards against does
-not exist here: `fix` needs all three reviewers, so when it pushes, only `ubuntu-latest` jobs
+not exist here: `fix` needs all four reviewers, so when it pushes, only `ubuntu-latest` jobs
 remain and no self-hosted runner is held.
 
 ### Role selection
 
-`invariant` always runs. `security` runs unless the change is docs-only, and always for
-anything under `.github/`, `src/`, or the dependency and container files. `test` runs for
-`src/`, `tests/`, `config/`, and `pyproject.toml`.
+`invariant` always runs. `docs` runs on every non-empty diff: documentation drift can
+originate on either side of the docs/code boundary, so there is no file class whose change
+provably cannot stale a document. `security` runs unless the change is docs-only, and
+always for anything under `.github/`, `src/`, or the dependency and container files.
+`test` runs for `src/`, `tests/`, `config/`, and `pyproject.toml`.
 
-**`invariant` must never abstain**, and its prompt says so. Selecting it unconditionally
+**`invariant` and `docs` must never abstain**, and their prompts say so. Selecting it unconditionally
 is what guarantees the judge never sees an empty or wholly-abstaining review set — and
 the judge treats all-abstain as a fail-closed `pipeline_error`. So a role that is always
 selected but permitted to abstain produces exactly the vacuous outcome the unconditional
@@ -336,8 +339,8 @@ Every knob lives in [`review-agent-run`](../.github/actions/review-agent-run/act
 ## Things that will bite
 
 - `strategy.matrix` cannot be used on a job that `uses:` a reusable workflow, and
-  `matrix.*` is unavailable in a reusable caller's `if:`. Hence three static reviewer
-  jobs. Getting this wrong produces a `startup_failure` with no logs.
+  `matrix.*` is unavailable in a reusable caller's `if:`. Hence static reviewer
+  jobs, one per role. Getting this wrong produces a `startup_failure` with no logs.
 - An `if: always()` aggregate job bypasses `needs`-based skipping, so it must repeat the
   fork check inline.
 - `skipped` must count as a pass in `PR Validation Required`, or every docs-only PR fails.

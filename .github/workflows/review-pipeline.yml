@@ -3,9 +3,9 @@ name: Review pipeline — orchestrator
 
 # Called only by review-entry.yml, which owns authorization and the dedup claim.
 #
-# Graph:  gather → {invariant, security, test} → judge → finalize
+# Graph:  gather → {invariant, docs, security, test} → judge → finalize
 #
-# The reviewer jobs are three static callers rather than a matrix, because
+# The reviewer jobs are static callers rather than a matrix, because
 # `strategy.matrix` cannot be used on a job that `uses:` a reusable workflow, and
 # `matrix.*` is not available in a reusable caller's `if:`. Getting that wrong produces
 # a startup_failure with no logs and nothing to debug.
@@ -231,6 +231,24 @@ jobs:
     secrets:
       WORKFLOW_PAT: ${{ secrets.WORKFLOW_PAT }}
 
+  review-docs:
+    name: 'Review: docs'
+    needs: gather
+    if: |
+      needs.gather.outputs.cap_exhausted != 'true' &&
+      needs.gather.outputs.inherit != 'true' &&
+      contains(fromJSON(needs.gather.outputs.roles), 'docs')
+    uses: ./.github/workflows/review-reviewer.yml
+    with:
+      role: docs
+      agent: codex
+      pr_number: ${{ inputs.pr_number }}
+      reviewed_sha: ${{ inputs.reviewed_sha }}
+      base_ref: ${{ inputs.base_ref }}
+      cycle: ${{ needs.gather.outputs.cycle }}
+    secrets:
+      WORKFLOW_PAT: ${{ secrets.WORKFLOW_PAT }}
+
   review-security:
     name: 'Review: security'
     needs: gather
@@ -278,7 +296,7 @@ jobs:
   # it progress.
   fix:
     name: Fix
-    needs: [gather, review-invariant, review-security, review-test]
+    needs: [gather, review-invariant, review-docs, review-security, review-test]
     if: |
       always() &&
       needs.gather.result == 'success' &&
@@ -297,7 +315,7 @@ jobs:
 
   judge:
     name: Judge
-    needs: [gather, review-invariant, review-security, review-test, fix]
+    needs: [gather, review-invariant, review-docs, review-security, review-test, fix]
     if: |
       always() &&
       needs.gather.result == 'success' &&
