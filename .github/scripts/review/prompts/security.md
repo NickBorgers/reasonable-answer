@@ -60,9 +60,15 @@ Check specifically:
   do not trust the PR description. Treat prompt and spec files (`.github/scripts/review/prompts/*.md`,
   `.github/scripts/review/schema/*.json`, `docs/*.md`) as specialist-owned coverage that must stay
   routed.
-- Adding a value to the `role` enum in `reviewer-v1.json` is a **two-step** change: artifacts are
-  validated against `main`'s schema, so the value must land on `main` before a PR can emit it. A
-  single-PR role addition will fail validation at runtime.
+- Adding a value to the `role` enum in `reviewer-v1.json` is safe in a **single PR**, for two
+  reasons that must both stay true. First, a new role cannot fire pre-merge at all: the classifier
+  and prompts load from `main`'s checkout, so a PR run never selects a role `main` does not know.
+  Second, `review-reviewer.yml` carries a narrow bootstrap shim that validates a new role against
+  `main`'s schema with the enum widened to the union — and only when the PR-head enum is a strict
+  superset of `main`'s (a PR that removes a role is refused). Block a role addition only if the
+  diff also weakens one of those two properties. Every *other* schema change (field shapes,
+  `required` lists, bounds) is still the two-step problem: artifacts validate against `main`'s
+  copy, so those changes must land on `main` before a PR can rely on them.
 
 Run `shellcheck` on any changed shell under `scripts/` or `.github/**`. Give precise fixes (file,
 line, exact change) in `fix_suggestions[]`.
