@@ -25,8 +25,9 @@ from urllib.parse import urlsplit
 from fastapi import FastAPI, Form, HTTPException, Request
 from fastapi.responses import HTMLResponse, PlainTextResponse, RedirectResponse, StreamingResponse
 
-from .. import ingest, shutdown
+from .. import export, ingest, shutdown
 from ..config import Config, ConfigError
+from ..store import CorruptRun
 from .registry import Registry, RunSummary
 from .render import render_index, render_report, render_run, render_run_progress
 from .retention import RetentionSweeper
@@ -167,12 +168,16 @@ def create_app(
     @app.get("/runs/{run_id}", response_class=HTMLResponse)
     def run_detail(run_id: str) -> str:
         summary = _require(registry, worker, run_id)
+        report = registry.report(run_id)
+        final, prov = _provenance(registry, summary, run_id)
+        record = export.provenance_html(prov) if report else ""
         return render_run(
             summary=summary,
             timeline=registry.timeline(run_id),
-            report=registry.report(run_id),
-            final=registry.final(run_id),
+            report=report,
+            final=final,
             lens_names=registry.lens_names(),
+            record=record,
         )
 
     @app.post("/runs/{run_id}/resume")
@@ -254,15 +259,45 @@ def create_app(
         report = registry.report(run_id)
         if report is None:
             raise HTTPException(status_code=404, detail="this run has not produced a report yet")
-        return render_report(summary, report, registry.final(run_id))
+        # The page a reader prints is the page a recipient downloads: same review
+        # record, same stylesheet, so `Save as PDF` and `Download .html` agree. That
+        # makes this page durable too, so it gets the same honesty about an unreadable
+        # record — it says so rather than printing a status nothing supports.
+        final, prov = _provenance(registry, summary, run_id)
+        return render_report(
+            summary,
+            report,
+            final,
+            record=export.provenance_html(prov),
+            print_header=export.print_header_html(prov),
+        )
 
     @app.get("/runs/{run_id}/report.md", response_class=PlainTextResponse)
     def report_markdown(run_id: str) -> str:
+        """The shipped artifact, byte for byte. Anything that hashes or diffs a report
+        wants this route, not `export.md`."""
         _require(registry, worker, run_id)
         report = registry.report(run_id)
         if report is None:
             raise HTTPException(status_code=404, detail="this run has not produced a report yet")
         return report
+
+    @app.get("/runs/{run_id}/export.md")
+    def export_md(run_id: str) -> PlainTextResponse:
+        summary, report, final = _exportable(registry, worker, run_id)
+        return PlainTextResponse(
+            export.export_markdown(summary.question, report, final, run_id),
+            media_type="text/markdown; charset=utf-8",
+            headers=_attachment(export.export_filename(summary.question, run_id, "md")),
+        )
+
+    @app.get("/runs/{run_id}/export.html")
+    def export_html(run_id: str) -> HTMLResponse:
+        summary, report, final = _exportable(registry, worker, run_id)
+        return HTMLResponse(
+            export.export_html(summary.question, report, final, run_id),
+            headers=_attachment(export.export_filename(summary.question, run_id, "html")),
+        )
 
     @app.get("/runs/{run_id}/audit.json")
     def audit(run_id: str) -> dict[str, Any]:
@@ -351,6 +386,47 @@ def _require(registry: Registry, worker: RunWorker, run_id: str) -> RunSummary:
     if not registry.exists(run_id) and worker.status(run_id) is None:
         raise HTTPException(status_code=404, detail=f"no such run: {run_id}")
     return registry.summary(run_id, worker.active())
+
+
+def _exportable(
+    registry: Registry, worker: RunWorker, run_id: str
+) -> tuple[RunSummary, str, dict[str, Any] | None]:
+    summary = _require(registry, worker, run_id)
+    report = registry.report(run_id)
+    if report is None:
+        raise HTTPException(status_code=404, detail="this run has not produced a report yet")
+    try:
+        final = registry.final_strict(run_id)
+    except CorruptRun as exc:
+        # Refusing beats shipping a file that states a verdict the record cannot
+        # support. 409 rather than 500: nothing failed here, the run is in a state
+        # that has no honest export. The exception names the file it could not parse,
+        # which is for the operator reading logs, not for the response body.
+        log.warning("run %s has an unreadable record: %s", run_id, exc)
+        raise HTTPException(
+            status_code=409,
+            detail="this run's record cannot be read, so no export can state its verdict",
+        ) from exc
+    return summary, report, final
+
+
+def _provenance(
+    registry: Registry, summary: RunSummary, run_id: str
+) -> tuple[dict[str, Any] | None, export.Provenance]:
+    """The review record for a page. Pages survive an unreadable record — they show it
+    as unknown — where an export refuses outright."""
+    try:
+        final = registry.final_strict(run_id)
+    except CorruptRun:
+        return None, export.provenance(summary.question, None, run_id, unreadable=True)
+    return final, export.provenance(summary.question, final, run_id)
+
+
+def _attachment(filename: str) -> dict[str, str]:
+    """`export_filename` restricts its output to `[a-z0-9.-]`, so no quoting or
+    RFC 5987 encoding is needed — and no request-derived text can reach the header
+    unfiltered."""
+    return {"Content-Disposition": f'attachment; filename="{filename}"'}
 
 
 def _identity(request: Request) -> str:

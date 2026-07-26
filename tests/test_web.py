@@ -3,6 +3,7 @@
 from __future__ import annotations
 
 import os
+import re
 import threading
 import time
 import urllib.request
@@ -241,7 +242,12 @@ def test_report_markdown_is_served_only_once_it_exists(client, config):
 
 
 def test_the_report_is_rendered_not_shown_as_raw_markdown(client, config):
-    """A reader gets HTML; `report.md` stays the escape hatch for the source."""
+    """A reader gets HTML; `report.md` stays the escape hatch for the source.
+
+    The copy control is the one sanctioned exception — it carries the markdown in an
+    off-screen textarea because that is what a clipboard write can select — so the
+    guard is that raw markdown appears *only* there, not that it appears nowhere.
+    """
     response = client.post("/runs", data={"question": "Rendered?"}, follow_redirects=False)
     run_id = response.headers["location"].rsplit("/", 1)[-1]
     _wait_for_final(config, run_id)
@@ -250,7 +256,8 @@ def test_the_report_is_rendered_not_shown_as_raw_markdown(client, config):
         page = client.get(url)
         assert page.status_code == 200
         assert "<h1>Answer</h1>" in page.text
-        assert "# Answer" not in page.text
+        visible = re.sub(r"<textarea[^>]*>.*?</textarea>", "", page.text, flags=re.S)
+        assert "# Answer" not in visible
 
 
 def test_the_report_page_404s_before_there_is_a_report_and_for_unknown_runs(config, identities):

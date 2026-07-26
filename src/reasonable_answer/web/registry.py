@@ -14,6 +14,7 @@ from dataclasses import dataclass, field
 from pathlib import Path
 from typing import Any, Literal
 
+from ..store import load_final
 from ..taxonomy import LENSES
 
 Status = Literal["queued", "running", "interrupted", "abandoned", "accepted",
@@ -214,6 +215,17 @@ class Registry:
             return json.loads(path.read_text())
         except json.JSONDecodeError:
             return None
+
+    def final_strict(self, run_id: str) -> dict[str, Any] | None:
+        """`final`, but corrupt and absent are told apart — raises `CorruptRun`.
+
+        A *page* can degrade gracefully when the record will not parse: it shows the
+        run as unfinished and the reader can see the directory for themselves. A
+        durable export cannot. It has to state a verdict, and reading an unreadable
+        record as an absent one would make it state `aborted` — a terminal status no
+        controller rule produced. So the export paths ask this question strictly.
+        """
+        return load_final(self.dir(run_id) / "final.json")
 
     def report(self, run_id: str) -> str | None:
         path = self.dir(run_id) / "final.md"

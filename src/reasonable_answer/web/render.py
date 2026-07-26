@@ -12,6 +12,10 @@ import time
 from typing import Any
 
 from ..config import Config
+
+# The same words describe a status on the page and in an exported file, and `export.py`
+# owns them because `ra export` reads them without this optional extra installed.
+from ..export import STATUS_MEANING
 from .markdown import to_html
 from .registry import RoundSnapshot, RunSummary
 
@@ -24,17 +28,6 @@ STATUS_TONE = {
     "running": "live",
     "queued": "live",
     "interrupted": "warn",
-}
-
-STATUS_MEANING = {
-    "accepted": "every lens cleared by two distinct non-author models on the final artifact",
-    "converged_unconfirmed": "every lens cleared, but a lens had only one eligible reviewer",
-    "exhausted_unresolved": "reached the cap or stagnated with only non-blocking issues left",
-    "needs_human_review": "reached the cap, stagnated or cycled with blocking issues present",
-    "aborted": "fatal: a model was unavailable or a review could not be completed",
-    "queued": "waiting for a worker",
-    "running": "in progress",
-    "interrupted": "the process stopped before finishing; this run can be resumed",
 }
 
 
@@ -66,7 +59,7 @@ def _short(identity: str | None) -> str:
 # --------------------------------------------------------------------- layout
 
 
-def render_layout(title: str, body: str, live: bool = False) -> str:
+def render_layout(title: str, body: str, live: bool = False, copyable: bool = False) -> str:
     return f"""<!doctype html>
 <html lang="en">
 <head>
@@ -87,6 +80,7 @@ def render_layout(title: str, body: str, live: bool = False) -> str:
 </header>
 <main>{body}</main>
 {'<script>' + LIVE_JS + '</script>' if live else ''}
+{'<script>' + COPY_JS + '</script>' if copyable else ''}
 </body>
 </html>"""
 
@@ -185,6 +179,7 @@ def render_run(
     report: str | None,
     final: dict[str, Any] | None,
     lens_names: list[str],
+    record: str = "",
 ) -> str:
     resume = (
         f"""<form method="post" action="/runs/{esc(summary.run_id)}/resume" class="inline">
@@ -195,7 +190,7 @@ def render_run(
 
     downloads = (
         f"""<a class="button" href="/runs/{esc(summary.run_id)}/report">Read the report</a>
-        <a class="secondary button" href="/runs/{esc(summary.run_id)}/report.md">report.md</a>
+        {_share_links(summary.run_id)}
         <a class="secondary button" href="/runs/{esc(summary.run_id)}/audit.json">audit.json</a>"""
         if report
         else f'<a class="secondary button" href="/runs/{esc(summary.run_id)}/audit.json">audit.json</a>'
@@ -232,6 +227,8 @@ def render_run(
 </section>
 
 {_report_section(report, final)}
+
+{record}
 
 {progress}
 """
@@ -299,28 +296,11 @@ def _lens_row(r: RoundSnapshot, lens: str) -> str:
 
 
 def _report_section(report: str | None, final: dict[str, Any] | None) -> str:
+    """The report body. Outstanding defects and warnings are *not* repeated here —
+    they live in the review record below, which is the block that also travels with
+    every export, so a reader on screen and a reader holding the file see one list."""
     if not report:
         return ""
-    outstanding = (final or {}).get("outstanding_defects") or []
-    warnings = (final or {}).get("warnings") or []
-
-    defects = ""
-    if outstanding:
-        items = "".join(
-            f'<li><span class="chip {esc(d.get("severity"))}">{esc(d.get("severity"))}</span>'
-            f'<span class="chip">{esc(d.get("category"))}</span> '
-            f'{esc(d.get("instruction"))}</li>'
-            for d in outstanding
-        )
-        defects = f"""<div class="callout warn">
-          <h3>Outstanding defects in the shipped report</h3>
-          <p>These were raised and not resolved before the run stopped.</p>
-          <ul class="defects">{items}</ul></div>"""
-
-    warn = ""
-    if warnings:
-        warn = '<div class="callout">' + "".join(f"<p>{esc(w)}</p>" for w in warnings) + "</div>"
-
     chosen = (final or {}).get("chosen_round")
     provenance = (
         f'<p class="lede">Shipped the best-scoring draft (round {esc(chosen)}), '
@@ -333,29 +313,68 @@ def _report_section(report: str | None, final: dict[str, Any] | None) -> str:
 <section class="panel">
   <h2>Report</h2>
   {provenance}
-  {defects}
-  {warn}
   <article class="report">{to_html(report)}</article>
 </section>"""
 
 
-def render_report(summary: RunSummary, report: str, final: dict[str, Any] | None) -> str:
+def _share_links(run_id: str) -> str:
+    return (
+        f'<a class="secondary button" href="/runs/{esc(run_id)}/export.md" '
+        f'title="the report with its review record, as markdown">Download .md</a>'
+        f'<a class="secondary button" href="/runs/{esc(run_id)}/export.html" '
+        f'title="one self-contained file that opens anywhere">Download .html</a>'
+        f'<a class="secondary button" href="/runs/{esc(run_id)}/report.md" '
+        f'title="the shipped artifact, exactly as stored">report.md</a>'
+    )
+
+
+def _copy_control(report: str) -> str:
+    """A copy button plus the text it copies.
+
+    The markdown lives in a textarea rather than a JS string literal: report text is
+    model-written, and interpolating it into a script is the one way to hand it the
+    execution the renderer spends its whole docstring denying it. The textarea is
+    positioned off-screen rather than hidden, because `execCommand('copy')` — the only
+    path available on plain http, where `navigator.clipboard` does not exist — can
+    only copy a selection from a rendered element.
+    """
+    return f"""<button type="button" id="copy-md" class="secondary">Copy markdown</button>
+<textarea id="copy-src" class="copy-src" readonly aria-hidden="true"
+  tabindex="-1">{esc(report)}</textarea>"""
+
+
+def render_report(
+    summary: RunSummary,
+    report: str,
+    final: dict[str, Any] | None,
+    record: str = "",
+    print_header: str = "",
+) -> str:
     """The report on its own page — the thing to hand to someone who wants to *read* it,
-    rather than watch the pipeline that produced it."""
+    rather than watch the pipeline that produced it.
+
+    Also the thing that gets printed: this page and the exported file share one
+    stylesheet and one review record, so `Save as PDF` from a phone produces the same
+    document as the download.
+    """
     chosen = (final or {}).get("chosen_round")
     provenance = f" · shipped from round {esc(chosen)}" if chosen else ""
     body = f"""
+{print_header}
 <section class="panel reading">
-  <div class="run-meta">
+  <div class="run-meta screen-only">
     {_badge(summary.status)}
     <a class="dim" href="/runs/{esc(summary.run_id)}">back to the run</a>
     <span class="dim mono">{esc(summary.run_id)}{provenance}</span>
-    <a class="dim" href="/runs/{esc(summary.run_id)}/report.md">report.md</a>
   </div>
-  <p class="question">{esc(summary.question)}</p>
+  <p class="question screen-only">{esc(summary.question)}</p>
+  <div class="share screen-only">{_copy_control(report)}{_share_links(summary.run_id)}</div>
   <article class="report">{to_html(report)}</article>
-</section>"""
-    return render_layout(f"{summary.question[:60]} — reasonable-answer", body)
+</section>
+{record}"""
+    return render_layout(
+        f"{summary.question[:60]} — reasonable-answer", body, copyable=True
+    )
 
 
 # ------------------------------------------------------------------- assets
@@ -373,6 +392,60 @@ LIVE_JS = """
     location.reload();
   });
   src.onerror = function () { /* browser retries on its own */ };
+})();
+"""
+
+COPY_JS = """
+(function () {
+  var btn = document.getElementById('copy-md');
+  var src = document.getElementById('copy-src');
+  if (!btn || !src) return;
+
+  function flash(text) {
+    var was = btn.textContent;
+    btn.textContent = text;
+    setTimeout(function () { btn.textContent = was === text ? 'Copy markdown' : was; }, 1800);
+  }
+
+  btn.addEventListener('click', function () {
+    // The deployment is plain http on a tailnet, which is not a secure context, so
+    // navigator.clipboard is undefined there. Selection + execCommand is the path
+    // that actually works; the async API is the fallback, not the other way round.
+    var ok = false;
+    try {
+      if (/ipad|iphone|ipod/i.test(navigator.userAgent)) {
+        // iOS ignores select() on a readonly textarea.
+        src.contentEditable = 'true';
+        src.readOnly = false;
+        var range = document.createRange();
+        range.selectNodeContents(src);
+        var sel = window.getSelection();
+        sel.removeAllRanges();
+        sel.addRange(range);
+        src.setSelectionRange(0, src.value.length);
+      } else {
+        src.select();
+        src.setSelectionRange(0, src.value.length);
+      }
+      ok = document.execCommand('copy');
+    } catch (e) {
+      ok = false;
+    } finally {
+      src.contentEditable = 'false';
+      src.readOnly = true;
+      if (window.getSelection) window.getSelection().removeAllRanges();
+    }
+
+    if (ok) { flash('Copied'); return; }
+    if (navigator.clipboard) {
+      navigator.clipboard.writeText(src.value).then(
+        function () { flash('Copied'); },
+        function () { flash('Copy failed'); }
+      );
+      return;
+    }
+    flash('Copy failed');
+  });
 })();
 """
 
@@ -561,5 +634,88 @@ table.runs { width: 100%; border-collapse: collapse; }
   .lens { grid-template-columns: 1fr; gap: .1rem; }
   .decision { margin-left: 0; }
   .hash { margin-left: 0; }
+}
+
+/* ------------------------------------------------------------ share + record */
+.share { display: flex; flex-wrap: wrap; gap: .5rem; align-items: center; margin-bottom: 1.2rem; }
+.share .button, .share button { margin: 0; }
+/* Off-screen, not hidden: execCommand copies a selection, and a display:none
+   element cannot hold one. */
+.copy-src {
+  position: absolute; left: -9999px; top: 0; width: 1px; height: 1px;
+  opacity: 0; border: 0; padding: 0;
+}
+.print-only { display: none; }
+.record .verdict { margin: 0 0 .4rem; font-size: .95rem; }
+.record .verdict.caveat strong { color: var(--bad); }
+.record .verdict.ok strong { color: var(--good); }
+.record .advice { color: var(--dim); margin: 0 0 1rem; }
+.record-grid { margin: 0 0 1.2rem; display: grid; gap: .3rem; }
+.rec-row { display: grid; grid-template-columns: 9rem 1fr; gap: .6rem; font-size: .9rem; }
+.rec-row dt { color: var(--dim); }
+.rec-row dd { margin: 0; }
+.reviewers { list-style: none; margin: 0 0 1.2rem; padding: 0; font-size: .9rem; }
+.reviewers li { padding: .12rem 0; }
+.reviewers .lens-name { display: inline-block; min-width: 8rem; color: var(--dim); }
+.record .colophon { color: var(--dim); font-size: .8rem; margin: 1.2rem 0 0; }
+.exported main { padding-top: 2rem; }
+
+/* ------------------------------------------------------------------- print
+   The target is iOS Safari's share-sheet print, which is how a report actually
+   reaches someone off the tailnet. Two things matter there. It inherits the page's
+   colour scheme, so a phone in dark mode prints white text on black unless the
+   palette is reset here; and it drops no chrome of its own, so anything that is
+   only useful on a screen has to be removed explicitly.
+
+   The review record is deliberately *not* removed. A printed report that has lost
+   its verdict is the one artifact this project must not produce. */
+@media print {
+  :root, :root[data-theme="dark"], :root[data-theme="light"] {
+    --bg: #fff; --panel: #fff; --ink: #111; --dim: #444; --line: #b9b6b1;
+    --accent: #1c3f35; --good: #1c3f35; --warn: #6b5310; --bad: #7a2415; --chip: #fff;
+  }
+  @page { margin: 16mm 15mm; }
+  html, body { background: #fff; color: #111; }
+  body {
+    font: 11pt/1.5 ui-serif, Georgia, "Iowan Old Style", "Times New Roman", serif;
+  }
+  header, footer, form, .run-actions, .share, .copy-src, .fold, #progress,
+  .screen-only, .queued-note, .badge { display: none !important; }
+  .print-only { display: block !important; }
+  /* `.exported main` is listed explicitly: it is more specific than a bare `main`,
+     so its screen padding would otherwise survive onto the first printed page. */
+  main, .exported main { max-width: none; margin: 0; padding: 0; display: block; }
+  .panel, .reading {
+    background: none; border: 0; border-radius: 0; padding: 0; margin: 0 0 1rem;
+    max-width: none;
+  }
+  h1 { font-size: 17pt; margin: 0 0 .3rem; }
+  h2 { font-size: 9pt; letter-spacing: .08em; margin: 0 0 .5rem; }
+  h3 { font-size: 8.5pt; }
+  .print-header { margin-bottom: 1.4rem; padding-bottom: .8rem; border-bottom: 1px solid var(--line); }
+  .print-meta { color: var(--dim); font-size: 9pt; margin: 0 0 .15rem; }
+  .print-caveat {
+    font-size: 9.5pt; margin: .6rem 0 0; padding: .5rem .7rem;
+    border: 1px solid var(--bad); color: var(--bad); border-radius: 3px;
+  }
+  .report { font-size: 11pt; overflow-wrap: break-word; }
+  .report h1 { font-size: 15pt; }
+  .report h2 { font-size: 12pt; text-transform: none; letter-spacing: 0; color: var(--ink); }
+  .report h3 { font-size: 11pt; text-transform: none; letter-spacing: 0; color: var(--ink); }
+  .report a { color: var(--ink); text-decoration: underline; }
+  /* Reports cite with [n] markers into a Sources section, so inline URLs would be
+     noise on paper — the list at the end already carries them. */
+  p { orphans: 3; widows: 3; }
+  h1, h2, h3, h4 { break-after: avoid-page; page-break-after: avoid; }
+  /* Rows, not whole tables: a table longer than a page cannot honour `avoid` and gets
+     pushed or clipped instead. Browsers repeat `<thead>` across the break on their own. */
+  .report pre, .report blockquote, .report li, .report tr,
+  .rec-row, .reviewers li, .defects li, .print-header {
+    break-inside: avoid; page-break-inside: avoid;
+  }
+  .record { break-before: page; page-break-before: always; }
+  /* Chips are background-coloured, and print engines drop backgrounds by default. */
+  .chip { background: none !important; border: 1px solid var(--line); color: var(--ink); }
+  .defects li { margin-bottom: .4rem; }
 }
 """
