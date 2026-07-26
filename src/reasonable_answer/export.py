@@ -8,7 +8,7 @@ and a `needs_human_review` report with three blocking defects are byte-indisting
 as prose, and the whole point of the pipeline is the difference between them.
 
 So every export is *report + review record*, mechanically derived from `final.json`
-(D26). Nothing here is model-authored except the report body and the defect prose that
+(D30). Nothing here is model-authored except the report body and the defect prose that
 was already shown on the run page; the status, label, reviewer list and hashes are the
 pipeline's own record.
 

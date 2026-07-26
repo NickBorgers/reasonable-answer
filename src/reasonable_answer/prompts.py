@@ -13,8 +13,9 @@ Two rules govern this file:
 from __future__ import annotations
 
 import json
+from collections.abc import Sequence
 
-from .schemas import Defect
+from .schemas import REFINE_TRANSFORMS, Defect
 from .taxonomy import LENS_BRIEF, LENS_CATEGORIES, Category, Lens
 
 DATA_FENCE = "<<<BEGIN DATA>>>"
@@ -456,4 +457,113 @@ def orchestrator_user(view_json: str) -> str:
         "- `minor_issues_worth_polishing` — enough minor issues to justify a pass.\n"
         "- `minor_issues_not_worth_polishing` — remaining minors are nitpicking.\n"
         "Set `polish_recommended` true only for `minor_issues_worth_polishing`."
+    )
+
+
+# --------------------------------------------------------------- question refinement
+#
+# docs/question-refinement.md (D26). Ambient, pre-run reframing suggestions: the
+# model sees only the question, never anything from the graph, and returns zero or
+# more chip suggestions. Zero is the expected, common outcome — most questions are
+# already well-posed and get no chips at all.
+
+#: label -> (trigger, one-line rewrite guidance). Kept as data rather than baked
+#: prose so `refine_system` can compose only the enabled subset — a disabled
+#: transform must never be described to the model, or a lucky sample could still
+#: produce it and slip past a filter that only checks the *enabled* set for shape,
+#: not for whether it was ever supposed to be offered.
+_TRANSFORM_DESCRIPTIONS: dict[str, str] = {
+    "split_the_either_or": (
+        "split_the_either_or — trigger: the question offers exactly two labels for "
+        "something that is actually a record or a spectrum (e.g. 'does X back the "
+        "police or support defunding them?'). Rewrite as an open, multi-dimensional "
+        "question about the actual record, dropping both labels."
+    ),
+    "check_the_premise_first": (
+        "check_the_premise_first — trigger: the question presupposes a contested or "
+        "unverified fact as settled (e.g. 'why is it illegal to...' assumes it is). "
+        "Rewrite to ask whether the premise holds, before or alongside the original ask."
+    ),
+    "name_the_outcome": (
+        "name_the_outcome — trigger: an unscoped scalar verdict — 'net positive/"
+        "negative', 'better/worse' — with no population, outcome, or timeframe named. "
+        "Rewrite naming a concrete outcome, population, and timeframe to evaluate."
+    ),
+    "surface_the_real_goal": (
+        "surface_the_real_goal — trigger: a practical need is buried inside a purely "
+        "factual framing (e.g. asking why something is illegal when what the asker "
+        "wants is how to do the lawful thing). Rewrite to surface that practical goal "
+        "explicitly, in addition to or instead of the factual framing."
+    ),
+    "ask_whats_answerable": (
+        "ask_whats_answerable — trigger: a pure value question with no factual core "
+        "('is it better to be honest or nice?'). Rewrite as a question about what "
+        "evidence or research bears on the underlying value tension."
+    ),
+    "question_behind_the_question": (
+        "question_behind_the_question — trigger: the literal question is already "
+        "settled/answerable, but a different, adjacent question is what a genuine "
+        "asker is likely to actually care about (e.g. a settled factual verification "
+        "question where the live interest is in why a contrary belief persists). "
+        "Extra constraints, because this transform authorizes inferring an unstated "
+        "concern and is the highest-steering-risk one: the adjacent question you "
+        "propose must itself be factual and answerable — never a value question or "
+        "one requiring speculation about a specific individual's psychology; it must "
+        "not attribute beliefs, motives, or causes to any population beyond what is "
+        "independently verifiable; and it may appear only *in addition to* a separate "
+        "suggestion that keeps the original literal question wording unchanged — never "
+        "as a replacement for it."
+    ),
+}
+
+REFINE_GUARDRAILS = (
+    "Rules for every suggestion you propose (violating any of these makes the "
+    "suggestion worse than no suggestion at all):\n"
+    "- No meta-commentary. Never say or imply the original question is 'loaded', "
+    "'biased', or 'wrong'. The label names the move you are making (e.g. 'check the "
+    "premise first'), never the flaw you think you found.\n"
+    "- No steering. A suggestion must not embed a verdict, flip the question's "
+    "valence, or demand a both-sides framing. It opens the question wider; it never "
+    "answers it.\n"
+    "- Preserve the subject. The user's entities and topic must survive the "
+    "rewrite exactly — never substitute a question about the asker or about people "
+    "in general for a question about the subject they actually named.\n"
+    "- Silence is the default and the correct, common answer. Only propose a "
+    "suggestion when one of the transforms below genuinely applies. Returning zero "
+    "suggestions for a well-posed question is success, not a missed opportunity — do "
+    "not manufacture a transform to have something to say.\n"
+    "- Exactly one transform per suggestion. Never combine two transforms in a "
+    "single rewrite."
+)
+
+
+def refine_system(enabled_transforms: Sequence[str]) -> str:
+    """Built from only the enabled subset of the six taxonomy transforms, so a
+    disabled one (`question_behind_the_question`, by default — see RefineConfig) is
+    never even described to the model. Bump `web.refine.PROMPT_VERSION` whenever
+    this text or `RefinementSuggestions` changes: cached suggestions are keyed on
+    that version so stale ones cannot outlive the prompt that produced them."""
+    ordered = [t for t in REFINE_TRANSFORMS if t in set(enabled_transforms)]
+    table = "\n\n".join(_TRANSFORM_DESCRIPTIONS[t] for t in ordered)
+    return (
+        "You suggest, at most, better articulations of a question someone is about "
+        "to ask an analytical research system — never an answer to the question "
+        "itself. You propose a suggestion only when the question, as worded, matches "
+        "one of these bounded transforms:\n\n"
+        f"{table}\n\n"
+        f"{REFINE_GUARDRAILS}\n\n"
+        "Return at most a small number of suggestions (fewer is better; most "
+        "well-posed questions get none at all). Each suggestion names exactly one "
+        "transform, a short intent label for the chip (not the flaw), and the "
+        "rewritten question, which must itself read as a complete, answerable "
+        "question."
+    )
+
+
+def refine_user(question: str) -> str:
+    return (
+        f"{UNTRUSTED_NOTE}\n\n"
+        f"QUESTION\n{DATA_FENCE}\n{question}\n{DATA_END}\n\n"
+        "Propose suggestions per your instructions, or none at all if the question is "
+        "already well-posed."
     )

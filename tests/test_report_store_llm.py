@@ -72,11 +72,16 @@ def test_content_only_purge_keeps_the_decision_record(tmp_path):
     store.critique("h" * 64, "logic", 1, CritiqueOutput(issues=[]))
     store.event("control", rule=7)
     store.final("final body", {"terminal_status": "accepted"})
+    # D26: refinement content is a CONTENT_DIRS entry precisely so it does not silently
+    # escape this same purge (a root-level file would, per store.py's comment).
+    store.refinement({"provenance": "verified", "offer_id": "abc"})
 
     purge(tmp_path, "run-y", content_only=True)
 
     assert not list((store.dir / "reports").iterdir())
     assert not list((store.dir / "critiques").iterdir())
+    assert not list((store.dir / "refinements").iterdir())
+    assert not (store.dir / "refinements" / "refinement.json").exists()
     assert not (store.dir / "final.md").exists()
     assert (store.dir / "events.jsonl").exists()
     assert json.loads((store.dir / "final.json").read_text())["terminal_status"] == "accepted"

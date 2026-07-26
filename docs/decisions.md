@@ -197,6 +197,27 @@ rate-limited proxy, and an operator blocked by an expired audition will disable 
 harness outright, which is strictly worse than a loud warning. `audition.enforce: true`
 turns an `unfit` assigned critic into a startup `ConfigError`.
 
+**The gate blocks only on `unfit`, and only ever reads the cache.** `audition.enforce_fitness`
+runs in `graph.build_runtime` beside `validate_roster_health`, before the structured-output
+probes, so a roster with a measured-incapable critic never reaches the point of spending
+tokens. `marginal`, `stale` and `not audited` stay warnings even with enforcement on: they
+are absences of evidence, not evidence of incapacity, and blocking on them is precisely the
+coupling to cache freshness the paragraph above rejects. A verdict about a model no longer
+rostered is ignored, so swapping the unfit model out takes effect immediately. The gate
+takes no `LLMClient` by signature — a test pins that — because it runs on every `ra run` and
+every web boot, where growing a call would bill an audition per run and break a keyless boot.
+
+**`audition.enabled` is deleted, not implemented.** It shipped `false`, was read by nothing,
+and there was nothing for it to gate: `ra audition` is the only thing that measures, and
+`ra doctor` and the gate above only read the cache it leaves behind. Auditioning is opt-in by
+being its own command. A knob that cannot change behaviour is worse than no knob, because it
+reads as a safety control — the same reason a blank audition cell in `ra doctor` is forbidden.
+`AuditionConfig` is `extra="forbid"`, so a config still carrying `enabled:` now fails to load
+rather than silently ignoring it — a loud break on a line that never did anything, which is the
+right trade for a two-file repo but is the one thing to know before pulling this into a
+deployment with a hand-edited roster. `config/roster.yaml` is updated;
+`config/roster.default.yaml` carries no `audition` block and takes the code defaults.
+
 One case is deliberately not tunable: a model scoring **zero** on `tier: obvious` fixtures
 grades `unfit` under every threshold configuration. That is the observed signature above,
 and a threshold that could permit it would defeat the purpose.
@@ -436,76 +457,112 @@ and every citation dispute rides on the arbiter; the dispute config deliberately
 the resume fingerprint, so toggling it mid-run changes only whether the *privilege* exists going
 forward.
 
-## D26 — a report leaves the system with its verdict attached, or it does not leave
+## D26 — question refinement is offered at the edge, ambient and never blocking
 
-**The problem.** There was no export. `final.md` and `GET /runs/<id>/report.md` served the report
-alone, and the deployment posture (tailnet-only, unauthenticated) means sharing a result is
-handing over a *file* — the recipient has no run page, no badge, no event log. As prose, an
-`accepted` report and a `needs_human_review` report shipped with blocking defects outstanding are
-indistinguishable. An export that carried only the text would make the system's one distinction
-invisible at exactly the moment it travels furthest, and would do it in the format most likely to
-be forwarded on.
+**The problem.** The pipeline already knows questions arrive loaded: `unexamined_presupposition`
+(D24, completeness lens, major floor) exists precisely to catch a writer who accepts a contested
+framing as settled. But that machinery fires only after a run is already underway, and the
+production run history shows what waiting until then costs. `run-75eb136b9bfb` ("Does Talarico
+back the police or support defunding them?") forced the report to spend its conclusion rejecting
+a false either/or; 7 rounds, terminated `needs_human_review`. `run-40de6a7cdbf9` ("Why is it
+illegal to move an opossum in tx?") let an unverified premise stand without a statute citation
+while the user's real, buried question — lawful removal options — went unaddressed; 8 rounds,
+`exhausted_unresolved` with the missing citation still blocking. `run-3e184fb11a36` and
+`run-5af587189b89` both posed a "net positive/negative" scalar verdict over an unscoped
+population, outcome set, and timeframe — unanswerable as asked. `run-85c88f8c6ba4` ("Is it better
+to be honest or nice?") posed a value question as an either/or with nothing for the evidence
+machinery to converge on; `exhausted_unresolved`. `run-4d350e1d27a8` asked a settled verification
+question ("Did Donald Trump win the 2020 presidential election?") when the report's real energy
+went to the adjacent, more interesting question of why the belief persists. In every case the
+category was already nameable — `unexamined_presupposition` (D24) would tag some of these on
+sight — but the finding lands 10–25 minutes and several critique rounds after the one party who
+could cheaply reframe the question, the asker, has already walked away from the keyboard. The
+fix that costs nothing is upstream: catch the same framing before the run starts, while the asker
+is still there to accept, ignore, or edit it.
 
-**The decision.** Every export is *report + review record*, and the review record is mechanically
-derived from `final.json` — terminal status and what it means, the sourcing label, round count and
-which round shipped, run id and artifact hash, the reviewers whose clean records key to **that**
-hash, outstanding defects, warnings. Three surfaces, one renderer (`export.py`):
+**The mechanism** (opt-in, `refine.enabled: false` by default):
 
-| surface | what it is for |
-|---|---|
-| `GET /runs/<id>/export.md`, `ra export <id>` | paste into a document or a message; the copy button on the report page copies the same text |
-| `GET /runs/<id>/export.html`, `ra export <id> -f html` | one self-contained file for someone who cannot reach the tailnet |
-| the print stylesheet | `Save as PDF` from a browser, which is where a shared report usually ends up |
+1. **A closed enum of six transforms**, not free-form rewriting: split-the-either/or,
+   check-the-premise-first, name-the-outcome-you-care-about, surface-the-real-goal,
+   ask-what's-answerable, and ask-the-question-behind-the-question. Every transform preserves the
+   user's subject; the model may change *how* the question is posed, never *what* it is about.
+   The sixth — the only transform that lets the model infer an unstated concern rather than
+   rephrase what is already on the page — ships **disabled** and is enabled only after a
+   paired-fixture audition (mirror questions posed from opposing framings must yield mirror
+   suggestions) passes, the same deferred-audition pattern D24 uses for its own cross-critic
+   bias-correlation check.
+2. **Edge-only placement.** Refinement lives entirely in `web/refine.py`, never inside the graph.
+   `_intake` (RA-018) is unchanged; the graph still receives exactly one question and never knows
+   refinement existed. This follows the seed-ingestion precedent (PR #25): edge-side
+   transformation that is audited but never routes. Keeping it out of `_intake` also keeps the
+   resume fingerprint honest — the question the graph fingerprints never depends on a model call.
+3. **Server-side offer records are the provenance authority.** Client-submitted
+   `refine_offer_id`/`refine_selected` are *claims*, never evidence. They are verified only when
+   the offer exists server-side, the index is valid, and the submitted question exactly equals
+   that suggestion's stored text. A forged or stale claim degrades to an `unverified` mark; it
+   can never fabricate an audit trail, because the record it would have to fake was never written
+   from client input in the first place.
+4. **Two layers of guarantee.** Enforced: schema validation plus deterministic per-entry checks
+   (transform in the enabled set, length caps, ends with `?`, no control characters, no
+   duplicates, count bound) — any failure degrades silently to zero suggestions. Prompt policy:
+   no meta-commentary, no steering, subject preservation, silence-as-default, one transform per
+   suggestion — fixture-tested, never assumed, not enforced.
+5. **Retention follows content, not code path.** Full refinement content — question at offer,
+   suggestions offered, chosen text — is written to `runs/<id>/refinements/refinement.json`,
+   folded into `CONTENT_DIRS` so the existing directory-level content purge removes it alongside
+   reports and critiques. `events.jsonl`, which survives purges, gets only hashes and enum
+   fields: `{offer_id, transform, selected_index, question_sha256, original_sha256, provenance}`.
+   `question.txt` continues to hold exactly the question that ran, per the resume-fingerprint
+   rule.
 
-`report.md` is unchanged and stays the raw shipped artifact, so anything that hashes or diffs a
-report is unaffected by the record being added elsewhere.
+**Alternatives rejected.**
+- *An interstitial confirmation step after "Start run"*: makes every user pay a click to benefit
+  a minority of loaded questions, and reads as a correction gate ("are you sure?") rather than
+  the felt experience of being understood.
+- *Refinement inside the graph, at `_intake`*: would make the question the graph fingerprints
+  depend on a model call, breaking resume, and would put the reframing decision in the pipeline's
+  hands rather than the asker's — the opposite of the intent.
+- *Trusting client-submitted provenance*: a `refine_offer_id`/`refine_selected` pair from the
+  client is exactly the kind of untrusted input RA-010 already treats every model-adjacent field
+  as; recording it as fact would let a forged or replayed claim write a false audit trail.
+- *A distinct alias name as an isolation claim*: a different alias name alone proves nothing
+  about backend isolation, and can even add contention rather than remove it, via model swapping
+  onto the same underlying resource pool.
 
-**Why these three and not a share link.** A hosted link is the obvious answer and the wrong one
-here: it needs authentication and public exposure, which is precisely the posture D22 and the
-README refuse to take on in this repo. Files need neither. PDF is generated by the browser rather
-than by a server-side engine — the alternative costs a large dependency to reproduce a rendering
-path every reader already has, and the print stylesheet is the same stylesheet as the screen, so
-the printed page cannot drift from the page it was printed from.
+**Isolation accounting** (the seven principles): refinement is not part of the alternating game —
+no writer, no critic, no orchestrator role is added or touched — so principles 2–7 hold by
+absence of contact: no new social context, no authorship question, no new lens, no new step
+inside the alternating loop, no new context accumulation, no critic-writer coupling. Principle 1
+is the one with an honest tension to name: refinement puts a model's words in front of the human
+*before* a run exists at all, a channel the pipeline otherwise does not have — there is no
+analogous point today where an artifact-first handoff rule even applies, since nothing has been
+produced yet. It is bounded the same way every other model-facing channel in this system is
+bounded: the transform enum forbids free-form rewriting, the subject is preserved (guardrail 6),
+the original wording is always one tap away and always wins ties (never auto-replaced, never
+required), and every offered suggestion is written to `refinements/refinement.json`, auditable
+per run exactly like a report or critique.
 
-**Why the reviewer list is filtered by artifact hash.** A `CleanRecord` attests to one artifact
-(RC-001/RC-002). Earlier drafts collect their own, and listing those in an export would credit a
-critic with clearing text it never read — an overstatement of review coverage in the one artifact
-that outlives the run directory. With **no** hash to key against, nobody is credited at all:
-crediting everyone would be that same overstatement, arriving exactly when the record is least
-trustworthy.
-
-**Three states, not two: absent, unreadable, known.** A missing `final.json` means the controller
-never reached a verdict. An *unreadable* one means a verdict may exist and cannot be recovered —
-a different fact, and reading it as the first would make an export state `aborted`, a terminal
-status no rule produced (the failure D12/RA-012 keeps `abandoned` out of `final.json` for). So
-`store.load_final` raises `CorruptRun` rather than returning `None`, `Registry.final_strict` asks
-that question where `Registry.final` stays lenient for the pages that already depend on it, and
-the export routes **refuse** with 409 rather than shipping a file whose verdict line is invented.
-The report page renders instead of refusing — but it is what gets printed to PDF, so it shows the
-verdict as `unreadable record` and claims no defects.
-
-**What is not sanitised, and why that is a documented limit rather than a bug.** Defect
-descriptions, warnings, the reviewer identities and the sourcing label are model-authored or
-proxy-derived and reach the export with newline flattening only — enough that none of them can
-*start a markdown block* and forge a second review record, not enough to stop inline emphasis or a
-link rendering inside the record with the record's apparent authority. Full per-field escaping
-would not close that gap: the report body is deliberately rendered as markdown, so a writer can
-already put a convincing fake record in the body itself. The defence against a forged record is
-not escaping — it is the artifact hash and run id, which tie a document back to a run directory
-holding the real one.
-
-**Consequences and residue.** The copy control puts raw markdown in an off-screen `<textarea>`
-rather than a JS string, because report text is model-written and `execCommand('copy')` — the only
-clipboard path available on plain http, which is not a secure context — must select a rendered
-element. The exported HTML fetches nothing (no font, no stylesheet, no image), which preserves the
-property `web/markdown.py` disables images for: opening a report never emits a request on the
-reader's behalf, and an exported file travels to people who have no idea what it is. `export.py`
-imports nothing from `web/` at module scope so `ra export -f md` works on a core install; the HTML
-path borrows the renderer and stylesheet at call time and is the only part needing the `web` extra.
-Defect *prose* in the record is critic-authored and carries no provenance — unchanged from what
-the run page already showed, but it now leaves the host. A `purge --content-only` removes
-`final.md`, so exporting is the thing that outlives retention; the CLI says so rather than
-reporting a corrupt run.
+**Known residuals, accepted and recorded:** refinement shares the LiteLLM proxy with runs, so the
+honest guarantee is a **small fixed ceiling on live client calls** (`refine.concurrency`), shed
+rather than queued when saturated — not zero contention with run traffic, which is a deployment
+property (an alias routed to a dedicated backend/resource pool), not something an alias name or
+client-side control can provide on its own. A timed-out call's orphan-linger window
+(`orphan_linger_seconds`) is best-effort damping on orphan accumulation, not a guarantee — a
+stalled backend can outlive any window, since the design does not assume verified
+disconnect-cancellation from the underlying proxy/backend. The suggester could itself introduce
+spin — a taste for one phrasing over another — mitigated by the closed transform enum, the
+prompt-policy guardrails, the highest-risk transform (`question_behind_the_question`) shipping
+disabled, and per-run auditability via `refinement.json`, but not eliminated as a possibility. An
+expired or evicted offer record downgrades an honest, unforged selection to `unverified`
+provenance — indistinguishable, downstream, from a forged one; the cost is a slightly less
+informative audit trail, never a false one. Enabling refinement also makes the proxy a **boot**
+dependency of the web server rather than only a run dependency — the refine alias joins startup
+identity resolution and structured-output probing, so an unreachable proxy stops the UI coming up
+at all. That is the intended fail-closed trade (a schema-incapable alias must not first surface on
+a user's pause), and it is why the roster baked into the image and the wheel is
+`config/roster.default.yaml`, which leaves refinement off so the image still boots with no network
+and no credential; `config/roster.yaml`, mounted over it by `compose.yaml`, is where this
+deployment opts in.
 
 ## D27 — installable on a phone, without letting anything cacheable be wrong
 
@@ -621,11 +678,23 @@ labels the PR `needs-human-review`, and comments the unresolved paths. So the ho
 cheap and visible, which is what makes "do not guess" a real instruction rather than a wish.
 
 **What is not defended.** A resolution that is syntactically clean and semantically wrong passes
-every gate here — `ruff` sees Python, and nothing reads the merge for meaning. The next cycle's
-reviewers read the branch, but the merge commit itself arrives on the inherit path, so they read
-it as part of whatever comes next rather than as a change under review. This is the residual, and
-it is accepted for the same reason the feature exists: the alternative on offer is not a human
-reading the merge, it is a PR nobody merges.
+every gate here — `ruff` sees Python, and nothing reads the merge for meaning. What *does* read it
+is the next cycle's panel, on the fixed SHA, which is the same protection every other fixer output
+gets.
+
+**Correction, from PR #49.** The paragraph above originally said the merge commit "arrives on the
+inherit path", and treated that as an accepted cost. It was not a cost, it was a hole, and it was
+larger than described. Inherit re-stamps the *previous* verdict, and the previous verdict is the
+cycle-1 judge's reading of the **pre-fix** tree. So on #49: reviewers cleared the pre-fix tree, the
+judge issued a GO, the fixer pushed a merge carrying four conflict resolutions and two blocker
+fixes, gather saw merge-from-base and skipped all four reviewers, and that GO was re-stamped onto a
+tree nobody had read. Auto-merge fired three seconds later; 2105 lines landed on main unreviewed.
+
+The property "the fixed SHA earns its own cycle with its own reviewers" was never a consequence of
+the inherit rule being careful — it held by accident, because fixer commits used to have one parent
+and so could not match the inherit test. Teaching the fixer to merge silently removed that
+accident. Gather now refuses to inherit any commit authored as `AGENT_COMMIT_EMAIL`, which restores
+the property by stating it rather than relying on commit shape.
 
 ## D29 — servable under a URL base path, without relaxing the same-origin posture
 
@@ -687,6 +756,77 @@ web layer, which is a window onto the audit trail and touches no model context, 
 does touch is D27's, and it is generalized, not relaxed: "served from the root so its scope
 is the whole origin" becomes "served from the mount point so its scope is the app," with the
 root case as `base = ''`.
+
+## D30 — a report leaves the system with its verdict attached, or it does not leave
+
+**The problem.** There was no export. `final.md` and `GET /runs/<id>/report.md` served the report
+alone, and the deployment posture (tailnet-only, unauthenticated) means sharing a result is
+handing over a *file* — the recipient has no run page, no badge, no event log. As prose, an
+`accepted` report and a `needs_human_review` report shipped with blocking defects outstanding are
+indistinguishable. An export that carried only the text would make the system's one distinction
+invisible at exactly the moment it travels furthest, and would do it in the format most likely to
+be forwarded on.
+
+**The decision.** Every export is *report + review record*, and the review record is mechanically
+derived from `final.json` — terminal status and what it means, the sourcing label, round count and
+which round shipped, run id and artifact hash, the reviewers whose clean records key to **that**
+hash, outstanding defects, warnings. Three surfaces, one renderer (`export.py`):
+
+| surface | what it is for |
+|---|---|
+| `GET /runs/<id>/export.md`, `ra export <id>` | paste into a document or a message; the copy button on the report page copies the same text |
+| `GET /runs/<id>/export.html`, `ra export <id> -f html` | one self-contained file for someone who cannot reach the tailnet |
+| the print stylesheet | `Save as PDF` from a browser, which is where a shared report usually ends up |
+
+`report.md` is unchanged and stays the raw shipped artifact, so anything that hashes or diffs a
+report is unaffected by the record being added elsewhere.
+
+**Why these three and not a share link.** A hosted link is the obvious answer and the wrong one
+here: it needs authentication and public exposure, which is precisely the posture D22 and the
+README refuse to take on in this repo. Files need neither. PDF is generated by the browser rather
+than by a server-side engine — the alternative costs a large dependency to reproduce a rendering
+path every reader already has, and the print stylesheet is the same stylesheet as the screen, so
+the printed page cannot drift from the page it was printed from.
+
+**Why the reviewer list is filtered by artifact hash.** A `CleanRecord` attests to one artifact
+(RC-001/RC-002). Earlier drafts collect their own, and listing those in an export would credit a
+critic with clearing text it never read — an overstatement of review coverage in the one artifact
+that outlives the run directory. With **no** hash to key against, nobody is credited at all:
+crediting everyone would be that same overstatement, arriving exactly when the record is least
+trustworthy.
+
+**Three states, not two: absent, unreadable, known.** A missing `final.json` means the controller
+never reached a verdict. An *unreadable* one means a verdict may exist and cannot be recovered —
+a different fact, and reading it as the first would make an export state `aborted`, a terminal
+status no rule produced (the failure D12/RA-012 keeps `abandoned` out of `final.json` for). So
+`store.load_final` raises `CorruptRun` rather than returning `None`, `Registry.final_strict` asks
+that question where `Registry.final` stays lenient for the pages that already depend on it, and
+the export routes **refuse** with 409 rather than shipping a file whose verdict line is invented.
+The report page renders instead of refusing — but it is what gets printed to PDF, so it shows the
+verdict as `unreadable record` and claims no defects.
+
+**What is not sanitised, and why that is a documented limit rather than a bug.** Defect
+descriptions, warnings, the reviewer identities and the sourcing label are model-authored or
+proxy-derived and reach the export with newline flattening only — enough that none of them can
+*start a markdown block* and forge a second review record, not enough to stop inline emphasis or a
+link rendering inside the record with the record's apparent authority. Full per-field escaping
+would not close that gap: the report body is deliberately rendered as markdown, so a writer can
+already put a convincing fake record in the body itself. The defence against a forged record is
+not escaping — it is the artifact hash and run id, which tie a document back to a run directory
+holding the real one.
+
+**Consequences and residue.** The copy control puts raw markdown in an off-screen `<textarea>`
+rather than a JS string, because report text is model-written and `execCommand('copy')` — the only
+clipboard path available on plain http, which is not a secure context — must select a rendered
+element. The exported HTML fetches nothing (no font, no stylesheet, no image), which preserves the
+property `web/markdown.py` disables images for: opening a report never emits a request on the
+reader's behalf, and an exported file travels to people who have no idea what it is. `export.py`
+imports nothing from `web/` at module scope so `ra export -f md` works on a core install; the HTML
+path borrows the renderer and stylesheet at call time and is the only part needing the `web` extra.
+Defect *prose* in the record is critic-authored and carries no provenance — unchanged from what
+the run page already showed, but it now leaves the host. A `purge --content-only` removes
+`final.md`, so exporting is the thing that outlives retention; the CLI says so rather than
+reporting a corrupt run.
 
 ## Open items for a future round
 

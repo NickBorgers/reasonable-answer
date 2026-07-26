@@ -23,6 +23,7 @@ from typing import Any, TypedDict
 
 from langgraph.graph import END, START, StateGraph
 
+from . import audition as audition_mod
 from . import critique as critique_mod
 from . import dispute as dispute_mod
 from . import fetch, prompts, roles, search, triage
@@ -139,6 +140,11 @@ def build_runtime(
     client = client or LLMClient(config)
     identities = client.resolve_identities(config.roster.all_aliases)
     warnings = validate_roster_health(config, identities)
+    # Structural eligibility says a lens *has* a reviewer; this says the reviewer can
+    # actually find a defect (D20). Cache-read only, so it costs nothing and stays put
+    # ahead of the probes below — a roster with an unfit critic should not get as far
+    # as spending tokens on structured-output detection.
+    audition_mod.enforce_fitness(config.audition, config.roster, identities)
 
     for alias in config.roster.all_aliases:
         mode = client.probe_structured_output(alias)
@@ -166,6 +172,7 @@ def build_runtime(
         search_enabled=searcher is not None,
         search_query_budget=config.search.query_budget if searcher else 0,
         verify_sources=fetcher is not None,
+        audition_enforced=config.audition.enforce,
     )
     for warning in warnings:
         log.warning("roster: %s", warning)

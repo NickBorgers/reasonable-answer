@@ -20,8 +20,11 @@ from typing import Any
 
 from pydantic import BaseModel
 
-#: purged by `ra purge --content`; retained longer than the signal record
-CONTENT_DIRS = ("reports", "critiques", "disputes")
+#: purged by `ra purge --content`; retained longer than the signal record. `refinements`
+#: (D26) has to live here rather than as a root-level `refinement.json` because `purge`
+#: (below) only sweeps directories on a content-only purge -- a root file would silently
+#: survive it and outlive the reports/critiques it was meant to retire alongside.
+CONTENT_DIRS = ("reports", "critiques", "disputes", "refinements")
 
 #: A run id becomes a filesystem path and, via `purge`, an rmtree target. Anything
 #: outside this alphabet — separators, `..`, absolute paths — is rejected outright.
@@ -123,6 +126,15 @@ class RunStore:
         `purge --content-only` (D25)."""
         name = f"r{round_no:02d}-{sequence:02d}.json"
         self._write(Path("disputes") / name, json.dumps(payload, indent=2, default=str))
+
+    def refinement(self, payload: dict[str, Any]) -> None:
+        """The full pre-run refinement record (D26): question at offer, suggestions
+        offered, chosen text. Content-bearing, so it lives in `refinements/` -- a
+        `CONTENT_DIRS` entry -- rather than `events.jsonl`, which survives
+        `purge --content-only` and must carry only non-content signal."""
+        self._write(
+            Path("refinements") / "refinement.json", json.dumps(payload, indent=2, default=str)
+        )
 
     def view(self, round_no: int, view: BaseModel) -> None:
         self._append(

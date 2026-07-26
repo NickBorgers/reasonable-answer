@@ -21,6 +21,14 @@ can find a material defect (fabricated citations, contradictions, unsupported cl
 misrepresented sources, missing counterarguments). What remains is only cosmetic nitpicking — at
 which point we stop.
 
+*Eligible* here is both **structural** — non-author, distinct resolved identity, distinct family —
+and **demonstrated**: D20 added a measured capability term, because a structurally-eligible model
+that reports nothing satisfies the predicate while performing no review. `ra audition` grades each
+rostered critic `fit` / `marginal` / `unfit` and caches the verdict; `ra doctor` surfaces it and
+`audition.enforce` fails startup closed on a cached `unfit`. The controller's stop logic below
+still reads only structural eligibility — the capability term gates *whether the roster may run*,
+not what "cleared" means once it does.
+
 Speed is an explicit **anti-goal**. The intended runtime is a Mac Studio running GLM 5.2
 locally: high quality, abysmal token rate. Resumability and a full audit trail matter far
 more than latency.
@@ -159,6 +167,9 @@ can't game because none can see the whole board.
   schema, the ordered stop-decision (guaranteed to terminate), and terminal statuses.
 - **[decisions.md](./decisions.md)** — design decisions, the Codex review, and how each of the
   20 findings was resolved.
+- **[question-refinement.md](./question-refinement.md)** — the edge-side, ambient
+  pre-run reframing suggestions (D26): what they are, the reframe taxonomy, and the
+  provenance/retention mechanism.
 - **[../src/reasonable_answer/web/static/icons/README.md](../src/reasonable_answer/web/static/icons/README.md)**
   — the icon-replacement contract for the installable app (D27): which file each platform
   reads, what each one has to be, and why nothing needs clearing on an installed device
