@@ -235,8 +235,11 @@ carried no headings is accepted with a warning; the warning rides the run's exis
   pile up, so submission is also bounded. `RunWorker.submit()` refuses with **HTTP 429** once the
   queue's waiting depth reaches `max_queue_depth`, and a fixed-window `submit_rate_max` /
   `submit_rate_window_seconds` limiter caps how fast one caller may open new runs — keyed by the
-  Tailscale identity header when the app is fronted so it is present, otherwise one global bucket.
-  Both checks run **before** any run directory is written, so a refused submission costs no disk.
+  caller's resolved identity (Cloudflare Access email first, then the Tailscale header, then the
+  optional `auth.dev_identity`), the same identity the auth middleware enforces (D26). There is no
+  shared global bucket: a request carrying no identity is refused by the middleware before it
+  reaches submission at all. Both checks run **before** any run directory is written, so a refused
+  submission costs no disk.
   `resume()` and boot-time `recover()` bypass both bounds: they replay work already owed and on disk.
 - **Audit/privacy (concrete):** `runs/<id>/` holds sensitive seed material → least-privilege file
   perms (0700 dir), configurable retention (default: raw reports/critiques purged after N days;

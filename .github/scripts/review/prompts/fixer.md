@@ -33,6 +33,33 @@ echo "$PR_TITLE_B64" | base64 -d
 echo "$PR_BODY_B64" | base64 -d
 ```
 
+## Merge conflicts — do these first, before any reviewer blocker
+
+Before invoking you the pipeline ran `git merge --no-commit --no-ff origin/<base>` on the host.
+`${MERGE_STATE}` says what happened:
+
+- `none` or `clean` — nothing for you here. Go to the reviewer blockers.
+- `conflicts` — the merge left markers (`<<<<<<<`, `=======`, `>>>>>>>`) in the working tree. The
+  conflicted paths are listed one per line in the file named by `${MERGE_CONFLICT_FILES_PATH}`:
+
+  ```bash
+  cat "${MERGE_CONFLICT_FILES_PATH}"
+  ```
+
+Resolve **every** marker by editing the files to the correct merged content. Do it before the
+reviewer blockers: a blocker fixed on top of an unresolved tree is work you are about to lose.
+
+How to choose at each marker: prefer the base branch's structural change and re-apply this PR's
+intent on top of it. The base is shared and already reviewed; this PR is the thing being proposed.
+When the two genuinely cannot be reconciled — they change the same behaviour in incompatible ways —
+leave the marker in place. The pipeline aborts the merge and hands it to a human, which is the
+correct outcome; inventing a resolution nobody can check is not.
+
+The `.git` prohibition below applies unchanged. Edit files; do not run `git add`, `git commit`,
+`git merge --continue`, or `git merge --abort`. The host seals the merge after you exit, and it
+refuses to push if any marker or unmerged path survives — so resolve them all, or leave the ones
+you cannot resolve untouched and say so in `summary`.
+
 ## Reconstructing the author's intent — read this before deciding anything
 
 You did not write this PR, but the repository remembers a good deal of why it exists. That record
@@ -209,3 +236,6 @@ Write JSON to `$RESULT_PATH`, conforming to `.review-prompt/fix-result-v1.json`:
   has the original intent to appeal to. You do not.
 - Every blocker in every reviewer artifact must appear in exactly one of `addressed[]` or
   `skipped[]`. A blocker in neither reads as an oversight and will be treated as one.
+- A run whose only work was resolving merge conflicts still writes this file, with `addressed[]`
+  and `skipped[]` empty and the conflict resolution described in `summary`. Conflict resolution is
+  not a blocker and never appears in either list.

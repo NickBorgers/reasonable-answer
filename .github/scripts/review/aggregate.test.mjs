@@ -157,7 +157,7 @@ test("partially addressed blockers -> NO-GO with remaining ids", () => {
     ],
     {
       input_sha: SHA_A,
-      new_sha: SHA_A,
+      new_sha: SHA_B,
       addressed: ["security/sec-1"],
       skipped: [{ id: "security/sec-2", reason: "manual" }],
     }
@@ -223,7 +223,7 @@ test("two reviewers emit same bare id; addressing one MUST NOT clear the other",
     ],
     {
       input_sha: SHA_A,
-      new_sha: SHA_A,
+      new_sha: SHA_B,
       addressed: ["security/issue-1"],
       skipped: [],
     }
@@ -254,10 +254,48 @@ test("bare id in addressed[] (not namespaced) does NOT clear blockers", () => {
   // clearing the wrong blockers.
   const v = aggregate(
     [reviewer("security", "request_changes", [blocker("sec-1")])],
-    { input_sha: SHA_A, new_sha: SHA_A, addressed: ["sec-1"], skipped: [] }
+    { input_sha: SHA_A, new_sha: SHA_B, addressed: ["sec-1"], skipped: [] }
   );
   assert.equal(v.verdict, "NO-GO");
   assert.deepEqual(v.unaddressed_blocker_ids, ["security/sec-1"]);
+});
+
+// ────────── a claimed fix that was never pushed clears nothing ──────────
+//
+// The fixer uploads its artifact under `if: always()`, so a run that wrote
+// `addressed[]` and then died at a later gate — lint, conflict markers, the
+// remote-head check — leaves a truthful-looking record of work that is not in
+// the tree. `new_sha === input_sha` is exactly that state; the host sets
+// `new_sha` only after a successful push. PR #49 reported one of three blockers
+// unaddressed when none of the three had landed.
+
+test("addressed[] is not credited when nothing was pushed", () => {
+  const v = aggregate(
+    [reviewer("security", "request_changes", [blocker("sec-1")])],
+    { input_sha: SHA_A, new_sha: SHA_A, addressed: ["security/sec-1"], skipped: [] }
+  );
+  assert.equal(v.verdict, "NO-GO");
+  assert.deepEqual(v.unaddressed_blocker_ids, ["security/sec-1"]);
+  assert.match(v.reasons.join("\n"), /pushed nothing/);
+});
+
+test("a null or absent new_sha counts as not pushed", () => {
+  for (const new_sha of [null, undefined, ""]) {
+    const v = aggregate(
+      [reviewer("security", "request_changes", [blocker("sec-1")])],
+      { input_sha: SHA_A, new_sha, addressed: ["security/sec-1"], skipped: [] }
+    );
+    assert.equal(v.verdict, "NO-GO", `new_sha=${JSON.stringify(new_sha)}`);
+    assert.deepEqual(v.unaddressed_blocker_ids, ["security/sec-1"]);
+  }
+});
+
+test("an unpushed no-op fixer on a clean review is still GO", () => {
+  // The common case: no blockers, so the fixer never ran and new_sha == input_sha.
+  // Nothing to credit and nothing to withhold — this path must not be collateral.
+  const v = aggregate([reviewer("security", "approve")], noFix);
+  assert.equal(v.verdict, "GO");
+  assert.doesNotMatch(v.reasons.join("\n"), /pushed nothing/);
 });
 
 // ──────────────────── category discriminator ────────────────────
