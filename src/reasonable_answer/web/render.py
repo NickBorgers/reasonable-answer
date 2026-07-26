@@ -63,6 +63,16 @@ def _short(identity: str | None) -> str:
     return identity.split("/")[-1]
 
 
+#: The page's Content-Security-Policy, in one place so the test that pins it and the head
+#: that emits it cannot disagree. Every source here is argued for in the comment beside the
+#: meta tag and in D27; widening it is a decision that belongs in `docs/decisions.md`.
+CSP = (
+    "default-src 'none'; img-src 'self'; style-src 'unsafe-inline'; "
+    "script-src 'self' 'unsafe-inline'; connect-src 'self'; manifest-src 'self'; "
+    "worker-src 'self'; form-action 'self'; base-uri 'none'"
+)
+
+
 # --------------------------------------------------------------------- layout
 
 
@@ -71,13 +81,40 @@ def render_layout(title: str, body: str, live: bool = False) -> str:
 <html lang="en">
 <head>
 <meta charset="utf-8">
-<meta name="viewport" content="width=device-width, initial-scale=1">
+<!-- `viewport-fit=cover` lets the page reach under a notch and the home indicator, which
+     is what an installed app is expected to do; the stylesheet pays that back with
+     safe-area padding. No `maximum-scale` — pinch-zoom stays available, and the reason it
+     is not needed is that the stylesheet sizes controls at 16px. -->
+<meta name="viewport" content="width=device-width, initial-scale=1, viewport-fit=cover">
 <!-- Belt to the renderer's braces: the report is model-written, so even if some future
      construct slips past markdown-it, the browser has no directive that lets this page
-     fetch anything off-origin. `unsafe-inline` covers the stylesheet and the SSE script,
-     both of which are literals in this file; `connect-src 'self'` is the progress stream. -->
-<meta http-equiv="Content-Security-Policy" content="default-src 'none'; img-src 'none'; style-src 'unsafe-inline'; script-src 'unsafe-inline'; connect-src 'self'; form-action 'self'; base-uri 'none'">
+     fetch anything off-origin. `unsafe-inline` covers the stylesheet and the two inline
+     scripts, all literals in this file; `connect-src 'self'` is the progress stream.
+     `img-src 'self'` is what the icon set needs — the browser enforces img-src on favicon
+     and manifest-icon fetches. It does not reopen what `'none'` was closing: report text
+     cannot produce an image at all, because `web/markdown.py` disables the image rule and
+     forbids raw HTML, so the ban lives a layer earlier than this policy. `manifest-src`
+     and `worker-src` are additions rather than relaxations, both blocked by
+     `default-src 'none'` and neither covered by `script-src 'unsafe-inline'`, which
+     permits inline blocks and not URLs. Changing this literal is a decision, not a
+     tidy-up: see D27, and the test that pins it. -->
+<meta http-equiv="Content-Security-Policy" content="{CSP}">
 <title>{esc(title)}</title>
+<!-- Hand-maintained copies of `--bg` light and dark from the stylesheet below. -->
+<meta name="theme-color" content="#fbfaf8" media="(prefers-color-scheme: light)">
+<meta name="theme-color" content="#16181a" media="(prefers-color-scheme: dark)">
+<meta name="color-scheme" content="light dark">
+<meta name="mobile-web-app-capable" content="yes">
+<meta name="apple-mobile-web-app-capable" content="yes">
+<!-- `default`, not `black-translucent`: translucent draws the page under the status bar,
+     which would put the clock on top of the header. -->
+<meta name="apple-mobile-web-app-status-bar-style" content="default">
+<meta name="apple-mobile-web-app-title" content="reasonable-answer">
+<link rel="icon" href="/static/icons/favicon.svg" type="image/svg+xml">
+<link rel="icon" href="/static/icons/icon-192.png" sizes="192x192" type="image/png">
+<!-- iOS ignores the manifest's icons for the home screen and reads this one. -->
+<link rel="apple-touch-icon" href="/static/icons/apple-touch-icon.png">
+<link rel="manifest" href="/manifest.webmanifest">
 <style>{CSS}</style>
 </head>
 <body>
@@ -86,7 +123,7 @@ def render_layout(title: str, body: str, live: bool = False) -> str:
   <span class="tag">consensus-reviewed with in-artifact sourcing</span>
 </header>
 <main>{body}</main>
-{'<script>' + LIVE_JS + '</script>' if live else ''}
+<script>{REGISTER_SW_JS}{LIVE_JS if live else ''}</script>
 </body>
 </html>"""
 
@@ -365,6 +402,25 @@ def render_report(summary: RunSummary, report: str, final: dict[str, Any] | None
 
 # ------------------------------------------------------------------- assets
 
+#: Registers the service worker, which is what makes the app installable rather than
+#: bookmarkable. Both guards matter: outside a secure context `navigator.serviceWorker` is
+#: undefined in Chrome, and the `register` call would raise a SecurityError that surfaces
+#: as an unhandled rejection. Reached over plain http on a tailnet address this emits
+#: nothing at all and the page behaves exactly as it did before; over `tailscale serve`'s
+#: HTTPS — or `http://localhost`, which also counts — it installs.
+#:
+#: MUST end in a semicolon. This is concatenated with LIVE_JS into one <script>, and
+#: without it `})()` followed by `(function` parses as a call and takes the live stream
+#: down with it. There is a test for exactly that.
+REGISTER_SW_JS = """
+(function () {
+  if (!('serviceWorker' in navigator) || !window.isSecureContext) return;
+  window.addEventListener('load', function () {
+    navigator.serviceWorker.register('/sw.js', { scope: '/' }).catch(function () {});
+  });
+})();
+"""
+
 LIVE_JS = """
 (function () {
   var el = document.getElementById('progress');
@@ -609,6 +665,19 @@ table.runs { width: 100%; border-collapse: collapse; }
   padding: .15rem 0; color: var(--dim);
 }
 .queued-note { color: var(--dim); font-size: .85rem; margin-bottom: 0; }
+/* `viewport-fit=cover` puts the page under the notch and the home indicator, so the two
+   full-width containers have to hold their content clear of both. These follow the padding
+   shorthands above rather than replacing them: a browser that cannot parse `env()` drops
+   the whole declaration, and the shorthand is what it falls back to. */
+header {
+  padding-left: max(var(--gutter), env(safe-area-inset-left));
+  padding-right: max(var(--gutter), env(safe-area-inset-right));
+}
+main {
+  padding-left: max(var(--gutter), env(safe-area-inset-left));
+  padding-right: max(var(--gutter), env(safe-area-inset-right));
+  padding-bottom: calc(var(--gutter) + env(safe-area-inset-bottom));
+}
 /* Two breakpoints, deliberately. 48rem is only the flex-basis that stops the run title
    sharing a row with the download buttons; everything phone-shaped happens at 34rem.
    No `pointer: coarse` query — it also matches a desktop touchscreen, where none of this

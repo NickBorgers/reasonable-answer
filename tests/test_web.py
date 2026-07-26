@@ -2,7 +2,9 @@
 
 from __future__ import annotations
 
+import json
 import os
+import re
 import threading
 import time
 import urllib.request
@@ -14,6 +16,7 @@ from fastapi.testclient import TestClient
 from reasonable_answer.graph import run as run_graph
 from reasonable_answer.schemas import CritiqueOutput
 from reasonable_answer.store import RunStore, sweep_expired
+from reasonable_answer.web import assets
 from reasonable_answer.web.app import create_app
 from reasonable_answer.web.registry import Registry
 from reasonable_answer.web.retention import RetentionSweeper
@@ -863,3 +866,171 @@ def test_resume_restores_the_seed(config, tmp_path):
         assert app is not None
     finally:
         worker.shutdown()
+
+
+# ------------------------------------------------------- installable-app assets
+
+
+def test_the_manifest_names_only_icons_that_are_actually_served(client):
+    """The swap-in-your-own-artwork path is only safe if this holds: rename or delete an
+    icon and the manifest still promises it, and the install silently degrades."""
+    response = client.get("/manifest.webmanifest")
+    assert response.status_code == 200
+    assert response.headers["content-type"].startswith("application/manifest+json")
+
+    manifest = json.loads(response.text)
+    assert manifest["start_url"] == "/"
+    assert manifest["scope"] == "/"
+    assert manifest["display"] == "standalone"
+    assert manifest["name"] and manifest["short_name"]
+
+    sizes = {icon["sizes"] for icon in manifest["icons"]}
+    # Chrome will not offer to install without both of these present.
+    assert "192x192" in sizes and "512x512" in sizes
+    # Android crops to the launcher's own shape; without a maskable entry it crops the
+    # "any" icon instead and eats the artwork's corners.
+    assert any(icon.get("purpose") == "maskable" for icon in manifest["icons"])
+
+    for icon in manifest["icons"]:
+        assert client.get(icon["src"]).status_code == 200, icon["src"]
+
+
+def test_every_icon_is_served_as_the_type_it_claims_to_be(client):
+    for name, media_type in assets.ICON_TYPES.items():
+        response = client.get(assets.ICONS_PREFIX + name)
+        assert response.status_code == 200, name
+        assert response.headers["content-type"].startswith(media_type), name
+        if media_type == "image/png":
+            assert response.content.startswith(b"\x89PNG\r\n\x1a\n"), name
+
+
+@pytest.mark.parametrize(
+    "name",
+    ["nope.png", "../app.py", "..%2fapp.py", "%2e%2e%2fapp.py", "/etc/passwd"],
+)
+def test_an_unknown_or_traversing_asset_name_is_a_miss_not_a_read(client, name):
+    """The name is a key into a fixed table, never a path segment, so none of these are a
+    special case — they are all just names that are not in the table."""
+    response = client.get(assets.ICONS_PREFIX + name)
+    assert response.status_code != 200
+    assert b"def create_app" not in response.content
+
+
+def test_the_service_worker_is_served_at_root_scope(client):
+    response = client.get("/sw.js")
+    assert response.status_code == 200
+    assert response.headers["content-type"].startswith("text/javascript")
+    # Without root scope the worker controls only its own directory, and an app installed
+    # from "/" would never be under its control.
+    assert response.headers["service-worker-allowed"] == "/"
+    # Revalidated on every navigation, so a fix reaches an installed app immediately.
+    assert "no-cache" in response.headers["cache-control"]
+
+
+def test_the_service_worker_cannot_cache_anything_about_a_run(client):
+    """The load-bearing property of the whole feature. A cached run page would show a
+    finished run as still running, which is the one output this interface must not
+    produce. It is prevented structurally: the worker's precache list is an inclusion
+    allowlist, and no run URL appears anywhere in its source."""
+    source = client.get("/sw.js").text
+
+    declared = json.loads(re.search(r"var ASSETS = (\[.*?\]);", source, re.S).group(1))
+    assert declared, "the precache list must not be templated away to nothing"
+    assert declared == client.app.state.assets.precache
+    assert not [path for path in declared if path.startswith("/runs")]
+
+    # Comments in that file discuss run URLs at length — the claim is about what the code
+    # can reach, so the prose has to come off before asserting on it.
+    code = "\n".join(line.split("//")[0] for line in source.splitlines())
+    for forbidden in ("/runs", "stream", "progress", "audit.json", "report.md"):
+        assert forbidden not in code, f"the worker's code must never name {forbidden}"
+    # Exactly one write into a cache, and it sits behind the ASSETS membership test.
+    assert code.count(".put(") == 1
+
+
+def test_the_cache_version_tracks_the_asset_bytes(client):
+    """Replacing an icon has to invalidate the old one on every installed client with no
+    version bump and nothing to clear by hand, so the key is the bytes themselves."""
+    first = assets.cache_version({"/a.png": b"one", "/b.png": b"two"})
+    assert first == assets.cache_version({"/b.png": b"two", "/a.png": b"one"})
+    assert first != assets.cache_version({"/a.png": b"one", "/b.png": b"CHANGED"})
+    # A rename changes the URL the worker precaches, so it has to change the key too.
+    assert first != assets.cache_version({"/a.png": b"one", "/c.png": b"two"})
+
+    assert client.app.state.assets.version in client.get("/sw.js").text
+
+
+def test_the_offline_page_stands_alone(client):
+    """It is shown precisely when the server is unreachable, so a link into a run would be
+    a link to a page that cannot load."""
+    response = client.get("/offline.html")
+    assert response.status_code == 200
+    assert response.headers["content-type"].startswith("text/html")
+    assert "/runs" not in response.text
+
+
+def test_a_run_page_is_never_cacheable(client, config):
+    """The same rule as the service worker's, restated at the HTTP layer — an installed
+    standalone app leans on the browser cache and the back-forward cache much harder than
+    a tab does."""
+    response = client.post("/runs", data={"question": "Stale?"}, follow_redirects=False)
+    run_id = response.headers["location"].rsplit("/", 1)[-1]
+    _wait_for_final(config, run_id)
+
+    assert client.get(f"/runs/{run_id}").headers["cache-control"] == "no-store"
+    assert client.get(f"/runs/{run_id}/progress").headers["cache-control"] == "no-store"
+
+
+def test_the_head_advertises_the_installable_app(client):
+    page = client.get("/").text
+    assert '<link rel="manifest" href="/manifest.webmanifest">' in page
+    assert '<link rel="apple-touch-icon" href="/static/icons/apple-touch-icon.png">' in page
+    # iOS reads this and ignores the manifest's icons entirely.
+    assert '<meta name="apple-mobile-web-app-capable" content="yes">' in page
+    assert '<meta name="theme-color" content="#fbfaf8" media="(prefers-color-scheme: light)">' in page
+    assert '<meta name="theme-color" content="#16181a" media="(prefers-color-scheme: dark)">' in page
+    # Lets the page reach under the notch, which the stylesheet pays back with safe-area
+    # padding. Without it the safe-area insets all resolve to zero.
+    assert "viewport-fit=cover" in page
+
+
+def test_the_csp_admits_the_manifest_and_the_worker_and_nothing_off_origin(client, config):
+    """Pinned as an exact literal on purpose. Widening this policy is a decision recorded
+    in docs/decisions.md (D27), not a tidy-up — so it should not be possible to widen it
+    without a test turning red and asking why."""
+    expected = (
+        "default-src 'none'; img-src 'self'; style-src 'unsafe-inline'; "
+        "script-src 'self' 'unsafe-inline'; connect-src 'self'; manifest-src 'self'; "
+        "worker-src 'self'; form-action 'self'; base-uri 'none'"
+    )
+    response = client.post("/runs", data={"question": "Policy?"}, follow_redirects=False)
+    run_id = response.headers["location"].rsplit("/", 1)[-1]
+    _wait_for_final(config, run_id)
+
+    for url in ("/", f"/runs/{run_id}", f"/runs/{run_id}/report"):
+        page = client.get(url).text
+        assert f'content="{expected}"' in page, url
+
+
+def test_service_worker_registration_is_guarded_and_cannot_break_the_live_script(client, config):
+    """Two things at once. The guard is what keeps a plain-http tailnet address silent
+    instead of throwing a SecurityError; the semicolon is what stops `})()` followed by
+    `(function` from parsing as a call and taking the live stream down with it."""
+    response = client.post("/runs", data={"question": "Both scripts?"}, follow_redirects=False)
+    run_id = response.headers["location"].rsplit("/", 1)[-1]
+
+    live_page = client.get(f"/runs/{run_id}").text
+    assert "isSecureContext" in live_page
+    assert "navigator.serviceWorker.register('/sw.js'" in live_page
+
+    script = live_page.split("<script>")[1].split("</script>")[0]
+    if "EventSource" in script:  # the run was still live when the page was rendered
+        # Two IIFEs share one <script>, and the first has to close with a semicolon:
+        # without it, `})()` followed by `(function` parses as a single call expression.
+        assert re.search(r"\}\)\(\);\s*\(function", script), script
+
+    _wait_for_final(config, run_id)
+    # The registration is on every page, live or not — an installed app is entered from
+    # whichever page the user last had open.
+    assert "isSecureContext" in client.get("/").text
+    assert "isSecureContext" in client.get(f"/runs/{run_id}/report").text

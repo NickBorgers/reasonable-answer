@@ -1,0 +1,16 @@
+<svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 32 32" role="img" aria-label="reasonable-answer">
+  <!-- The one icon that can follow the reader's theme: browser tab chrome is dark far more
+       often than a home screen is, and a mid-green plate disappears against it. The PNGs
+       next to this file cannot do this — neither a manifest icon nor an apple-touch-icon
+       is re-fetched when the system theme changes — so they commit to the light pairing. -->
+  <style>
+    .plate { fill: #2f5d50; }
+    .mark { fill: none; stroke: #fbfaf8; stroke-width: 4.2; stroke-linecap: round; stroke-linejoin: round; }
+    @media (prefers-color-scheme: dark) {
+      .plate { fill: #7fbfa8; }
+      .mark { stroke: #16181a; }
+    }
+  </style>
+  <rect class="plate" width="32" height="32" rx="7"/>
+  <path class="mark" d="M9.3 16.6 L14 21.3 L22.7 10.4"/>
+</svg>

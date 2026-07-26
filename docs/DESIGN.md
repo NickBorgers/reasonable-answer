@@ -159,3 +159,8 @@ can't game because none can see the whole board.
   schema, the ordered stop-decision (guaranteed to terminate), and terminal statuses.
 - **[decisions.md](./decisions.md)** — design decisions, the Codex review, and how each of the
   20 findings was resolved.
+- **[../src/reasonable_answer/web/static/icons/README.md](../src/reasonable_answer/web/static/icons/README.md)**
+  — the icon-replacement contract for the installable app (D27): which file each platform
+  reads, what each one has to be, and why nothing needs clearing on an installed device
+  afterwards. It lives beside the files it describes because that is where an operator
+  replacing them will look, and it is indexed here because the main README sends them to it.
