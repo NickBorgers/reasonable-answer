@@ -29,6 +29,16 @@ on:
       cycle:
         required: true
         type: string
+    outputs:
+      reviewed:
+        description: >
+          'true' when the guard cleared this role to actually review. The caller uses it
+          for cycle accounting: a run where every guard refused (PR Validation red on the
+          reviewed SHA, the branch moved on, an untrusted author) read no code, so it must
+          not consume one of the PR's MAX_CYCLES budget. Empty when the guard itself
+          errored — read as "did not review", the direction that costs a retry rather than
+          silently spending the PR's only fix attempt.
+        value: ${{ jobs.guard.outputs.ok }}
     secrets:
       WORKFLOW_PAT:
         required: true
