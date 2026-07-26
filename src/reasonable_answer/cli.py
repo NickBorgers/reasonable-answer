@@ -442,22 +442,16 @@ def _audition_warnings(config: Config, identities: dict[str, str]) -> list[str]:
     `ra doctor` must not spend an audition's worth of calls, so anything unmeasured is
     simply absent here and shows as `not audited` in the table.
     """
-    try:
-        corpus_hash = audition_mod.load_fixtures().corpus_hash
-    except audition_mod.FixtureError:
-        return []
-    cache = audition_mod.load_cache(config.audition.cache_path)
-    ph = audition_mod.prompt_hash()
-    now = time.time()
-
-    judgements: dict[tuple[str, Lens], audition_mod.Judgement] = {}
-    for slot in audition_mod.assignments(config.roster, identities):
-        entry = cache.get(audition_mod.cache_key(slot.identity, slot.lens))
-        if entry is None or not entry.matches(corpus_hash, ph, config.audition.repetitions):
-            continue
-        if entry.is_stale(now, config.audition.max_age_days):
-            continue
-        judgements[(slot.identity, slot.lens)] = audition_mod.judge(
-            entry.metrics, config.audition.thresholds
+    judgements = audition_mod.cached_judgements(config.audition, config.roster, identities)
+    warnings = audition_mod.roster_warnings(config.roster, identities, judgements)
+    # Enforcement with nothing measured is the failure mode that got `audition.enabled`
+    # deleted: a setting that reads as a safety control while gating nothing. It cannot
+    # be an error (a fresh checkout has no cache and must still run) so it is said out
+    # loud in the one place an operator goes to ask whether the roster is sound.
+    if config.audition.enforce and not judgements:
+        warnings.insert(
+            0,
+            "audition.enforce is on but no assigned critic has a usable verdict — the "
+            "gate cannot block anything. Run `ra audition` to give it something to read",
         )
-    return audition_mod.roster_warnings(config.roster, identities, judgements)
+    return warnings

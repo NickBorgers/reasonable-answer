@@ -126,12 +126,16 @@ disputes:
 # Position 3 is unreachable on the first pass and is reached on the rule 8 confirmation
 # top-up — where a false clean raises cleared_count to 2, satisfies strong_met, and
 # terminates the run `accepted`. Audition it before trusting that lineup.
+# Measuring is opt-in by being its own command (`ra audition`) — there is no `enabled`
+# flag here. Everything below only shapes what that command measures and what the two
+# cache readers, `ra doctor` and the `enforce` gate, make of the result.
 audition:
-  enabled: false
   # Warn rather than abort when a critic grades `unfit`. Fail-closed is the right
   # instinct — the soundness claim is void without capable reviewers — but coupling
   # every run to a cache whose freshness depends on a rate-limited proxy means an
-  # operator blocked by an expired audition disables the harness outright.
+  # operator blocked by an expired audition disables the harness outright. Turning this
+  # on makes `ra run` and the web server refuse to start while an assigned critic is
+  # measured `unfit`; `marginal`, `stale` and `not audited` stay warnings regardless.
   enforce: false
   cache_path: .ra-audition.json
   max_age_days: 30

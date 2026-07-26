@@ -54,7 +54,9 @@ def test_default_roster_boots_without_a_proxy_or_a_credential(default_config: Co
     assert default_config.search.enabled is False, "search needs a Brave credential"
     assert default_config.search.verify_sources is False, "fetching model-chosen URLs needs egress"
     assert default_config.disputes.enabled is False
-    assert default_config.audition.enabled is False
+    # Auditioning itself needs no withholding — it only happens via `ra audition`. What
+    # must stay off is the gate that reads its cache: `enforce` is warn-by-default (D20).
+    assert default_config.audition.enforce is False
 
 
 def test_the_two_rosters_name_the_same_models(

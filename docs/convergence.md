@@ -10,6 +10,13 @@ report, and it is bounded so it **always terminates**.
 > same-artifact acceptance. The roster is **role-structured** (D15/D16): a writer pool plus
 > per-lens critic pools headed by the model best matched to each lens, sized to give **≥2
 > eligible non-author models per lens** for strong acceptance.
+>
+> *Eligible* throughout this document means **structurally** eligible — non-author, distinct
+> identity, distinct family — which is all the controller reads. D20 adds a separate
+> **demonstrated-capability** term (`ra audition` grades each critic `fit` / `marginal` / `unfit`);
+> under `audition.enforce` a cached `unfit` verdict fails startup closed *before* the graph runs, so
+> it never reaches the stop decision below. It gates whether the roster may run, not what any lens
+> predicate here means.
 
 ## The observable-category taxonomy (RA-006) with mechanical severity floors (RB-006, RC-005)
 

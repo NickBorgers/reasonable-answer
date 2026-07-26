@@ -18,6 +18,13 @@ dimension can be independently double-checked (see Acceptance in
 [convergence.md](./convergence.md)); a lens with only one eligible model degrades that dimension to
 `converged_unconfirmed`.
 
+"Eligible" in this structural sense — non-author, distinct identity, distinct family — is what the
+convergence controller counts. D20 adds an orthogonal **demonstrated-capability** term: `ra audition`
+measures whether each critic can actually perform its lens (`fit` / `marginal` / `unfit`), `ra doctor`
+reports the cached status, and `audition.enforce` fails startup closed on a cached `unfit` verdict
+(`marginal` / stale / not-audited stay warnings). That gate runs in `build_runtime` before any tokens
+are spent; it does not feed the stop decision.
+
 The diagram below shows a minimal roster for clarity; generator selection is round-robin among
 writers excluding the current artifact's author, preserving `critic(Rₙ) ≠ generator(Rₙ)`.
 
