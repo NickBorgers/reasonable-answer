@@ -246,7 +246,7 @@ def render_index(
         body,
         base_path=base_path,
         extra_css=REFINE_CSS if config.refine.enabled else "",
-        extra_script=REFINE_JS if config.refine.enabled else "",
+        extra_script=_refine_js(base_path) if config.refine.enabled else "",
     )
 
 
@@ -660,7 +660,7 @@ REFINE_JS = """
     var body = new URLSearchParams();
     body.set('question', raw);
 
-    fetch('/refine', {
+    fetch('__RA_BASE__/refine', {
       method: 'POST',
       headers: { 'Content-Type': 'application/x-www-form-urlencoded' },
       body: body.toString(),
@@ -703,6 +703,19 @@ REFINE_JS = """
   });
 })();
 """
+
+
+def _refine_js(base_path: str = "") -> str:
+    """Same `__RA_BASE__` substitution the service-worker registration uses, for the same
+    reason: `fetch('/refine')` addresses the origin root, so behind a stripping proxy the
+    request leaves the prefix the app is actually served under and 404s. With an empty
+    base this is byte-identical to the unprefixed form.
+
+    D26 (refinement) and D29 (base path) landed in separate PRs and collided in a merge
+    that no reviewer read; every other URL on the page was already prefixed, and this one
+    was missed. The failure is silent — chips simply never appear."""
+    return REFINE_JS.replace("__RA_BASE__", base_path)
+
 
 CSS = """
 :root {
