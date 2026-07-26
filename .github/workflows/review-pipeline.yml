@@ -72,6 +72,7 @@ jobs:
       cycle: ${{ steps.cycle.outputs.cycle }}
       cap_exhausted: ${{ steps.cycle.outputs.cap_exhausted }}
       fix_allowed: ${{ steps.cycle.outputs.fix_allowed }}
+      needs_sync: ${{ steps.drift.outputs.needs_sync }}
       inherit: ${{ steps.inherit.outputs.inherit }}
       inherited_verdict: ${{ steps.inherit.outputs.inherited_verdict }}
       roles: ${{ steps.classify.outputs.roles }}
@@ -97,6 +98,39 @@ jobs:
           sha: ${{ inputs.reviewed_sha }}
           base_sha: ${{ inputs.base_sha }}
           github_token: ${{ secrets.WORKFLOW_PAT }}
+
+      # Whether the reviewed SHA is behind the base branch, i.e. a base-branch sync (D28)
+      # is needed. This is the one thing that lets `fix` run when every reviewer guard
+      # refused — the conflicted-PR deadlock (issue #70).
+      #
+      # A PR that conflicts with the base has no computable merge ref, so GitHub fires no
+      # `pull_request` event, so PR Validation never runs, so every reviewer guard refuses
+      # (it requires a completed `PR Validation Required` on the reviewed SHA), so
+      # `record-cycle` is skipped and the fixer — the only stage that can resync and break
+      # the conflict — never runs. `/review` reaches this graph via `issue_comment`, which
+      # fires regardless of merge state, but with the panel guarded off the run does
+      # nothing. A sync consumes no reviewer findings, so it does not need the reviewers to
+      # have run; `fix` keys its sync-only path on this output.
+      #
+      # `merge-base --is-ancestor origin/<base> HEAD` is exactly the test the fixer's own
+      # sync step uses, so the two agree on when a sync is due. Deliberately not a shallow
+      # fetch: a branch further behind than the depth would get a wrong merge base.
+      - name: Detect base-branch drift
+        id: drift
+        working-directory: pr-head
+        env:
+          BASE_REF: ${{ inputs.base_ref }}
+          SHA: ${{ inputs.reviewed_sha }}
+        run: |
+          set -euo pipefail
+          git fetch --quiet origin "${BASE_REF}"
+          if git merge-base --is-ancestor "origin/${BASE_REF}" "${SHA}"; then
+            echo "needs_sync=false" >> "$GITHUB_OUTPUT"
+            echo "gather: ${SHA} already contains origin/${BASE_REF}; no base-branch sync needed"
+          else
+            echo "needs_sync=true" >> "$GITHUB_OUTPUT"
+            echo "gather: ${SHA} is behind origin/${BASE_REF}; a base-branch sync is needed"
+          fi
 
       # A merge of main into the PR branch is not new content to review. Without this,
       # routinely resyncing a long-lived branch burns cycles and can push a PR into the
@@ -386,16 +420,44 @@ jobs:
   # `record-cycle` must succeed first, not merely finish: the fixer's push starts the next
   # pipeline run, whose `gather` reads this SHA's cycle back. Pushing before the counter
   # is durable would let the fix be reviewed as cycle 1 again and fixed a second time.
+  #
+  # Two ways in, and they are disjoint:
+  #
+  #   (a) reviewers ran (`record-cycle` succeeded) and a fix is allowed — the normal
+  #       path. The fixer addresses blockers and, if the base moved, syncs in the same
+  #       commit.
+  #   (b) reviewers did NOT run (`record-cycle` was skipped: every guard refused) but the
+  #       branch is behind the base — the sync-only path (issue #70). This is the
+  #       conflicted-PR deadlock: no merge ref ⇒ no PR Validation ⇒ every guard refuses ⇒
+  #       no reviewers ⇒ the fixer that would resync never runs. The sync consumes no
+  #       reviewer findings, so it does not need `record-cycle`. With the panel guarded
+  #       off there are no reviewer artifacts, so the fixer counts zero blockers and does
+  #       nothing but the merge; the merged SHA becomes mergeable, earns a `pull_request`
+  #       event, gets validated, and is reviewed by its own cycle like any other D28 sync.
+  #
+  #       Path (b) deliberately does NOT require `fix_allowed`. `fix_allowed` bars a
+  #       blocker-fix on the last cycle because that fix would go unreviewed — but a sync
+  #       addresses no blockers, and its pushed SHA is reviewed once it is mergeable, so
+  #       the reason does not apply. It also writes no `review/cycle` (that is
+  #       `record-cycle`'s job, and it was skipped), so a sync-only cycle costs nothing on
+  #       the counter, exactly as a run that reviewed nothing should. `cap_exhausted` is
+  #       still honoured on both paths: a genuinely exhausted PR takes the terminal
+  #       cap-exhausted finalize and waits for a human, rather than being kept alive by an
+  #       endless resync.
   fix:
     name: Fix
     needs: [gather, review-invariant, review-docs, review-security, review-test, record-cycle]
     if: |
       always() &&
       needs.gather.result == 'success' &&
-      needs.record-cycle.result == 'success' &&
       needs.gather.outputs.cap_exhausted != 'true' &&
       needs.gather.outputs.inherit != 'true' &&
-      needs.gather.outputs.fix_allowed == 'true'
+      (
+        (needs.record-cycle.result == 'success' &&
+         needs.gather.outputs.fix_allowed == 'true') ||
+        (needs.record-cycle.result == 'skipped' &&
+         needs.gather.outputs.needs_sync == 'true')
+      )
     uses: ./.github/workflows/review-fixer.yml
     with:
       pr_number: ${{ inputs.pr_number }}

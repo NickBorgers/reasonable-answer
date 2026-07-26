@@ -832,6 +832,76 @@ the run page already showed, but it now leaves the host. A `purge --content-only
 `final.md`, so exporting is the thing that outlives retention; the CLI says so rather than
 reporting a corrupt run.
 
+## D31 — a conflicted PR can be synced back to mergeable even with the review panel guarded off
+
+**The problem.** The base-branch sync D28 built to keep agent-authored PRs mergeable was
+unreachable in exactly the case it exists for. GitHub cannot compute a merge ref for a PR that
+conflicts with its base, so it fires no `pull_request` event. No event means `pr-validation.yml`
+never runs, which means the `PR Validation Required` check never appears on the reviewed SHA. Every
+reviewer's guard requires that check to have completed successfully before it will spend agent time,
+so with it absent every guard refuses. The panel is skipped, `record-cycle` writes nothing, and
+`fix` — the one stage that could resync and clear the conflict — was gated on `record-cycle`
+succeeding, so it never ran. The deadlock is self-sustaining:
+
+```
+conflicted PR → no merge ref → no pull_request event → no PR Validation
+  → every reviewer guard refuses → no reviewers → record-cycle skipped → no fixer
+  → the conflict is never resolved
+```
+
+`/review` reaches the graph through `issue_comment`, which fires regardless of merge state, but with
+the panel guarded off the run did nothing but re-publish a fail-closed NO-GO. PRs #54 and #56 both
+sat in this state and had to be unstuck by a human merging `main` in by hand.
+
+**Rejected: fixing it at PR Validation.** #67 added a `push` trigger to `pr-validation.yml` — a push
+needs no merge ref. But `pr-validation.yml`'s concurrency group keys on `head.ref`/`head.sha` with
+`cancel-in-progress: true`, so a push and its paired `pull_request` event land in the same group and
+one *cancels* the other. Both publish a check named `PR Validation Required`, and a cancelled
+required check is not a success, so the PR could show that required check as failed when nothing had
+failed. It was reverted in #68. The other options weighed in #68 — separate concurrency groups
+(doubles CI on every push), a second check name the guard also accepts (widens what "validated"
+means), or relaxing the guard to proceed when validation is *absent* (loosens the gate that keeps
+reviewers off unvalidated code) — each pay a cost on the healthy path to fix the stuck one.
+
+**The decision.** Fix it at the fixer's gate instead, which is where the maintainer's analysis in
+#68 landed: *let the fix job run without the guard's PR-Validation precondition when the only work is
+a base-branch sync — a sync consumes no reviewer findings, so the precondition buys nothing there.*
+`gather` now computes `needs_sync` (is the reviewed SHA behind `origin/<base>`, by the same
+`merge-base --is-ancestor` test the fixer's sync uses), and `fix` has a second, disjoint way in:
+
+- **normal path** — `record-cycle` succeeded (a reviewer ran) *and* `fix_allowed`. Blockers plus, if
+  the base moved, a sync in the same commit. Unchanged.
+- **sync-only path** — `record-cycle` was *skipped* (every guard refused) *and* `needs_sync`. With
+  the panel off there are no reviewer artifacts, so the fixer counts zero blockers and does nothing
+  but the merge. The merged SHA is mergeable, so it earns a `pull_request` event, gets validated, and
+  is reviewed by its own cycle — exactly as every other D28 sync is.
+
+**Why the sync-only path drops `fix_allowed` but keeps `cap_exhausted`.** `fix_allowed` bars a
+blocker-fix on the last permitted cycle because that fix would never be reviewed (its cycle is
+capped). A sync addresses no blockers, and its pushed SHA *is* reviewed the moment it is mergeable,
+so the reason does not apply — and the stuck PRs (#54, #56) were at a cycle where `fix_allowed` was
+already false, so honouring it would have left the deadlock intact. `cap_exhausted` is still honoured
+on both paths: a genuinely exhausted PR takes the terminal cap-exhausted NO-GO and waits for a human,
+rather than being kept alive indefinitely by resyncs.
+
+**Why this does not weaken the loop bound.** `MAX_CYCLES` bounds the *agent fix loop*
+(review → fix → push → review). The sync-only path writes no `review/cycle` (that is `record-cycle`'s
+job, and it was skipped), so it consumes no cycle — consistent with "a run that reviewed nothing does
+not consume a cycle". It cannot advance the fix loop because it addresses no blockers, and it cannot
+run away: once merged, the SHA contains the base, `needs_sync` reads false, and no further sync
+fires until the base moves again — one sync per base movement, which is external and legitimate. The
+"a fixer-authored commit is never inherited" rule (D28, corrected on #49) still holds, so the merged
+SHA earns its own panel rather than re-stamping a stale verdict.
+
+**Invariants.** None of the pipeline safety invariants are in reach. No blocker-fixing code lands
+unreviewed: the sync-only path pushes a merge and nothing else, and that merge is read by the next
+cycle's reviewers like any D28 sync. Author-exclusion, the blind orchestrator, fail-closed lenses,
+severity floors, controller termination, and the untrusted-text boundary are all in the Python
+review core and the convergence controller, none of which this touches — this is CI gating in
+`review-pipeline.yml`. The judge still fails closed on the sync-only cycle's empty reviewer set
+(pre-existing behaviour when guards refuse), publishing a NO-GO on the pre-sync SHA that the mergeable
+successor supersedes.
+
 ## Open items for a future round
 
 - Whether `misrepresented_source` can be meaningfully checked without fetching the source

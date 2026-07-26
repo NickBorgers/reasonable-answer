@@ -39,7 +39,9 @@ review-entry            authorize · fork-reject · resolve SHA · prior-GO chec
        ├─ test          Claude    ─┘
        ├─ record-cycle  writes review/cycle — only if a reviewer actually ran
        ├─ fix           the ONLY branch-writing stage; syncs with the base branch and
-       │                addresses blockers; skipped on the last cycle
+       │                addresses blockers; skipped on the last cycle, but still runs a
+       │                sync-only pass when the panel was guarded off and the branch is
+       │                behind the base (breaks the conflicted-PR deadlock, D31)
        ├─ judge         deterministic, from main, contents: read
        └─ finalize      labels · summary comment · merge gate
 ```
@@ -164,10 +166,12 @@ it holds `contents: read`, so it could not push if it tried.
   `record-cycle`, after the panel has read the code, and only when at least one reviewer's
   guard cleared. Every guard refusing — PR Validation red on the reviewed SHA, the branch
   moved on mid-run, an untrusted author — means no code was read, and the next push starts
-  from the same cycle number. This is fail-open on the counter and safe because `fix`
-  needs `record-cycle`: the only stage that can push cannot run on an unrecorded cycle, so
-  the review → fix → push → review loop the cap bounds cannot advance without being
-  counted. PR #49 is the case that forced this: its first run recorded cycle 1 while all
+  from the same cycle number. This is fail-open on the counter and safe because the only
+  way `fix` can push on an unrecorded cycle is the **sync-only** path (D31), which
+  addresses no blockers and writes no `review/cycle` of its own: it merges the base in and
+  nothing else, so it cannot advance the review → fix → push → review loop the cap bounds.
+  Every *blocker-fixing* run still needs `record-cycle` to have succeeded. PR #49 is the
+  case that forced the deferred write: its first run recorded cycle 1 while all
   four guards refused, and the push that repaired validation arrived as cycle 2, where
   `fix_allowed` is already false — spending the PR's one automated fix attempt on a run
   that read nothing.
@@ -239,6 +243,22 @@ The resulting merge commit lands on the merge-from-base inherit path like any ot
 does not burn a cycle. The conflicted-path list travels in a file rather than an
 environment variable: paths are contributor-controlled, and the agent's environment is
 assembled from an `--env-file`, where a newline in a path would inject arbitrary variables.
+
+**The sync runs even when the panel was guarded off (D31).** A PR that *conflicts* with the
+base has no computable merge ref, so GitHub fires no `pull_request` event, so PR Validation
+never runs, so every reviewer guard refuses on the missing `PR Validation Required` check.
+The panel is then skipped, `record-cycle` writes nothing, and the fixer — the one stage that
+could resync and clear the conflict — never runs. The feature D28 built to keep PRs
+mergeable was unreachable in exactly the case it was built for. So `fix` has a second way in:
+when `record-cycle` was skipped (every guard refused) *and* `gather` reports the reviewed SHA
+is behind the base, the fixer runs a **sync-only** pass. With the panel off there are no
+reviewer artifacts, so it counts zero blockers and does nothing but the merge; the merged SHA
+is mergeable, earns its `pull_request` event, gets validated, and is reviewed by its own cycle
+like any other sync. This path does not require `fix_allowed`: `fix_allowed` bars a
+blocker-fix on the last cycle because that fix would go unreviewed, but a sync addresses no
+blockers and its pushed SHA *is* reviewed once mergeable. It still honours `cap_exhausted`, so
+a genuinely exhausted PR reaches the terminal cap-exhausted verdict and waits for a human
+rather than being kept alive by an endless resync.
 
 It runs in one of two modes.
 
