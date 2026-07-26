@@ -462,21 +462,22 @@ forward.
 **The problem.** The pipeline already knows questions arrive loaded: `unexamined_presupposition`
 (D24, completeness lens, major floor) exists precisely to catch a writer who accepts a contested
 framing as settled. But that machinery fires only after a run is already underway, and the
-production run history shows what waiting until then costs. `run-75eb136b9bfb` ("Does Talarico
-back the police or support defunding them?") forced the report to spend its conclusion rejecting
-a false either/or; 7 rounds, terminated `needs_human_review`. `run-40de6a7cdbf9` ("Why is it
-illegal to move an opossum in tx?") let an unverified premise stand without a statute citation
-while the user's real, buried question — lawful removal options — went unaddressed; 8 rounds,
-`exhausted_unresolved` with the missing citation still blocking. `run-3e184fb11a36` and
-`run-5af587189b89` both posed a "net positive/negative" scalar verdict over an unscoped
-population, outcome set, and timeframe — unanswerable as asked. `run-85c88f8c6ba4` ("Is it better
-to be honest or nice?") posed a value question as an either/or with nothing for the evidence
-machinery to converge on; `exhausted_unresolved`. `run-4d350e1d27a8` asked a settled verification
-question ("Did Donald Trump win the 2020 presidential election?") when the report's real energy
-went to the adjacent, more interesting question of why the belief persists. In every case the
-category was already nameable — `unexamined_presupposition` (D24) would tag some of these on
-sight — but the finding lands 10–25 minutes and several critique rounds after the one party who
-could cheaply reframe the question, the asker, has already walked away from the keyboard. The
+production run history shows what waiting until then costs. Six runs motivated this decision, and
+they fall into four shapes. Two posed a **false either/or** — a political "does X back A or
+support B?" and a values question of the "is it better to be honest or nice?" kind — and both
+spent their conclusions rejecting the frame rather than answering: 7 rounds to
+`needs_human_review`, and `exhausted_unresolved`. One carried an **unverified premise** ("why is
+it illegal to do X in Y?") and let it stand uncited while the asker's real, buried question — the
+lawful alternative — went unaddressed; 8 rounds, `exhausted_unresolved`. Two asked for a **"net
+positive or negative?" scalar verdict** over an unscoped population, outcome set, and timeframe,
+which is unanswerable as asked. One asked a **settled verification question** when the report's
+real energy went to the adjacent and more interesting question of why the belief persists.
+
+The questions themselves are paraphrased here rather than quoted, and the run IDs left out: they
+are a private operator's own queries, and this repository is public. In every case the category
+was already nameable — `unexamined_presupposition` (D24) would tag some of these on sight — but
+the finding lands 10–25 minutes and several critique rounds after the one party who could cheaply
+reframe the question, the asker, has already walked away from the keyboard. The
 fix that costs nothing is upstream: catch the same framing before the run starts, while the asker
 is still there to accept, ignore, or edit it.
 
@@ -603,7 +604,8 @@ the presence of a nonce or a hash. The whole policy is now pinned by an exact-ma
 widening it further fails a test rather than passing quietly.
 
 **A service worker is the first persistent client-side execution surface this project ships** —
-code that keeps running after the tab closes, on an interface with no authentication. Three
+code that keeps running after the tab closes, on an interface whose only authentication is a
+trusted header (D31). Three
 properties bound it:
 
 1. **Its cache is an inclusion allowlist, not an exclusion list.** It precaches the icons, the
@@ -716,7 +718,10 @@ build, which is what lets the whole existing web test suite stand unchanged and 
 exactly the places a browser resolves against the origin: the server-rendered links and
 form actions, the `303` `Location` after a submit or resume, the manifest's `id`,
 `start_url`, `scope` and icon `src`s, the worker's precache list, its `OFFLINE` fallback and
-its registration scope, and the `Service-Worker-Allowed` header.
+its registration scope, the `Service-Worker-Allowed` header, and — when refinement is
+enabled (D26) — the `fetch()` the inline refinement script issues to `/refine`. That last
+one is a browser-origin URL like the rest and carries the prefix for the same reason; it was
+missed when D26 and D29 landed in separate PRs and is corrected in PR #66.
 
 **A stripping proxy, so the routes do not move.** The proxy removes `/app/` before the
 request arrives, so the app still serves at `/runs`, `/sw.js`, `/manifest.webmanifest`. The
@@ -756,6 +761,79 @@ web layer, which is a window onto the audit trail and touches no model context, 
 does touch is D27's, and it is generalized, not relaxed: "served from the root so its scope
 is the whole origin" becomes "served from the mount point so its scope is the app," with the
 root case as `base = ''`.
+
+## D30 — a report leaves the system with its verdict attached, or it does not leave
+
+**The problem.** There was no export. `final.md` and `GET /runs/<id>/report.md` served the report
+alone, and the deployment posture (tailnet-only, and — until D31 — unauthenticated) means
+sharing a result is
+handing over a *file* — the recipient has no run page, no badge, no event log. As prose, an
+`accepted` report and a `needs_human_review` report shipped with blocking defects outstanding are
+indistinguishable. An export that carried only the text would make the system's one distinction
+invisible at exactly the moment it travels furthest, and would do it in the format most likely to
+be forwarded on.
+
+**The decision.** Every export is *report + review record*, and the review record is mechanically
+derived from `final.json` — terminal status and what it means, the sourcing label, round count and
+which round shipped, run id and artifact hash, the reviewers whose clean records key to **that**
+hash, outstanding defects, warnings. Three surfaces, one renderer (`export.py`):
+
+| surface | what it is for |
+|---|---|
+| `GET /runs/<id>/export.md`, `ra export <id>` | paste into a document or a message; the copy button on the report page copies the same text |
+| `GET /runs/<id>/export.html`, `ra export <id> -f html` | one self-contained file for someone who cannot reach the tailnet |
+| the print stylesheet | `Save as PDF` from a browser, which is where a shared report usually ends up |
+
+`report.md` is unchanged and stays the raw shipped artifact, so anything that hashes or diffs a
+report is unaffected by the record being added elsewhere.
+
+**Why these three and not a share link.** A hosted link is the obvious answer and the wrong one
+here: it needs public exposure and an account for the recipient, which is well past the trusted-header
+identity D31 gives a handful of invited people, and past the posture D22 and the README take on.
+Files need neither. PDF is generated by the browser rather
+than by a server-side engine — the alternative costs a large dependency to reproduce a rendering
+path every reader already has, and the print stylesheet is the same stylesheet as the screen, so
+the printed page cannot drift from the page it was printed from.
+
+**Why the reviewer list is filtered by artifact hash.** A `CleanRecord` attests to one artifact
+(RC-001/RC-002). Earlier drafts collect their own, and listing those in an export would credit a
+critic with clearing text it never read — an overstatement of review coverage in the one artifact
+that outlives the run directory. With **no** hash to key against, nobody is credited at all:
+crediting everyone would be that same overstatement, arriving exactly when the record is least
+trustworthy.
+
+**Three states, not two: absent, unreadable, known.** A missing `final.json` means the controller
+never reached a verdict. An *unreadable* one means a verdict may exist and cannot be recovered —
+a different fact, and reading it as the first would make an export state `aborted`, a terminal
+status no rule produced (the failure D12/RA-012 keeps `abandoned` out of `final.json` for). So
+`store.load_final` raises `CorruptRun` rather than returning `None`, `Registry.final_strict` asks
+that question where `Registry.final` stays lenient for the pages that already depend on it, and
+the export routes **refuse** with 409 rather than shipping a file whose verdict line is invented.
+The report page renders instead of refusing — but it is what gets printed to PDF, so it shows the
+verdict as `unreadable record` and claims no defects.
+
+**What is not sanitised, and why that is a documented limit rather than a bug.** Defect
+descriptions, warnings, the reviewer identities and the sourcing label are model-authored or
+proxy-derived and reach the export with newline flattening only — enough that none of them can
+*start a markdown block* and forge a second review record, not enough to stop inline emphasis or a
+link rendering inside the record with the record's apparent authority. Full per-field escaping
+would not close that gap: the report body is deliberately rendered as markdown, so a writer can
+already put a convincing fake record in the body itself. The defence against a forged record is
+not escaping — it is the artifact hash and run id, which tie a document back to a run directory
+holding the real one.
+
+**Consequences and residue.** The copy control puts raw markdown in an off-screen `<textarea>`
+rather than a JS string, because report text is model-written and `execCommand('copy')` — the only
+clipboard path available on plain http, which is not a secure context — must select a rendered
+element. The exported HTML fetches nothing (no font, no stylesheet, no image), which preserves the
+property `web/markdown.py` disables images for: opening a report never emits a request on the
+reader's behalf, and an exported file travels to people who have no idea what it is. `export.py`
+imports nothing from `web/` at module scope so `ra export -f md` works on a core install; the HTML
+path borrows the renderer and stylesheet at call time and is the only part needing the `web` extra.
+Defect *prose* in the record is critic-authored and carries no provenance — unchanged from what
+the run page already showed, but it now leaves the host. A `purge --content-only` removes
+`final.md`, so exporting is the thing that outlives retention; the CLI says so rather than
+reporting a corrupt run.
 
 ## D31 — the interface has users: a trusted identity header, and runs that belong to someone
 

@@ -57,6 +57,7 @@ uv run ra doctor
 uv run ra audition
 uv run ra purge <run_id> [--content-only]
 uv run ra expired
+uv run ra export <run_id> [--format md|html] [-o out.html]
 ```
 
 ## Web interface
@@ -114,6 +115,30 @@ The icons are placeholders. To use your own, replace the PNGs in
 — no Python to touch, and nothing to clear on already-installed devices. See
 [the README in that directory](src/reasonable_answer/web/static/icons/README.md) for what each
 file has to be, and `scripts/make-icons.py` if you want to regenerate the placeholders.
+
+## Sharing a result
+
+Reaching the interface means being on the tailnet or through Access, so sharing a result with
+anyone else means handing over a **file**, not a link. Every export carries
+the report *and* its review record — status, sourcing label, which round shipped, the reviewers
+whose clean records key to that exact artifact, and any outstanding defects. As prose, an
+`accepted` report and a `needs_human_review` one look identical; that difference is the whole
+product, so it travels with the text (D30).
+
+| from the report page | what you get |
+|---|---|
+| **Copy markdown** | report + record on the clipboard, for a message or a doc |
+| **Download .md** | the same thing as a file |
+| **Download .html** | one self-contained page — no font, script, stylesheet or image is fetched when it is opened |
+| **Print → Save as PDF** | the same page with a print stylesheet: no nav, no buttons, serif body, forced light colours, the record as a final page |
+
+PDF is the browser's own print path rather than a server-side renderer — no extra dependency, and
+the printed page cannot drift from the page you printed it from, because it is one stylesheet.
+Dark mode is explicitly reset for print, so a phone in dark mode does not produce black pages.
+
+`report.md` is untouched and remains the raw shipped artifact, for anything that hashes or diffs
+a report. Note that `purge --content-only` deletes `final.md`, so an export is what outlives the
+retention sweep.
 
 ## Docker
 
@@ -281,6 +306,10 @@ signals/decisions.jsonl  which rule fired, per round
 `reports/` and `critiques/` hold the sensitive material; `ra purge <id> --content-only` drops them
 and keeps the decision record — and `owner.txt`, so a purged run stays in its owner's index.
 
+`final.md` is the report on its own, which says nothing about how it ended. `ra export <run_id>`
+joins it to `final.json` and writes the document you would actually give someone — see
+[Sharing a result](#sharing-a-result).
+
 ## Speed is an anti-goal
 
 The intended deployment is a slow local model. A run is many sequential model calls by design —
@@ -303,6 +332,7 @@ src/reasonable_answer/
   controller.py  the 14-rule ordered stop decision — pure, deterministic, total
   graph.py       the LangGraph loop
   store.py       audit trail and retention
+  export.py      report + review record, for markdown, self-contained HTML and print
 ```
 
 The test suite is offline: a scriptable fake proxy drives the whole graph, so the loop's safety

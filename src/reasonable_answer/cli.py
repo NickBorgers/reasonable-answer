@@ -14,15 +14,20 @@ from . import audition as audition_mod
 from . import ingest, search, shutdown
 from .audition import Assignment as Assignment_t
 from .config import Config, ConfigError, validate_roster_health
+from .export import export_html, export_markdown
 from .graph import GracefulStop
 from .graph import run as run_graph
 from .llm import LLMClient
-from .store import expired_runs
+from .store import CorruptRun, UnsafeRunId, expired_runs, read_run
 from .store import purge as purge_run
 from .taxonomy import Lens
 
 app = typer.Typer(add_completion=False, help="reasonable-answer — isolation-pipeline report refiner")
 console = Console()
+
+#: Top-level modules that only the `web` extra installs. An ImportError naming one of
+#: these means "not installed"; anything else means the web layer itself is broken.
+_WEB_EXTRA_MODULES = {"fastapi", "markdown_it", "uvicorn", "multipart", "starlette"}
 
 
 def _setup_logging(verbose: bool) -> None:
@@ -232,6 +237,65 @@ def purge(
     removed = purge_run(config.runs_dir, run_id, content_only=content_only)
     for path in removed:
         console.print(f"removed {path}")
+
+
+@app.command()
+def export(
+    run_id: str = typer.Argument(..., help="Run id to export."),
+    fmt: str = typer.Option("md", "--format", "-f", help="md or html."),
+    out: Path | None = typer.Option(None, "--out", "-o", help="Write here instead of stdout."),
+    config_path: Path | None = typer.Option(None, "--config", "-c"),
+) -> None:
+    """Write a finished run as a shareable document: the report plus its review record.
+
+    `runs/<id>/final.md` is the report on its own, which says nothing about whether it
+    was accepted or shipped with blocking defects outstanding. This adds that.
+    """
+    if fmt not in ("md", "html"):
+        console.print(f"[red]unknown format:[/red] {fmt} (expected md or html)")
+        raise typer.Exit(code=2)
+
+    config = Config.load(config_path)
+    try:
+        question, report, final = read_run(config.runs_dir, run_id)
+    except UnsafeRunId:
+        # A run id is a path component. Rejecting it is a usage error, not a lookup
+        # that came back empty, so it does not share the "no such run" exit code.
+        console.print(f"[red]invalid run id:[/red] {run_id}")
+        raise typer.Exit(code=2) from None
+    except FileNotFoundError:
+        console.print(f"[red]no such run:[/red] {run_id}")
+        raise typer.Exit(code=1) from None
+    except CorruptRun as exc:
+        # Refusing beats exporting: with an unreadable final.json the status is
+        # unknown, and every export is required to state one.
+        console.print(f"[red]cannot describe this run:[/red] {exc}")
+        raise typer.Exit(code=1) from None
+
+    if report is None:
+        # `purge --content-only` removes final.md and keeps the decision record, so
+        # this is a normal state for an old run, not a corrupt one.
+        console.print(f"[red]no report stored for[/red] {run_id} (never finished, or purged)")
+        raise typer.Exit(code=1)
+
+    render = export_html if fmt == "html" else export_markdown
+    try:
+        document = render(question, report, final, run_id)
+    except ImportError as exc:
+        # Only a *missing optional dependency* is reported as one. An ImportError from
+        # inside the web layer itself is a defect, and hiding it behind installation
+        # advice would send someone to reinstall a package they already have.
+        if exc.name not in _WEB_EXTRA_MODULES:
+            raise
+        console.print(f"[red]html export needs the web extra[/red] ({exc}): uv sync --extra web")
+        raise typer.Exit(code=2) from None
+
+    if out is None:
+        # Not `console.print`: rich would interpret the report's own brackets as markup.
+        typer.echo(document)
+        return
+    out.write_text(document)
+    console.print(f"wrote {out}")
 
 
 @app.command()
