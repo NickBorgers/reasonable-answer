@@ -12,7 +12,7 @@ than reproducing that archaeology.
 
 | workflow | trigger | runner | what it does |
 |---|---|---|---|
-| `pr-validation.yml` | every PR | `ubuntu-latest` | ruff, offline pytest on 3.11 + 3.12, lockfile check, actionlint, judge unit tests, docker build + smoke test |
+| `pr-validation.yml` | every PR | `ubuntu-latest` | ruff, offline pytest on 3.11 + 3.12, lockfile check, actionlint, judge unit tests, decision-number collision check, docker build + smoke test |
 | `docker-release.yml` | push to `main`, `v*` tags | `ubuntu-latest` | multi-arch build and push to GHCR, then pull back **by digest** and smoke test |
 | `ci-image.yml` | changes to `.github/ci/**`, manual | `ubuntu-latest` | builds the agent image and verifies every tool inside it runs |
 | `resolve-issue.yml` | issue opened/reopened/unlabeled, `/autoresolve` comment | `[self-hosted, homelab]` | an agent implements the issue and opens a PR |
@@ -27,6 +27,19 @@ GitHub-hosted runners with read-only permissions and no secrets: nothing in that
 
 Preserving that property is a reviewer's explicit job. A test that needs the real proxy
 must carry the `live` marker, and CI always passes `-m "not live"`.
+
+## Decision numbers are checked at the gate, not allocated at merge
+
+Each `## D<n>` section in [decisions.md](./decisions.md) is allocated by whoever writes the
+PR, and the number is echoed across `config/`, `src/`, `tests/` and docs — so a collision
+costs a repo-wide rename. Two PRs open at once each pick the same next-free number against
+main and collide when both merge (D31, issue #71). `scripts/validate-decision-numbers.sh`
+refuses a `decisions.md` in which any number is defined twice; on a `pull_request` event the
+checked-out file is the merge result, so a duplicate there is a collision that would
+otherwise land on main. It is pure and offline — one file, no git, no network — so it fits
+the secret-free gate and is unit-tested by `tests/test_decision_numbers.py`. The `tests`
+job skips docs-only PRs, so the collision check runs as its own path-filtered job to cover
+a PR that touches nothing but `decisions.md`.
 
 ## The review graph
 
