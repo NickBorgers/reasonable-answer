@@ -114,13 +114,19 @@ it holds `contents: read`, so it could not push if it tried.
   short-circuit is `pull_request`-only, so a comment trigger re-reviews a SHA that already
   cleared. It still goes through the SHA-keyed dedup claim like every other trigger, so it
   cannot start while a pending `review/pipeline` claim is held on that SHA. It does *not*
-  reset the counter: the run it starts is the next cycle, so on a PR already at the cap it produces a
-  `cycle_capped` NO-GO with no reviewers. Rebasing the branch is what resets the counter —
-  `review/cycle` lives on the commits, and a rebase leaves those SHAs out of the chain
-  `read-cycle` walks.
-- **A human commit on top of a GO resets the counter** — that is a new conversation, and
-  it should get a full review budget. Machine commits are identified by the author email
-  `ci@reasonable-answer.local`.
+  reset the counter: the run it starts is the next cycle on the same SHA, so re-running a
+  capped PR still produces `cycle_capped`. Pushing a commit is what resets it (next bullet).
+- **A human commit resets the counter to 1.** `MAX_CYCLES` bounds the *agent* loop —
+  review → fix → push → review — so only agent-authored commits are billed against it.
+  A human push means someone read the blockers and answered them: that is a new
+  conversation and it gets a full budget, including its own fixer attempt. Machine commits
+  are identified by the author email `ci@reasonable-answer.local` and never reset.
+  This does not weaken the bound: the fixer authors as that email, so the automated loop
+  cannot refresh its own budget, and a human has to intervene for the counter to move
+  back — that intervention *is* the bound. It used to reset only on top of a GO, which
+  billed humans for exactly the iteration the blockers had asked them to do; PR #49 walked
+  to `cycle_capped` in three human pushes, one of which was repairing the CI failure that
+  started the burn, and force-pushing was the only way out.
 - **A merge of the base branch into the PR inherits the previous verdict** instead of
   burning a cycle. Without this, routinely resyncing a long-lived branch can push a PR
   into the cap without a single substantive change.
@@ -248,10 +254,16 @@ In order, and all of them fail closed:
    nobody reviewed.
 3. `mode` matches what the workflow determined, so a cold fixer cannot self-report as a
    resumed author to unlock `body_clarification`.
-4. `ruff` passes on the whole tree. Tests are deliberately **not** run here: that would
-   mean installing the PR's own `pyproject.toml`, executing PR-authored build config in the
-   one job holding a write-capable PAT. Tests belong to PR Validation, which runs on a
-   runner with no secrets.
+4. `ruff` passes on the whole tree, at the version pinned in **main's** `uv.lock` — the
+   same version PR Validation enforces, and not one a PR can choose for its own gate. An
+   inline pin here drifted to six minor versions behind (0.9.7 against the lockfile's
+   0.15.22) before anyone noticed. Installing the linter and running it are separate steps
+   so a registry or egress failure cannot report itself as "the tree does not lint" and
+   spend the PR's one fix attempt on a network error. Tests are deliberately **not** run
+   here: that would mean installing the PR's own `pyproject.toml`, executing PR-authored
+   build config in the one job holding a write-capable PAT. Tests belong to PR Validation,
+   which runs on a runner with no secrets. Reading a version string out of a lockfile
+   executes nothing.
 5. The remote branch head still equals the reviewed SHA. If a human pushed meanwhile, the
    fix is discarded rather than racing them.
 

@@ -577,17 +577,46 @@ jobs:
       - name: Refuse to push a tree that does not lint
         if: steps.blockers.outputs.count != '0'
         working-directory: ${{ env.PR_WORKSPACE }}
+        env:
+          # main's lockfile, not the PR's. A PR must not choose — or quietly downgrade —
+          # the linter that gates its own fix. The one-PR window this opens (a PR whose
+          # whole point is bumping ruff is linted by the outgoing version) is the correct
+          # direction to be wrong in.
+          MAIN_LOCK: ${{ github.workspace }}/uv.lock
         run: |
           set -euo pipefail
           # PR Validation runs ruff as a required check. Pushing a commit that fails it
           # burns the next cycle on a failure this stage created.
           #
+          # The version is read from the lockfile rather than pinned inline, because an
+          # inline pin silently drifts: this step ran ruff 0.9.7 while PR Validation
+          # resolved the lockfile's 0.15.22 — six minor versions apart, two different
+          # linters answering the same question, and this one holding the push decision.
+          #
           # The test suite is deliberately NOT run here. Doing so means installing the
           # PR's own pyproject.toml, which executes PR-authored build configuration in
           # the one job that holds a write-capable PAT. Tests run in PR Validation, on a
-          # runner with no secrets — the correct place to execute untrusted code.
-          uvx ruff@0.9.7 check src/ tests/ || {
-            echo "::error::ruff failed on the fixed tree; refusing to push."
+          # runner with no secrets — the correct place to execute untrusted code. Reading
+          # a version string out of main's lockfile executes nothing.
+          RUFF_VERSION=$(grep -A1 '^name = "ruff"$' "$MAIN_LOCK" \
+            | sed -n 's/^version = "\(.*\)"$/\1/p' | head -1)
+          if [ -z "$RUFF_VERSION" ]; then
+            echo "::error::could not read the pinned ruff version from main's uv.lock; refusing to push."
+            exit 1
+          fi
+
+          # Installing and linting are separated on purpose. `uvx ruff@X check ...` folds a
+          # PyPI fetch into the lint result, so a registry hiccup or an egress blip on this
+          # self-hosted runner reported as "the tree does not lint" — and spent the PR's
+          # single fix attempt on a network error. These two failures need different words
+          # because they need different responses: retry vs. read the diff.
+          if ! uvx "ruff@${RUFF_VERSION}" --version >/dev/null 2>&1; then
+            echo "::error::could not install ruff ${RUFF_VERSION} — infrastructure failure, not a lint failure. The fix was NOT pushed; re-run this job."
+            exit 1
+          fi
+
+          uvx "ruff@${RUFF_VERSION}" check src/ tests/ || {
+            echo "::error::ruff ${RUFF_VERSION} failed on the fixed tree; refusing to push."
             exit 1
           }
 
