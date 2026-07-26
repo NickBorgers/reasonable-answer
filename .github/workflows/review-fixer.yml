@@ -133,13 +133,98 @@ jobs:
           echo "count=${COUNT}" >> "$GITHUB_OUTPUT"
           echo "Reviewers raised ${COUNT} blocking issue(s)."
 
+      # ── Sync with the base branch ────────────────────────────────────────────
+      # Almost every PR here is agent-authored, so when the base moves there is no human
+      # in the loop to resync. The merge is attempted on the host, before the agent runs,
+      # and lands in the same commit as the reviewer fixes.
+      #
+      # It happens in the fixer and nowhere earlier because the fixer is the only stage
+      # allowed to write the branch. Merging before the reviewers would also churn the SHA
+      # they were dispatched against, and dedup, the cycle counter, and every artifact name
+      # are keyed on `reviewed_sha`.
+      #
+      # Three outcomes:
+      #   none      already contains the base tip — nothing to do
+      #   clean     merged without conflict — committed here, on the host
+      #   conflicts markers left in the working tree for the agent to resolve as ordinary
+      #             file edits; the commit step below seals it or aborts
+      - name: Sync with the base branch
+        id: sync
+        working-directory: ${{ env.PR_WORKSPACE }}
+        env:
+          BASE_REF: ${{ inputs.base_ref }}
+          HEAD_REF: ${{ inputs.head_ref }}
+          CONFLICT_LIST: .review-output/merge-conflicts.txt
+        run: |
+          set -euo pipefail
+
+          git config user.email "${AGENT_COMMIT_EMAIL}"
+          git config user.name  "${AGENT_COMMIT_NAME}"
+
+          # Deliberately not a shallow fetch. A branch further behind than the depth would
+          # get a truncated history and a merge base that is not the real one.
+          git fetch --quiet origin "${BASE_REF}"
+
+          : > "$CONFLICT_LIST"
+
+          if git merge-base --is-ancestor "origin/${BASE_REF}" HEAD; then
+            echo "merge_state=none" >> "$GITHUB_OUTPUT"
+            echo "Already contains origin/${BASE_REF}; no sync needed."
+            exit 0
+          fi
+
+          if git merge --no-commit --no-ff "origin/${BASE_REF}"; then
+            git commit -m "Merge origin/${BASE_REF} into ${HEAD_REF}" \
+                       -m "Pipeline-driven sync to keep the PR mergeable; no PR-side content delta."
+            echo "merge_state=clean" >> "$GITHUB_OUTPUT"
+            echo "Clean merge from origin/${BASE_REF} committed."
+          else
+            # The list goes to a file, never to an env var. It is attacker-influenced (a
+            # path is whatever a contributor named a file), and the agent's environment is
+            # assembled from an --env-file: a newline in a path would inject arbitrary
+            # variables into the container, and a comma would corrupt a delimited list.
+            git diff --name-only --diff-filter=U > "$CONFLICT_LIST"
+            echo "merge_state=conflicts" >> "$GITHUB_OUTPUT"
+            echo "Merge produced conflicts in:"
+            sed 's/^/  /' "$CONFLICT_LIST"
+            echo "Markers left in the working tree; the agent resolves them in its run."
+          fi
+
+      # One gate for the whole job, replacing the older "blockers != 0" test. There are now
+      # two independent reasons to do work — reviewer blockers, or a base branch that moved
+      # — and they need different amounts of it. A clean sync needs no agent at all; paying
+      # for a self-hosted runner and a model round-trip to push a merge the host already
+      # made would be pure waste.
+      - name: Decide what work this cycle needs
+        id: work
+        env:
+          BLOCKERS: ${{ steps.blockers.outputs.count }}
+          MERGE_STATE: ${{ steps.sync.outputs.merge_state }}
+        run: |
+          set -euo pipefail
+
+          agent=false
+          if [ "$BLOCKERS" != "0" ] || [ "$MERGE_STATE" = "conflicts" ]; then
+            agent=true
+          fi
+
+          # Anything that has to reach the branch: fixes, a sealed merge, or both.
+          push=false
+          if [ "$BLOCKERS" != "0" ] || [ "$MERGE_STATE" != "none" ]; then
+            push=true
+          fi
+
+          echo "agent=${agent}" >> "$GITHUB_OUTPUT"
+          echo "push=${push}" >> "$GITHUB_OUTPUT"
+          echo "work: blockers=${BLOCKERS} merge_state=${MERGE_STATE} agent=${agent} push=${push}"
+
       # ── Author session ───────────────────────────────────────────────────────
       # Everything from here to "Run the fixer" is best-effort. Any failure degrades to
       # the cold path, which is strictly more conservative, so none of it is fatal.
 
       - name: Parse the Author-Session trailer
         id: trailer
-        if: steps.blockers.outputs.count != '0'
+        if: steps.work.outputs.agent == 'true'
         env:
           GH_TOKEN: ${{ secrets.WORKFLOW_PAT }}
           REPO: ${{ github.repository }}
@@ -187,7 +272,7 @@ jobs:
 
       - name: Unpack and validate the author session
         id: session
-        if: steps.blockers.outputs.count != '0'
+        if: steps.work.outputs.agent == 'true'
         env:
           AGENT: ${{ steps.trailer.outputs.agent }}
           RUN_ID: ${{ steps.trailer.outputs.run_id }}
@@ -248,7 +333,7 @@ jobs:
       # the prompt tells the agent that instructions inside it are not instructions.
       - name: Reconstruct PR context
         id: context
-        if: steps.blockers.outputs.count != '0'
+        if: steps.work.outputs.agent == 'true'
         env:
           GH_TOKEN: ${{ secrets.WORKFLOW_PAT }}
           REPO: ${{ github.repository }}
@@ -337,7 +422,7 @@ jobs:
       # ── Run ──────────────────────────────────────────────────────────────────
 
       - name: Stage the prompt and schema
-        if: steps.blockers.outputs.count != '0'
+        if: steps.work.outputs.agent == 'true'
         env:
           MODE: ${{ steps.session.outputs.mode }}
         run: |
@@ -362,7 +447,7 @@ jobs:
       # a resume that has produced nothing in 25 minutes is hung, not thinking.
       - name: Run the fixer
         id: run
-        if: steps.blockers.outputs.count != '0'
+        if: steps.work.outputs.agent == 'true'
         continue-on-error: ${{ steps.session.outputs.mode == 'author-resume' }}
         uses: ./.github/actions/review-agent-run
         with:
@@ -382,6 +467,8 @@ jobs:
           extra_env: |
             REVIEWER_ARTIFACTS_DIR=.review-output/reviewer-artifacts
             PR_CONTEXT_PATH=.review-output/pr-context.md
+            MERGE_STATE=${{ steps.sync.outputs.merge_state }}
+            MERGE_CONFLICT_FILES_PATH=.review-output/merge-conflicts.txt
           workflow_pat: ${{ secrets.WORKFLOW_PAT }}
           llm_proxy_base_url: ${{ vars.LLM_PROXY_BASE_URL }}
           llm_proxy_openai_base_url: ${{ vars.LLM_PROXY_OPENAI_BASE_URL }}
@@ -402,7 +489,7 @@ jobs:
       - name: Fall back to a cold fixer
         id: fallback
         if: >-
-          steps.blockers.outputs.count != '0'
+          steps.work.outputs.agent == 'true'
           && steps.session.outputs.mode == 'author-resume'
           && steps.run.outcome != 'success'
         env:
@@ -463,6 +550,8 @@ jobs:
           extra_env: |
             REVIEWER_ARTIFACTS_DIR=.review-output/reviewer-artifacts
             PR_CONTEXT_PATH=.review-output/pr-context.md
+            MERGE_STATE=${{ steps.sync.outputs.merge_state }}
+            MERGE_CONFLICT_FILES_PATH=.review-output/merge-conflicts.txt
           workflow_pat: ${{ secrets.WORKFLOW_PAT }}
           llm_proxy_base_url: ${{ vars.LLM_PROXY_BASE_URL }}
           llm_proxy_openai_base_url: ${{ vars.LLM_PROXY_OPENAI_BASE_URL }}
@@ -476,7 +565,7 @@ jobs:
       # outputs are absent when that run was killed mid-flight.
       - name: Resolve the effective fixer result
         id: fixer
-        if: steps.blockers.outputs.count != '0'
+        if: steps.work.outputs.agent == 'true'
         env:
           SESSION_MODE: ${{ steps.session.outputs.mode }}
           COLD_OUTCOME: ${{ steps.run_cold.outcome }}
@@ -497,7 +586,7 @@ jobs:
       # ── Gates before anything is pushed ──────────────────────────────────────
 
       - name: Validate the fixer artifact
-        if: steps.blockers.outputs.count != '0'
+        if: steps.work.outputs.agent == 'true'
         env:
           RESULT_JSON: ${{ steps.fixer.outputs.result_json }}
           EXPECTED_SHA: ${{ inputs.reviewed_sha }}
@@ -575,7 +664,7 @@ jobs:
           exit "$fail"
 
       - name: Refuse to push a tree that does not lint
-        if: steps.blockers.outputs.count != '0'
+        if: steps.work.outputs.push == 'true'
         working-directory: ${{ env.PR_WORKSPACE }}
         env:
           # main's lockfile, not the PR's. A PR must not choose — or quietly downgrade —
@@ -622,12 +711,17 @@ jobs:
 
       - name: Commit the fix
         id: commit
-        if: steps.blockers.outputs.count != '0'
+        if: steps.work.outputs.push == 'true'
         working-directory: ${{ env.PR_WORKSPACE }}
         env:
+          GH_TOKEN: ${{ secrets.WORKFLOW_PAT }}
+          REPO: ${{ github.repository }}
+          PR_NUMBER: ${{ inputs.pr_number }}
           RESULT_JSON: ${{ steps.fixer.outputs.result_json }}
           CYCLE: ${{ inputs.cycle }}
           MODE: ${{ steps.fixer.outputs.effective_mode }}
+          BASE_REF: ${{ inputs.base_ref }}
+          MERGE_STATE: ${{ steps.sync.outputs.merge_state }}
         run: |
           set -euo pipefail
           # The host commits, not the agent. The container runs as uid 1000 against a
@@ -639,9 +733,28 @@ jobs:
           # below nor `git add -A` sees them. They must survive this step regardless —
           # the fixer artifact is uploaded from .review-output after the push.
 
-          if [ -z "$(git status --porcelain)" ]; then
-            echo "The fixer changed nothing."
-            echo "changed=false" >> "$GITHUB_OUTPUT"
+          # A merge left uncommitted by the sync step — i.e. one the agent was asked to
+          # resolve. `git status` is not the test: a conflicted merge can leave a clean
+          # worktree if the agent reverted every hunk, and that still must be sealed or
+          # aborted rather than silently dropped.
+          MERGING=false
+          if git rev-parse --quiet --verify MERGE_HEAD >/dev/null 2>&1; then
+            MERGING=true
+          fi
+
+          if [ "$MERGING" != "true" ] && [ -z "$(git status --porcelain)" ]; then
+            # A clean sync was already committed by the sync step, so there is nothing
+            # further to stage — but that commit is local and still has to reach the
+            # branch. Reporting "nothing changed" here is how the reference implementation
+            # loses its clean merges: they are made, committed, and then dropped with the
+            # workspace whenever the agent had no fixes of its own to add.
+            if [ "$MERGE_STATE" = "clean" ]; then
+              echo "Nothing beyond the sync merge to commit; the merge still needs pushing."
+              echo "changed=true" >> "$GITHUB_OUTPUT"
+            else
+              echo "Nothing to commit."
+              echo "changed=false" >> "$GITHUB_OUTPUT"
+            fi
             exit 0
           fi
 
@@ -652,27 +765,91 @@ jobs:
           git config user.email "${AGENT_COMMIT_EMAIL}"
           git config user.name  "${AGENT_COMMIT_NAME}"
 
-          ADDRESSED=$(jq -r '.addressed[]?.id' "$RESULT_JSON" | sed 's/^/  - /')
-          SKIPPED=$(jq -r '.skipped[]?.id' "$RESULT_JSON" | sed 's/^/  - /')
-          SUMMARY=$(jq -r '.summary' "$RESULT_JSON")
+          git add -A
+
+          # The marker gate. Two independent checks, because they fail independently: an
+          # unmerged index entry means a path was never resolved at all, while a marker in
+          # a staged file means it was "resolved" by staging the conflict verbatim. Either
+          # one pushed would break the build for a human to find later.
+          if [ "$MERGING" = "true" ]; then
+            UNRESOLVED=$(git ls-files -u | awk '{print $4}' | sort -u || true)
+            MARKERS=$(git diff --check --cached 2>/dev/null | awk -F: '/conflict marker/ {print $1}' | sort -u || true)
+            REMAINING=$(printf '%s\n%s\n' "$UNRESOLVED" "$MARKERS" | grep -v '^$' | sort -u || true)
+            if [ -n "$REMAINING" ]; then
+              echo "::error::conflicts from origin/${BASE_REF} are unresolved; aborting the merge."
+              printf '%s\n' "$REMAINING" | while IFS= read -r f; do
+                echo "::error::unresolved: ${f}"
+              done
+              git merge --abort || true
+
+              BULLETS=$(printf '%s\n' "$REMAINING" | while IFS= read -r f; do
+                printf -- "- \`%s\`\n" "$f"
+              done)
+
+              # A human has to take this one, and they need to be told where they are
+              # already looking. The label is what makes it visible on the PR list.
+              gh label create "needs-human-review" --color "d73a4a" \
+                --description "Pipeline could not auto-resolve merge conflicts" \
+                --repo "${REPO}" 2>/dev/null || true
+              gh pr edit "${PR_NUMBER}" --add-label "needs-human-review" --repo "${REPO}" || true
+
+              BODY_FILE=$(mktemp)
+              {
+                echo "The review pipeline tried to merge \`origin/${BASE_REF}\` into this branch and the fixer could not resolve every conflict. The merge was aborted and nothing was pushed."
+                echo
+                echo "Unresolved:"
+                echo "${BULLETS}"
+                echo
+                echo "Resolve them locally and push — that also resets the review cycle count."
+              } > "$BODY_FILE"
+              gh pr comment "${PR_NUMBER}" --repo "${REPO}" --body-file "$BODY_FILE" || true
+              rm -f "$BODY_FILE"
+
+              echo "changed=false" >> "$GITHUB_OUTPUT"
+              exit 1
+            fi
+          fi
+
+          # A merge-only cycle has no fixer artifact at all: the agent never ran, because a
+          # clean merge needs no judgement. Read the artifact only when there is one.
+          ADDRESSED=""; SKIPPED=""; SUMMARY=""
+          if [ -n "${RESULT_JSON:-}" ] && [ -f "$RESULT_JSON" ]; then
+            ADDRESSED=$(jq -r '.addressed[]?.id' "$RESULT_JSON" | sed 's/^/  - /')
+            SKIPPED=$(jq -r '.skipped[]?.id' "$RESULT_JSON" | sed 's/^/  - /')
+            SUMMARY=$(jq -r '.summary' "$RESULT_JSON")
+          fi
+
+          # Say which of the three things this commit is. A reader looking at branch
+          # history should not have to diff it to find out whether an agent chose a
+          # conflict resolution here.
+          if [ "$MERGING" = "true" ] && [ -z "$ADDRESSED" ]; then
+            SUBJECT="merge: resolve conflicts with origin/${BASE_REF} (cycle ${CYCLE})"
+          elif [ "$MERGING" = "true" ]; then
+            SUBJECT="merge: resolve conflicts with origin/${BASE_REF} + address reviewer findings (cycle ${CYCLE}, ${MODE})"
+          else
+            SUBJECT="fix: address reviewer findings (cycle ${CYCLE}, ${MODE})"
+          fi
 
           MSG_FILE=$(mktemp)
           {
-            echo "fix: address reviewer findings (cycle ${CYCLE}, ${MODE})"
+            echo "${SUBJECT}"
             echo
-            echo "${SUMMARY}"
+            if [ -n "$SUMMARY" ]; then echo "${SUMMARY}"; fi
+            if [ "$MERGING" = "true" ]; then
+              echo
+              echo "Conflict markers were resolved by the fixer agent; the host sealed the merge."
+            fi
             if [ -n "$ADDRESSED" ]; then echo; echo "Addressed:"; echo "${ADDRESSED}"; fi
             if [ -n "$SKIPPED" ];   then echo; echo "Skipped:";   echo "${SKIPPED}"; fi
           } > "$MSG_FILE"
 
-          git add -A
           git commit --file "$MSG_FILE"
           rm -f "$MSG_FILE"
           echo "changed=true" >> "$GITHUB_OUTPUT"
 
       - name: Push
         id: push
-        if: steps.blockers.outputs.count != '0'
+        if: steps.work.outputs.push == 'true'
         working-directory: ${{ env.PR_WORKSPACE }}
         env:
           GH_TOKEN: ${{ secrets.WORKFLOW_PAT }}
@@ -744,7 +921,7 @@ jobs:
           echo "Pushed ${NEW_SHA} to ${HEAD_REF}."
 
       - name: Upload the fixer artifact
-        if: always() && steps.blockers.outputs.count != '0'
+        if: always() && steps.work.outputs.agent == 'true'
         uses: actions/upload-artifact@v4
         with:
           name: fixer-${{ inputs.reviewed_sha }}
