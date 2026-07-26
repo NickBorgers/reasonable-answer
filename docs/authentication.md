@@ -10,11 +10,19 @@ Two proxies are supported, checked in this order:
 | header | set by | who arrives this way |
 |---|---|---|
 | `Cf-Access-Authenticated-User-Email` | Cloudflare Access | invited users, over the internet |
-| `Tailscale-User-Login` / `Tailscale-User-Name` | `tailscale serve` | the operator, over the tailnet |
+| `Tailscale-User-Login` | `tailscale serve` | the operator, over the tailnet |
 
 A request carrying neither is refused with `403` on every route but `/healthz`, which is
 exempt because the container healthcheck runs inside the container with nothing in front
-of it to attach a header.
+of it to attach a header. `Tailscale-User-Name` sits beside the login header and is
+deliberately **not** read: it carries a display name, which is a different namespace from
+the address Access reports.
+
+**The two doors are one identity only if they report the same address.** Every source is
+lower-cased and compared for equality, so case never splits you — but if your tailnet's
+identity provider reports something other than the address your Access policy lists, the
+same person becomes two owners, each seeing half their runs. Worth checking once, on the
+index: sign in each way and confirm *signed in as* reads identically.
 
 ## What "reachable only through the proxy" means
 

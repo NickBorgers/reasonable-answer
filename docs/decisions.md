@@ -459,12 +459,17 @@ that is a trade taken knowingly, and revisiting it is the stated condition for e
 service more broadly. All of it is confined to `web/identity.py:resolve_identity`, so verifying
 the JWT is a change to one function.
 
-**Access is preferred over Tailscale, and the fallback order is fixed.** Both headers are
-trusted equally; Access is checked first because it is how friends arrive, and a deployment
-fronted both ways must not file one person's runs under two owners depending on which header a
-request happened to carry. The email is lower-cased for the same reason. A value that is blank,
-over 320 characters, or carries control characters is treated as absent rather than truncated:
-it would otherwise become an ownership key that its own submitter could never match.
+**Access is preferred over Tailscale, and every source is normalized identically.** Both
+headers are trusted equally; Access is checked first because it is how friends arrive. The
+operator reaches the app by both doors, so the same person must resolve to one identity either
+way — every source is lower-cased, and a value that is blank, over 320 characters, or carries
+control characters is treated as absent rather than truncated into an ownership key its own
+submitter could never match. Only `Tailscale-User-Login` is read; `Tailscale-User-Name` was
+fine as D21's rate-limit key, where any *stable* string worked, but an ownership key must be
+the *same* string the other door produces, and a display name is a different namespace from an
+address. What normalization cannot fix is a tailnet whose identity provider reports a different
+address than the Access policy lists — that is two people as far as this system can tell, and
+the check is to sign in each way and compare the *signed in as* line.
 
 **Enforcement is middleware, not a call per route.** `_reject_cross_site` is invoked by hand at
 the top of each mutating handler, and that idiom is right for CSRF — it is a property of two

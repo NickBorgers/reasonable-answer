@@ -24,8 +24,15 @@ from ..config import AuthConfig
 #: the path friends arrive by, and the tailnet path is the fallback for the operator.
 ACCESS_EMAIL_HEADER = "cf-access-authenticated-user-email"
 
-#: Set by `tailscale serve` when it fronts the app; carries the calling node's user.
-TAILSCALE_HEADERS = ("tailscale-user-login", "tailscale-user-name")
+#: Set by `tailscale serve` when it fronts the app; carries the calling node's login.
+#:
+#: Only the login. `Tailscale-User-Name` sits beside it and D21 read both, because a
+#: rate-limit key only has to be *stable* — any string would do. An ownership key has to
+#: be the *same* string the other door produces, and the display name ("Nick Borgers")
+#: is a different namespace from the address Access reports. Reaching for it would file
+#: one person's runs under two owners; refusing the request instead is visible and fixed
+#: by configuring the tailnet, which a silently split index is not.
+TAILSCALE_LOGIN_HEADER = "tailscale-user-login"
 
 #: An identity is an ownership key that is written to disk and compared for equality,
 #: so it is bounded and kept to printable characters. 320 is the maximum length of an
@@ -38,21 +45,32 @@ def resolve_identity(request: Request, auth: AuthConfig) -> str | None:
 
     None is the refusal case, not a shared bucket: an unauthenticated request owns
     nothing and may see nothing, so there is no longer anywhere for it to go.
+
+    Every source is normalized the same way, because the *point* is that the same
+    person arriving by a different door is the same owner. One person reaching the app
+    over Access and over the tailnet must land on one identity, or their index silently
+    holds half their runs. Whether the two doors agree beyond case is a property of the
+    tailnet's identity provider, not of this function: if `Tailscale-User-Login` reports
+    something other than the address Access reports, they are two owners and no
+    normalization here can join them.
     """
-    access = _clean(request.headers.get(ACCESS_EMAIL_HEADER))
-    if access:
-        # Addresses are case-insensitive in the part that matters here, and an identity
-        # that varies by case would split one person's runs across two owners.
-        return access.lower()
-    for header in TAILSCALE_HEADERS:
-        tailnet = _clean(request.headers.get(header))
-        if tailnet:
-            return tailnet
-    return _clean(auth.dev_identity)
+    for source in (
+        request.headers.get(ACCESS_EMAIL_HEADER),
+        request.headers.get(TAILSCALE_LOGIN_HEADER),
+        auth.dev_identity,
+    ):
+        identity = _clean(source)
+        if identity:
+            return identity
+    return None
 
 
 def _clean(value: str | None) -> str | None:
-    """Trim, and reject anything that would be an awkward ownership key.
+    """Normalize into an ownership key, or None if the value is not one.
+
+    Lower-cased because identities are compared for equality and written to disk: an
+    address that varies by case would split one person's runs across two owners, and
+    the case a header happens to carry is not something the person chose.
 
     Control characters would land in `owner.txt` and in the JSON of `audit.json`; an
     unbounded header would land there at whatever length the caller chose. Neither is
@@ -66,4 +84,4 @@ def _clean(value: str | None) -> str | None:
         return None
     if any(ch < " " or ch == "\x7f" for ch in value):
         return None
-    return value
+    return value.lower()

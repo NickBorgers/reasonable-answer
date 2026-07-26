@@ -1087,3 +1087,44 @@ def test_a_cli_run_is_invisible_unless_it_is_given_an_owner(config, fake_client)
     registry = Registry(config.runs_dir)
     assert registry.summary("run-cli").owner is None
     assert registry.summary("run-cli-owned").owner == FRIEND
+
+
+def test_the_same_person_is_one_owner_at_either_door(config):
+    """Access and the tailnet are two doors onto one index. A run submitted through
+    one must be listed through the other, or an operator who uses both silently sees
+    half their runs — which is why every source is normalized identically."""
+    worker = RunWorker(config, max_concurrent=1, runner=lambda *a, **k: None)
+    app = create_app(config, worker=worker)
+    try:
+        with web_client(app, identity=None) as c:
+            posted = c.post(
+                "/runs",
+                data={"question": "Submitted over Access?"},
+                headers={"Cf-Access-Authenticated-User-Email": "Nick@Example.COM"},
+                follow_redirects=False,
+            )
+            assert posted.status_code == 303
+            run_id = posted.headers["location"].rsplit("/", 1)[-1]
+
+            # Same person, other door, and a case the header happened to carry.
+            listed = c.get("/", headers={"Tailscale-User-Login": "nick@example.com"}).text
+            assert run_id in listed
+            shouty = c.get("/", headers={"Tailscale-User-Login": "NICK@EXAMPLE.COM"}).text
+            assert run_id in shouty
+
+        assert Registry(config.runs_dir).summary(run_id).owner == "nick@example.com"
+    finally:
+        worker.shutdown(timeout=0.1)
+
+
+def test_the_tailscale_display_name_is_not_an_identity(config):
+    """`Tailscale-User-Name` carries a display name, a different namespace from the
+    address Access reports. It was a fine rate-limit key under D21, where any stable
+    string worked; as an ownership key it would file one person under two owners."""
+    worker = RunWorker(config, max_concurrent=1, runner=lambda *a, **k: None)
+    app = create_app(config, worker=worker)
+    try:
+        with web_client(app, identity=None) as c:
+            assert c.get("/", headers={"Tailscale-User-Name": "Nick Borgers"}).status_code == 403
+    finally:
+        worker.shutdown(timeout=0.1)
