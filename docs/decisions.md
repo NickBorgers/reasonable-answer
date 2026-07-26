@@ -516,6 +516,46 @@ media-query mechanism and the OS caches it at install time, so the Android splas
 even in dark mode. Serving the manifest dynamically would fix one frame at the cost of making it
 non-static; not worth it.
 
+## D28 — the fixer syncs the branch and resolves conflicts; it merges, it never rebases
+
+**The problem.** Almost every PR in this repository is agent-authored, and no agent goes back to
+a PR it already opened. When `main` moves, the branch drifts, and there is nobody in the loop to
+resync it — the PR sits until a human notices and rebases by hand. The previous position was that
+this was deliberate: `docs/ci-pipeline.md` listed "no agent-driven merge-conflict resolution"
+under *Deliberately not built*, on the grounds that an agent choosing at conflict markers produces
+exactly the unreviewable change this pipeline exists to catch. That reasoning is not wrong about
+the risk; it is wrong about the alternative, which in practice is not a careful human resolution
+but an indefinitely stale PR.
+
+**The mechanism.** Before the fixer's agent runs, the host attempts
+`git merge --no-commit --no-ff origin/<base>` in the PR workspace. `none` (already current) is a
+no-op; `clean` is committed by the host and needs no agent at all; `conflicts` leaves the markers
+in the working tree, writes the conflicted paths to a file, and the agent resolves them as
+ordinary file edits before it touches any reviewer blocker. The host then seals the merge, or
+aborts it.
+
+**Merge, not rebase**, for three reasons that all point the same way. A rebase rewrites the SHAs,
+and `reviewed_sha` is the key that dedup, the cycle counter, and every artifact name hang from. It
+would break the `input_sha == reviewed_sha` gate, since the rebased tree no longer descends from
+the SHA the reviewers read. And it needs a force-push from the one job holding a write-capable
+PAT, where a non-forced `git push HEAD:<ref>` is a much smaller thing to get wrong. A merge commit
+also lands on the existing merge-from-base inherit path, so a resync costs no review cycle.
+
+**The gate that makes it safe to leave a conflict unresolved.** Both fixer prompts tell the agent
+to prefer the base branch's structural change and re-apply the PR's intent on top, and — the part
+that matters — to leave a marker in place when the two genuinely cannot be reconciled. The host
+checks for unmerged index entries *and* for markers in staged content, because a file staged with
+its markers intact has neither an unmerged entry nor a resolution. Either one aborts the merge,
+labels the PR `needs-human-review`, and comments the unresolved paths. So the honest failure is
+cheap and visible, which is what makes "do not guess" a real instruction rather than a wish.
+
+**What is not defended.** A resolution that is syntactically clean and semantically wrong passes
+every gate here — `ruff` sees Python, and nothing reads the merge for meaning. The next cycle's
+reviewers read the branch, but the merge commit itself arrives on the inherit path, so they read
+it as part of whatever comes next rather than as a change under review. This is the residual, and
+it is accepted for the same reason the feature exists: the alternative on offer is not a human
+reading the merge, it is a PR nobody merges.
+
 ## Open items for a future round
 
 - Whether `misrepresented_source` can be meaningfully checked without fetching the source
