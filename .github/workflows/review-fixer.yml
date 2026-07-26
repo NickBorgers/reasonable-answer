@@ -681,10 +681,25 @@ jobs:
           REVIEWED_SHA: ${{ inputs.reviewed_sha }}
           CYCLE: ${{ inputs.cycle }}
           CHANGED: ${{ steps.commit.outputs.changed }}
+          RESULT_JSON: ${{ steps.fixer.outputs.result_json }}
         run: |
           set -euo pipefail
 
+          # `new_sha` in the artifact is the judge's only evidence that a fix actually
+          # landed, so it is written here — the one place that knows. The agent cannot
+          # know it (it never touches .git) and the schema has always said the host
+          # overwrites it; until now nothing did, leaving the field at whatever the agent
+          # guessed. Every early return below stamps the reviewed SHA, which is exactly
+          # what "nothing landed" means to aggregate.mjs.
+          stamp_new_sha() {
+            [ -n "${RESULT_JSON:-}" ] && [ -f "$RESULT_JSON" ] || return 0
+            local tmp
+            tmp=$(mktemp)
+            jq --arg s "$1" '.new_sha = $s' "$RESULT_JSON" > "$tmp" && mv "$tmp" "$RESULT_JSON"
+          }
+
           if [ "$CHANGED" != "true" ]; then
+            stamp_new_sha "$REVIEWED_SHA"
             echo "pushed=false" >> "$GITHUB_OUTPUT"
             echo "new_sha=${REVIEWED_SHA}" >> "$GITHUB_OUTPUT"
             exit 0
@@ -696,6 +711,7 @@ jobs:
           REMOTE_HEAD=$(git ls-remote --heads origin "refs/heads/${HEAD_REF}" | awk 'NR==1 {print $1}')
           if [ -z "$REMOTE_HEAD" ] || [ "$REMOTE_HEAD" != "$REVIEWED_SHA" ]; then
             echo "::warning::${HEAD_REF} moved from ${REVIEWED_SHA} to ${REMOTE_HEAD:-<gone>}; discarding the fix."
+            stamp_new_sha "$REVIEWED_SHA"
             echo "pushed=false" >> "$GITHUB_OUTPUT"
             echo "new_sha=${REVIEWED_SHA}" >> "$GITHUB_OUTPUT"
             exit 0
@@ -722,6 +738,7 @@ jobs:
           # Duplicate work on the *same* SHA is still prevented: review-entry.yml claims
           # each SHA before dispatching, and NEW_SHA is a SHA no run has claimed yet.
 
+          stamp_new_sha "$NEW_SHA"
           echo "pushed=true" >> "$GITHUB_OUTPUT"
           echo "new_sha=${NEW_SHA}" >> "$GITHUB_OUTPUT"
           echo "Pushed ${NEW_SHA} to ${HEAD_REF}."
