@@ -19,6 +19,17 @@ name: PR Validation
 on:
   pull_request:
     branches: ['**']
+  # Also on push, and not as a belt-and-braces duplicate: a PR with merge conflicts has no
+  # computable merge ref, so GitHub never dispatches its `pull_request` events at all. No
+  # PR Validation runs, every reviewer's guard then refuses (it requires a completed
+  # `PR Validation Required` on the reviewed SHA), so no reviewers run, so the fixer never
+  # runs — and the fixer is the stage that would have resolved the conflict. A conflicted
+  # PR could not be reviewed back into a mergeable state by any means.
+  #
+  # `push` needs no merge ref. Excluding `main` keeps this to branch heads; pushes to main
+  # are covered by docker-release.yml and by the PR that merged them.
+  push:
+    branches-ignore: [main]
   workflow_dispatch:
 
 concurrency:
