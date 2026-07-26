@@ -450,9 +450,11 @@ def test_resuming_a_seeded_run_passes_the_seed_back(config, monkeypatch):
     automatic path has its own coverage below."""
     monkeypatch.setenv("RA_RESUME_ON_BOOT", "0")
     seen: list[str | None] = []
+    ran = threading.Event()
 
     def recording(cfg, *, question, seed, run_id, stop=None, **_):
         seen.append(seed)
+        ran.set()
 
     worker = RunWorker(config, max_concurrent=1, runner=recording)
     app = create_app(config, worker=worker)
@@ -464,9 +466,12 @@ def test_resuming_a_seeded_run_passes_the_seed_back(config, monkeypatch):
         with TestClient(app) as c:
             assert c.post("/runs/run-seeded/resume", follow_redirects=False).status_code == 303
 
-        deadline = time.time() + 5
-        while not seen and time.time() < deadline:
-            time.sleep(0.05)
+        # Wait on the runner's own signal, not a wall clock: a busy full-suite run
+        # can leave a worker thread unscheduled for well over the old 5s budget. The
+        # timeout is generous because the passing case returns the instant the run is
+        # picked up. Splitting the two asserts keeps the failure legible — a lapsed
+        # wait reads as "worker never ran", not as a lost seed.
+        assert ran.wait(timeout=20), "worker never picked up the resumed run"
         assert seen == ["# A seed report"]
     finally:
         worker.shutdown()
@@ -842,13 +847,17 @@ def test_resume_restores_the_seed(config, tmp_path):
     forever. The seed is read back from the store, where it sits already converted.
     """
     seen: dict = {}
+    ran = threading.Event()
 
     def runner(cfg, *, question, seed, run_id, **_):
         seen["seed"] = seed
+        ran.set()
 
     worker = RunWorker(config, max_concurrent=1, runner=runner)
     try:
         run_id = worker.submit("Q?", "# Seeded\n\nBody.")
+        # Let the first run fully drain before resuming; a still-running run would
+        # dedupe the resume rather than re-invoke the runner.
         deadline = time.time() + 5
         while worker.status(run_id) and time.time() < deadline:
             time.sleep(0.05)
@@ -858,10 +867,11 @@ def test_resume_restores_the_seed(config, tmp_path):
         assert registry.seed(run_id) == "# Seeded\n\nBody."
 
         seen.clear()
+        ran.clear()
         worker.resume(run_id, "Q?", registry.seed(run_id))
-        deadline = time.time() + 5
-        while not seen and time.time() < deadline:
-            time.sleep(0.05)
+        # Same generous, event-driven wait as the resume-seed test: distinguish a
+        # worker that never ran from one that ran with the wrong seed.
+        assert ran.wait(timeout=20), "worker never picked up the resumed run"
         assert seen["seed"] == "# Seeded\n\nBody.", "resume must carry the seed, or the run is stuck"
         assert app is not None
     finally:
