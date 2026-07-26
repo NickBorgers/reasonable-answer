@@ -6,6 +6,7 @@ looking document. A `needs_human_review` report shared as a file has to say so.
 
 from __future__ import annotations
 
+import html
 import json
 
 import pytest
@@ -184,6 +185,23 @@ def test_the_review_record_is_the_same_list_the_page_shows(client, finished_run)
     for surface in (page, document):
         assert "Cite or drop the 40% figure." in surface
         assert "the seed carried no headings" in surface
+
+
+def test_copy_markdown_copies_the_export_document_not_just_the_report(client, finished_run):
+    """Copy markdown must place the export — report *and* review record — on the
+    clipboard, the same text `export.md`/`Download .md` serve (D26). The source is the
+    off-screen textarea the copy button selects, so the record has to be *in* it, not
+    merely elsewhere on the page."""
+    page = client.get(f"/runs/{finished_run}/report").text
+    textarea = html.unescape(
+        page.split('id="copy-src"')[1].split(">", 1)[1].split("</textarea>")[0]
+    )
+    document = client.get(f"/runs/{finished_run}/export.md").text
+
+    assert "## Review record" in textarea
+    assert "needs human review" in textarea
+    assert "Cite or drop the 40% figure." in textarea
+    assert textarea.strip() == document.strip()
 
 
 # ----------------------------------------------------------------------- html

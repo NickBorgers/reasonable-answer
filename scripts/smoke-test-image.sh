@@ -78,6 +78,22 @@ for i in $(seq 1 60); do
   sleep 1
 done
 
+# The icons, the manifest and the service worker are the only non-Python files the app
+# serves, so they are the only thing here that can be lost by a packaging change. pytest
+# runs from a checkout and would never notice; this is the check that would.
+echo "==> Installable-app assets shipped in the image"
+if ! curl -fsS "http://127.0.0.1:${PORT}/manifest.webmanifest" | grep -q '"standalone"'; then
+  echo "Manifest missing or not a standalone app manifest." >&2
+  exit 1
+fi
+for path in /sw.js /offline.html /static/icons/icon-512.png /static/icons/apple-touch-icon.png; do
+  if ! curl -fsS -o /dev/null "http://127.0.0.1:${PORT}${path}"; then
+    echo "Asset $path did not make it into the image." >&2
+    exit 1
+  fi
+done
+echo "    ok"
+
 echo "==> Runs as a non-root user"
 uid="$(docker run --rm --entrypoint id "$IMAGE" -u)"
 if [ "$uid" = "0" ]; then
