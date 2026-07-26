@@ -3,6 +3,7 @@
 from __future__ import annotations
 
 import json
+import time
 from pathlib import Path
 
 import pytest
@@ -11,7 +12,7 @@ from fakes import FakeClient
 from reasonable_answer.config import Budgets, Config, ConfigError
 from reasonable_answer.graph import run
 from reasonable_answer.schemas import CritiqueOutput, RawIssue, StructuralRef
-from reasonable_answer.taxonomy import Category, Severity
+from reasonable_answer.taxonomy import Category, Lens, Severity
 
 REPORT = """# Answer
 
@@ -208,6 +209,57 @@ def test_intake_rejects_an_oversized_seed(identities, config):
     client = make_client(identities)
     with pytest.raises(ConfigError, match="seed exceeds"):
         run(config, question="q?", seed="x" * (config.max_report_chars + 1), client=client)
+
+
+def plant_unfit_verdict(config: Config, identity: str, tmp_path: Path) -> None:
+    """Point `config` at a cache holding one silent-critic verdict for `identity` on the
+    logic lens. Real corpus and prompt hashes: anything else and the entry is discarded
+    as not-about-this-harness, and a gate test would pass for the wrong reason."""
+    from reasonable_answer import audition
+
+    config.audition.cache_path = tmp_path / "audition.json"
+    silent = audition.Metrics(
+        alias="logic-spec", identity=identity, lens=Lens.LOGIC,
+        calls=10, planted_total=6, obvious_total=6, control_runs=4, control_clean_runs=4,
+    )
+    assert audition.judge(silent, config.audition.thresholds).verdict is audition.Verdict.UNFIT
+    audition.save_cache(
+        config.audition.cache_path,
+        {
+            audition.cache_key(identity, Lens.LOGIC): audition.CacheEntry(
+                metrics=silent,
+                corpus_hash=audition.load_fixtures().corpus_hash,
+                prompt_hash=audition.prompt_hash(),
+                repetitions=config.audition.repetitions,
+                recorded_at=time.time(),
+            )
+        },
+    )
+
+
+def test_audition_enforcement_refuses_to_start_before_spending_anything(
+    identities, config, tmp_path
+):
+    """D20's opt-in fail-closed. A lens staffed by a measured-unfit critic is not being
+    reviewed, so the run must not begin — and must not pay for the structured-output
+    probes on its way to finding that out."""
+    plant_unfit_verdict(config, identities["logic-spec"], tmp_path)
+    config.audition.enforce = True
+
+    client = make_client(identities)
+    with pytest.raises(ConfigError, match="unfit"):
+        run(config, question="Is it so?", seed=REPORT, client=client)
+    assert client.calls == [], "the gate spent tokens before failing closed"
+
+
+def test_an_unfit_critic_is_only_a_warning_while_enforcement_is_off(
+    identities, config, tmp_path
+):
+    """The shipped posture. Same cache, same roster, `enforce` off — the run proceeds."""
+    plant_unfit_verdict(config, identities["logic-spec"], tmp_path)
+
+    final = run(config, question="Is it so?", seed=REPORT, client=make_client(identities))
+    assert final["terminal_status"] == "accepted"
 
 
 def test_the_audit_trail_records_every_stage(identities, config):

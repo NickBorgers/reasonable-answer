@@ -260,17 +260,27 @@ class AuditionThresholds(BaseModel):
 
 
 class AuditionConfig(BaseModel):
+    """Auditioning is opt-in by being a separate command, not by a flag.
+
+    There is deliberately no `enabled` here. An audition costs |models| x |fixtures| x
+    repetitions calls against a paid proxy, so it must never happen implicitly — and
+    nothing implicit invokes it: `ra audition` is the only thing that measures, while
+    `ra doctor` and the `enforce` gate below only *read* the cache it leaves behind.
+    A flag would have gated nothing, and a config knob that cannot change behaviour
+    reads as a safety control while being inert.
+    """
+
     model_config = ConfigDict(extra="forbid")
 
-    #: Off by default: an audition costs |models| x |fixtures| x repetitions calls
-    #: against a paid proxy, and a checkout with no credential must still behave
-    #: exactly as it always has.
-    enabled: bool = False
     #: Warn-by-default rather than fail-closed. The guarantee is genuinely void
     #: without capable reviewers, so the fail-closed instinct is right in principle —
     #: but coupling every run to a cache whose freshness depends on a rate-limited
     #: proxy means an operator blocked by an expired audition disables the harness
     #: outright, which is strictly worse than a loud warning. Opt in deliberately.
+    #: When on, `graph.build_runtime` refuses to start if an assigned critic graded
+    #: `unfit` (`audition.enforce_fitness`). Only `unfit` blocks: `marginal`, `stale`
+    #: and `not audited` stay warnings even here, because they are absences of
+    #: evidence rather than evidence of incapacity.
     enforce: bool = False
     cache_path: Path = Path(".ra-audition.json")
     max_age_days: int = Field(default=30, ge=1, le=365)
