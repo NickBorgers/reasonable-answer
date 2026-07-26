@@ -138,28 +138,33 @@ jobs:
         id: cycle
         working-directory: pr-head
         env:
-          GH_TOKEN: ${{ secrets.WORKFLOW_PAT }}
-          REPO: ${{ github.repository }}
           SHA: ${{ inputs.reviewed_sha }}
           PRIOR: ${{ steps.prior.outputs.cycle }}
-          PRIOR_CYCLE_SHA: ${{ steps.prior.outputs.cycle_sha }}
         run: |
           set -euo pipefail
 
           prior="${PRIOR:-0}"
           cycle=$((prior + 1))
 
-          # A human who pushes on top of a converged GO is starting a new conversation,
-          # not continuing the old one. Resetting the counter means their work gets a
-          # full review budget instead of inheriting a nearly-exhausted one.
+          # MAX_CYCLES bounds the AGENT loop — review → fix → push → review — so only
+          # agent-authored commits are billed against it. A human push is a new
+          # conversation: they read the blockers and answered them, and the next run is
+          # cycle 1 of that conversation, with its own fixer attempt.
+          #
+          # This used to reset only on top of a GO, which made the counter bill humans for
+          # the very iteration the blockers asked them to do. PR #49 hit the wall: three
+          # human pushes (one of them repairing the CI failure that caused the burn in the
+          # first place) walked it to cycle 3, and it finalized `cycle_capped` with no
+          # reviewer ever reading the fixes. The only recovery was a force-push — a
+          # destructive gesture as the routine answer to a counter working as designed.
+          #
+          # The loop the cap exists to break cannot escape this: the fixer authors as
+          # AGENT_COMMIT_EMAIL, so a fix-push never resets, and a human has to intervene
+          # for the budget to refresh. That intervention is the bound.
           author_email=$(git log -1 --format='%ae' "$SHA")
-          if [ "$prior" -gt 0 ] && [ "$author_email" != "$AGENT_COMMIT_EMAIL" ] && [ -n "$PRIOR_CYCLE_SHA" ]; then
-            prior_verdict=$(gh api "repos/${REPO}/commits/${PRIOR_CYCLE_SHA}/statuses" \
-              --jq '[.[] | select(.context == "review/verdict")] | sort_by(.created_at) | last | .description // empty')
-            if [ "$prior_verdict" = "GO" ]; then
-              echo "gather: human commit (${author_email}) on top of a GO; resetting cycle to 1"
-              cycle=1
-            fi
+          if [ "$prior" -gt 0 ] && [ "$author_email" != "$AGENT_COMMIT_EMAIL" ]; then
+            echo "gather: human commit (${author_email}); resetting cycle to 1 (was ${prior})"
+            cycle=1
           fi
 
           cap_exhausted=false
