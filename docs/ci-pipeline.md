@@ -38,7 +38,8 @@ review-entry            authorize · fork-reject · resolve SHA · prior-GO chec
        ├─ security      Codex      │
        ├─ test          Claude    ─┘
        ├─ record-cycle  writes review/cycle — only if a reviewer actually ran
-       ├─ fix           the ONLY branch-writing stage; skipped on the last cycle
+       ├─ fix           the ONLY branch-writing stage; syncs with the base branch and
+       │                addresses blockers; skipped on the last cycle
        ├─ judge         deterministic, from main, contents: read
        └─ finalize      labels · summary comment · merge gate
 ```
@@ -59,6 +60,12 @@ that wants a human's inline comment to block must ingest it via `gh api` and fol
 
 Blocker ids must be stable across cycles for the same underlying problem, because the
 judge namespaces them as `role/id`.
+
+Adding a reviewer role means touching **two** schemas. `reviewer-v1.json`'s `role` enum
+lets the role publish; `fix-result-v1.json`'s `id` pattern lets the fixer *name* that
+role's blockers in `addressed[]`/`skipped[]`. The `docs` role shipped with only the first,
+so for every PR since, a `docs` blocker was one the fixer could never claim to have
+addressed — its artifact would have failed validation against main's schema if it tried.
 
 ### The judge fails closed
 
@@ -90,6 +97,15 @@ tree and so does the verdict; `addressed[]` only records which of their blockers
 claims to have closed. Nothing in the judge inspects the fixer's diff. That is what stops
 the fixer clearing its own work — the fixed SHA is graded by its own cycle, by reviewers
 that actually read it.
+
+`addressed[]` is credited **only when the fix was actually pushed** — `new_sha` differs
+from `input_sha`, which the host sets only after a successful push. The fixer uploads its
+artifact under `if: always()`, so a run that recorded its work and then died at a later
+gate (lint, the remote-head check) leaves behind a truthful-looking record of changes that
+are not in the tree. PR #49 reported one of three blockers unaddressed when in fact none of
+the three had landed. The finalize comment now says so explicitly, because "the fixer
+claimed fixes but pushed nothing" and "the fixer did nothing" send an operator to two
+different places.
 
 A reviewer only publishes its artifact under the name the judge consumes **if it
 validated**, and the judge separately requires every role the classifier selected to be
@@ -176,6 +192,39 @@ choice in an `/autoresolve` comment outranks it.
 reviewers and before the judge**, which is load-bearing: the judge then grades the SHA the
 reviewers actually read, and the fixed SHA earns its own cycle with its own reviewers.
 Judging the post-fix tree would let the fixer clear its own work unread.
+
+It does two jobs: it syncs the branch with the base, and it addresses reviewer blockers.
+Either one alone is enough to make it run.
+
+#### Syncing with the base branch
+
+Almost every PR here is agent-authored, so when the base moves there is no human in the
+loop to resync. Before the agent is invoked, the host attempts `git merge --no-commit
+--no-ff origin/<base>` in the PR workspace, with three outcomes:
+
+| state | what happens |
+|---|---|
+| `none` | the branch already contains the base tip; nothing to do |
+| `clean` | merged without conflict, committed by the host, pushed with whatever else this cycle produces |
+| `conflicts` | markers are left in the working tree and the conflicted paths written to a file; the agent resolves them as ordinary file edits |
+
+The `.git` contract is unchanged: the agent edits files and never runs a git write. The
+host seals the merge. A clean merge needs no agent at all — paying for a self-hosted runner
+and a model round-trip to deliver a merge the host already made would be waste.
+
+**The marker gate.** Before committing a merge the host checks two things, because they
+fail independently: no unmerged index entries (`git ls-files -u`), and no conflict markers
+in the staged content (`git diff --check --cached`). A file staged with its markers intact
+has no unmerged entry and no resolution — the first check alone would pass it. If either
+finds something, the merge is aborted, the PR is labelled `needs-human-review` with a
+comment naming the unresolved paths, and the job fails. That is the intended landing place
+for a conflict the agent should not be guessing at: the prompts tell it to leave a marker
+it cannot reconcile honestly rather than invent a resolution nobody can check.
+
+The resulting merge commit lands on the merge-from-base inherit path like any other, so it
+does not burn a cycle. The conflicted-path list travels in a file rather than an
+environment variable: paths are contributor-controlled, and the agent's environment is
+assembled from an `--env-file`, where a newline in a path would inject arbitrary variables.
 
 It runs in one of two modes.
 
@@ -264,7 +313,10 @@ In order, and all of them fail closed:
    build config in the one job holding a write-capable PAT. Tests belong to PR Validation,
    which runs on a runner with no secrets. Reading a version string out of a lockfile
    executes nothing.
-5. The remote branch head still equals the reviewed SHA. If a human pushed meanwhile, the
+5. No conflict marker and no unmerged index entry survives, when a merge is in flight —
+   see the marker gate above. This one aborts the merge and labels the PR rather than
+   silently pushing a tree with `<<<<<<<` in it.
+6. The remote branch head still equals the reviewed SHA. If a human pushed meanwhile, the
    fix is discarded rather than racing them.
 
 Artifacts are validated with a JSON-schema validator **pinned by a committed lockfile**
@@ -394,10 +446,6 @@ Every knob lives in [`review-agent-run`](../.github/actions/review-agent-run/act
 
 ## Deliberately not built
 
-- **No agent-driven merge-conflict resolution.** The fixer works on the reviewed SHA and
-  never merges the base branch. If the branch has drifted, that is a human's call — an
-  agent picking resolutions at conflict markers is exactly the kind of unreviewable change
-  this pipeline exists to catch, not to generate.
 - **No two-lens security split.** Folding a confidence threshold and an exclusion list
   into one prompt gets most of the value without a second reviewer job, a merger module,
   and a vendored-prompt pin.
