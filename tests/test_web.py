@@ -1138,6 +1138,32 @@ def test_the_index_stays_entirely_under_the_prefix(config, fake_client):
     assert f"register('{BASE}/sw.js', {{ scope: '{BASE}/' }})" in page
 
 
+def test_refinement_posts_under_the_prefix(config):
+    """The refine POST is issued by inline JS, so `_absolute_urls` above cannot see it —
+    it is not an attribute, not `register(...)`, not a scope. That blind spot is how it
+    shipped addressing the origin root: D26 (refinement) and D29 (the base path) landed in
+    separate PRs, collided in a merge nobody reviewed, and every URL on the page was
+    prefixed except this one. Behind a stripping proxy the request leaves the prefix and
+    404s, and the only symptom is that suggestion chips never appear.
+
+    Rendered directly rather than through a client: enabling refinement makes the proxy a
+    boot dependency (D26), and this is a question about a string the renderer emits."""
+    from reasonable_answer.web.render import render_index
+
+    cfg = config.model_copy(update={"refine": config.refine.model_copy(update={"enabled": True})})
+    page = render_index([], 0, cfg, BASE)
+    assert f"fetch('{BASE}/refine'" in page
+    assert "fetch('/refine'" not in page
+
+
+def test_refinement_posts_to_the_root_without_a_prefix(config):
+    """The empty base stays the join identity here too."""
+    from reasonable_answer.web.render import render_index
+
+    cfg = config.model_copy(update={"refine": config.refine.model_copy(update={"enabled": True})})
+    assert "fetch('/refine'" in render_index([], 0, cfg)
+
+
 def test_the_manifest_is_served_under_the_prefix(config, fake_client):
     with _prefixed_client(config, fake_client) as c:
         manifest = json.loads(c.get("/manifest.webmanifest").text)

@@ -462,21 +462,22 @@ forward.
 **The problem.** The pipeline already knows questions arrive loaded: `unexamined_presupposition`
 (D24, completeness lens, major floor) exists precisely to catch a writer who accepts a contested
 framing as settled. But that machinery fires only after a run is already underway, and the
-production run history shows what waiting until then costs. `run-75eb136b9bfb` ("Does Talarico
-back the police or support defunding them?") forced the report to spend its conclusion rejecting
-a false either/or; 7 rounds, terminated `needs_human_review`. `run-40de6a7cdbf9` ("Why is it
-illegal to move an opossum in tx?") let an unverified premise stand without a statute citation
-while the user's real, buried question — lawful removal options — went unaddressed; 8 rounds,
-`exhausted_unresolved` with the missing citation still blocking. `run-3e184fb11a36` and
-`run-5af587189b89` both posed a "net positive/negative" scalar verdict over an unscoped
-population, outcome set, and timeframe — unanswerable as asked. `run-85c88f8c6ba4` ("Is it better
-to be honest or nice?") posed a value question as an either/or with nothing for the evidence
-machinery to converge on; `exhausted_unresolved`. `run-4d350e1d27a8` asked a settled verification
-question ("Did Donald Trump win the 2020 presidential election?") when the report's real energy
-went to the adjacent, more interesting question of why the belief persists. In every case the
-category was already nameable — `unexamined_presupposition` (D24) would tag some of these on
-sight — but the finding lands 10–25 minutes and several critique rounds after the one party who
-could cheaply reframe the question, the asker, has already walked away from the keyboard. The
+production run history shows what waiting until then costs. Six runs motivated this decision, and
+they fall into four shapes. Two posed a **false either/or** — a political "does X back A or
+support B?" and a values question of the "is it better to be honest or nice?" kind — and both
+spent their conclusions rejecting the frame rather than answering: 7 rounds to
+`needs_human_review`, and `exhausted_unresolved`. One carried an **unverified premise** ("why is
+it illegal to do X in Y?") and let it stand uncited while the asker's real, buried question — the
+lawful alternative — went unaddressed; 8 rounds, `exhausted_unresolved`. Two asked for a **"net
+positive or negative?" scalar verdict** over an unscoped population, outcome set, and timeframe,
+which is unanswerable as asked. One asked a **settled verification question** when the report's
+real energy went to the adjacent and more interesting question of why the belief persists.
+
+The questions themselves are paraphrased here rather than quoted, and the run IDs left out: they
+are a private operator's own queries, and this repository is public. In every case the category
+was already nameable — `unexamined_presupposition` (D24) would tag some of these on sight — but
+the finding lands 10–25 minutes and several critique rounds after the one party who could cheaply
+reframe the question, the asker, has already walked away from the keyboard. The
 fix that costs nothing is upstream: catch the same framing before the run starts, while the asker
 is still there to accept, ignore, or edit it.
 
@@ -716,7 +717,10 @@ build, which is what lets the whole existing web test suite stand unchanged and 
 exactly the places a browser resolves against the origin: the server-rendered links and
 form actions, the `303` `Location` after a submit or resume, the manifest's `id`,
 `start_url`, `scope` and icon `src`s, the worker's precache list, its `OFFLINE` fallback and
-its registration scope, and the `Service-Worker-Allowed` header.
+its registration scope, the `Service-Worker-Allowed` header, and — when refinement is
+enabled (D26) — the `fetch()` the inline refinement script issues to `/refine`. That last
+one is a browser-origin URL like the rest and carries the prefix for the same reason; it was
+missed when D26 and D29 landed in separate PRs and is corrected in PR #66.
 
 **A stripping proxy, so the routes do not move.** The proxy removes `/app/` before the
 request arrives, so the app still serves at `/runs`, `/sw.js`, `/manifest.webmanifest`. The
