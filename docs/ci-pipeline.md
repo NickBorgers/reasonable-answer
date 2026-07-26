@@ -60,6 +60,12 @@ that wants a human's inline comment to block must ingest it via `gh api` and fol
 Blocker ids must be stable across cycles for the same underlying problem, because the
 judge namespaces them as `role/id`.
 
+Adding a reviewer role means touching **two** schemas. `reviewer-v1.json`'s `role` enum
+lets the role publish; `fix-result-v1.json`'s `id` pattern lets the fixer *name* that
+role's blockers in `addressed[]`/`skipped[]`. The `docs` role shipped with only the first,
+so for every PR since, a `docs` blocker was one the fixer could never claim to have
+addressed — its artifact would have failed validation against main's schema if it tried.
+
 ### The judge fails closed
 
 [`aggregate.mjs`](../.github/scripts/review/aggregate.mjs) returns NO-GO rather than
@@ -90,6 +96,15 @@ tree and so does the verdict; `addressed[]` only records which of their blockers
 claims to have closed. Nothing in the judge inspects the fixer's diff. That is what stops
 the fixer clearing its own work — the fixed SHA is graded by its own cycle, by reviewers
 that actually read it.
+
+`addressed[]` is credited **only when the fix was actually pushed** — `new_sha` differs
+from `input_sha`, which the host sets only after a successful push. The fixer uploads its
+artifact under `if: always()`, so a run that recorded its work and then died at a later
+gate (lint, the remote-head check) leaves behind a truthful-looking record of changes that
+are not in the tree. PR #49 reported one of three blockers unaddressed when in fact none of
+the three had landed. The finalize comment now says so explicitly, because "the fixer
+claimed fixes but pushed nothing" and "the fixer did nothing" send an operator to two
+different places.
 
 A reviewer only publishes its artifact under the name the judge consumes **if it
 validated**, and the judge separately requires every role the classifier selected to be

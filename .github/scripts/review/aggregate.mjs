@@ -63,8 +63,9 @@
 /**
  * @typedef {Object} FixResult
  * @property {string} input_sha    SHA the fixer started from; MUST equal reviewers' reviewed_sha
- * @property {string} new_sha      resulting SHA after fix (== input_sha if no-op)
- * @property {string[]} addressed  namespaced ids of blockers the fixer applied, e.g. "security/sec-1"
+ * @property {string} new_sha      SHA after the fix was pushed; == input_sha when nothing landed
+ * @property {string[]} addressed  namespaced ids of blockers the fixer applied, e.g. "security/sec-1".
+ *                                 Credited only when new_sha proves a push happened.
  * @property {Array<{id:string,reason:string}>} skipped
  */
 
@@ -178,11 +179,27 @@ export function aggregate(reviewers, fixResult) {
   // Anything without a usable string id is dropped rather than coerced. A malformed entry
   // must not clear a blocker: failing to credit a real fix costs one cycle, while
   // wrongly clearing one lets an unaddressed blocker merge.
+  //
+  // And nothing is credited at all unless the fix actually landed. The fixer uploads its
+  // artifact under `if: always()`, so a run that wrote `addressed[]` and then died at a
+  // later gate — the lint gate, the marker gate, the remote-head check — leaves behind a
+  // truthful-looking record of work that is not in the tree. `new_sha === input_sha` is
+  // exactly that state: the host sets `new_sha` only after a successful push. PR #49 hit
+  // this, reporting one of three blockers unaddressed when in fact none of the three had
+  // been pushed.
+  const pushed =
+    typeof fixResult.new_sha === "string" &&
+    fixResult.new_sha.length > 0 &&
+    fixResult.new_sha !== fixResult.input_sha;
   const addressed = new Set(
-    (Array.isArray(fixResult.addressed) ? fixResult.addressed : [])
-      .map((a) => (typeof a === "string" ? a : a?.id))
-      .filter((id) => typeof id === "string" && id.length > 0)
+    !pushed
+      ? []
+      : (Array.isArray(fixResult.addressed) ? fixResult.addressed : [])
+          .map((a) => (typeof a === "string" ? a : a?.id))
+          .filter((id) => typeof id === "string" && id.length > 0)
   );
+  const claimedButUnpushed =
+    !pushed && (Array.isArray(fixResult.addressed) ? fixResult.addressed.length : 0);
 
   const unaddressed = [];
   for (const r of reviewers) {
@@ -205,6 +222,14 @@ export function aggregate(reviewers, fixResult) {
     reasons.push(
       `${unaddressed.length} blocking issue(s) not addressed by fixer: ` +
         unaddressed.map((u) => u.key).join(", ")
+    );
+  }
+  if (claimedButUnpushed) {
+    // Say it out loud. Otherwise the comment reads as "the fixer did nothing", and the
+    // operator goes looking for a fixer that never ran instead of a gate that refused.
+    reasons.push(
+      `Fixer claimed ${claimedButUnpushed} fix(es) but pushed nothing (new_sha == input_sha); ` +
+        `none were credited.`
     );
   }
   if (requestingChanges.length > 0) {
