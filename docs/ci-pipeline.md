@@ -210,9 +210,12 @@ choice in an `/autoresolve` comment outranks it.
 ### The fixer
 
 `review-fixer.yml` is the only stage that may write to the PR branch. It runs **after the
-reviewers and before the judge**, which is load-bearing: the judge then grades the SHA the
-reviewers actually read, and the fixed SHA earns its own cycle with its own reviewers.
-Judging the post-fix tree would let the fixer clear its own work unread.
+reviewers and before the judge**, which is load-bearing: the judge grades the SHA the
+reviewers actually read — the pre-fix tree — so the fixer cannot clear its own work unread.
+The fixed SHA itself is **not** reviewed again in the normal case: the fixer claims its own
+post-push SHA so no second panel runs, and the fix reaches main on the strength of that
+pre-fix verdict plus the fixer's own gates (see "The fixer claims its own SHA" below, and
+D28 in `docs/decisions.md`).
 
 It does two jobs: it syncs the branch with the base, and it addresses reviewer blockers.
 Either one alone is enough to make it run.

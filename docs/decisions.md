@@ -324,9 +324,9 @@ work); the context record still cannot widen scope and is still untrusted text; 
 fixer still cannot claim `body_clarification` (schema-enforced — recorded intent is not the
 author's own); the docs-coupling rule for invariant-touching fixes still applies; and the
 verification run before exit matters *more* under a wider reach, not less. The safety story
-moves from "the fixer cannot do much" to "the fixed SHA earns its own review cycle with its
-own reviewers" — which was always the real backstop, since the judge grades the reviewed
-SHA, not the fixer's output.
+is not "the fixer cannot do much" but that the judge grades the pre-fix reviewed SHA, not the
+fixer's output: the fixed SHA is not reviewed again (D28), so the pre-fix panel, the fixer's own
+gates, and this verification run are the backstop.
 
 ## D24 — social-bias categories on existing lenses, governed by docs/bias.md
 

@@ -167,10 +167,10 @@ break every time the matrix changes.
 ## 8. Verify the loop end to end
 
 1. Open a trivial PR (a README typo). `PR Validation Required` should go green, and the
-   review pipeline should run the `invariant` reviewer only — a docs-only change does not
-   select `security` or `test`.
-2. Open a PR touching `src/reasonable_answer/controller.py`. All three reviewers should
-   run.
+   review pipeline should run the `invariant` and `docs` reviewers — every non-empty diff
+   selects both, and a docs-only change does not additionally select `security` or `test`.
+2. Open a PR touching `src/reasonable_answer/controller.py`. All four reviewers
+   (`invariant`, `docs`, `security`, and `test`) should run.
 3. File an issue with the **Agent task** template. An agent starts on it immediately. A PR
    should appear with `Resolves #N` — **and the review pipeline should fire on it.** If
    the PR appears but nothing reviews it, the resolver checkout is not using
