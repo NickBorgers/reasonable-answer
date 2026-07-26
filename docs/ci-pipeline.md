@@ -37,6 +37,7 @@ review-entry            authorize · fork-reject · resolve SHA · prior-GO chec
        ├─ docs          Codex      ├─ read-only, each emits a JSON artifact
        ├─ security      Codex      │
        ├─ test          Claude    ─┘
+       ├─ record-cycle  writes review/cycle — only if a reviewer actually ran
        ├─ fix           the ONLY branch-writing stage; skipped on the last cycle
        ├─ judge         deterministic, from main, contents: read
        └─ finalize      labels · summary comment · merge gate
@@ -109,13 +110,31 @@ it holds `contents: read`, so it could not push if it tried.
   re-reviewed. Re-reviewing identical content can only cost tokens and risk a different
   verdict.
 - **NO-GO is not.** A push that tries to address the blockers gets reviewed again.
-- **`/review` always forces a fresh cycle.** It is the human override.
+- **`/review` always forces a fresh review run.** It is the human override: the prior-GO
+  short-circuit is `pull_request`-only, so a comment trigger re-reviews a SHA that already
+  cleared. It still goes through the SHA-keyed dedup claim like every other trigger, so it
+  cannot start while a pending `review/pipeline` claim is held on that SHA. It does *not*
+  reset the counter: the run it starts is the next cycle, so on a PR already at the cap it produces a
+  `cycle_capped` NO-GO with no reviewers. Rebasing the branch is what resets the counter —
+  `review/cycle` lives on the commits, and a rebase leaves those SHAs out of the chain
+  `read-cycle` walks.
 - **A human commit on top of a GO resets the counter** — that is a new conversation, and
   it should get a full review budget. Machine commits are identified by the author email
   `ci@reasonable-answer.local`.
 - **A merge of the base branch into the PR inherits the previous verdict** instead of
   burning a cycle. Without this, routinely resyncing a long-lived branch can push a PR
   into the cap without a single substantive change.
+- **A run that reviewed nothing does not consume a cycle.** `review/cycle` is written by
+  `record-cycle`, after the panel has read the code, and only when at least one reviewer's
+  guard cleared. Every guard refusing — PR Validation red on the reviewed SHA, the branch
+  moved on mid-run, an untrusted author — means no code was read, and the next push starts
+  from the same cycle number. This is fail-open on the counter and safe because `fix`
+  needs `record-cycle`: the only stage that can push cannot run on an unrecorded cycle, so
+  the review → fix → push → review loop the cap bounds cannot advance without being
+  counted. PR #49 is the case that forced this: its first run recorded cycle 1 while all
+  four guards refused, and the push that repaired validation arrived as cycle 2, where
+  `fix_allowed` is already false — spending the PR's one automated fix attempt on a run
+  that read nothing.
 - **`MAX_CYCLES: 2`** is a real loop breaker now that the fixer exists. The loop it bounds
   is review → fix → push → review. At 2: cycle 1 reviews and may fix; cycle 2 reviews that
   fix and may not fix again; a third cycle is capped and finalizes NO-GO. So a PR gets at
@@ -348,6 +367,10 @@ Every knob lives in [`review-agent-run`](../.github/actions/review-agent-run/act
   states are re-claimable by design — do not "harden" this.
 - `cleanup-claim` runs under `if: always()`. Without it a crashed reviewer leaves the SHA
   claimed forever and no future run, including `/review`, can proceed.
+- A reviewer caller job reports `success` when its inner `review` job was *skipped* by the
+  guard, so job `result` cannot answer "did anyone review this?". `review-reviewer.yml`
+  exposes the guard's decision as a workflow output (`reviewed`) for that reason — read it,
+  not `needs.<job>.result`.
 - `hashFiles()` silently returns empty for paths outside the workspace, so gate steps on
   step outputs instead.
 - `gh pr comment`, never `gh pr review --approve` — the latter fails whenever the PAT user

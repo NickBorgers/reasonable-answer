@@ -165,12 +165,17 @@ def _model_list(models: list[str]) -> str:
 
 def _run_row(run: RunSummary) -> str:
     question = run.question if len(run.question) <= 90 else run.question[:87] + "…"
+    # `data-label` mirrors the `<th>` text above it. Below 34rem the stylesheet hides the
+    # header row and restacks each `<tr>` as a card, where a bare "2" means nothing; the
+    # labels come back as `::before` content. They live here, next to the header they
+    # mirror, rather than as literals in the stylesheet, so the two cannot drift apart.
+    # Status needs none — the badge says what it is — and neither does the question.
     return f"""<tr>
   <td>{_badge(run.status)}</td>
   <td class="q"><a href="/runs/{esc(run.run_id)}">{esc(question)}</a></td>
-  <td class="num">{run.rounds or "—"}</td>
-  <td class="dim">{_ago(run.started_at)}</td>
-  <td class="dim mono">{esc(run.run_id)}</td>
+  <td class="num" data-label="rounds">{run.rounds or "—"}</td>
+  <td class="dim" data-label="started">{_ago(run.started_at)}</td>
+  <td class="dim mono" data-label="id">{esc(run.run_id)}</td>
 </tr>"""
 
 
@@ -400,6 +405,12 @@ CSS = """
   --bg: #fbfaf8; --panel: #ffffff; --ink: #1a1a1a; --dim: #6b6b6b;
   --line: #e4e1dc; --accent: #2f5d50; --good: #2f6f4f; --warn: #8a6d1f;
   --bad: #97331f; --live: #2f5d50; --chip: #f0eeea;
+  color-scheme: light dark;
+  /* The two horizontal paddings that stack on a phone: `main`'s gutter and the panel's
+     side padding. Variables rather than literals so the narrow breakpoint can shrink both
+     from one place, and so `.report` can cancel the panel padding with a negative margin
+     that cannot drift from it. */
+  --gutter: 1.5rem; --pad-x: 1.4rem;
 }
 :root[data-theme="dark"], html:not([data-theme="light"]) {}
 @media (prefers-color-scheme: dark) {
@@ -413,13 +424,18 @@ CSS = """
   --bg: #16181a; --panel: #1e2124; --ink: #e8e6e3; --dim: #9a9691;
   --line: #2e3236; --accent: #7fbfa8; --good: #7fbfa8; --warn: #d4b062;
   --bad: #e08b76; --live: #7fbfa8; --chip: #2a2e32;
+  color-scheme: dark;
 }
 :root[data-theme="light"] {
   --bg: #fbfaf8; --panel: #ffffff; --ink: #1a1a1a; --dim: #6b6b6b;
   --line: #e4e1dc; --accent: #2f5d50; --good: #2f6f4f; --warn: #8a6d1f;
   --bad: #97331f; --live: #2f5d50; --chip: #f0eeea;
+  color-scheme: light;
 }
 * { box-sizing: border-box; }
+/* Without this iOS Safari inflates body text when the phone turns landscape, which
+   silently undoes the line-length work below. */
+html { -webkit-text-size-adjust: 100%; }
 body {
   margin: 0; background: var(--bg); color: var(--ink);
   font: 15px/1.55 ui-sans-serif, system-ui, -apple-system, "Segoe UI", sans-serif;
@@ -427,23 +443,33 @@ body {
 .mono, .hash, .runs td.dim.mono { font-family: ui-monospace, SFMono-Regular, Menlo, monospace; font-size: .85em; }
 header {
   display: flex; align-items: baseline; gap: 1rem; flex-wrap: wrap;
-  padding: 1.1rem 1.5rem; border-bottom: 1px solid var(--line);
+  padding: 1.1rem var(--gutter); border-bottom: 1px solid var(--line);
 }
 .brand { font-weight: 650; letter-spacing: -.01em; color: var(--ink); text-decoration: none; font-size: 1.05rem; }
 .tag { color: var(--dim); font-size: .8rem; }
-main { max-width: 60rem; margin: 0 auto; padding: 1.5rem; display: grid; gap: 1.25rem; }
-.panel { background: var(--panel); border: 1px solid var(--line); border-radius: 10px; padding: 1.25rem 1.4rem; }
+main { max-width: 60rem; margin: 0 auto; padding: var(--gutter); display: grid; gap: 1.25rem; }
+/* A grid item defaults to `min-width: auto`, which means it refuses to shrink below the
+   widest unbreakable thing inside it — and on a phone that silently widens the layout
+   viewport for the whole page rather than overflowing one box. Every panel here is free
+   to be narrower than its content; the content is what has to give. */
+main > * { min-width: 0; }
+.panel { background: var(--panel); border: 1px solid var(--line); border-radius: 10px; padding: 1.25rem var(--pad-x); }
 h1 { font-size: 1.3rem; margin: 0 0 .4rem; letter-spacing: -.01em; }
 h2 { font-size: 1rem; margin: 0 0 .9rem; text-transform: uppercase; letter-spacing: .07em; color: var(--dim); }
 h3 { font-size: .8rem; margin: 0 0 .4rem; text-transform: uppercase; letter-spacing: .06em; color: var(--dim); }
 .lede { color: var(--dim); margin: .2rem 0 1rem; }
 .hint { color: var(--dim); font-weight: 400; }
 label { display: block; font-weight: 550; margin: .9rem 0 .35rem; font-size: .9rem; }
-textarea {
+/* `input` is here because the seed-URL field is a real control on this form and was
+   otherwise inheriting the browser default — wrong font, and white-on-white in dark mode. */
+textarea, input[type="url"], input[type="text"] {
   width: 100%; padding: .7rem .8rem; border: 1px solid var(--line); border-radius: 8px;
   background: var(--bg); color: var(--ink); font: inherit; resize: vertical;
 }
-textarea:focus { outline: 2px solid var(--accent); outline-offset: 1px; }
+input[type="url"], input[type="text"] { resize: none; }
+textarea:focus, input[type="url"]:focus, input[type="text"]:focus {
+  outline: 2px solid var(--accent); outline-offset: 1px;
+}
 button, .button {
   display: inline-block; margin-top: 1rem; padding: .55rem 1.1rem; border: 0; border-radius: 7px;
   background: var(--accent); color: var(--bg); font: inherit; font-weight: 600; cursor: pointer;
@@ -528,13 +554,25 @@ table.runs { width: 100%; border-collapse: collapse; }
 /* The report is model-written markdown rendered to HTML, so it is the one place in
    this stylesheet that has to style tags it did not author. Everything is scoped
    under .report for that reason. */
+/* `anywhere` rather than `break-word`, which looks identical but is not: only `anywhere`
+   is counted when the browser works out the element's minimum content width. A report's
+   Sources section is a list of 90-character URLs, and under `break-word` those URLs made
+   the article's minimum width ~660px — which a phone resolves by widening the layout
+   viewport for the entire page, so every other fix here was being undone by three links. */
 .report {
   line-height: 1.7; background: var(--bg); border: 1px solid var(--line);
-  border-radius: 8px; padding: 1.4rem 1.6rem; overflow-wrap: break-word;
+  border-radius: 8px; padding: 1.4rem 1.6rem; overflow-wrap: anywhere;
 }
 .report > :first-child { margin-top: 0; }
 .report > :last-child { margin-bottom: 0; }
-.report h1, .report h2, .report h3, .report h4 { line-height: 1.3; margin: 1.8rem 0 .6rem; }
+/* The global h2/h3 rules dress this app's *own* section labels as small dim uppercase
+   chrome. A report's headings are prose written by a model, not labels on our UI, so they
+   have to be undressed again here — otherwise "## Sources" arrives as a shouting grey
+   caption instead of a heading. */
+.report h1, .report h2, .report h3, .report h4 {
+  line-height: 1.3; margin: 1.8rem 0 .6rem;
+  text-transform: none; letter-spacing: normal; color: var(--ink); font-weight: 650;
+}
 .report h1 { font-size: 1.5rem; }
 .report h2 { font-size: 1.2rem; padding-bottom: .3rem; border-bottom: 1px solid var(--line); }
 .report h3 { font-size: 1rem; }
@@ -554,6 +592,15 @@ table.runs { width: 100%; border-collapse: collapse; }
   padding: .8rem 1rem; overflow-x: auto;
 }
 .report pre code { background: none; border: 0; padding: 0; }
+/* A markdown table is the one construct a model can write that is wider than any phone.
+   `web/markdown.py` wraps every table in this scroller so the table scrolls instead of the
+   document. `overscroll-behavior-x` keeps a horizontal swipe inside the table rather than
+   letting it become the browser's back gesture. */
+.report .table-scroll {
+  overflow-x: auto; overscroll-behavior-x: contain; -webkit-overflow-scrolling: touch;
+  max-width: 100%; margin-bottom: 1rem;
+}
+.report .table-scroll > table { margin-bottom: 0; }
 .report table { border-collapse: collapse; width: 100%; margin-bottom: 1rem; font-size: .9rem; }
 .report th, .report td { border: 1px solid var(--line); padding: .4rem .6rem; text-align: left; }
 .report th { background: var(--panel); }
@@ -566,7 +613,12 @@ table.runs { width: 100%; border-collapse: collapse; }
 .fold > summary:hover { color: var(--ink); }
 .fold[open] > summary { margin-bottom: .6rem; }
 .fold #progress h2 { margin-top: 0; }
-.reading { max-width: 48rem; margin: 0 auto; }
+/* `width: 100%` is not redundant next to `margin: 0 auto`. `main` is a grid, and an auto
+   inline margin makes a grid item size itself to fit-content instead of stretching — which
+   on a phone meant this panel sized to the report's widest line and took the page with it.
+   The explicit width restores the stretch; the auto margins still centre it once the grid
+   area is wider than 48rem. */
+.reading { max-width: 48rem; width: 100%; margin: 0 auto; }
 .reading .run-meta { margin-bottom: .8rem; }
 .reading .question { font-size: 1.05rem; font-weight: 600; margin: 0 0 1rem; }
 .roster-grid { display: grid; grid-template-columns: repeat(auto-fit, minmax(11rem, 1fr)); gap: 1rem; }
@@ -576,8 +628,76 @@ table.runs { width: 100%; border-collapse: collapse; }
   padding: .15rem 0; color: var(--dim);
 }
 .queued-note { color: var(--dim); font-size: .85rem; margin-bottom: 0; }
+/* Two breakpoints, deliberately. 48rem is only the flex-basis that stops the run title
+   sharing a row with the download buttons; everything phone-shaped happens at 34rem.
+   No `pointer: coarse` query — it also matches a desktop touchscreen, where none of this
+   is wanted. */
+@media (max-width: 48rem) {
+  :root { --gutter: 1rem; }
+  /* `flex: 1 1 24rem` let the title keep a 24rem basis while the buttons sat beside it,
+     which crushed the question into a column narrower than the buttons it was next to. */
+  .run-title { flex-basis: 100%; }
+  /* Wide enough that a table which fits still stretches to fill the column, and only one
+     that genuinely does not fit starts to scroll. Above this width the default
+     `width: 100%` is better: there is room for a cell to wrap onto two lines, and wrapping
+     beats hiding a column behind a scroll. Below it, wrapping produces three characters a
+     line, which is not a table any more. */
+  .report .table-scroll > table { width: max-content; min-width: 100%; }
+}
 @media (max-width: 34rem) {
-  .lens { grid-template-columns: 1fr; gap: .1rem; }
+  /* On a 375px viewport the old fixed paddings — 1.5rem + 1.4rem + 1.6rem a side, plus
+     borders — left 227px for the report text. Shrinking the outer two and letting the
+     report cancel the panel's padding entirely gets that to ~320px. */
+  :root { --gutter: .75rem; --pad-x: .9rem; }
+  header { padding: .9rem var(--gutter); }
+  main { gap: 1rem; }
+  /* Full-bleed inside the panel: the negative margin is the panel's own padding, so the
+     two can never drift apart. `.report` is a direct child of `.panel` on both the run
+     page and the reading page. */
+  .panel > .report {
+    margin-left: calc(-1 * var(--pad-x)); margin-right: calc(-1 * var(--pad-x));
+    border-left: 0; border-right: 0; border-radius: 0; padding: 1rem var(--pad-x);
+  }
+  .report h1 { font-size: 1.3rem; }
+  .report h2 { font-size: 1.1rem; }
+  /* iOS Safari zooms the page whenever a focused control is under 16px, and these inherit
+     the 15px body font. Fixed here rather than with `maximum-scale`, which would take
+     pinch-zoom away from everyone to solve it. */
+  textarea, input, select, button, .button { font-size: 16px; }
+  button, .button {
+    display: inline-flex; align-items: center; justify-content: center;
+    min-height: 2.75rem; padding: .6rem 1.1rem;
+  }
+  /* In a standalone window there is no browser back button, so these two links are the
+     only way out of a run or a report. They have to be real targets. */
+  .run-meta a, .fold > summary { display: inline-flex; align-items: center; min-height: 2.75rem; }
+  /* The runs table has five columns and cannot fit a phone, so each row becomes a card:
+     the question on its own full-width line, then the remaining fields labelled from the
+     `data-label` attributes that `_run_row` mirrors off the header cells. */
+  .runs, .runs tbody { display: block; }
+  .runs thead {
+    position: absolute; width: 1px; height: 1px; overflow: hidden;
+    clip-path: inset(50%); white-space: nowrap;
+  }
+  .runs tr {
+    display: grid; grid-template-columns: auto 1fr; gap: .2rem .55rem; align-items: baseline;
+    padding: .5rem 0; border-bottom: 1px solid var(--line);
+  }
+  .runs tr:last-child { border-bottom: 0; }
+  .runs td { display: block; padding: 0; border-bottom: 0; }
+  .runs td.q { grid-column: 1 / -1; order: -1; }
+  .runs td.q a { display: block; min-height: 2.75rem; padding: .35rem 0; }
+  .runs td.num { text-align: left; width: auto; }
+  .runs td.empty { grid-column: 1 / -1; }
+  .runs td.dim.mono { overflow-wrap: anywhere; }
+  .runs td[data-label]::before {
+    content: attr(data-label) " "; color: var(--dim); font-size: .72rem;
+    text-transform: uppercase; letter-spacing: .06em;
+  }
+  /* Two lines per lens rather than three: name on its own row, critic and verdict share
+     the next one. */
+  .lens { grid-template-columns: 1fr auto; gap: .1rem .5rem; }
+  .lens-name { grid-column: 1 / -1; }
   .decision { margin-left: 0; }
   .hash { margin-left: 0; }
 }
