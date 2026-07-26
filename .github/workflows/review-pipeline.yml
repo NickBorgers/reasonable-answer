@@ -188,17 +188,6 @@ jobs:
             echo "fix_allowed=$fix_allowed"
           } >> "$GITHUB_OUTPUT"
 
-      - name: Record cycle on the reviewed SHA
-        if: steps.cycle.outputs.cap_exhausted != 'true' && steps.inherit.outputs.inherit != 'true'
-        uses: ./main-checkout/.github/actions/review-state
-        with:
-          op: write-status
-          sha: ${{ inputs.reviewed_sha }}
-          context: review/cycle
-          state: success
-          description: ${{ steps.cycle.outputs.cycle }}
-          github_token: ${{ secrets.WORKFLOW_PAT }}
-
       - name: Select applicable reviewer roles
         id: classify
         if: steps.cycle.outputs.cap_exhausted != 'true' && steps.inherit.outputs.inherit != 'true'
@@ -285,6 +274,52 @@ jobs:
     secrets:
       WORKFLOW_PAT: ${{ secrets.WORKFLOW_PAT }}
 
+  # ── Cycle accounting ─────────────────────────────────────────────────────────
+  # The cycle counter records reviews performed, not pipeline runs started — so this is
+  # written here, after the panel has actually read the code, rather than in `gather`.
+  #
+  # PR #49 is why. Its first run had every reviewer's guard refuse (PR Validation was red
+  # on that SHA), so nothing was reviewed; `gather` had already recorded cycle 1 anyway,
+  # the judge fail-closed an empty artifact set into a NO-GO, and the next push — the one
+  # that fixed the validation failure — became cycle 2, where `fix_allowed` is false. The
+  # PR's single automated fix attempt was spent on a run that read nothing, and four real
+  # blockers came back with no fixer left to address them.
+  #
+  # Deferring the write means a run that reviewed nothing costs nothing: the next push
+  # starts from the same cycle number. That is fail-open on the counter, and safe, because
+  # `fix` needs this job — the only stage that can push, and therefore the only way to
+  # advance the review → fix → push → review loop this cap exists to bound, cannot run on
+  # a cycle that was never recorded.
+  record-cycle:
+    name: Record cycle
+    needs: [gather, review-invariant, review-docs, review-security, review-test]
+    # A guard that errored outright reports an empty `reviewed`, which reads as false.
+    if: |
+      always() &&
+      needs.gather.result == 'success' &&
+      needs.gather.outputs.cap_exhausted != 'true' &&
+      needs.gather.outputs.inherit != 'true' &&
+      (needs.review-invariant.outputs.reviewed == 'true' ||
+       needs.review-docs.outputs.reviewed == 'true' ||
+       needs.review-security.outputs.reviewed == 'true' ||
+       needs.review-test.outputs.reviewed == 'true')
+    runs-on: ubuntu-latest
+    timeout-minutes: 20
+    steps:
+      - uses: actions/checkout@v4
+        with:
+          ref: main
+
+      - name: Record cycle on the reviewed SHA
+        uses: ./.github/actions/review-state
+        with:
+          op: write-status
+          sha: ${{ inputs.reviewed_sha }}
+          context: review/cycle
+          state: success
+          description: ${{ needs.gather.outputs.cycle }}
+          github_token: ${{ secrets.WORKFLOW_PAT }}
+
   # ── Fixer ────────────────────────────────────────────────────────────────────
   # The only stage that may write to the branch. It runs between the reviewers and the
   # judge on purpose: the judge then grades the SHA the reviewers actually read, and the
@@ -294,12 +329,17 @@ jobs:
   # Skipped on the final permitted cycle. A fix pushed there would never be reviewed —
   # the next cycle is capped — so it would land unexamined code on the branch and call
   # it progress.
+  #
+  # `record-cycle` must succeed first, not merely finish: the fixer's push starts the next
+  # pipeline run, whose `gather` reads this SHA's cycle back. Pushing before the counter
+  # is durable would let the fix be reviewed as cycle 1 again and fixed a second time.
   fix:
     name: Fix
-    needs: [gather, review-invariant, review-docs, review-security, review-test]
+    needs: [gather, review-invariant, review-docs, review-security, review-test, record-cycle]
     if: |
       always() &&
       needs.gather.result == 'success' &&
+      needs.record-cycle.result == 'success' &&
       needs.gather.outputs.cap_exhausted != 'true' &&
       needs.gather.outputs.inherit != 'true' &&
       needs.gather.outputs.fix_allowed == 'true'

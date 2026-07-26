@@ -285,6 +285,31 @@ def test_report_markdown_features_reports_actually_use_are_enabled(config):
     assert "<s>struck</s>" in html
 
 
+def test_report_tables_are_wrapped_in_a_horizontal_scroller(config):
+    """A model-written table is the one construct wider than any phone. It has to scroll
+    inside its own box; without the wrapper it widens the whole document instead."""
+    from reasonable_answer.web.markdown import to_html
+
+    html = to_html("| a | b |\n| - | - |\n| 1 | 2 |\n")
+    assert html.startswith('<div class="table-scroll"><table>')
+    assert html.endswith("</table>\n</div>")
+    # Only tables — the wrapper must not leak onto ordinary prose.
+    assert "table-scroll" not in to_html("A paragraph, a [link](https://example.org).\n")
+
+
+def test_the_runs_table_carries_the_labels_the_card_layout_needs(client, config):
+    """Below 34rem the header row is hidden and each row becomes a card, so every cell
+    that is not self-describing needs its own label. Deleting these attributes degrades
+    the phone layout with nothing else failing, so pin them."""
+    response = client.post("/runs", data={"question": "Labelled?"}, follow_redirects=False)
+    run_id = response.headers["location"].rsplit("/", 1)[-1]
+    _wait_for_final(config, run_id)
+
+    page = client.get("/").text
+    for label in ("rounds", "started", "id"):
+        assert f'data-label="{label}"' in page
+
+
 def test_a_finished_report_outranks_the_progress_trail(client, config):
     """Once there is an answer, the answer is the page; the rounds fold up below it."""
     response = client.post("/runs", data={"question": "Which comes first?"}, follow_redirects=False)
