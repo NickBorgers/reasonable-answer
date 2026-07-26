@@ -85,6 +85,28 @@ Showing reports and critiques to a *human* does not weaken the isolation design 
 about what enters a *model's* context. The UI is a window onto the audit trail, which is the
 reason the pipeline keeps one.
 
+### Installing it on a phone
+
+Behind `tailscale serve` the app is served over HTTPS, which makes it a *secure context* — so
+Chrome offers **Install app** and iOS Safari's **Share → Add to Home Screen** gives a standalone
+window with its own icon, no browser chrome, and the theme colour following light or dark mode.
+
+Reaching it as plain `http://<tailnet-ip>:8080` will not offer installation. Service workers and
+installability require a secure context; that is a browser rule, not a missing feature here, and
+the page behaves identically apart from the missing offer. (`http://localhost` counts as secure,
+so `make serve` does exercise the whole path locally.)
+
+The service worker caches the icons, the manifest and a small offline page — **and nothing else**.
+Runs are live data, so offline you get the offline page rather than a stale run status, and a run
+page is never stored on the device at all. See [D27](docs/decisions.md) for why that is a
+structural property rather than a rule someone has to remember.
+
+The icons are placeholders. To use your own, replace the PNGs in
+`src/reasonable_answer/web/static/icons/` keeping the same filenames and pixel sizes, and restart
+— no Python to touch, and nothing to clear on already-installed devices. See
+[the README in that directory](src/reasonable_answer/web/static/icons/README.md) for what each
+file has to be, and `scripts/make-icons.py` if you want to regenerate the placeholders.
+
 ## Docker
 
 ```bash
@@ -109,6 +131,15 @@ container runs unprivileged; the app detects this at startup and tells you what 
 than failing on your first submission.
 
 No database, no broker, no GPU, no model weights — all inference goes through the proxy.
+
+**Behind a reverse proxy that strips a path prefix** (e.g. Cloudflare Access serving the app
+under `/app` while `/` stays a public landing page), set `RA_ROOT_PATH=/app`. Every URL the
+app emits — links, redirects, the PWA manifest, the live stream and the service worker —
+then carries the prefix and stays same-origin, so nothing escapes back to the root. The app
+still receives the stripped path, so the proxy is the ordinary
+`location /app/ { proxy_pass http://ra:8080/; }` (the trailing slashes strip `/app/`). Unset,
+it serves at the origin root exactly as before. The CSP is unchanged: this is purely
+path-prefixing, not a relaxation. See D29.
 
 ## Configuration
 

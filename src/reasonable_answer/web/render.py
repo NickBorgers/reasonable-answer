@@ -42,6 +42,30 @@ def esc(value: Any) -> str:
     return html.escape(str(value if value is not None else ""))
 
 
+def normalize_base_path(raw: str | None) -> str:
+    """Normalize an operator-supplied URL base path to ``''`` or ``'/seg[/seg...]'``.
+
+    RA is served at the origin root by default; a reverse proxy can relocate it under a
+    stripped prefix (``RA_ROOT_PATH=/app`` behind ``location /app/ { proxy_pass .../; }``).
+    The app still *receives* the stripped path — the prefix only shapes the absolute URLs it
+    *emits*, so every value here is joined as ``base + "/..."``. The empty string is the
+    identity: ``"" + "/runs"`` is ``"/runs"``, which is exactly today's behaviour, so an
+    unset env leaves every URL byte-identical to before.
+
+    A bare ``/`` and an unset value both collapse to ``''``; a trailing slash is dropped so
+    the join never doubles it, and a missing leading slash is added so a value like ``app``
+    still anchors at the origin rather than escaping to some sibling path.
+    """
+    if not raw:
+        return ""
+    trimmed = raw.strip()
+    if not trimmed or trimmed == "/":
+        return ""
+    if not trimmed.startswith("/"):
+        trimmed = "/" + trimmed
+    return trimmed.rstrip("/")
+
+
 def _ago(ts: float | None) -> str:
     if not ts:
         return "—"
@@ -63,32 +87,78 @@ def _short(identity: str | None) -> str:
     return identity.split("/")[-1]
 
 
+#: The page's Content-Security-Policy, in one place so the test that pins it and the head
+#: that emits it cannot disagree. Every source here is argued for in the comment beside the
+#: meta tag and in D27; widening it is a decision that belongs in `docs/decisions.md`.
+CSP = (
+    "default-src 'none'; img-src 'self'; style-src 'unsafe-inline'; "
+    "script-src 'self' 'unsafe-inline'; connect-src 'self'; manifest-src 'self'; "
+    "worker-src 'self'; form-action 'self'; base-uri 'none'"
+)
+
+
 # --------------------------------------------------------------------- layout
 
 
-def render_layout(title: str, body: str, live: bool = False, extra_css: str = "", extra_script: str = "") -> str:
-    # `extra_css`/`extra_script` default to "", so when neither is supplied this string
-    # is byte-for-byte what it always was -- load-bearing for `render_index`'s promise
+def render_layout(
+    title: str,
+    body: str,
+    live: bool = False,
+    base_path: str = "",
+    extra_css: str = "",
+    extra_script: str = "",
+) -> str:
+    # `extra_css`/`extra_script` default to "", so when neither is supplied this page
+    # is byte-for-byte the non-refine build -- load-bearing for `render_index`'s promise
     # that `refine.enabled = false` renders an unchanged page (docs/question-refinement.md).
-    scripts = ("<script>" + LIVE_JS + "</script>" if live else "") + (
+    # The service-worker + live-progress tag is emitted exactly as it is without refine
+    # (D27); the refine script, when enabled, is appended as its own separate tag.
+    scripts = f"<script>{_register_sw_js(base_path)}{LIVE_JS if live else ''}</script>" + (
         "<script>" + extra_script + "</script>" if extra_script else ""
     )
     return f"""<!doctype html>
 <html lang="en">
 <head>
 <meta charset="utf-8">
-<meta name="viewport" content="width=device-width, initial-scale=1">
+<!-- `viewport-fit=cover` lets the page reach under a notch and the home indicator, which
+     is what an installed app is expected to do; the stylesheet pays that back with
+     safe-area padding. No `maximum-scale` — pinch-zoom stays available, and the reason it
+     is not needed is that the stylesheet sizes controls at 16px. -->
+<meta name="viewport" content="width=device-width, initial-scale=1, viewport-fit=cover">
 <!-- Belt to the renderer's braces: the report is model-written, so even if some future
      construct slips past markdown-it, the browser has no directive that lets this page
-     fetch anything off-origin. `unsafe-inline` covers the stylesheet and the SSE script,
-     both of which are literals in this file; `connect-src 'self'` is the progress stream. -->
-<meta http-equiv="Content-Security-Policy" content="default-src 'none'; img-src 'none'; style-src 'unsafe-inline'; script-src 'unsafe-inline'; connect-src 'self'; form-action 'self'; base-uri 'none'">
+     fetch anything off-origin. `unsafe-inline` covers the stylesheet and the two inline
+     scripts, all literals in this file; `connect-src 'self'` is the progress stream.
+     `img-src 'self'` is what the icon set needs — the browser enforces img-src on favicon
+     and manifest-icon fetches. It does not reopen what `'none'` was closing: report text
+     cannot produce an image at all, because `web/markdown.py` disables the image rule and
+     forbids raw HTML, so the ban lives a layer earlier than this policy. `manifest-src`
+     and `worker-src` are additions rather than relaxations, both blocked by
+     `default-src 'none'` and neither covered by `script-src 'unsafe-inline'`, which
+     permits inline blocks and not URLs. Changing this literal is a decision, not a
+     tidy-up: see D27, and the test that pins it. -->
+<meta http-equiv="Content-Security-Policy" content="{CSP}">
 <title>{esc(title)}</title>
+<!-- Hand-maintained copies of `--bg` light and dark from the stylesheet below. -->
+<meta name="theme-color" content="#fbfaf8" media="(prefers-color-scheme: light)">
+<meta name="theme-color" content="#16181a" media="(prefers-color-scheme: dark)">
+<meta name="color-scheme" content="light dark">
+<meta name="mobile-web-app-capable" content="yes">
+<meta name="apple-mobile-web-app-capable" content="yes">
+<!-- `default`, not `black-translucent`: translucent draws the page under the status bar,
+     which would put the clock on top of the header. -->
+<meta name="apple-mobile-web-app-status-bar-style" content="default">
+<meta name="apple-mobile-web-app-title" content="reasonable-answer">
+<link rel="icon" href="{base_path}/static/icons/favicon.svg" type="image/svg+xml">
+<link rel="icon" href="{base_path}/static/icons/icon-192.png" sizes="192x192" type="image/png">
+<!-- iOS ignores the manifest's icons for the home screen and reads this one. -->
+<link rel="apple-touch-icon" href="{base_path}/static/icons/apple-touch-icon.png">
+<link rel="manifest" href="{base_path}/manifest.webmanifest">
 <style>{CSS}{extra_css}</style>
 </head>
 <body>
 <header>
-  <a class="brand" href="/">reasonable&#8209;answer</a>
+  <a class="brand" href="{base_path}/">reasonable&#8209;answer</a>
   <span class="tag">consensus-reviewed with in-artifact sourcing</span>
 </header>
 <main>{body}</main>
@@ -100,9 +170,11 @@ def render_layout(title: str, body: str, live: bool = False, extra_css: str = ""
 # ---------------------------------------------------------------------- index
 
 
-def render_index(runs: list[RunSummary], queue_depth: int, config: Config) -> str:
+def render_index(
+    runs: list[RunSummary], queue_depth: int, config: Config, base_path: str = ""
+) -> str:
     rows = (
-        "\n".join(_run_row(r) for r in runs)
+        "\n".join(_run_row(r, base_path) for r in runs)
         or '<tr><td colspan="5" class="empty">No runs yet. Ask something above.</td></tr>'
     )
     depth = (
@@ -137,7 +209,7 @@ def render_index(runs: list[RunSummary], queue_depth: int, config: Config) -> st
   <p class="lede">A roster of models will take turns writing and critiquing an answer until no
   eligible reviewer can find a material defect &mdash; or until the cap stops them.
   Expect this to take <strong>10&ndash;25 minutes</strong>.</p>
-  <form method="post" action="/runs">
+  <form method="post" action="{base_path}/runs">
     <label for="question">Question</label>
     <textarea id="question" name="question" rows="3" required maxlength="{config.max_question_chars}"
       placeholder="Is remote work better for software team productivity?"></textarea>{refine_block}
@@ -172,6 +244,7 @@ def render_index(runs: list[RunSummary], queue_depth: int, config: Config) -> st
     return render_layout(
         "reasonable-answer",
         body,
+        base_path=base_path,
         extra_css=REFINE_CSS if config.refine.enabled else "",
         extra_script=REFINE_JS if config.refine.enabled else "",
     )
@@ -181,7 +254,7 @@ def _model_list(models: list[str]) -> str:
     return "".join(f"<li>{esc(m)}</li>" for m in models)
 
 
-def _run_row(run: RunSummary) -> str:
+def _run_row(run: RunSummary, base_path: str = "") -> str:
     question = run.question if len(run.question) <= 90 else run.question[:87] + "…"
     # `data-label` mirrors the `<th>` text above it. Below 34rem the stylesheet hides the
     # header row and restacks each `<tr>` as a card, where a bare "2" means nothing; the
@@ -190,7 +263,7 @@ def _run_row(run: RunSummary) -> str:
     # Status needs none — the badge says what it is — and neither does the question.
     return f"""<tr>
   <td>{_badge(run.status)}</td>
-  <td class="q"><a href="/runs/{esc(run.run_id)}">{esc(question)}</a></td>
+  <td class="q"><a href="{base_path}/runs/{esc(run.run_id)}">{esc(question)}</a></td>
   <td class="num" data-label="rounds">{run.rounds or "—"}</td>
   <td class="dim" data-label="started">{_ago(run.started_at)}</td>
   <td class="dim mono" data-label="id">{esc(run.run_id)}</td>
@@ -213,27 +286,28 @@ def render_run(
     report: str | None,
     final: dict[str, Any] | None,
     lens_names: list[str],
+    base_path: str = "",
 ) -> str:
     resume = (
-        f"""<form method="post" action="/runs/{esc(summary.run_id)}/resume" class="inline">
+        f"""<form method="post" action="{base_path}/runs/{esc(summary.run_id)}/resume" class="inline">
         <button type="submit" class="secondary">Resume this run</button></form>"""
         if summary.status == "interrupted"
         else ""
     )
 
     downloads = (
-        f"""<a class="button" href="/runs/{esc(summary.run_id)}/report">Read the report</a>
-        <a class="secondary button" href="/runs/{esc(summary.run_id)}/report.md">report.md</a>
-        <a class="secondary button" href="/runs/{esc(summary.run_id)}/audit.json">audit.json</a>"""
+        f"""<a class="button" href="{base_path}/runs/{esc(summary.run_id)}/report">Read the report</a>
+        <a class="secondary button" href="{base_path}/runs/{esc(summary.run_id)}/report.md">report.md</a>
+        <a class="secondary button" href="{base_path}/runs/{esc(summary.run_id)}/audit.json">audit.json</a>"""
         if report
-        else f'<a class="secondary button" href="/runs/{esc(summary.run_id)}/audit.json">audit.json</a>'
+        else f'<a class="secondary button" href="{base_path}/runs/{esc(summary.run_id)}/audit.json">audit.json</a>'
     )
 
     # Once there is a report to read, the report is the page and the round-by-round
     # trail is supporting evidence — so it moves below and folds away. While the run is
     # live it is the only thing there is to look at, so it stays open.
     progress = f"""<section class="panel" id="progress"
-   data-stream="/runs/{esc(summary.run_id)}/stream"
+   data-stream="{base_path}/runs/{esc(summary.run_id)}/stream"
    data-live="{'1' if summary.is_live else '0'}">
 {render_run_progress(summary, timeline, lens_names)}
 </section>"""
@@ -263,7 +337,12 @@ def render_run(
 
 {progress}
 """
-    return render_layout(f"{summary.question[:60]} — reasonable-answer", body, live=summary.is_live)
+    return render_layout(
+        f"{summary.question[:60]} — reasonable-answer",
+        body,
+        live=summary.is_live,
+        base_path=base_path,
+    )
 
 
 def render_run_progress(
@@ -367,7 +446,9 @@ def _report_section(report: str | None, final: dict[str, Any] | None) -> str:
 </section>"""
 
 
-def render_report(summary: RunSummary, report: str, final: dict[str, Any] | None) -> str:
+def render_report(
+    summary: RunSummary, report: str, final: dict[str, Any] | None, base_path: str = ""
+) -> str:
     """The report on its own page — the thing to hand to someone who wants to *read* it,
     rather than watch the pipeline that produced it."""
     chosen = (final or {}).get("chosen_round")
@@ -376,17 +457,46 @@ def render_report(summary: RunSummary, report: str, final: dict[str, Any] | None
 <section class="panel reading">
   <div class="run-meta">
     {_badge(summary.status)}
-    <a class="dim" href="/runs/{esc(summary.run_id)}">back to the run</a>
+    <a class="dim" href="{base_path}/runs/{esc(summary.run_id)}">back to the run</a>
     <span class="dim mono">{esc(summary.run_id)}{provenance}</span>
-    <a class="dim" href="/runs/{esc(summary.run_id)}/report.md">report.md</a>
+    <a class="dim" href="{base_path}/runs/{esc(summary.run_id)}/report.md">report.md</a>
   </div>
   <p class="question">{esc(summary.question)}</p>
   <article class="report">{to_html(report)}</article>
 </section>"""
-    return render_layout(f"{summary.question[:60]} — reasonable-answer", body)
+    return render_layout(f"{summary.question[:60]} — reasonable-answer", body, base_path=base_path)
 
 
 # ------------------------------------------------------------------- assets
+
+#: Registers the service worker, which is what makes the app installable rather than
+#: bookmarkable. Both guards matter: outside a secure context `navigator.serviceWorker` is
+#: undefined in Chrome, and the `register` call would raise a SecurityError that surfaces
+#: as an unhandled rejection. Reached over plain http on a tailnet address this emits
+#: nothing at all and the page behaves exactly as it did before; over `tailscale serve`'s
+#: HTTPS — or `http://localhost`, which also counts — it installs.
+#:
+#: The script URL and scope carry the base path so that behind a stripping proxy the worker
+#: registers under `/app/` and controls the app where it actually lives, rather than
+#: escaping to the origin root the way an unprefixed `/sw.js` would. `__RA_BASE__` is a
+#: literal placeholder substituted per request, not a real path, so the empty base leaves
+#: this byte-identical to `register('/sw.js', { scope: '/' })`.
+#:
+#: MUST end in a semicolon. This is concatenated with LIVE_JS into one <script>, and
+#: without it `})()` followed by `(function` parses as a call and takes the live stream
+#: down with it. There is a test for exactly that.
+_REGISTER_SW_JS = """
+(function () {
+  if (!('serviceWorker' in navigator) || !window.isSecureContext) return;
+  window.addEventListener('load', function () {
+    navigator.serviceWorker.register('__RA_BASE__/sw.js', { scope: '__RA_BASE__/' }).catch(function () {});
+  });
+})();
+"""
+
+
+def _register_sw_js(base_path: str = "") -> str:
+    return _REGISTER_SW_JS.replace("__RA_BASE__", base_path)
 
 LIVE_JS = """
 (function () {
@@ -822,6 +932,19 @@ table.runs { width: 100%; border-collapse: collapse; }
   padding: .15rem 0; color: var(--dim);
 }
 .queued-note { color: var(--dim); font-size: .85rem; margin-bottom: 0; }
+/* `viewport-fit=cover` puts the page under the notch and the home indicator, so the two
+   full-width containers have to hold their content clear of both. These follow the padding
+   shorthands above rather than replacing them: a browser that cannot parse `env()` drops
+   the whole declaration, and the shorthand is what it falls back to. */
+header {
+  padding-left: max(var(--gutter), env(safe-area-inset-left));
+  padding-right: max(var(--gutter), env(safe-area-inset-right));
+}
+main {
+  padding-left: max(var(--gutter), env(safe-area-inset-left));
+  padding-right: max(var(--gutter), env(safe-area-inset-right));
+  padding-bottom: calc(var(--gutter) + env(safe-area-inset-bottom));
+}
 /* Two breakpoints, deliberately. 48rem is only the flex-basis that stops the run title
    sharing a row with the download buttons; everything phone-shaped happens at 34rem.
    No `pointer: coarse` query — it also matches a desktop touchscreen, where none of this

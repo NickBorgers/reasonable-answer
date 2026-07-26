@@ -133,13 +133,98 @@ jobs:
           echo "count=${COUNT}" >> "$GITHUB_OUTPUT"
           echo "Reviewers raised ${COUNT} blocking issue(s)."
 
+      # ── Sync with the base branch ────────────────────────────────────────────
+      # Almost every PR here is agent-authored, so when the base moves there is no human
+      # in the loop to resync. The merge is attempted on the host, before the agent runs,
+      # and lands in the same commit as the reviewer fixes.
+      #
+      # It happens in the fixer and nowhere earlier because the fixer is the only stage
+      # allowed to write the branch. Merging before the reviewers would also churn the SHA
+      # they were dispatched against, and dedup, the cycle counter, and every artifact name
+      # are keyed on `reviewed_sha`.
+      #
+      # Three outcomes:
+      #   none      already contains the base tip — nothing to do
+      #   clean     merged without conflict — committed here, on the host
+      #   conflicts markers left in the working tree for the agent to resolve as ordinary
+      #             file edits; the commit step below seals it or aborts
+      - name: Sync with the base branch
+        id: sync
+        working-directory: ${{ env.PR_WORKSPACE }}
+        env:
+          BASE_REF: ${{ inputs.base_ref }}
+          HEAD_REF: ${{ inputs.head_ref }}
+          CONFLICT_LIST: .review-output/merge-conflicts.txt
+        run: |
+          set -euo pipefail
+
+          git config user.email "${AGENT_COMMIT_EMAIL}"
+          git config user.name  "${AGENT_COMMIT_NAME}"
+
+          # Deliberately not a shallow fetch. A branch further behind than the depth would
+          # get a truncated history and a merge base that is not the real one.
+          git fetch --quiet origin "${BASE_REF}"
+
+          : > "$CONFLICT_LIST"
+
+          if git merge-base --is-ancestor "origin/${BASE_REF}" HEAD; then
+            echo "merge_state=none" >> "$GITHUB_OUTPUT"
+            echo "Already contains origin/${BASE_REF}; no sync needed."
+            exit 0
+          fi
+
+          if git merge --no-commit --no-ff "origin/${BASE_REF}"; then
+            git commit -m "Merge origin/${BASE_REF} into ${HEAD_REF}" \
+                       -m "Pipeline-driven sync to keep the PR mergeable; no PR-side content delta."
+            echo "merge_state=clean" >> "$GITHUB_OUTPUT"
+            echo "Clean merge from origin/${BASE_REF} committed."
+          else
+            # The list goes to a file, never to an env var. It is attacker-influenced (a
+            # path is whatever a contributor named a file), and the agent's environment is
+            # assembled from an --env-file: a newline in a path would inject arbitrary
+            # variables into the container, and a comma would corrupt a delimited list.
+            git diff --name-only --diff-filter=U > "$CONFLICT_LIST"
+            echo "merge_state=conflicts" >> "$GITHUB_OUTPUT"
+            echo "Merge produced conflicts in:"
+            sed 's/^/  /' "$CONFLICT_LIST"
+            echo "Markers left in the working tree; the agent resolves them in its run."
+          fi
+
+      # One gate for the whole job, replacing the older "blockers != 0" test. There are now
+      # two independent reasons to do work — reviewer blockers, or a base branch that moved
+      # — and they need different amounts of it. A clean sync needs no agent at all; paying
+      # for a self-hosted runner and a model round-trip to push a merge the host already
+      # made would be pure waste.
+      - name: Decide what work this cycle needs
+        id: work
+        env:
+          BLOCKERS: ${{ steps.blockers.outputs.count }}
+          MERGE_STATE: ${{ steps.sync.outputs.merge_state }}
+        run: |
+          set -euo pipefail
+
+          agent=false
+          if [ "$BLOCKERS" != "0" ] || [ "$MERGE_STATE" = "conflicts" ]; then
+            agent=true
+          fi
+
+          # Anything that has to reach the branch: fixes, a sealed merge, or both.
+          push=false
+          if [ "$BLOCKERS" != "0" ] || [ "$MERGE_STATE" != "none" ]; then
+            push=true
+          fi
+
+          echo "agent=${agent}" >> "$GITHUB_OUTPUT"
+          echo "push=${push}" >> "$GITHUB_OUTPUT"
+          echo "work: blockers=${BLOCKERS} merge_state=${MERGE_STATE} agent=${agent} push=${push}"
+
       # ── Author session ───────────────────────────────────────────────────────
       # Everything from here to "Run the fixer" is best-effort. Any failure degrades to
       # the cold path, which is strictly more conservative, so none of it is fatal.
 
       - name: Parse the Author-Session trailer
         id: trailer
-        if: steps.blockers.outputs.count != '0'
+        if: steps.work.outputs.agent == 'true'
         env:
           GH_TOKEN: ${{ secrets.WORKFLOW_PAT }}
           REPO: ${{ github.repository }}
@@ -187,7 +272,7 @@ jobs:
 
       - name: Unpack and validate the author session
         id: session
-        if: steps.blockers.outputs.count != '0'
+        if: steps.work.outputs.agent == 'true'
         env:
           AGENT: ${{ steps.trailer.outputs.agent }}
           RUN_ID: ${{ steps.trailer.outputs.run_id }}
@@ -248,7 +333,7 @@ jobs:
       # the prompt tells the agent that instructions inside it are not instructions.
       - name: Reconstruct PR context
         id: context
-        if: steps.blockers.outputs.count != '0'
+        if: steps.work.outputs.agent == 'true'
         env:
           GH_TOKEN: ${{ secrets.WORKFLOW_PAT }}
           REPO: ${{ github.repository }}
@@ -337,7 +422,7 @@ jobs:
       # ── Run ──────────────────────────────────────────────────────────────────
 
       - name: Stage the prompt and schema
-        if: steps.blockers.outputs.count != '0'
+        if: steps.work.outputs.agent == 'true'
         env:
           MODE: ${{ steps.session.outputs.mode }}
         run: |
@@ -362,7 +447,7 @@ jobs:
       # a resume that has produced nothing in 25 minutes is hung, not thinking.
       - name: Run the fixer
         id: run
-        if: steps.blockers.outputs.count != '0'
+        if: steps.work.outputs.agent == 'true'
         continue-on-error: ${{ steps.session.outputs.mode == 'author-resume' }}
         uses: ./.github/actions/review-agent-run
         with:
@@ -382,6 +467,8 @@ jobs:
           extra_env: |
             REVIEWER_ARTIFACTS_DIR=.review-output/reviewer-artifacts
             PR_CONTEXT_PATH=.review-output/pr-context.md
+            MERGE_STATE=${{ steps.sync.outputs.merge_state }}
+            MERGE_CONFLICT_FILES_PATH=.review-output/merge-conflicts.txt
           workflow_pat: ${{ secrets.WORKFLOW_PAT }}
           llm_proxy_base_url: ${{ vars.LLM_PROXY_BASE_URL }}
           llm_proxy_openai_base_url: ${{ vars.LLM_PROXY_OPENAI_BASE_URL }}
@@ -402,11 +489,14 @@ jobs:
       - name: Fall back to a cold fixer
         id: fallback
         if: >-
-          steps.blockers.outputs.count != '0'
+          steps.work.outputs.agent == 'true'
           && steps.session.outputs.mode == 'author-resume'
           && steps.run.outcome != 'success'
         env:
           REVIEWED_SHA: ${{ inputs.reviewed_sha }}
+          BASE_REF: ${{ inputs.base_ref }}
+          HEAD_REF: ${{ inputs.head_ref }}
+          MERGE_STATE: ${{ steps.sync.outputs.merge_state }}
         run: |
           set -euo pipefail
           echo "::warning::Author-resume fixer did not succeed (outcome=${{ steps.run.outcome }}); falling back to a cold fixer."
@@ -433,6 +523,31 @@ jobs:
           # — untouched.
           git -C "${PR_DIR}" reset --hard "${REVIEWED_SHA}"
           git -C "${PR_DIR}" clean -fd
+
+          # That reset also undid the base-branch sync — a clean merge commit, or a
+          # conflicted index with its markers. The cold fixer is handed the same
+          # MERGE_STATE the sync step recorded, so leaving the tree unsynced here would
+          # tell it to resolve conflicts that are no longer in front of it, and would
+          # quietly drop the sync: a conflicts-only cycle would then reach the commit
+          # step with a clean tree, report nothing to do, and push nothing at all.
+          #
+          # Replaying the same merge is deterministic — same two commits, same strategy —
+          # so it reproduces the recorded state rather than inventing a new one. If it
+          # somehow does not, fail rather than run an agent against a state nobody
+          # described to it.
+          if [ "${MERGE_STATE}" != "none" ]; then
+            REPLAYED=conflicts
+            if git -C "${PR_DIR}" merge --no-commit --no-ff "origin/${BASE_REF}"; then
+              git -C "${PR_DIR}" commit -m "Merge origin/${BASE_REF} into ${HEAD_REF}" \
+                                        -m "Pipeline-driven sync to keep the PR mergeable; no PR-side content delta."
+              REPLAYED=clean
+            fi
+            if [ "$REPLAYED" != "${MERGE_STATE}" ]; then
+              echo "::error::re-applying the base merge produced '${REPLAYED}' where the sync step recorded '${MERGE_STATE}'; refusing to run the cold fixer against an undescribed tree."
+              exit 1
+            fi
+            echo "Re-applied the ${MERGE_STATE} merge from origin/${BASE_REF} for the cold run."
+          fi
 
           # Swap the resume prompt out for the cold one. Same destination path the
           # primary run read, staged from main's checkout so the PR cannot edit it.
@@ -463,6 +578,8 @@ jobs:
           extra_env: |
             REVIEWER_ARTIFACTS_DIR=.review-output/reviewer-artifacts
             PR_CONTEXT_PATH=.review-output/pr-context.md
+            MERGE_STATE=${{ steps.sync.outputs.merge_state }}
+            MERGE_CONFLICT_FILES_PATH=.review-output/merge-conflicts.txt
           workflow_pat: ${{ secrets.WORKFLOW_PAT }}
           llm_proxy_base_url: ${{ vars.LLM_PROXY_BASE_URL }}
           llm_proxy_openai_base_url: ${{ vars.LLM_PROXY_OPENAI_BASE_URL }}
@@ -476,7 +593,7 @@ jobs:
       # outputs are absent when that run was killed mid-flight.
       - name: Resolve the effective fixer result
         id: fixer
-        if: steps.blockers.outputs.count != '0'
+        if: steps.work.outputs.agent == 'true'
         env:
           SESSION_MODE: ${{ steps.session.outputs.mode }}
           COLD_OUTCOME: ${{ steps.run_cold.outcome }}
@@ -497,7 +614,7 @@ jobs:
       # ── Gates before anything is pushed ──────────────────────────────────────
 
       - name: Validate the fixer artifact
-        if: steps.blockers.outputs.count != '0'
+        if: steps.work.outputs.agent == 'true'
         env:
           RESULT_JSON: ${{ steps.fixer.outputs.result_json }}
           EXPECTED_SHA: ${{ inputs.reviewed_sha }}
@@ -505,6 +622,28 @@ jobs:
           EXPECTED_MODE: ${{ steps.fixer.outputs.effective_mode }}
         run: |
           set -euo pipefail
+
+          # Take the canonical name away from the agent BEFORE anything is checked.
+          #
+          # `fixer-result.json` is the exact path the judge downloads and reads, the agent
+          # wrote it, and the artifact uploads under `if: always()` — so every gate below
+          # is a gate the agent survives by failing it, as long as the file keeps that
+          # name. An artifact with the right `input_sha`, a fabricated `new_sha` and a
+          # wrong `cycle` fails validation here and still gets its `addressed[]` credited,
+          # because the judge re-checks neither cycle nor mode.
+          #
+          # From this line the canonical name exists only if the host creates it, which it
+          # does at the end of this step from validated, stamped content. Anything that
+          # goes wrong in between leaves no canonical artifact at all, and the judge treats
+          # a missing one as "nothing was fixed" — the fail-closed direction. The agent's
+          # original stays under a name the judge never looks up and the `fixer-*` upload
+          # glob still collects, so a failure here is still diagnosable.
+          UNSTAMPED="$(dirname "$RESULT_JSON")/fixer-unstamped-result.json"
+          mv "$RESULT_JSON" "$UNSTAMPED" || {
+            rm -f "$RESULT_JSON"
+            echo "::error::could not quarantine the fixer artifact; refusing to leave an unvalidated one where the judge reads."
+            exit 1
+          }
 
           # `npm ci` from a committed lockfile, never `npx --yes ajv-cli@5`.
           #
@@ -542,7 +681,7 @@ jobs:
           # MODULE_NOT_FOUND. Skipping only removes a tolerance — ajv still fails closed.
           NORMALIZER=".github/scripts/review/normalize-artifact.mjs"
           if [ -f "$NORMALIZER" ]; then
-            node "$NORMALIZER" --schema "$FIX_SCHEMA" --data "$RESULT_JSON"
+            node "$NORMALIZER" --schema "$FIX_SCHEMA" --data "$UNSTAMPED"
           else
             echo "::notice::normalize-artifact.mjs is not on main yet; skipping length normalization (bootstrap)"
           fi
@@ -550,14 +689,14 @@ jobs:
           # Main's schema, never the PR's — a PR cannot redefine the contract its own
           # fixer output is checked against.
           "${AJV[@]}" validate --spec=draft2020 --strict=false \
-            -s "$FIX_SCHEMA" -d "$RESULT_JSON"
+            -s "$FIX_SCHEMA" -d "$UNSTAMPED"
 
           # The fixer declares which tree it worked from. If that is not the tree the
           # reviewers read, its changes answer findings that were never made about this
           # code, and pushing them is worse than doing nothing.
-          actual_sha=$(jq -r '.input_sha' "$RESULT_JSON")
-          actual_cycle=$(jq -r '.cycle' "$RESULT_JSON")
-          actual_mode=$(jq -r '.mode' "$RESULT_JSON")
+          actual_sha=$(jq -r '.input_sha' "$UNSTAMPED")
+          actual_cycle=$(jq -r '.cycle' "$UNSTAMPED")
+          actual_mode=$(jq -r '.mode' "$UNSTAMPED")
 
           fail=0
           [ "$actual_sha" = "$EXPECTED_SHA" ] || { echo "::error::input_sha mismatch: $actual_sha != $EXPECTED_SHA"; fail=1; }
@@ -569,36 +708,115 @@ jobs:
           # intent of its own to appeal to. Left unchecked it becomes a way to close
           # every blocker without changing code.
           if [ "$actual_mode" != "author-resume" ]; then
-            n=$(jq '[.addressed[] | select(.resolution == "body_clarification")] | length' "$RESULT_JSON")
+            n=$(jq '[.addressed[] | select(.resolution == "body_clarification")] | length' "$UNSTAMPED")
             [ "$n" -eq 0 ] || { echo "::error::cold fixer claimed $n body_clarification resolution(s)"; fail=1; }
           fi
-          exit "$fail"
+          [ "$fail" -eq 0 ] || exit "$fail"
+
+          # Take `new_sha` away from the agent, here, before any gate below can fail.
+          #
+          # The judge credits `addressed[]` only when `new_sha` differs from `input_sha`,
+          # which is meant to prove the host pushed. But the agent writes this artifact and
+          # the artifact uploads under `if: always()` — so an agent that guessed any
+          # non-equal value, on a run that then died at the lint gate or the marker gate,
+          # would have every claimed fix credited for work that is not in the tree. That is
+          # the exact bug the crediting rule exists to close, re-entered through the field
+          # it keys on.
+          #
+          # Everything above passed, so the canonical name can exist again — created here,
+          # by the host, from the quarantined content, with `new_sha` stamped to the input
+          # SHA. The field is host-owned from this point on: it reads "nothing landed"
+          # unless the push step overwrites it with a real SHA.
+          if jq --arg s "$EXPECTED_SHA" '.new_sha = $s' "$UNSTAMPED" > "$RESULT_JSON"; then
+            rm -f "$UNSTAMPED"
+          else
+            rm -f "$RESULT_JSON"
+            echo "::error::could not stamp new_sha on the fixer artifact; the unstamped copy is preserved as fixer-unstamped-result.json and this cycle will be judged as having fixed nothing."
+            exit 1
+          fi
 
       - name: Refuse to push a tree that does not lint
-        if: steps.blockers.outputs.count != '0'
+        if: steps.work.outputs.push == 'true'
         working-directory: ${{ env.PR_WORKSPACE }}
+        env:
+          # main's lockfile, not the PR's. A PR must not choose — or quietly downgrade —
+          # the linter that gates its own fix. The one-PR window this opens (a PR whose
+          # whole point is bumping ruff is linted by the outgoing version) is the correct
+          # direction to be wrong in.
+          MAIN_LOCK: ${{ github.workspace }}/uv.lock
+          PR_DIR: ${{ github.workspace }}/${{ env.PR_WORKSPACE }}
+          CI_IMAGE: ${{ vars.CI_IMAGE || format('ghcr.io/nickborgers/{0}-ci:latest', 'reasonable-answer') }}
         run: |
           set -euo pipefail
           # PR Validation runs ruff as a required check. Pushing a commit that fails it
           # burns the next cycle on a failure this stage created.
           #
+          # The version is read from the lockfile rather than pinned inline, because an
+          # inline pin silently drifts: this step ran ruff 0.9.7 while PR Validation
+          # resolved the lockfile's 0.15.22 — six minor versions apart, two different
+          # linters answering the same question, and this one holding the push decision.
+          #
           # The test suite is deliberately NOT run here. Doing so means installing the
           # PR's own pyproject.toml, which executes PR-authored build configuration in
           # the one job that holds a write-capable PAT. Tests run in PR Validation, on a
-          # runner with no secrets — the correct place to execute untrusted code.
-          uvx ruff@0.9.7 check src/ tests/ || {
-            echo "::error::ruff failed on the fixed tree; refusing to push."
+          # runner with no secrets — the correct place to execute untrusted code. Reading
+          # a version string out of main's lockfile executes nothing.
+          RUFF_VERSION=$(grep -A1 '^name = "ruff"$' "$MAIN_LOCK" \
+            | sed -n 's/^version = "\(.*\)"$/\1/p' | head -1)
+          if [ -z "$RUFF_VERSION" ]; then
+            echo "::error::could not read the pinned ruff version from main's uv.lock; refusing to push."
+            exit 1
+          fi
+
+          # ruff runs inside the CI image, invoked as `uv tool run`, and neither half of that
+          # is incidental.
+          #
+          # `uvx` does not exist here. The runner has no uv at all, and the CI image copies
+          # only the `uv` binary out of the astral image — `uvx` is a second binary that
+          # never came with it. Every invocation failed with "command not found", which the
+          # old single-expression gate reported as "the tree does not lint". That is how
+          # three PRs lost their one automated fix attempt to a linter that never ran: #49,
+          # #51 and #52 all died here, and every one of those trees linted clean by hand.
+          # `uv tool run` is the same thing spelled with the binary that is present.
+          #
+          # The image is already on this runner — the agent just ran in it — and it is the
+          # environment the fixer prompt tells the agent to verify its own work in, so the
+          # gate and the agent now agree on what "lints" means.
+          #
+          # The workspace mounts read-only because ruff only reads, and the cache is
+          # redirected out of it: ruff writes `.ruff_cache/` next to the code by default and
+          # fails outright on a read-only mount.
+          #
+          # Installing and linting stay separate expressions. Folding the fetch into the
+          # lint result is what made an infrastructure failure indistinguishable from a real
+          # finding, and the two need different responses: retry versus read the diff.
+          LINT_IN_IMAGE=(docker run --rm --network host
+            -v "${PR_DIR}:/workspace:ro" -w /workspace
+            -e RUFF_CACHE_DIR=/tmp/ruff-cache "$CI_IMAGE" -lc)
+
+          if ! "${LINT_IN_IMAGE[@]}" "uv tool run ruff@${RUFF_VERSION} --version" >/dev/null 2>&1; then
+            echo "::error::could not run ruff ${RUFF_VERSION} in ${CI_IMAGE} — infrastructure failure, not a lint failure. The fix was NOT pushed; re-run this job."
+            exit 1
+          fi
+
+          "${LINT_IN_IMAGE[@]}" "uv tool run ruff@${RUFF_VERSION} check src/ tests/" || {
+            echo "::error::ruff ${RUFF_VERSION} failed on the fixed tree; refusing to push."
             exit 1
           }
 
       - name: Commit the fix
         id: commit
-        if: steps.blockers.outputs.count != '0'
+        if: steps.work.outputs.push == 'true'
         working-directory: ${{ env.PR_WORKSPACE }}
         env:
+          GH_TOKEN: ${{ secrets.WORKFLOW_PAT }}
+          REPO: ${{ github.repository }}
+          PR_NUMBER: ${{ inputs.pr_number }}
           RESULT_JSON: ${{ steps.fixer.outputs.result_json }}
           CYCLE: ${{ inputs.cycle }}
           MODE: ${{ steps.fixer.outputs.effective_mode }}
+          BASE_REF: ${{ inputs.base_ref }}
+          MERGE_STATE: ${{ steps.sync.outputs.merge_state }}
         run: |
           set -euo pipefail
           # The host commits, not the agent. The container runs as uid 1000 against a
@@ -610,9 +828,28 @@ jobs:
           # below nor `git add -A` sees them. They must survive this step regardless —
           # the fixer artifact is uploaded from .review-output after the push.
 
-          if [ -z "$(git status --porcelain)" ]; then
-            echo "The fixer changed nothing."
-            echo "changed=false" >> "$GITHUB_OUTPUT"
+          # A merge left uncommitted by the sync step — i.e. one the agent was asked to
+          # resolve. `git status` is not the test: a conflicted merge can leave a clean
+          # worktree if the agent reverted every hunk, and that still must be sealed or
+          # aborted rather than silently dropped.
+          MERGING=false
+          if git rev-parse --quiet --verify MERGE_HEAD >/dev/null 2>&1; then
+            MERGING=true
+          fi
+
+          if [ "$MERGING" != "true" ] && [ -z "$(git status --porcelain)" ]; then
+            # A clean sync was already committed by the sync step, so there is nothing
+            # further to stage — but that commit is local and still has to reach the
+            # branch. Reporting "nothing changed" here is how the reference implementation
+            # loses its clean merges: they are made, committed, and then dropped with the
+            # workspace whenever the agent had no fixes of its own to add.
+            if [ "$MERGE_STATE" = "clean" ]; then
+              echo "Nothing beyond the sync merge to commit; the merge still needs pushing."
+              echo "changed=true" >> "$GITHUB_OUTPUT"
+            else
+              echo "Nothing to commit."
+              echo "changed=false" >> "$GITHUB_OUTPUT"
+            fi
             exit 0
           fi
 
@@ -623,27 +860,91 @@ jobs:
           git config user.email "${AGENT_COMMIT_EMAIL}"
           git config user.name  "${AGENT_COMMIT_NAME}"
 
-          ADDRESSED=$(jq -r '.addressed[]?.id' "$RESULT_JSON" | sed 's/^/  - /')
-          SKIPPED=$(jq -r '.skipped[]?.id' "$RESULT_JSON" | sed 's/^/  - /')
-          SUMMARY=$(jq -r '.summary' "$RESULT_JSON")
+          git add -A
+
+          # The marker gate. Two independent checks, because they fail independently: an
+          # unmerged index entry means a path was never resolved at all, while a marker in
+          # a staged file means it was "resolved" by staging the conflict verbatim. Either
+          # one pushed would break the build for a human to find later.
+          if [ "$MERGING" = "true" ]; then
+            UNRESOLVED=$(git ls-files -u | awk '{print $4}' | sort -u || true)
+            MARKERS=$(git diff --check --cached 2>/dev/null | awk -F: '/conflict marker/ {print $1}' | sort -u || true)
+            REMAINING=$(printf '%s\n%s\n' "$UNRESOLVED" "$MARKERS" | grep -v '^$' | sort -u || true)
+            if [ -n "$REMAINING" ]; then
+              echo "::error::conflicts from origin/${BASE_REF} are unresolved; aborting the merge."
+              printf '%s\n' "$REMAINING" | while IFS= read -r f; do
+                echo "::error::unresolved: ${f}"
+              done
+              git merge --abort || true
+
+              BULLETS=$(printf '%s\n' "$REMAINING" | while IFS= read -r f; do
+                printf -- "- \`%s\`\n" "$f"
+              done)
+
+              # A human has to take this one, and they need to be told where they are
+              # already looking. The label is what makes it visible on the PR list.
+              gh label create "needs-human-review" --color "d73a4a" \
+                --description "Pipeline could not auto-resolve merge conflicts" \
+                --repo "${REPO}" 2>/dev/null || true
+              gh pr edit "${PR_NUMBER}" --add-label "needs-human-review" --repo "${REPO}" || true
+
+              BODY_FILE=$(mktemp)
+              {
+                echo "The review pipeline tried to merge \`origin/${BASE_REF}\` into this branch and the fixer could not resolve every conflict. The merge was aborted and nothing was pushed."
+                echo
+                echo "Unresolved:"
+                echo "${BULLETS}"
+                echo
+                echo "Resolve them locally and push — that also resets the review cycle count."
+              } > "$BODY_FILE"
+              gh pr comment "${PR_NUMBER}" --repo "${REPO}" --body-file "$BODY_FILE" || true
+              rm -f "$BODY_FILE"
+
+              echo "changed=false" >> "$GITHUB_OUTPUT"
+              exit 1
+            fi
+          fi
+
+          # A merge-only cycle has no fixer artifact at all: the agent never ran, because a
+          # clean merge needs no judgement. Read the artifact only when there is one.
+          ADDRESSED=""; SKIPPED=""; SUMMARY=""
+          if [ -n "${RESULT_JSON:-}" ] && [ -f "$RESULT_JSON" ]; then
+            ADDRESSED=$(jq -r '.addressed[]?.id' "$RESULT_JSON" | sed 's/^/  - /')
+            SKIPPED=$(jq -r '.skipped[]?.id' "$RESULT_JSON" | sed 's/^/  - /')
+            SUMMARY=$(jq -r '.summary' "$RESULT_JSON")
+          fi
+
+          # Say which of the three things this commit is. A reader looking at branch
+          # history should not have to diff it to find out whether an agent chose a
+          # conflict resolution here.
+          if [ "$MERGING" = "true" ] && [ -z "$ADDRESSED" ]; then
+            SUBJECT="merge: resolve conflicts with origin/${BASE_REF} (cycle ${CYCLE})"
+          elif [ "$MERGING" = "true" ]; then
+            SUBJECT="merge: resolve conflicts with origin/${BASE_REF} + address reviewer findings (cycle ${CYCLE}, ${MODE})"
+          else
+            SUBJECT="fix: address reviewer findings (cycle ${CYCLE}, ${MODE})"
+          fi
 
           MSG_FILE=$(mktemp)
           {
-            echo "fix: address reviewer findings (cycle ${CYCLE}, ${MODE})"
+            echo "${SUBJECT}"
             echo
-            echo "${SUMMARY}"
+            if [ -n "$SUMMARY" ]; then echo "${SUMMARY}"; fi
+            if [ "$MERGING" = "true" ]; then
+              echo
+              echo "Conflict markers were resolved by the fixer agent; the host sealed the merge."
+            fi
             if [ -n "$ADDRESSED" ]; then echo; echo "Addressed:"; echo "${ADDRESSED}"; fi
             if [ -n "$SKIPPED" ];   then echo; echo "Skipped:";   echo "${SKIPPED}"; fi
           } > "$MSG_FILE"
 
-          git add -A
           git commit --file "$MSG_FILE"
           rm -f "$MSG_FILE"
           echo "changed=true" >> "$GITHUB_OUTPUT"
 
       - name: Push
         id: push
-        if: steps.blockers.outputs.count != '0'
+        if: steps.work.outputs.push == 'true'
         working-directory: ${{ env.PR_WORKSPACE }}
         env:
           GH_TOKEN: ${{ secrets.WORKFLOW_PAT }}
@@ -652,10 +953,34 @@ jobs:
           REVIEWED_SHA: ${{ inputs.reviewed_sha }}
           CYCLE: ${{ inputs.cycle }}
           CHANGED: ${{ steps.commit.outputs.changed }}
+          RESULT_JSON: ${{ steps.fixer.outputs.result_json }}
         run: |
           set -euo pipefail
 
+          # `new_sha` in the artifact is the judge's only evidence that a fix actually
+          # landed, so it is written here — the one place that knows. The agent cannot
+          # know it (it never touches .git), and the validate step has already stamped the
+          # reviewed SHA, so the artifact reads "nothing landed" unless this overwrites it.
+          #
+          # A merge-only cycle runs no agent and has no artifact at all; that is the
+          # `-f` guard, and it is not an error.
+          stamp_new_sha() {
+            [ -n "${RESULT_JSON:-}" ] && [ -f "$RESULT_JSON" ] || return 0
+            local tmp
+            tmp=$(mktemp) || return 1
+            if jq --arg s "$1" '.new_sha = $s' "$RESULT_JSON" > "$tmp"; then
+              mv "$tmp" "$RESULT_JSON"
+            else
+              rm -f "$tmp"
+              return 1
+            fi
+          }
+
           if [ "$CHANGED" != "true" ]; then
+            stamp_new_sha "$REVIEWED_SHA" || {
+              echo "::error::could not stamp the fixer artifact; nothing was pushed."
+              exit 1
+            }
             echo "pushed=false" >> "$GITHUB_OUTPUT"
             echo "new_sha=${REVIEWED_SHA}" >> "$GITHUB_OUTPUT"
             exit 0
@@ -667,6 +992,10 @@ jobs:
           REMOTE_HEAD=$(git ls-remote --heads origin "refs/heads/${HEAD_REF}" | awk 'NR==1 {print $1}')
           if [ -z "$REMOTE_HEAD" ] || [ "$REMOTE_HEAD" != "$REVIEWED_SHA" ]; then
             echo "::warning::${HEAD_REF} moved from ${REVIEWED_SHA} to ${REMOTE_HEAD:-<gone>}; discarding the fix."
+            stamp_new_sha "$REVIEWED_SHA" || {
+              echo "::error::could not stamp the fixer artifact; nothing was pushed."
+              exit 1
+            }
             echo "pushed=false" >> "$GITHUB_OUTPUT"
             echo "new_sha=${REVIEWED_SHA}" >> "$GITHUB_OUTPUT"
             exit 0
@@ -693,12 +1022,17 @@ jobs:
           # Duplicate work on the *same* SHA is still prevented: review-entry.yml claims
           # each SHA before dispatching, and NEW_SHA is a SHA no run has claimed yet.
 
+          # Deliberately not fatal. The commit is already on the branch; failing the
+          # step here would not unpush it, and would trade a wasted cycle for a red
+          # job that says nothing useful. Unstamped means uncredited, which is the
+          # direction that costs a cycle rather than merging unaddressed blockers.
+          stamp_new_sha "$NEW_SHA" || echo "::warning::pushed ${NEW_SHA} but could not stamp the artifact; the judge will read this cycle as having landed nothing."
           echo "pushed=true" >> "$GITHUB_OUTPUT"
           echo "new_sha=${NEW_SHA}" >> "$GITHUB_OUTPUT"
           echo "Pushed ${NEW_SHA} to ${HEAD_REF}."
 
       - name: Upload the fixer artifact
-        if: always() && steps.blockers.outputs.count != '0'
+        if: always() && steps.work.outputs.agent == 'true'
         uses: actions/upload-artifact@v4
         with:
           name: fixer-${{ inputs.reviewed_sha }}

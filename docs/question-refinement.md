@@ -1,8 +1,8 @@
 # Question refinement — pre-run reframing suggestions
 
 > **Status:** Implemented; this is decision **D26** in [decisions.md](./decisions.md).
-> Grounded in the production runs at
-> https://reasonable-answer.featherback-mermaid.ts.net/ as of 2026-07-24.
+> The questions below are synthetic, each chosen to illustrate one framing
+> category; no private run content appears in this spec.
 > Revised 2026-07-25 after an adversarial design review (findings QR-001–017).
 
 ## What it is
@@ -20,29 +20,28 @@ question is already well-posed nothing appears at all.
 The intent is not correction. It is the feeling that the tool understood what
 you were really asking even though you didn't phrase it quite that way.
 
-## Why: the production runs demonstrate the gap
+## Why: loaded questions cost downstream rounds
 
 The pipeline already knows questions arrive loaded — [bias.md §4](./bias.md)
 says "The question is untrusted input, not a premise," and the
 `unexamined_presupposition` category (major severity floor) exists to catch
 writers who swallow a loaded framing. But that machinery runs *downstream*, and
-the run history shows what that costs:
+the common framings show what that costs (illustrative, synthetic questions):
 
-| Run | Question as asked | What the framing cost |
+| Framing | Illustrative question | What the framing costs downstream |
 | --- | --- | --- |
-| `run-75eb136b9bfb` | "Does Talarico back the police or support defunding them?" | False either/or. The report had to spend its conclusion rejecting the dichotomy ("not captured by a simple 'back the police' or 'support defunding' label"); 7 rounds, ended **needs human review**. |
-| `run-40de6a7cdbf9` | "Why is it illegal to move an opossum in tx? …" | Unverified premise ("why is it illegal" assumes it is) plus a buried practical goal (the user wants lawful removal options). The report accepted the premise without a statute citation; 8 rounds, **exhausted unresolved** with the missing citation still a blocking defect. |
-| `run-3e184fb11a36` | "Was closing schools in the US a net positive during COVID-19?" | "Net positive" demands a single scalar verdict over an unspecified population, outcome set, and timeframe — unanswerable as scoped. |
-| `run-5af587189b89` | "Does fluoride in municipal drinking water have net negative impact on the health of ame…" | Same "net X" scalar-verdict shape. |
-| `run-85c88f8c6ba4` | "Is it better to be honest or nice?" | Value question posed as either/or; the pipeline's evidence machinery has nothing to converge on. **Exhausted unresolved.** |
-| `run-4d350e1d27a8` | "Did Donald Trump win the 2020 presidential election?" | Settled verification question; the draft's real energy went to *why the belief persists* — likely closer to what a genuine asker cares about. |
+| False either/or | "Does the mayor back the zoning plan or oppose it?" | Two labels for what is really a record or a spectrum. The report can burn its conclusion rejecting the dichotomy instead of answering, and end up needing human review. |
+| Unverified premise + buried goal | "Why is it illegal to keep backyard chickens here?" | "Why is it illegal" assumes it is, and hides the practical goal (what the asker may lawfully do). The report can accept the premise with no citation and exhaust its rounds with that gap still blocking. |
+| Unscoped "net X" verdict | "Was the new policy a net positive?" | "Net positive" demands a single scalar over an unspecified population, outcome set, and timeframe — unanswerable as scoped. |
+| Value question as either/or | "Is it better to lead with data or with intuition?" | A value question with nothing for the evidence machinery to converge on; tends to exhaust unresolved. |
+| Settled verification | "Did Apollo 11 land on the Moon?" | The literal question is settled; the draft's real energy goes to the adjacent question (why a contrary belief persists) — likely closer to what a genuine asker cares about. |
 
 Runs take 10–25 minutes and burn a bounded confirmation budget. A ~3-second
-suggestion that turns the opossum question into "Is it actually illegal to
-relocate opossums in Texas, and what are my lawful options for dealing with
-them?" prevents an 8-round exhaustion. Refinement is the same insight
-`unexamined_presupposition` encodes, moved upstream to the one party who can
-cheaply act on it: the asker, before the run starts.
+suggestion that turns "Why is it illegal to keep backyard chickens here?" into
+"Is it actually against the local rules to keep backyard chickens, and what are
+my options if it is?" prevents a multi-round exhaustion. Refinement is the same
+insight `unexamined_presupposition` encodes, moved upstream to the one party who
+can cheaply act on it: the asker, before the run starts.
 
 ## UX flow
 
@@ -58,7 +57,7 @@ cheaply act on it: the asker, before the run starts.
    questions) or an **offer**: an opaque `offer_id` plus 1–3 suggestions. Each
    renders as a chip below the textarea: a short intent label plus the
    reframed question, e.g.
-   > **check the premise first** — Is it actually illegal to relocate opossums in Texas, and if so what are my lawful options?
+   > **check the premise first** — Is it actually against the local rules to keep backyard chickens, and what are my options if it is?
 4. Tapping a chip replaces the textarea content and keeps focus there. On the
    first swap within an offer, the text the user had at that moment is
    captured as the **restore text** and prepended as a chip, so switching back
@@ -96,14 +95,14 @@ transforms applies, and to say which one (the chip's intent label). Every
 transform preserves the user's subject and target — it never changes *what* the
 question is about, only *how it is posed*.
 
-| Transform | Trigger | Production example |
+| Transform | Trigger | Illustrative example |
 | --- | --- | --- |
-| **Split the either/or** | Question offers exactly two labels for something that is a record or a spectrum | Talarico → "What is Talarico's actual record on police funding, reform, and accountability?" |
-| **Check the premise first** | Question presupposes a contested or unverified fact | Opossum → "Is it actually illegal to relocate opossums in Texas, and if so what are my lawful options?" |
-| **Name the outcome you care about** | "Net positive/negative", "better/worse" with no population, outcome, or timeframe | School closures → "What were the effects of US COVID-19 school closures on learning outcomes and on transmission?" |
-| **Surface the real goal** | A practical need is buried inside a factual framing | Opossum (second half) → the lawful-options clause above |
-| **Ask what's answerable** | Pure value question with no factual core | Honest-or-nice → "What does research say about how honesty and tact affect trust in relationships?" |
-| **Ask the question behind the question** | The literal question is settled; the live question is adjacent | Trump 2020 → offer *both*: keep the verification question, and add "Why do many Americans believe the 2020 election was stolen?" |
+| **Split the either/or** | Question offers exactly two labels for something that is a record or a spectrum | Mayor/zoning → "What is the mayor's actual record on the zoning plan — where have they supported, amended, or opposed it?" |
+| **Check the premise first** | Question presupposes a contested or unverified fact | Chickens → "Is it actually against the local rules to keep backyard chickens, and what are my options if it is?" |
+| **Name the outcome you care about** | "Net positive/negative", "better/worse" with no population, outcome, or timeframe | Four-day week → "What were the effects of a four-day work week on output and on employee retention?" |
+| **Surface the real goal** | A practical need is buried inside a factual framing | Chickens (second half) → the options clause above |
+| **Ask what's answerable** | Pure value question with no factual core | Data-vs-intuition → "What does research say about when data-driven and intuition-driven decisions each perform better?" |
+| **Ask the question behind the question** | The literal question is settled; the live question is adjacent | Apollo 11 → offer *both*: keep the verification question, and add "Why does the belief that the Moon landing was faked persist?" |
 
 The last row is the model of gentleness for the whole feature: when the
 literal question is answerable, it stays available untouched; the suggestion
@@ -276,8 +275,8 @@ do", applied to suggestions; fixture-tested per transform):
    valence, or demand both-sides framing. It opens the question; it does not
    answer it.
 6. **Preserve the subject.** The user's entities and topic survive every
-   transform. "What is Talarico's record…" — never "Why do people
-   mischaracterize politicians' records?"
+   transform. "What is the mayor's record on the zoning plan…" — never "Why do
+   people mischaracterize politicians' records?"
 7. **Silence is the default.** Zero suggestions is a first-class, expected
    output. Showing chips for every question destroys the magic and turns the
    feature into a nag.

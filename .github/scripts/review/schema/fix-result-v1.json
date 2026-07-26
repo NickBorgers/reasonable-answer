@@ -46,8 +46,8 @@
         "properties": {
           "id": {
             "type": "string",
-            "pattern": "^(invariant|security|test)/[A-Za-z0-9._-]+$",
-            "description": "Namespaced blocker id. Bare ids are rejected so two reviewers with colliding local ids cannot cross-clear each other."
+            "pattern": "^(invariant|docs|security|test)/[A-Za-z0-9._-]+$",
+            "description": "Namespaced blocker id. Bare ids are rejected so two reviewers with colliding local ids cannot cross-clear each other. The role list must track `role` in reviewer-v1.json: a role the reviewers can raise blockers under but the fixer cannot name is a role whose blockers can never be addressed."
           },
           "how": { "type": "string", "minLength": 1 },
           "resolution": {
@@ -73,7 +73,7 @@
         "properties": {
           "id": {
             "type": "string",
-            "pattern": "^(invariant|security|test)/[A-Za-z0-9._-]+$"
+            "pattern": "^(invariant|docs|security|test)/[A-Za-z0-9._-]+$"
           },
           "reason": { "type": "string", "minLength": 1 }
         }

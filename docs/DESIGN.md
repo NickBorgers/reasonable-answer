@@ -162,3 +162,8 @@ can't game because none can see the whole board.
 - **[question-refinement.md](./question-refinement.md)** — the edge-side, ambient
   pre-run reframing suggestions (D26): what they are, the reframe taxonomy, and the
   provenance/retention mechanism.
+- **[../src/reasonable_answer/web/static/icons/README.md](../src/reasonable_answer/web/static/icons/README.md)**
+  — the icon-replacement contract for the installable app (D27): which file each platform
+  reads, what each one has to be, and why nothing needs clearing on an installed device
+  afterwards. It lives beside the files it describes because that is where an operator
+  replacing them will look, and it is indexed here because the main README sends them to it.
