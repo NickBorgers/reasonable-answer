@@ -163,6 +163,7 @@ class LLMClient:
         tools: list[dict[str, Any]] | None = None,
         tool_handler: ToolHandler | None = None,
         max_tool_rounds: int = 6,
+        timeout: float | None = None,
     ) -> Completion:
         """One chat completion, retried within the call budget.
 
@@ -170,6 +171,15 @@ class LLMClient:
         loop: the model may emit tool calls, which are executed and fed back, until it
         answers in prose or `max_tool_rounds` is reached. Tool *results* are untrusted
         third-party text (RA-010) — the handler is responsible for fencing them.
+
+        `timeout`, when given, overrides the client-wide `budgets.timeout_seconds`
+        for this call only (passed straight through to the OpenAI SDK's per-request
+        `timeout` kwarg). It bounds **client occupancy** — the connection is closed
+        and the concurrency permit governing this call may be released once the SDK
+        gives up waiting — not upstream generation: whether the backend actually
+        stops computing on disconnect is a LiteLLM/backend property this bound does
+        not assume (docs/question-refinement.md's honest layering). `None` (the
+        default) leaves every existing caller byte-identical.
         """
         messages: list[dict[str, Any]] = [
             {"role": "system", "content": system},
@@ -182,7 +192,7 @@ class LLMClient:
             base["response_format"] = response_format
 
         if not (tools and tool_handler):
-            reply = self._create(alias, {**base, "messages": messages})
+            reply = self._invoke_create(alias, {**base, "messages": messages}, timeout)
             return Completion(
                 text=(reply.message.get("content") or "").strip(),
                 model_reported=reply.reported,
@@ -200,7 +210,7 @@ class LLMClient:
             kwargs = {**base, "messages": messages}
             if not exhausted:
                 kwargs["tools"] = tools
-            reply = self._create(alias, kwargs)
+            reply = self._invoke_create(alias, kwargs, timeout)
             prompt_tokens += reply.prompt_tokens
             completion_tokens += reply.completion_tokens
 
@@ -229,8 +239,22 @@ class LLMClient:
                 )
         raise ModelCallError(f"{alias}: tool loop did not terminate")  # pragma: no cover
 
-    def _create(self, alias: str, kwargs: dict[str, Any]) -> _Reply:
+    def _invoke_create(self, alias: str, kwargs: dict[str, Any], timeout: float | None) -> _Reply:
+        """Calls `_create` with a `timeout` kwarg only when one was actually given.
+
+        Several tests monkeypatch `_create` itself with a 2-positional-argument
+        stand-in (`tests/test_llm_tools.py`); always forwarding `timeout=None` would
+        break every one of them for no behavioural gain, since `None` and "omitted"
+        already mean the same thing to `_create`.
+        """
+        if timeout is not None:
+            return self._create(alias, kwargs, timeout=timeout)
+        return self._create(alias, kwargs)
+
+    def _create(self, alias: str, kwargs: dict[str, Any], *, timeout: float | None = None) -> _Reply:
         """One request, retried within the call budget."""
+        if timeout is not None:
+            kwargs = {**kwargs, "timeout": timeout}
         last: Exception | None = None
         for attempt in range(self._config.budgets.call_retries + 1):
             try:
@@ -264,7 +288,12 @@ class LLMClient:
                 prompt_tokens=getattr(usage, "prompt_tokens", 0) if usage else 0,
                 completion_tokens=getattr(usage, "completion_tokens", 0) if usage else 0,
             )
-        raise ModelCallError(f"{alias}: exhausted call retries ({last})")
+        # `from last` preserves the original exception as `__cause__` (lost once the
+        # loop moves past its `except` block otherwise) so a caller with its own
+        # timeout classification — `web.refine.RefinementService`'s orphan-linger
+        # logic — can distinguish a provider-level timeout from any other transport
+        # failure without this module needing to know that policy exists.
+        raise ModelCallError(f"{alias}: exhausted call retries ({last})") from last
 
     def probe_tool_calling(self, alias: str) -> bool:
         """Can `alias` actually emit a tool call? Probed once, like structured output.
@@ -325,8 +354,15 @@ class LLMClient:
         mode: str | None = None,
         max_tokens: int = 16000,
         repair_retries: int | None = None,
+        timeout: float | None = None,
     ) -> T:
-        """A completion validated against a closed schema. Bounded repair, then raise."""
+        """A completion validated against a closed schema. Bounded repair, then raise.
+
+        `timeout` (see `complete`) overrides `budgets.timeout_seconds` for every
+        attempt in this call, repairs included — callers with their own, tighter
+        per-call deadline (e.g. `web.refine.RefinementService`) want that deadline to
+        apply to the repair attempt too, not just the first.
+        """
         mode = mode or self.mode_for(alias)
         repair_retries = (
             self._config.budgets.repair_retries if repair_retries is None else repair_retries
@@ -344,6 +380,7 @@ class LLMClient:
                 user=attempt_user,
                 max_tokens=max_tokens,
                 response_format=response_format,
+                timeout=timeout,
             )
             try:
                 return schema.model_validate(_extract_json(completion.text))

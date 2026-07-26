@@ -159,6 +159,9 @@ can't game because none can see the whole board.
   schema, the ordered stop-decision (guaranteed to terminate), and terminal statuses.
 - **[decisions.md](./decisions.md)** — design decisions, the Codex review, and how each of the
   20 findings was resolved.
+- **[question-refinement.md](./question-refinement.md)** — the edge-side, ambient
+  pre-run reframing suggestions (D26): what they are, the reframe taxonomy, and the
+  provenance/retention mechanism.
 - **[../src/reasonable_answer/web/static/icons/README.md](../src/reasonable_answer/web/static/icons/README.md)**
   — the icon-replacement contract for the installable app (D27): which file each platform
   reads, what each one has to be, and why nothing needs clearing on an installed device

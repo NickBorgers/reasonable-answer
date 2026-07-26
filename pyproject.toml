@@ -52,7 +52,10 @@ packages = ["src/reasonable_answer"]
 # The default roster travels inside the wheel; without it an installed package has
 # no working config and every command fails on a path that only exists in a checkout.
 [tool.hatch.build.targets.wheel.force-include]
-"config/roster.yaml" = "reasonable_answer/_default_roster.yaml"
+# The last-resort fallback for an install with no source tree and no mounted config, so
+# it is roster.default.yaml — the roster that boots with no proxy and no credential —
+# not roster.yaml, which carries this deployment's opt-ins. See config/roster.default.yaml.
+"config/roster.default.yaml" = "reasonable_answer/_default_roster.yaml"
 
 # 110 is where this codebase already sits: at 100 there are 26 offenders, at 110 there
 # are 9, and the long lines are mostly prose comments explaining an invariant — wrapping

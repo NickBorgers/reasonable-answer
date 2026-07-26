@@ -23,11 +23,19 @@ from typing import Any
 from urllib.parse import urlsplit
 
 from fastapi import FastAPI, Form, HTTPException, Request, Response
-from fastapi.responses import HTMLResponse, PlainTextResponse, RedirectResponse, StreamingResponse
+from fastapi.responses import (
+    HTMLResponse,
+    JSONResponse,
+    PlainTextResponse,
+    RedirectResponse,
+    StreamingResponse,
+)
 
 from .. import ingest, shutdown
 from ..config import Config, ConfigError
+from ..llm import LLMClient
 from . import assets as static_assets
+from .refine import RefinementService
 from .registry import Registry, RunSummary
 from .render import (
     normalize_base_path,
@@ -50,6 +58,7 @@ def create_app(
     config: Config | None = None,
     worker: RunWorker | None = None,
     max_concurrent: int | None = None,
+    refiner: RefinementService | None = None,
 ) -> FastAPI:
     config = config or Config.load(os.environ.get("RA_CONFIG"))
     _check_runs_dir_writable(config)
@@ -64,6 +73,17 @@ def create_app(
     if (cap := os.environ.get("RA_MAX_RESUME_ATTEMPTS")):
         config = config.model_copy(update={"max_resume_attempts": int(cap)})
     worker = worker or RunWorker(config, max_concurrent=concurrent)
+    refiner = refiner or RefinementService(
+        config,
+        # A refine-dedicated `LLMClient`, never shared with anything else:
+        # `LLMClient.resolve_identities` *replaces* its whole identity map on every call
+        # rather than merging into it (see `RefinementService.start`'s docstring), so a
+        # shared instance would have the roster's resolved identities blanked out from
+        # underneath it the moment `refiner.start()` ran. Built only when the feature is
+        # enabled -- a disabled service never makes a network call, so there is nothing
+        # to construct a client for.
+        client=LLMClient(config) if config.refine.enabled else None,
+    )
     registry = Registry(config.runs_dir)
     # A never-live run cannot be older than the retention window, but skipping the live
     # set anyway means an in-flight run can never have its drafts swept mid-run.
@@ -77,6 +97,10 @@ def create_app(
 
     @asynccontextmanager
     async def lifespan(_: FastAPI):
+        # A bad or schema-incapable refine alias must fail here, at boot, not on some
+        # user's first pause after typing (D26) -- so this runs before recovery, which is
+        # itself allowed to enqueue real work.
+        refiner.start()
         # Recovery lives here rather than in RunWorker.__init__ so that constructing a
         # worker stays inert — tests build one directly and should not have the previous
         # process's leftovers enqueued underneath them.
@@ -88,6 +112,7 @@ def create_app(
         # uvicorn's handler sets should_exit, which unwinds into lifespan shutdown.
         shutdown.request_stop("lifespan")
         worker.shutdown()
+        refiner.shutdown()
         # The sweeper shares the stop flag, so it is already unwinding; join it on the
         # same grace budget rather than leaving a non-daemon thread behind.
         sweeper.join(timeout=shutdown.grace_seconds() * 0.5)
@@ -96,6 +121,7 @@ def create_app(
     app.state.config = config
     app.state.worker = worker
     app.state.registry = registry
+    app.state.refiner = refiner
     app.state.base_path = base_path
     # Read once here rather than per request: these files do not change while the process
     # runs, and resolving them at startup means a missing one is a 404 rather than a 500.
@@ -121,6 +147,8 @@ def create_app(
         question: str = Form(...),
         seed: str = Form(""),
         seed_url: str = Form(""),
+        refine_offer_id: str = Form(""),
+        refine_selected: str = Form(""),
     ) -> RedirectResponse:
         _reject_cross_site(request)
         question = question.strip()
@@ -163,6 +191,19 @@ def create_app(
                     status_code=400, detail=f"seed exceeds {config.max_report_chars} characters"
                 )
 
+        # `refine_offer_id`/`refine_selected` are claims, not evidence (D26): resolved
+        # against the server's own offer record, never trusted from the client. Skipped
+        # outright when refinement is disabled -- with no offer ever minted while off,
+        # any stray or forged pair would resolve to `unverified` anyway, but calling
+        # `resolve()` regardless would still write a `refinement` event for a feature
+        # that is supposed to leave no trace when it is off. A malformed claim here can
+        # never fail the submission; the run proceeds normally either way.
+        refinement = (
+            refiner.resolve(refine_offer_id or None, refine_selected or None, question)
+            if refiner.enabled
+            else None
+        )
+
         try:
             run_id = worker.submit(
                 question,
@@ -171,6 +212,7 @@ def create_app(
                 seed_format=ingested.format if ingested else None,
                 seed_source=ingested.source if ingested else None,
                 seed_warnings=ingested.warnings if ingested else (),
+                refinement=refinement,
             )
         except RateLimited as exc:
             # A concrete Retry-After lets a well-behaved client back off precisely
@@ -219,6 +261,38 @@ def create_app(
         # hashed, so reading it back reproduces the fingerprint exactly.
         worker.resume(run_id, summary.question, registry.seed(run_id))
         return RedirectResponse(url=f"{base_path}/runs/{run_id}", status_code=303)
+
+    @app.post("/refine")
+    def refine(request: Request, question: str = Form(...)) -> JSONResponse:
+        # Same-origin enforcement first, uniform with every other state-changing route --
+        # explaining an exception to this rule costs more than just applying it here too.
+        _reject_cross_site(request)
+        if not refiner.enabled:
+            # The endpoint does not exist when the feature is off (D26).
+            raise HTTPException(status_code=404, detail="refinement is disabled")
+
+        question = question.strip()
+        if len(question) > config.max_question_chars:
+            raise HTTPException(
+                status_code=400,
+                detail=f"question exceeds {config.max_question_chars} characters",
+            )
+
+        retry_after = refiner.limiter.check_and_record(_identity(request))
+        if retry_after > 0:
+            # This endpoint's entire contract is "silence on any problem": a rate-limited
+            # attempt degrades to the same empty result a timeout or a saturated
+            # semaphore would produce, rather than a 429. That keeps the page's budget
+            # and error handling uniform across every failure mode -- nothing to retry,
+            # nothing to branch on -- for a feature that was never load-bearing.
+            return JSONResponse(
+                {"offer_id": "", "suggestions": []}, headers={"Cache-Control": "no-store"}
+            )
+
+        # Blocking LLM call; `refine` is a plain `def`, so FastAPI runs it in the
+        # threadpool and the event loop is unaffected -- same as `submit` above.
+        offer = refiner.suggest(question)
+        return JSONResponse(offer.as_json(), headers={"Cache-Control": "no-store"})
 
     # ------------------------------------------------------------- fragments
 

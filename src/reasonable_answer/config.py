@@ -20,6 +20,7 @@ from pathlib import Path
 import yaml
 from pydantic import BaseModel, ConfigDict, Field, model_validator
 
+from .schemas import REFINE_TRANSFORMS
 from .taxonomy import LENSES, Lens
 
 #: Leading alphabetic run of a model name — 'gemma-4-31b-it' and 'gemma4' both -> 'gemma'.
@@ -297,6 +298,67 @@ class DisputeConfig(BaseModel):
     arbiter_max_tokens: int = Field(default=4000, ge=500, le=16000)
 
 
+#: All transforms except the ideologically riskiest one (docs/question-refinement.md
+#: "the reframe taxonomy"). Computed once from the schema's canonical tuple so the two
+#: never drift apart.
+_DEFAULT_REFINE_TRANSFORMS = frozenset(REFINE_TRANSFORMS) - {"question_behind_the_question"}
+
+
+class RefineConfig(BaseModel):
+    """Pre-run reframing suggestions (D26, docs/question-refinement.md). Off by
+    default: with `enabled: false` the web edge behaves byte-identically to a build
+    without the feature, matching the D17/D25 opt-in pattern.
+
+    Deliberately **excluded** from `graph._run_fingerprint`: refinement lives entirely
+    at the web edge and never reaches the graph (the fingerprint hashes `question`,
+    `seed`, `roster`, and `budgets` only — see graph.py), so a config change here
+    cannot invalidate a resumed run. `question.txt` always holds exactly the text that
+    ran, whether or not it was ever offered a suggestion.
+    """
+
+    model_config = ConfigDict(extra="forbid")
+
+    enabled: bool = False
+    #: Empty means "use `roster.orchestrator_alias`" — see `effective_alias`. A
+    #: dedicated alias lets a deployment route refinement at a different backend/
+    #: resource pool than run traffic (see the design's isolation accounting).
+    alias: str = ""
+    max_suggestions: int = Field(default=3, ge=1, le=3)
+    #: Provider-level request timeout for the refine call specifically — NOT
+    #: `budgets.timeout_seconds`, which is the roster-wide default baked into the
+    #: shared `OpenAI` client. See `LLMClient`'s per-call `timeout` kwarg.
+    timeout_seconds: float = Field(default=5.0, ge=0.5, le=15)
+    cache_entries: int = Field(default=256, ge=16, le=4096)
+    cache_ttl_seconds: int = Field(default=900, ge=60, le=86400)
+    #: Refinement-specific rate limit, separate from `submit_rate_max` — a person
+    #: pausing to type triggers many more refine calls than run submissions.
+    rate_max: int = Field(default=10, ge=1, le=100)
+    rate_window_seconds: int = Field(default=60, ge=1, le=3600)
+    concurrency: int = Field(default=2, ge=1, le=4)
+    offer_entries: int = Field(default=512, ge=64, le=8192)
+    offer_ttl_seconds: int = Field(default=1800, ge=300, le=7200)
+    #: Best-effort damper on orphaned semaphore permits after a timed-out call — not
+    #: a guarantee (see `web/refine.py`'s docstring on the honesty of this layering).
+    orphan_linger_seconds: int = Field(default=30, ge=0, le=300)
+    #: Which of the six taxonomy transforms the model is even told about.
+    #: `question_behind_the_question` is excluded by default — see the module-level
+    #: docstring above and docs/question-refinement.md.
+    enabled_transforms: set[str] = Field(default_factory=lambda: set(_DEFAULT_REFINE_TRANSFORMS))
+
+    @model_validator(mode="after")
+    def _check_transforms(self) -> RefineConfig:
+        unknown = self.enabled_transforms - set(REFINE_TRANSFORMS)
+        if unknown:
+            raise ConfigError(f"refine.enabled_transforms names unknown transforms: {sorted(unknown)}")
+        return self
+
+    def effective_alias(self, roster: Roster) -> str:
+        """The alias the refine call actually uses: the explicit override, else the
+        orchestrator's — refinement wants an orchestrator-class model (bounded,
+        cheap judgment), not writer-class reach."""
+        return self.alias or roster.orchestrator_alias
+
+
 class Config(BaseModel):
     model_config = ConfigDict(extra="forbid")
 
@@ -307,6 +369,7 @@ class Config(BaseModel):
     audition: AuditionConfig = Field(default_factory=AuditionConfig)
     seed: SeedConfig = Field(default_factory=SeedConfig)
     disputes: DisputeConfig = Field(default_factory=DisputeConfig)
+    refine: RefineConfig = Field(default_factory=RefineConfig)
     runs_dir: Path = Path("runs")
     retention_days: int = 14
     #: How often the web server's background sweep content-purges runs past

@@ -74,6 +74,10 @@ the framing) — compatible with the resolvability contract on critic instructio
 this is `omitted_counterargument`'s sibling, an omission of examination, and it carries the same
 floor for the same reason.
 
+This backstop is downstream and unchanged. [Question refinement](./question-refinement.md) (D26)
+offers the same insight — a question may presuppose a contested framing — upstream, to the one
+party who can cheaply act on it before a run exists: the asker.
+
 ## 5. Category table
 
 | category | lens | floor | escalation |

@@ -121,6 +121,11 @@ docker compose up -d
 | a volume at `/data/runs` | holds the audit trail *and* the SQLite checkpoints; resumability dies without it |
 | `roster.yaml` at `/etc/ra/roster.yaml` | change models without rebuilding |
 
+The image bakes [config/roster.default.yaml](./config/roster.default.yaml) at that path, so it starts
+with no mount at all — that copy leaves every opt-in that needs a reachable proxy or a credential
+(search, refinement) off. `docker compose` mounts [config/roster.yaml](./config/roster.yaml) over it,
+which is where this deployment's opt-ins live.
+
 Use a **named volume** if you can. A bind-mounted host directory arrives owned by root while the
 container runs unprivileged; the app detects this at startup and tells you what to chown rather
 than failing on your first submission.
