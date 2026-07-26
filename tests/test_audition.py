@@ -14,7 +14,7 @@ import pytest
 import yaml
 
 from reasonable_answer import audition, prompts
-from reasonable_answer.config import AuditionConfig, AuditionThresholds, Roster
+from reasonable_answer.config import AuditionConfig, AuditionThresholds, ConfigError, Roster
 from reasonable_answer.schemas import CritiqueOutput, LensResult, RawIssue, StructuralRef
 from reasonable_answer.taxonomy import Category, Lens, Severity
 
@@ -561,8 +561,84 @@ def test_failed_lens_counts_as_schema_failure_not_as_silence():
     assert audition.judge(m, THRESHOLDS).verdict is audition.Verdict.UNFIT
 
 
-def test_audition_is_disabled_by_default():
-    """A checkout with no credential must behave exactly as it always has."""
-    cfg = AuditionConfig()
-    assert cfg.enabled is False
-    assert cfg.enforce is False
+def test_audition_warns_by_default_and_has_no_inert_enabled_flag():
+    """Two properties, both load-bearing.
+
+    Enforcement is off by default (D20). And there is no `enabled` flag: it existed,
+    gated nothing — `ra audition` measures, everything else only reads the cache — and
+    a config knob that cannot change behaviour reads as a safety control while being
+    inert. Re-adding one should mean re-arguing that.
+    """
+    assert AuditionConfig().enforce is False
+    assert "enabled" not in AuditionConfig.model_fields
+
+
+# --------------------------------------------------------- the enforcement gate
+
+
+def unfit_cache(path: Path, identity: str, lens: Lens, cfg: AuditionConfig) -> None:
+    """Write a cache the gate will actually accept: real corpus and prompt hashes, the
+    configured repetition count, recorded now. Anything less and the entry is discarded
+    as not-about-this-harness and the gate passes for the wrong reason."""
+    silent = metrics(
+        identity=identity, lens=lens, planted_total=6, obvious_total=6,
+        control_runs=4, control_clean_runs=4,
+    )
+    assert audition.judge(silent, cfg.thresholds).verdict is audition.Verdict.UNFIT
+    audition.save_cache(
+        path,
+        {
+            audition.cache_key(identity, lens): audition.CacheEntry(
+                metrics=silent,
+                corpus_hash=audition.load_fixtures().corpus_hash,
+                prompt_hash=audition.prompt_hash(),
+                repetitions=cfg.repetitions,
+                recorded_at=time.time(),
+            )
+        },
+    )
+
+
+def test_enforce_off_lets_an_unfit_critic_through(tmp_path):
+    """The shipped posture: a loud warning, never a block."""
+    cfg = AuditionConfig(cache_path=tmp_path / "c.json")
+    unfit_cache(cfg.cache_path, "p/good", Lens.LOGIC, cfg)
+    audition.enforce_fitness(cfg, roster(), IDENTITIES)  # does not raise
+
+
+def test_enforce_on_refuses_to_start_with_an_unfit_assigned_critic(tmp_path):
+    cfg = AuditionConfig(enforce=True, cache_path=tmp_path / "c.json")
+    unfit_cache(cfg.cache_path, "p/good", Lens.LOGIC, cfg)
+    with pytest.raises(ConfigError) as exc:
+        audition.enforce_fitness(cfg, roster(), IDENTITIES)
+    assert "c_good" in str(exc.value) and "logic" in str(exc.value)
+
+
+def test_enforce_ignores_a_verdict_about_a_model_no_longer_rostered(tmp_path):
+    """Swapping the unfit model out is the fix, and it must take effect immediately —
+    the cache still holds its verdict, but it staffs nothing."""
+    cfg = AuditionConfig(enforce=True, cache_path=tmp_path / "c.json")
+    unfit_cache(cfg.cache_path, "p/dropped", Lens.LOGIC, cfg)
+    audition.enforce_fitness(cfg, roster(), IDENTITIES)  # does not raise
+
+
+def test_enforce_does_not_block_on_stale_or_unmeasured_verdicts(tmp_path):
+    """Absence of evidence is not evidence of incapacity. Blocking here would couple
+    every run to a cache only a paid, rate-limited proxy can refill."""
+    cfg = AuditionConfig(enforce=True, cache_path=tmp_path / "c.json")
+    audition.enforce_fitness(cfg, roster(), IDENTITIES)  # empty cache: does not raise
+
+    unfit_cache(cfg.cache_path, "p/good", Lens.LOGIC, cfg)
+    later = time.time() + (cfg.max_age_days + 1) * 86400
+    audition.enforce_fitness(cfg, roster(), IDENTITIES, now=later)  # stale: does not raise
+
+
+def test_the_gate_takes_no_client_and_so_can_never_spend(tmp_path):
+    """`test_grader_needs_no_client` in spirit, for the startup path. The gate runs on
+    every `ra run` and every web boot; if it ever grew a client it would quietly bill an
+    audition per run, and a keyless checkout would stop booting."""
+    import inspect
+
+    for fn in (audition.enforce_fitness, audition.cached_judgements):
+        params = set(inspect.signature(fn).parameters)
+        assert not params & {"client", "llm"}, f"{fn.__name__} gained a call path"
