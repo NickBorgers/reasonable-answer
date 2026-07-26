@@ -175,8 +175,15 @@ break every time the matrix changes.
    should appear with `Resolves #N` — **and the review pipeline should fire on it.** If
    the PR appears but nothing reviews it, the resolver checkout is not using
    `WORKFLOW_PAT`.
-4. Push a commit to that PR and confirm cycle 2 runs.
-5. Comment `/review` on an already-cleared PR and confirm it forces a fresh cycle.
+4. Once the fixer pushes a fix commit (a PR with blockers a cold fix can address), confirm
+   the pipeline does **not** start a second run on the new SHA — the fixer's Push step
+   claims `review/pipeline` on it before GitHub schedules the `synchronize` event, so
+   dedup should short-circuit — and confirm `All Required Agent Reviews` lands on that new
+   SHA (the PR's actual head), not the pre-fix `reviewed_sha`.
+5. Push a **human** commit on top of a cycle that has already run and confirm the counter
+   resets to cycle 1, not the next number — a human push is a new conversation, not a
+   fixer retry.
+6. Comment `/review` on an already-cleared PR and confirm it forces a fresh cycle.
 
 ## Troubleshooting
 

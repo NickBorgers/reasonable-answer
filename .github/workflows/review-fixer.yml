@@ -5,9 +5,13 @@ name: Review pipeline — fixer
 # reviewers, judge, finalize — is read-only by construction.
 #
 # It runs after the reviewers and before the judge. The judge therefore grades the SHA
-# the reviewers actually read, not the one the fixer produced; the fixed SHA gets its
-# own cycle with its own reviewers. Grading a tree nobody reviewed would let a fixer
-# clear its own work.
+# the reviewers actually read, not the one the fixer produced. The fixed SHA is not
+# reviewed again in the normal case: the Push step below claims it before the
+# `synchronize` event it fires can start a second pipeline, so this one panel plus the
+# fixer's own gates (schema, lint, marker gate, remote-head check) is the whole review
+# — see docs/decisions.md D28. Grading a tree nobody reviewed would let a fixer clear
+# its own work; that risk is now accepted rather than defended against, and the gates
+# below are what stand in its place.
 #
 # Two modes, chosen by whether the PR carries an `Author-Session:` trailer:
 #
@@ -1004,23 +1008,31 @@ jobs:
           git push origin "HEAD:${HEAD_REF}"
           NEW_SHA=$(git rev-parse HEAD)
 
-          # Deliberately NOT claiming review/pipeline on NEW_SHA.
+          # Push first, claim immediately after.
           #
-          # The reference implementation this was ported from writes a `pending` claim
-          # here, so the `synchronize` event the push fires finds the SHA taken and does
-          # not open a second pipeline. That is wrong for this graph: the pipeline that
-          # event opens IS cycle 2, the one that reviews this fix. Suppressing it would
-          # leave agent-written code on the branch that no reviewer ever read, while the
-          # judge reported on the pre-fix tree — the exact failure the fix/judge ordering
-          # exists to prevent.
+          # The owner's intent (confirmed after the divergence recorded below) is that
+          # fixer output reaches main without a further review cycle: the pre-fix panel
+          # plus the fixer's own gates (artifact quarantine, marker gate, remote-head
+          # check, this push) are the review. Claiming review/pipeline on NEW_SHA here
+          # makes the `synchronize` event this push fires land on an already-claimed
+          # SHA, so review-dedup short-circuits and no second pipeline opens to re-review
+          # the fix.
           #
-          # The contention that motivates the claim there does not exist here. `fix`
-          # needs all three reviewers, so when this runs the only remaining jobs are
-          # judge, finalize, and cleanup — all on ubuntu-latest. No self-hosted runner is
-          # held, so the incoming cycle can start its reviewers immediately.
+          # The claim has to come AFTER the push, not before: the commit-status API
+          # 422s on a SHA it has not seen, and NEW_SHA does not exist on the remote
+          # until the push above completes. The race window this leaves — GitHub takes
+          # a few seconds to schedule the synchronize event — is bounded by the cycle
+          # counter (gather's cycle cap and cleanup-claim below), so the worst case is
+          # one wasted extra cycle, not an infinite loop.
           #
-          # Duplicate work on the *same* SHA is still prevented: review-entry.yml claims
-          # each SHA before dispatching, and NEW_SHA is a SHA no run has claimed yet.
+          # This repo previously suppressed this claim on the theory that the fix
+          # itself needed review; the owner has since confirmed that was an invented
+          # divergence from the design being ported here, not an intended safety
+          # property. See docs/decisions.md D28.
+          gh api -X POST "repos/${REPO}/statuses/${NEW_SHA}" \
+            -f state=pending \
+            -f context=review/pipeline \
+            -f description="cycle=${CYCLE} (fixer post-push claim)" >/dev/null
 
           # Deliberately not fatal. The commit is already on the branch; failing the
           # step here would not unpush it, and would trade a wasted cycle for a red
