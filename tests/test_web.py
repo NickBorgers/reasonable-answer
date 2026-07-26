@@ -2,10 +2,13 @@
 
 from __future__ import annotations
 
+import json
 import os
+import re
 import threading
 import time
 import urllib.request
+from contextlib import contextmanager
 
 import pytest
 from conftest import WEB_IDENTITY, web_client
@@ -14,6 +17,7 @@ from fakes import FakeClient
 from reasonable_answer.graph import run as run_graph
 from reasonable_answer.schemas import CritiqueOutput
 from reasonable_answer.store import RunStore, sweep_expired
+from reasonable_answer.web import assets
 from reasonable_answer.web.app import create_app
 from reasonable_answer.web.registry import Registry
 from reasonable_answer.web.retention import RetentionSweeper
@@ -449,9 +453,11 @@ def test_resuming_a_seeded_run_passes_the_seed_back(config, monkeypatch):
     automatic path has its own coverage below."""
     monkeypatch.setenv("RA_RESUME_ON_BOOT", "0")
     seen: list[str | None] = []
+    ran = threading.Event()
 
     def recording(cfg, *, question, seed, run_id, stop=None, **_):
         seen.append(seed)
+        ran.set()
 
     worker = RunWorker(config, max_concurrent=1, runner=recording)
     app = create_app(config, worker=worker)
@@ -464,9 +470,12 @@ def test_resuming_a_seeded_run_passes_the_seed_back(config, monkeypatch):
         with web_client(app) as c:
             assert c.post("/runs/run-seeded/resume", follow_redirects=False).status_code == 303
 
-        deadline = time.time() + 5
-        while not seen and time.time() < deadline:
-            time.sleep(0.05)
+        # Wait on the runner's own signal, not a wall clock: a busy full-suite run
+        # can leave a worker thread unscheduled for well over the old 5s budget. The
+        # timeout is generous because the passing case returns the instant the run is
+        # picked up. Splitting the two asserts keeps the failure legible — a lapsed
+        # wait reads as "worker never ran", not as a lost seed.
+        assert ran.wait(timeout=20), "worker never picked up the resumed run"
         assert seen == ["# A seed report"]
     finally:
         worker.shutdown()
@@ -844,13 +853,17 @@ def test_resume_restores_the_seed(config, tmp_path):
     forever. The seed is read back from the store, where it sits already converted.
     """
     seen: dict = {}
+    ran = threading.Event()
 
     def runner(cfg, *, question, seed, run_id, **_):
         seen["seed"] = seed
+        ran.set()
 
     worker = RunWorker(config, max_concurrent=1, runner=runner)
     try:
         run_id = worker.submit("Q?", "# Seeded\n\nBody.", identity=WEB_IDENTITY)
+        # Let the first run fully drain before resuming; a still-running run would
+        # dedupe the resume rather than re-invoke the runner.
         deadline = time.time() + 5
         while worker.status(run_id) and time.time() < deadline:
             time.sleep(0.05)
@@ -860,10 +873,11 @@ def test_resume_restores_the_seed(config, tmp_path):
         assert registry.seed(run_id) == "# Seeded\n\nBody."
 
         seen.clear()
+        ran.clear()
         worker.resume(run_id, "Q?", registry.seed(run_id))
-        deadline = time.time() + 5
-        while not seen and time.time() < deadline:
-            time.sleep(0.05)
+        # Same generous, event-driven wait as the resume-seed test: distinguish a
+        # worker that never ran from one that ran with the wrong seed.
+        assert ran.wait(timeout=20), "worker never picked up the resumed run"
         assert seen["seed"] == "# Seeded\n\nBody.", "resume must carry the seed, or the run is stuck"
         assert app is not None
     finally:
@@ -984,6 +998,25 @@ def test_a_submitted_run_is_owned_by_its_submitter(config):
         assert Registry(config.runs_dir).summary(run_id).owner == FRIEND
     finally:
         worker.shutdown(timeout=0.1)
+
+
+def test_the_access_email_is_lowercased(owned, config):
+    """An identity that varies by case would split one person's runs across two owners
+    (D26): `Viewer@Example.com` submitting a run and `viewer@example.com` returning for
+    it must be the same person. `resolve_identity` lower-cases the Access email, so the
+    run is filed under — and the owner-scoped index queried by — the lower-cased form
+    whatever casing the header arrives in. Drop the `.lower()` and this run would be
+    owned by `Viewer@Example.com` while the index is scoped to it verbatim, so a caller
+    whose header casing differed by one letter would lose sight of their own run."""
+    app, _ = owned
+    with web_client(app, identity="Viewer@Example.com") as c:
+        response = c.post("/runs", data={"question": "Whose casing?"}, follow_redirects=False)
+        run_id = response.headers["location"].rsplit("/", 1)[-1]
+        # Written by the middleware-resolved viewer, so the header's casing is gone.
+        assert (config.runs_dir / run_id / "owner.txt").read_text() == "viewer@example.com"
+        assert Registry(config.runs_dir).summary(run_id).owner == "viewer@example.com"
+        # The mixed-case caller still finds its own run in the owner-scoped index.
+        assert run_id in c.get("/").text
 
 
 def test_anyone_signed_in_can_read_a_run_they_hold_the_id_for(owned):
@@ -1128,3 +1161,321 @@ def test_the_tailscale_display_name_is_not_an_identity(config):
             assert c.get("/", headers={"Tailscale-User-Name": "Nick Borgers"}).status_code == 403
     finally:
         worker.shutdown(timeout=0.1)
+# ------------------------------------------------------- installable-app assets
+
+
+def test_the_manifest_names_only_icons_that_are_actually_served(client):
+    """The swap-in-your-own-artwork path is only safe if this holds: rename or delete an
+    icon and the manifest still promises it, and the install silently degrades."""
+    response = client.get("/manifest.webmanifest")
+    assert response.status_code == 200
+    assert response.headers["content-type"].startswith("application/manifest+json")
+
+    manifest = json.loads(response.text)
+    assert manifest["start_url"] == "/"
+    assert manifest["scope"] == "/"
+    assert manifest["display"] == "standalone"
+    assert manifest["name"] and manifest["short_name"]
+
+    sizes = {icon["sizes"] for icon in manifest["icons"]}
+    # Chrome will not offer to install without both of these present.
+    assert "192x192" in sizes and "512x512" in sizes
+    # Android crops to the launcher's own shape; without a maskable entry it crops the
+    # "any" icon instead and eats the artwork's corners.
+    assert any(icon.get("purpose") == "maskable" for icon in manifest["icons"])
+
+    for icon in manifest["icons"]:
+        assert client.get(icon["src"]).status_code == 200, icon["src"]
+
+
+def test_every_icon_is_served_as_the_type_it_claims_to_be(client):
+    for name, media_type in assets.ICON_TYPES.items():
+        response = client.get(assets.ICONS_PREFIX + name)
+        assert response.status_code == 200, name
+        assert response.headers["content-type"].startswith(media_type), name
+        if media_type == "image/png":
+            assert response.content.startswith(b"\x89PNG\r\n\x1a\n"), name
+
+
+@pytest.mark.parametrize(
+    "name",
+    ["nope.png", "../app.py", "..%2fapp.py", "%2e%2e%2fapp.py", "/etc/passwd"],
+)
+def test_an_unknown_or_traversing_asset_name_is_a_miss_not_a_read(client, name):
+    """The name is a key into a fixed table, never a path segment, so none of these are a
+    special case — they are all just names that are not in the table."""
+    response = client.get(assets.ICONS_PREFIX + name)
+    assert response.status_code != 200
+    assert b"def create_app" not in response.content
+
+
+def test_the_service_worker_is_served_at_root_scope(client):
+    response = client.get("/sw.js")
+    assert response.status_code == 200
+    assert response.headers["content-type"].startswith("text/javascript")
+    # Without root scope the worker controls only its own directory, and an app installed
+    # from "/" would never be under its control.
+    assert response.headers["service-worker-allowed"] == "/"
+    # Revalidated on every navigation, so a fix reaches an installed app immediately.
+    assert "no-cache" in response.headers["cache-control"]
+
+
+def test_the_service_worker_cannot_cache_anything_about_a_run(client):
+    """The load-bearing property of the whole feature. A cached run page would show a
+    finished run as still running, which is the one output this interface must not
+    produce. It is prevented structurally: the worker's precache list is an inclusion
+    allowlist, and no run URL appears anywhere in its source."""
+    source = client.get("/sw.js").text
+
+    declared = json.loads(re.search(r"var ASSETS = (\[.*?\]);", source, re.S).group(1))
+    assert declared, "the precache list must not be templated away to nothing"
+    assert declared == client.app.state.assets.precache
+    assert not [path for path in declared if path.startswith("/runs")]
+
+    # Comments in that file discuss run URLs at length — the claim is about what the code
+    # can reach, so the prose has to come off before asserting on it.
+    code = "\n".join(line.split("//")[0] for line in source.splitlines())
+    for forbidden in ("/runs", "stream", "progress", "audit.json", "report.md"):
+        assert forbidden not in code, f"the worker's code must never name {forbidden}"
+    # Exactly one write into a cache, and it sits behind the ASSETS membership test.
+    assert code.count(".put(") == 1
+
+
+def test_the_cache_version_tracks_the_asset_bytes(client):
+    """Replacing an icon has to invalidate the old one on every installed client with no
+    version bump and nothing to clear by hand, so the key is the bytes themselves."""
+    first = assets.cache_version({"/a.png": b"one", "/b.png": b"two"})
+    assert first == assets.cache_version({"/b.png": b"two", "/a.png": b"one"})
+    assert first != assets.cache_version({"/a.png": b"one", "/b.png": b"CHANGED"})
+    # A rename changes the URL the worker precaches, so it has to change the key too.
+    assert first != assets.cache_version({"/a.png": b"one", "/c.png": b"two"})
+
+    assert client.app.state.assets.version in client.get("/sw.js").text
+
+
+def test_the_offline_page_stands_alone(client):
+    """It is shown precisely when the server is unreachable, so a link into a run would be
+    a link to a page that cannot load."""
+    response = client.get("/offline.html")
+    assert response.status_code == 200
+    assert response.headers["content-type"].startswith("text/html")
+    assert "/runs" not in response.text
+
+
+def test_a_run_page_is_never_cacheable(client, config):
+    """The same rule as the service worker's, restated at the HTTP layer — an installed
+    standalone app leans on the browser cache and the back-forward cache much harder than
+    a tab does."""
+    response = client.post("/runs", data={"question": "Stale?"}, follow_redirects=False)
+    run_id = response.headers["location"].rsplit("/", 1)[-1]
+    _wait_for_final(config, run_id)
+
+    assert client.get(f"/runs/{run_id}").headers["cache-control"] == "no-store"
+    assert client.get(f"/runs/{run_id}/progress").headers["cache-control"] == "no-store"
+
+
+def test_the_head_advertises_the_installable_app(client):
+    page = client.get("/").text
+    assert '<link rel="manifest" href="/manifest.webmanifest">' in page
+    assert '<link rel="apple-touch-icon" href="/static/icons/apple-touch-icon.png">' in page
+    # iOS reads this and ignores the manifest's icons entirely.
+    assert '<meta name="apple-mobile-web-app-capable" content="yes">' in page
+    assert '<meta name="theme-color" content="#fbfaf8" media="(prefers-color-scheme: light)">' in page
+    assert '<meta name="theme-color" content="#16181a" media="(prefers-color-scheme: dark)">' in page
+    # Lets the page reach under the notch, which the stylesheet pays back with safe-area
+    # padding. Without it the safe-area insets all resolve to zero.
+    assert "viewport-fit=cover" in page
+
+
+def test_the_csp_admits_the_manifest_and_the_worker_and_nothing_off_origin(client, config):
+    """Pinned as an exact literal on purpose. Widening this policy is a decision recorded
+    in docs/decisions.md (D27), not a tidy-up — so it should not be possible to widen it
+    without a test turning red and asking why."""
+    expected = (
+        "default-src 'none'; img-src 'self'; style-src 'unsafe-inline'; "
+        "script-src 'self' 'unsafe-inline'; connect-src 'self'; manifest-src 'self'; "
+        "worker-src 'self'; form-action 'self'; base-uri 'none'"
+    )
+    response = client.post("/runs", data={"question": "Policy?"}, follow_redirects=False)
+    run_id = response.headers["location"].rsplit("/", 1)[-1]
+    _wait_for_final(config, run_id)
+
+    for url in ("/", f"/runs/{run_id}", f"/runs/{run_id}/report"):
+        page = client.get(url).text
+        assert f'content="{expected}"' in page, url
+
+
+def test_service_worker_registration_is_guarded_and_cannot_break_the_live_script(client, config):
+    """Two things at once. The guard is what keeps a plain-http tailnet address silent
+    instead of throwing a SecurityError; the semicolon is what stops `})()` followed by
+    `(function` from parsing as a call and taking the live stream down with it."""
+    response = client.post("/runs", data={"question": "Both scripts?"}, follow_redirects=False)
+    run_id = response.headers["location"].rsplit("/", 1)[-1]
+
+    live_page = client.get(f"/runs/{run_id}").text
+    assert "isSecureContext" in live_page
+    assert "navigator.serviceWorker.register('/sw.js'" in live_page
+
+    script = live_page.split("<script>")[1].split("</script>")[0]
+    if "EventSource" in script:  # the run was still live when the page was rendered
+        # Two IIFEs share one <script>, and the first has to close with a semicolon:
+        # without it, `})()` followed by `(function` parses as a single call expression.
+        assert re.search(r"\}\)\(\);\s*\(function", script), script
+
+    _wait_for_final(config, run_id)
+    # The registration is on every page, live or not — an installed app is entered from
+    # whichever page the user last had open.
+    assert "isSecureContext" in client.get("/").text
+    assert "isSecureContext" in client.get(f"/runs/{run_id}/report").text
+
+
+# ------------------------------------------------------ base path (reverse-proxy prefix)
+#
+# The deployment model is a *stripping* proxy: `location /app/ { proxy_pass .../; }` removes
+# `/app/` before the request reaches the app, so the app serves at its normal stripped
+# routes. The TestClient stands in for that proxy by requesting those stripped paths — the
+# thing under test is that every URL the app *emits* carries the prefix and nothing escapes
+# back to the origin root, past the Access policy scoped to the prefix. See D29.
+
+BASE = "/app"
+
+#: Every attribute a browser resolves as a navigable/subresource URL. The event stream is
+#: `data-stream`, read by the inline live script and handed to `EventSource`.
+_URL_ATTRS = re.compile(r'(?:href|src|action|data-stream)="(/[^"]*)"')
+
+
+def _absolute_urls(html: str) -> list[str]:
+    """Every root-absolute URL the page emits, from the URL-bearing attributes and from the
+    service-worker `register(...)` call the attribute scan cannot see."""
+    urls = _URL_ATTRS.findall(html)
+    urls += re.findall(r"register\('(/[^']*)'", html)
+    urls += re.findall(r"scope:\s*'(/[^']*)'", html)
+    return urls
+
+
+@contextmanager
+def _prefixed_client(config, fake_client, base_path=BASE):
+    """A client whose app is built with `RA_ROOT_PATH` set, driven by the same fake graph
+    the default `client` fixture uses."""
+
+    def runner(cfg, *, question, seed, run_id, stop=None, **seed_provenance):
+        return run_graph(
+            cfg, question=question, seed=seed, run_id=run_id, client=fake_client, **seed_provenance
+        )
+
+    previous = os.environ.get("RA_ROOT_PATH")
+    os.environ["RA_ROOT_PATH"] = base_path
+    worker = RunWorker(config, max_concurrent=1, runner=runner)
+    try:
+        app = create_app(config, worker=worker)
+        # Signed in as the default viewer: the auth middleware (D26) refuses every
+        # route but /healthz, and these tests assert URL-prefixing behaviour that is
+        # only reachable past that gate.
+        with web_client(app) as c:
+            yield c
+    finally:
+        worker.shutdown()
+        if previous is None:
+            os.environ.pop("RA_ROOT_PATH", None)
+        else:
+            os.environ["RA_ROOT_PATH"] = previous
+
+
+@pytest.mark.parametrize(
+    "raw, expected",
+    [
+        (None, ""),
+        ("", ""),
+        ("   ", ""),
+        ("/", ""),
+        ("/app", "/app"),
+        ("/app/", "/app"),
+        ("  /app/  ", "/app"),
+        ("app", "/app"),  # a missing leading slash anchors at the origin, not a sibling
+        ("/app/v2/", "/app/v2"),
+    ],
+)
+def test_normalize_base_path_collapses_to_the_join_identity(raw, expected):
+    from reasonable_answer.web.render import normalize_base_path
+
+    assert normalize_base_path(raw) == expected
+
+
+def test_an_unset_prefix_leaves_every_url_at_the_root(client):
+    """The empty base is the join identity: with no `RA_ROOT_PATH`, every emitted URL is
+    byte-identical to before this feature existed."""
+    for url in _absolute_urls(client.get("/").text):
+        assert not url.startswith(f"{BASE}/"), url
+    assert '<link rel="manifest" href="/manifest.webmanifest">' in client.get("/").text
+
+
+def test_the_index_stays_entirely_under_the_prefix(config, fake_client):
+    with _prefixed_client(config, fake_client) as c:
+        page = c.get("/").text
+    urls = _absolute_urls(page)
+    assert urls, "the page emits URLs; the scan found none, so it is not asserting anything"
+    for url in urls:
+        # `/app` itself (the brand link is `/app/`) and everything below it are in; anything
+        # else is a link that escapes the Access-scoped prefix back to the origin root.
+        assert url == BASE or url.startswith(f"{BASE}/"), url
+    assert f'action="{BASE}/runs"' in page
+    assert f'href="{BASE}/manifest.webmanifest"' in page
+    assert f"register('{BASE}/sw.js', {{ scope: '{BASE}/' }})" in page
+
+
+def test_the_manifest_is_served_under_the_prefix(config, fake_client):
+    with _prefixed_client(config, fake_client) as c:
+        manifest = json.loads(c.get("/manifest.webmanifest").text)
+        # start_url, scope and id are what scope the installed app; unprefixed, the app
+        # launches at the origin root and its scope no longer contains its own pages.
+        assert manifest["start_url"] == f"{BASE}/"
+        assert manifest["scope"] == f"{BASE}/"
+        assert manifest["id"] == f"{BASE}/"
+        for icon in manifest["icons"]:
+            assert icon["src"].startswith(f"{BASE}/static/icons/"), icon["src"]
+            # The proxy strips the prefix, so the stripped path is what the app serves.
+            assert c.get(icon["src"][len(BASE):]).status_code == 200, icon["src"]
+
+
+def test_the_service_worker_registers_and_precaches_under_the_prefix(config, fake_client):
+    with _prefixed_client(config, fake_client) as c:
+        response = c.get("/sw.js")
+        # Without the prefixed scope the worker would claim the origin root, not `/app/`.
+        assert response.headers["service-worker-allowed"] == f"{BASE}/"
+        source = response.text
+        declared = json.loads(re.search(r"var ASSETS = (\[.*?\]);", source, re.S).group(1))
+        assert declared == c.app.state.assets.precache
+        assert declared, "the precache list must not be templated away to nothing"
+        for path in declared:
+            assert path.startswith(f"{BASE}/"), path
+        # OFFLINE has to match its precached entry or the navigate fallback misses the cache.
+        offline = re.search(r"var OFFLINE = '([^']*)'", source).group(1)
+        assert offline == f"{BASE}/offline.html"
+        assert offline in declared
+        # The structural no-run-caching property is unchanged under a prefix.
+        assert not [p for p in declared if "/runs" in p]
+
+
+def test_a_submit_redirect_carries_the_prefix(config, fake_client):
+    """A `303` to an unprefixed `/runs/<id>` would bounce the browser straight out of the
+    Access-scoped prefix on the very first submission."""
+    with _prefixed_client(config, fake_client) as c:
+        response = c.post("/runs", data={"question": "Under a prefix?"}, follow_redirects=False)
+        assert response.status_code == 303
+        assert response.headers["location"].startswith(f"{BASE}/runs/")
+
+
+def test_the_run_page_stays_entirely_under_the_prefix(config, fake_client):
+    with _prefixed_client(config, fake_client) as c:
+        response = c.post("/runs", data={"question": "A prefixed run?"}, follow_redirects=False)
+        run_id = response.headers["location"].rsplit("/", 1)[-1]
+        _wait_for_final(config, run_id)
+
+        for path in (f"/runs/{run_id}", f"/runs/{run_id}/report"):
+            page = c.get(path).text
+            for url in _absolute_urls(page):
+                assert url == BASE or url.startswith(f"{BASE}/"), (path, url)
+        run_page = c.get(f"/runs/{run_id}").text
+        # The live stream is the `connect-src 'self'` target; it has to stay under the prefix
+        # too or the EventSource escapes it.
+        assert f'data-stream="{BASE}/runs/{run_id}/stream"' in run_page

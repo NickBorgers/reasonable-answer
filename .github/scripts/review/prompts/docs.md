@@ -20,7 +20,8 @@ anything the diff made stale or inconsistent, in *either* direction.
 
 The doc set: `README.md`, `docs/DESIGN.md`, `docs/architecture.md`, `docs/isolation.md`,
 `docs/convergence.md`, `docs/bias.md`, `docs/decisions.md`, `docs/ci-pipeline.md`,
-`docs/ci-setup.md`, `docs/ssrf-egress-isolation.md`. `docs/concepts.md` may or may not exist yet —
+`docs/ci-setup.md`, `docs/ssrf-egress-isolation.md`, `docs/authentication.md`.
+`docs/concepts.md` may or may not exist yet —
 if a reference to it appears and the file is absent, that is a stale reference (lens 2), not a
 crash; if this diff *adds* it, run lens 4 against it.
 

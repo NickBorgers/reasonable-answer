@@ -38,7 +38,8 @@ review-entry            authorize · fork-reject · resolve SHA · prior-GO chec
        ├─ security      Codex      │
        ├─ test          Claude    ─┘
        ├─ record-cycle  writes review/cycle — only if a reviewer actually ran
-       ├─ fix           the ONLY branch-writing stage; skipped on the last cycle
+       ├─ fix           the ONLY branch-writing stage; syncs with the base branch and
+       │                addresses blockers; skipped on the last cycle
        ├─ judge         deterministic, from main, contents: read
        └─ finalize      labels · summary comment · merge gate
 ```
@@ -59,6 +60,12 @@ that wants a human's inline comment to block must ingest it via `gh api` and fol
 
 Blocker ids must be stable across cycles for the same underlying problem, because the
 judge namespaces them as `role/id`.
+
+Adding a reviewer role means touching **two** schemas. `reviewer-v1.json`'s `role` enum
+lets the role publish; `fix-result-v1.json`'s `id` pattern lets the fixer *name* that
+role's blockers in `addressed[]`/`skipped[]`. The `docs` role shipped with only the first,
+so for every PR since, a `docs` blocker was one the fixer could never claim to have
+addressed — its artifact would have failed validation against main's schema if it tried.
 
 ### The judge fails closed
 
@@ -91,6 +98,15 @@ claims to have closed. Nothing in the judge inspects the fixer's diff. That is w
 the fixer clearing its own work — the fixed SHA is graded by its own cycle, by reviewers
 that actually read it.
 
+`addressed[]` is credited **only when the fix was actually pushed** — `new_sha` differs
+from `input_sha`, which the host sets only after a successful push. The fixer uploads its
+artifact under `if: always()`, so a run that recorded its work and then died at a later
+gate (lint, the remote-head check) leaves behind a truthful-looking record of changes that
+are not in the tree. PR #49 reported one of three blockers unaddressed when in fact none of
+the three had landed. The finalize comment now says so explicitly, because "the fixer
+claimed fixes but pushed nothing" and "the fixer did nothing" send an operator to two
+different places.
+
 A reviewer only publishes its artifact under the name the judge consumes **if it
 validated**, and the judge separately requires every role the classifier selected to be
 present. Both halves are needed. Without the first, an artifact that had just failed
@@ -110,20 +126,32 @@ it holds `contents: read`, so it could not push if it tried.
   re-reviewed. Re-reviewing identical content can only cost tokens and risk a different
   verdict.
 - **NO-GO is not.** A push that tries to address the blockers gets reviewed again.
-- **`/review` always forces a fresh review run.** It is the human override: the prior-GO
-  short-circuit is `pull_request`-only, so a comment trigger re-reviews a SHA that already
-  cleared. It still goes through the SHA-keyed dedup claim like every other trigger, so it
-  cannot start while a pending `review/pipeline` claim is held on that SHA. It does *not*
-  reset the counter: the run it starts is the next cycle, so on a PR already at the cap it produces a
-  `cycle_capped` NO-GO with no reviewers. Rebasing the branch is what resets the counter —
-  `review/cycle` lives on the commits, and a rebase leaves those SHAs out of the chain
-  `read-cycle` walks.
-- **A human commit on top of a GO resets the counter** — that is a new conversation, and
-  it should get a full review budget. Machine commits are identified by the author email
-  `ci@reasonable-answer.local`.
+- **`/review` always forces a fresh review run.** It is the human override, and it now
+  outranks every "should this cycle run at all" short-circuit: the prior-GO check is
+  `pull_request`-only, and `force_review` suppresses the merge-from-base inherit path. That
+  second one mattered — a PR whose head was a merge from the base could not be re-reviewed
+  by any gesture, because the override was answered by skipping the panel and re-publishing
+  the prior verdict. It still goes through the SHA-keyed dedup claim like every other
+  trigger, so it cannot start while a pending `review/pipeline` claim is held on that SHA.
+  It does not *bypass* the counter, but on a human-authored head it does effectively reset
+  it, since the reset below keys on the author of HEAD rather than on what triggered the
+  run. On a head the fixer authored, `/review` advances the count as usual.
+- **A human commit resets the counter to 1.** `MAX_CYCLES` bounds the *agent* loop —
+  review → fix → push → review — so only agent-authored commits are billed against it.
+  A human push means someone read the blockers and answered them: that is a new
+  conversation and it gets a full budget, including its own fixer attempt. Machine commits
+  are identified by the author email `ci@reasonable-answer.local` and never reset.
+  This does not weaken the bound: the fixer authors as that email, so the automated loop
+  cannot refresh its own budget, and a human has to intervene for the counter to move
+  back — that intervention *is* the bound. It used to reset only on top of a GO, which
+  billed humans for exactly the iteration the blockers had asked them to do; PR #49 walked
+  to `cycle_capped` in three human pushes, one of which was repairing the CI failure that
+  started the burn, and force-pushing was the only way out.
 - **A merge of the base branch into the PR inherits the previous verdict** instead of
   burning a cycle. Without this, routinely resyncing a long-lived branch can push a PR
-  into the cap without a single substantive change.
+  into the cap without a single substantive change. It re-stamps that verdict without
+  reading anything, which is why `/review` overrides it: inheriting a NO-GO is the right
+  answer to an automatic resync and the wrong answer to a person asking to be re-reviewed.
 - **A run that reviewed nothing does not consume a cycle.** `review/cycle` is written by
   `record-cycle`, after the panel has read the code, and only when at least one reviewer's
   guard cleared. Every guard refusing — PR Validation red on the reviewed SHA, the branch
@@ -170,6 +198,39 @@ choice in an `/autoresolve` comment outranks it.
 reviewers and before the judge**, which is load-bearing: the judge then grades the SHA the
 reviewers actually read, and the fixed SHA earns its own cycle with its own reviewers.
 Judging the post-fix tree would let the fixer clear its own work unread.
+
+It does two jobs: it syncs the branch with the base, and it addresses reviewer blockers.
+Either one alone is enough to make it run.
+
+#### Syncing with the base branch
+
+Almost every PR here is agent-authored, so when the base moves there is no human in the
+loop to resync. Before the agent is invoked, the host attempts `git merge --no-commit
+--no-ff origin/<base>` in the PR workspace, with three outcomes:
+
+| state | what happens |
+|---|---|
+| `none` | the branch already contains the base tip; nothing to do |
+| `clean` | merged without conflict, committed by the host, pushed with whatever else this cycle produces |
+| `conflicts` | markers are left in the working tree and the conflicted paths written to a file; the agent resolves them as ordinary file edits |
+
+The `.git` contract is unchanged: the agent edits files and never runs a git write. The
+host seals the merge. A clean merge needs no agent at all — paying for a self-hosted runner
+and a model round-trip to deliver a merge the host already made would be waste.
+
+**The marker gate.** Before committing a merge the host checks two things, because they
+fail independently: no unmerged index entries (`git ls-files -u`), and no conflict markers
+in the staged content (`git diff --check --cached`). A file staged with its markers intact
+has no unmerged entry and no resolution — the first check alone would pass it. If either
+finds something, the merge is aborted, the PR is labelled `needs-human-review` with a
+comment naming the unresolved paths, and the job fails. That is the intended landing place
+for a conflict the agent should not be guessing at: the prompts tell it to leave a marker
+it cannot reconcile honestly rather than invent a resolution nobody can check.
+
+The resulting merge commit lands on the merge-from-base inherit path like any other, so it
+does not burn a cycle. The conflicted-path list travels in a file rather than an
+environment variable: paths are contributor-controlled, and the agent's environment is
+assembled from an `--env-file`, where a newline in a path would inject arbitrary variables.
 
 It runs in one of two modes.
 
@@ -248,11 +309,20 @@ In order, and all of them fail closed:
    nobody reviewed.
 3. `mode` matches what the workflow determined, so a cold fixer cannot self-report as a
    resumed author to unlock `body_clarification`.
-4. `ruff` passes on the whole tree. Tests are deliberately **not** run here: that would
-   mean installing the PR's own `pyproject.toml`, executing PR-authored build config in the
-   one job holding a write-capable PAT. Tests belong to PR Validation, which runs on a
-   runner with no secrets.
-5. The remote branch head still equals the reviewed SHA. If a human pushed meanwhile, the
+4. `ruff` passes on the whole tree, at the version pinned in **main's** `uv.lock` — the
+   same version PR Validation enforces, and not one a PR can choose for its own gate. An
+   inline pin here drifted to six minor versions behind (0.9.7 against the lockfile's
+   0.15.22) before anyone noticed. Installing the linter and running it are separate steps
+   so a registry or egress failure cannot report itself as "the tree does not lint" and
+   spend the PR's one fix attempt on a network error. Tests are deliberately **not** run
+   here: that would mean installing the PR's own `pyproject.toml`, executing PR-authored
+   build config in the one job holding a write-capable PAT. Tests belong to PR Validation,
+   which runs on a runner with no secrets. Reading a version string out of a lockfile
+   executes nothing.
+5. No conflict marker and no unmerged index entry survives, when a merge is in flight —
+   see the marker gate above. This one aborts the merge and labels the PR rather than
+   silently pushing a tree with `<<<<<<<` in it.
+6. The remote branch head still equals the reviewed SHA. If a human pushed meanwhile, the
    fix is discarded rather than racing them.
 
 Artifacts are validated with a JSON-schema validator **pinned by a committed lockfile**
@@ -382,10 +452,6 @@ Every knob lives in [`review-agent-run`](../.github/actions/review-agent-run/act
 
 ## Deliberately not built
 
-- **No agent-driven merge-conflict resolution.** The fixer works on the reviewed SHA and
-  never merges the base branch. If the branch has drifted, that is a human's call — an
-  agent picking resolutions at conflict markers is exactly the kind of unreviewable change
-  this pipeline exists to catch, not to generate.
 - **No two-lens security split.** Folding a confidence threshold and an exclusion list
   into one prompt gets most of the value without a second reviewer job, a merger module,
   and a vendored-prompt pin.

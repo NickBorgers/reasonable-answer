@@ -511,6 +511,187 @@ can make the server fetch a URL, but not what the host can reach, so the egress 
 
 Deployment is documented in [authentication.md](./authentication.md).
 
+## D27 — installable on a phone, without letting anything cacheable be wrong
+
+**The problem.** The web interface was a page, not an app: no manifest, no icons, no way to keep
+it on a home screen. Making it installable is mostly additive, but two parts of it are not, and
+both touch a documented posture rather than just adding a route.
+
+**The CSP had to change**, from
+
+```
+default-src 'none'; img-src 'none'; style-src 'unsafe-inline'; script-src 'unsafe-inline'; connect-src 'self'; form-action 'self'; base-uri 'none'
+```
+
+to
+
+```
+default-src 'none'; img-src 'self'; style-src 'unsafe-inline'; script-src 'self' 'unsafe-inline'; connect-src 'self'; manifest-src 'self'; worker-src 'self'; form-action 'self'; base-uri 'none'
+```
+
+`img-src 'none'` blocked the entire icon set: browsers enforce `img-src` on favicon and
+manifest-icon fetches, so there is no version of this feature that keeps it. The property that
+directive was protecting is nevertheless unchanged. It exists so that model-written report text
+cannot trigger an outbound GET from the reader's browser on a tailnet — and that ban does not
+live in the CSP. It lives one layer earlier, in `web/markdown.py`, which disables the `image`
+rule outright and sets `html=False`, so a report *cannot express* an image in the first place.
+The CSP was belt to that braces. What `'self'` newly permits is same-origin images the
+*application* names in its own template, from an origin the reader's browser is already loaded
+from. Off-origin fetches remain impossible. The renderer-level ban is now the load-bearing one,
+so it carries its own assertion in `tests/test_web.py`; if images are ever re-enabled there, this
+decision has to be revisited in the same change.
+
+`manifest-src 'self'` and `worker-src 'self'` are additions rather than relaxations — both were
+blocked by `default-src 'none'`, and `script-src 'unsafe-inline'` does not cover them, because
+`'unsafe-inline'` permits inline blocks and not URLs. `script-src` gains `'self'` because Safari
+has historically resolved worker scripts through `script-src`/`child-src` rather than
+`worker-src`; adding a host-source does not disable `'unsafe-inline'`, which is dropped only in
+the presence of a nonce or a hash. The whole policy is now pinned by an exact-match test, so
+widening it further fails a test rather than passing quietly.
+
+**A service worker is the first persistent client-side execution surface this project ships** —
+code that keeps running after the tab closes, on an interface with no authentication. Three
+properties bound it:
+
+1. **Its cache is an inclusion allowlist, not an exclusion list.** It precaches the icons, the
+   manifest and one static offline page. `cache.put` appears in exactly one branch, reachable
+   only for URLs in that fixed list. A run page, the `/runs/<id>/progress` fragment and the
+   `/runs/<id>/stream` event log therefore cannot be cached *by construction* — not by a pattern
+   that a later URL change could slip past. The stream is additionally never passed to
+   `respondWith`, so the worker never sits between the browser and an open `text/event-stream`.
+   `/runs/<id>` and `/runs/<id>/progress` also carry `Cache-Control: no-store`, because an
+   installed standalone app leans on the HTTP cache and the back-forward cache far harder than a
+   tab does and the rule has to hold at both layers. A finished run displayed as still running is
+   the one output this interface must not produce.
+2. **The cache key is a hash of the asset bytes**, not the package version — which has never been
+   bumped and would therefore never invalidate anything. Replacing a placeholder icon changes the
+   served `sw.js`, which is what makes every installed client fetch a new worker and drop the old
+   cache. That is what makes "swap in your own artwork" a two-step operation rather than a
+   support question.
+3. **Registration is guarded by `isSecureContext`.** Reached over plain HTTP on a tailnet address
+   the guard returns before anything can throw, and the page is byte-identical to a build without
+   the feature. Installation is available only behind `tailscale serve`'s HTTPS, which is the
+   intended posture anyway.
+
+To withdraw the worker later, ship a `sw.js` whose body is `self.registration.unregister()`. Do
+not simply delete the route: a worker already installed on a device outlives the deploy that
+removed its source.
+
+**Static files are served by an explicit URL→filename allowlist**, not a `StaticFiles` mount.
+The mount would resolve a request string against a directory, which contradicts the rule recorded
+at `web/app.py` that no code path in the web layer constructs a `Path` from request data. Here
+the request string is only ever a dictionary key and every filesystem path is the static
+directory joined with a literal, so traversal attempts are ordinary misses. It is also the only
+way to set `Service-Worker-Allowed`, and it avoids depending on `mimetypes` knowing
+`.webmanifest` — which a bare `python:3.12-slim` does not, and a manifest served as
+`application/octet-stream` is ignored silently.
+
+**Known residual:** the manifest's `background_color` is the light palette's. A manifest has no
+media-query mechanism and the OS caches it at install time, so the Android splash frame is light
+even in dark mode. Serving the manifest dynamically would fix one frame at the cost of making it
+non-static; not worth it.
+
+## D28 — the fixer syncs the branch and resolves conflicts; it merges, it never rebases
+
+**The problem.** Almost every PR in this repository is agent-authored, and no agent goes back to
+a PR it already opened. When `main` moves, the branch drifts, and there is nobody in the loop to
+resync it — the PR sits until a human notices and rebases by hand. The previous position was that
+this was deliberate: `docs/ci-pipeline.md` listed "no agent-driven merge-conflict resolution"
+under *Deliberately not built*, on the grounds that an agent choosing at conflict markers produces
+exactly the unreviewable change this pipeline exists to catch. That reasoning is not wrong about
+the risk; it is wrong about the alternative, which in practice is not a careful human resolution
+but an indefinitely stale PR.
+
+**The mechanism.** Before the fixer's agent runs, the host attempts
+`git merge --no-commit --no-ff origin/<base>` in the PR workspace. `none` (already current) is a
+no-op; `clean` is committed by the host and needs no agent at all; `conflicts` leaves the markers
+in the working tree, writes the conflicted paths to a file, and the agent resolves them as
+ordinary file edits before it touches any reviewer blocker. The host then seals the merge, or
+aborts it.
+
+**Merge, not rebase**, for three reasons that all point the same way. A rebase rewrites the SHAs,
+and `reviewed_sha` is the key that dedup, the cycle counter, and every artifact name hang from. It
+would break the `input_sha == reviewed_sha` gate, since the rebased tree no longer descends from
+the SHA the reviewers read. And it needs a force-push from the one job holding a write-capable
+PAT, where a non-forced `git push HEAD:<ref>` is a much smaller thing to get wrong. A merge commit
+also lands on the existing merge-from-base inherit path, so a resync costs no review cycle.
+
+**The gate that makes it safe to leave a conflict unresolved.** Both fixer prompts tell the agent
+to prefer the base branch's structural change and re-apply the PR's intent on top, and — the part
+that matters — to leave a marker in place when the two genuinely cannot be reconciled. The host
+checks for unmerged index entries *and* for markers in staged content, because a file staged with
+its markers intact has neither an unmerged entry nor a resolution. Either one aborts the merge,
+labels the PR `needs-human-review`, and comments the unresolved paths. So the honest failure is
+cheap and visible, which is what makes "do not guess" a real instruction rather than a wish.
+
+**What is not defended.** A resolution that is syntactically clean and semantically wrong passes
+every gate here — `ruff` sees Python, and nothing reads the merge for meaning. The next cycle's
+reviewers read the branch, but the merge commit itself arrives on the inherit path, so they read
+it as part of whatever comes next rather than as a change under review. This is the residual, and
+it is accepted for the same reason the feature exists: the alternative on offer is not a human
+reading the merge, it is a PR nobody merges.
+
+## D29 — servable under a URL base path, without relaxing the same-origin posture
+
+**The problem.** RA was a root-origin app: every URL it emitted was root-absolute
+(`/static/*`, `/manifest.webmanifest`, `href="/runs/<id>"`, `action="/runs"`, the brand
+`/`, the `/runs/<id>/stream` event source) and the service worker registered at `/sw.js`
+with scope `/`. A reverse proxy that relocates the app under a stripped prefix — the
+Cloudflare Access shape, `location /app/ { proxy_pass http://ra:8080/; }`, where the bare
+`/` has to be a real public page and the auth-gated app lives deeper — therefore could not
+hold the app under that prefix. Every link and the live stream escaped back to the origin
+root, past the Access policy scoped to `/app`.
+
+**The mechanism.** One env, `RA_ROOT_PATH`, normalized once at startup by
+`normalize_base_path` to `''` or `'/seg[/seg…]'` (no trailing slash), and joined to every
+emitted URL as `base + "/…"`. **The empty string is the join identity** — `"" + "/runs"` is
+`/runs` — so an unset env leaves every byte of every page identical to the root-origin
+build, which is what lets the whole existing web test suite stand unchanged and pins the
+"no prefix" case as a real assertion rather than an accident. The prefix is prepended in
+exactly the places a browser resolves against the origin: the server-rendered links and
+form actions, the `303` `Location` after a submit or resume, the manifest's `id`,
+`start_url`, `scope` and icon `src`s, the worker's precache list, its `OFFLINE` fallback and
+its registration scope, and the `Service-Worker-Allowed` header.
+
+**A stripping proxy, so the routes do not move.** The proxy removes `/app/` before the
+request arrives, so the app still serves at `/runs`, `/sw.js`, `/manifest.webmanifest`. The
+base path shapes only what the app *emits*, never what its router *matches*. This is the
+ASGI `root_path` convention, but `FastAPI(root_path=…)` is deliberately **not** set: nothing
+here reads `scope["root_path"]`, routing matches the already-stripped path, and URL
+generation is explicit, so setting it would add a second, silent mechanism that could
+disagree with the explicit one.
+
+**Why an env and not `X-Forwarded-Prefix`.** The manifest and the service worker are
+resolved to bytes once at startup (D27: "read once, at startup"), with the worker's cache
+version hashed over the precached URLs. Reading the prefix from a per-request header would
+force those to be rebuilt per request, or cached per distinct header value — turning a
+static, hashed artifact into a request-varying one. A single startup value keeps D27's
+"these files do not change while the process runs" true. One process serves one prefix;
+that is the residual, and it matches the one-deployment-one-mount reality.
+
+**The CSP does not change, and that is the point.** Everything stays same-origin, so
+`connect-src 'self'` / `form-action 'self'` / `base-uri 'none'` are exactly as D27 pinned
+them, and that test stays green. `base-uri 'none'` also forecloses the obvious shortcut — a
+single `<base href="/app/">` tag — so each URL is prefixed individually instead. The prefix
+is the application naming its own same-origin paths, which is what `'self'` already permits;
+it opens nothing.
+
+**What D27's three service-worker properties cost.** All three hold under a prefix. The
+cache is still an inclusion allowlist: the precache list is the same fixed set of icons,
+manifest and offline page, now carrying the prefix, and still contains no run URL — the
+`no /runs in the worker` assertion is unchanged. The cache key is still a hash of the asset
+bytes, now with the prefixed URL as each entry's name, so two deployments at different
+prefixes key their caches distinctly, which is correct. Registration is still
+`isSecureContext`-guarded. `Service-Worker-Allowed` becomes `/app/` because a worker served
+(as the browser sees it) from `/app/sw.js` must be allowed to claim `/app/`.
+
+**Invariants.** None of the pipeline invariants are in reach: this is URL generation in the
+web layer, which is a window onto the audit trail and touches no model context, no
+`OrchestratorView`, no author-exclusion, no controller rule. The web-layer posture this
+does touch is D27's, and it is generalized, not relaxed: "served from the root so its scope
+is the whole origin" becomes "served from the mount point so its scope is the app," with the
+root case as `base = ''`.
+
 ## Open items for a future round
 
 - Whether `misrepresented_source` can be meaningfully checked without fetching the source
