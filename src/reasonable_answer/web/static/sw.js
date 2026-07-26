@@ -15,7 +15,10 @@
 var VERSION = '__RA_CACHE_VERSION__';
 var CACHE = 'ra-' + VERSION;
 var ASSETS = __RA_PRECACHE__;
-var OFFLINE = '/offline.html';
+// Substituted alongside ASSETS so it always matches the precached entry, prefix and all:
+// behind a stripping proxy the browser requests `/app/offline.html`, so the navigate
+// fallback below has to look that URL up in the cache, not the bare `/offline.html`.
+var OFFLINE = '__RA_OFFLINE__';
 
 self.addEventListener('install', function (event) {
   event.waitUntil(
