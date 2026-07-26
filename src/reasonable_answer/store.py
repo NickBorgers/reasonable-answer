@@ -35,6 +35,16 @@ class UnsafeRunId(ValueError):
     """The run id could escape the runs directory."""
 
 
+class CorruptRun(ValueError):
+    """A stored run file exists but cannot be read as what it should be.
+
+    Distinct from "absent" on purpose. A missing `final.json` means the run never
+    reached a verdict; an unreadable one means the verdict is *unknown*. Collapsing the
+    second into the first would let an export state a terminal status no rule ever
+    produced — the same failure D12/RA-012 keeps `abandoned` out of `final.json` for.
+    """
+
+
 def safe_run_dir(root: Path, run_id: str, must_exist_root: bool = True) -> Path:
     if not RUN_ID.match(run_id or "") or ".." in run_id:
         raise UnsafeRunId(f"invalid run id: {run_id!r}")
@@ -153,6 +163,49 @@ class RunStore:
         with path.open("a") as fh:
             fh.write(json.dumps(obj, default=str) + "\n")
         os.chmod(path, 0o600)
+
+
+def read_run(root: Path, run_id: str) -> tuple[str, str | None, dict[str, Any] | None]:
+    """`(question, final report, final summary)` read back off disk.
+
+    The store is the one place that knows this layout, so reading it back lives here
+    too. `ra export` uses this rather than the web layer's `Registry`: the reader is
+    identical, but `web/` is an optional extra and exporting a run must not require it.
+    A `None` report means the run never finished, or `purge --content-only` has been
+    through — both normal, neither an error. An unreadable `final.json` is *not* normal
+    and raises `CorruptRun`: a caller that treated it as absent would go on to describe
+    the run as aborted, which is a verdict rather than an admission of ignorance.
+    """
+    target = safe_run_dir(root, run_id)
+    if not target.exists():
+        raise FileNotFoundError(f"no such run: {run_id}")
+
+    question = target / "question.txt"
+    report = target / "final.md"
+    final = target / "final.json"
+    return (
+        question.read_text().strip() if question.exists() else "(question not recorded)",
+        report.read_text() if report.exists() else None,
+        load_final(final),
+    )
+
+
+def load_final(path: Path) -> dict[str, Any] | None:
+    """Parse a `final.json`, refusing to read a corrupt one as an absent one.
+
+    Absent means the controller never reached a verdict. Corrupt means one may exist
+    and is unknowable — a different fact, and the only honest thing a durable export
+    can say about it.
+    """
+    if not path.exists():
+        return None
+    try:
+        decoded = json.loads(path.read_text())
+    except json.JSONDecodeError as exc:
+        raise CorruptRun(f"{path} is not valid JSON: {exc}") from exc
+    if not isinstance(decoded, dict):
+        raise CorruptRun(f"{path} decoded to {type(decoded).__name__}, not an object")
+    return decoded
 
 
 def purge(root: Path, run_id: str, content_only: bool = False) -> list[str]:

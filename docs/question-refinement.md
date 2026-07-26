@@ -26,7 +26,11 @@ The pipeline already knows questions arrive loaded — [bias.md §4](./bias.md)
 says "The question is untrusted input, not a premise," and the
 `unexamined_presupposition` category (major severity floor) exists to catch
 writers who swallow a loaded framing. But that machinery runs *downstream*, and
-the common framings show what that costs (illustrative, synthetic questions):
+that is expensive: of the six production runs that motivated this feature, none reached
+`accepted` — two terminated `needs_human_review` and four `exhausted_unresolved`, at 7 and 8
+rounds where they are recorded. The evidence for the cost is those runs; the questions in the
+table below are **synthetic illustrations of the same four shapes**, written for a public
+document, and they demonstrate nothing on their own:
 
 | Framing | Illustrative question | What the framing costs downstream |
 | --- | --- | --- |
@@ -39,7 +43,9 @@ the common framings show what that costs (illustrative, synthetic questions):
 Runs take 10–25 minutes and burn a bounded confirmation budget. A ~3-second
 suggestion that turns "Why is it illegal to keep backyard chickens here?" into
 "Is it actually against the local rules to keep backyard chickens, and what are
-my options if it is?" prevents a multi-round exhaustion. Refinement is the same
+my options if it is?" removes the premise the real run of this shape exhausted
+itself failing to cite — which is the hypothesis this feature tests, not a
+result it has yet demonstrated. Refinement is the same
 insight `unexamined_presupposition` encodes, moved upstream to the one party who
 can cheaply act on it: the asker, before the run starts.
 
@@ -48,8 +54,11 @@ can cheaply act on it: the asker, before the run starts.
 1. User types in the existing question textarea on `/`
    (`render_index`, `web/render.py:116-153`).
 2. Inline JS debounces: after ~1.5 s of typing pause and ≥ 20 characters, it
-   `fetch()`es `POST /refine` with the current text (same-origin; permitted by
-   the existing CSP, `connect-src 'self'`). Each request aborts any in-flight
+   `fetch()`es the refinement route with the current text (same-origin; permitted
+   by the existing CSP, `connect-src 'self'`). The route is `POST /refine`; the
+   browser-facing URL the script actually emits is base-path aware —
+   `RA_ROOT_PATH + "/refine"` (D29), which is the bare `/refine` root-origin
+   identity only when `RA_ROOT_PATH` is unset. Each request aborts any in-flight
    predecessor (`AbortController`) and carries the exact text it was issued
    for; a response is applied only if that text still matches the textarea,
    so a slow response for stale text can never replace fresher chips.

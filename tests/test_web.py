@@ -245,7 +245,12 @@ def test_report_markdown_is_served_only_once_it_exists(client, config):
 
 
 def test_the_report_is_rendered_not_shown_as_raw_markdown(client, config):
-    """A reader gets HTML; `report.md` stays the escape hatch for the source."""
+    """A reader gets HTML; `report.md` stays the escape hatch for the source.
+
+    The copy control is the one sanctioned exception — it carries the markdown in an
+    off-screen textarea because that is what a clipboard write can select — so the
+    guard is that raw markdown appears *only* there, not that it appears nowhere.
+    """
     response = client.post("/runs", data={"question": "Rendered?"}, follow_redirects=False)
     run_id = response.headers["location"].rsplit("/", 1)[-1]
     _wait_for_final(config, run_id)
@@ -254,7 +259,8 @@ def test_the_report_is_rendered_not_shown_as_raw_markdown(client, config):
         page = client.get(url)
         assert page.status_code == 200
         assert "<h1>Answer</h1>" in page.text
-        assert "# Answer" not in page.text
+        visible = re.sub(r"<textarea[^>]*>.*?</textarea>", "", page.text, flags=re.S)
+        assert "# Answer" not in visible
 
 
 def test_the_report_page_404s_before_there_is_a_report_and_for_unknown_runs(config, identities):
@@ -1136,6 +1142,32 @@ def test_the_index_stays_entirely_under_the_prefix(config, fake_client):
     assert f'action="{BASE}/runs"' in page
     assert f'href="{BASE}/manifest.webmanifest"' in page
     assert f"register('{BASE}/sw.js', {{ scope: '{BASE}/' }})" in page
+
+
+def test_refinement_posts_under_the_prefix(config):
+    """The refine POST is issued by inline JS, so `_absolute_urls` above cannot see it —
+    it is not an attribute, not `register(...)`, not a scope. That blind spot is how it
+    shipped addressing the origin root: D26 (refinement) and D29 (the base path) landed in
+    separate PRs, collided in a merge nobody reviewed, and every URL on the page was
+    prefixed except this one. Behind a stripping proxy the request leaves the prefix and
+    404s, and the only symptom is that suggestion chips never appear.
+
+    Rendered directly rather than through a client: enabling refinement makes the proxy a
+    boot dependency (D26), and this is a question about a string the renderer emits."""
+    from reasonable_answer.web.render import render_index
+
+    cfg = config.model_copy(update={"refine": config.refine.model_copy(update={"enabled": True})})
+    page = render_index([], 0, cfg, BASE)
+    assert f"fetch('{BASE}/refine'" in page
+    assert "fetch('/refine'" not in page
+
+
+def test_refinement_posts_to_the_root_without_a_prefix(config):
+    """The empty base stays the join identity here too."""
+    from reasonable_answer.web.render import render_index
+
+    cfg = config.model_copy(update={"refine": config.refine.model_copy(update={"enabled": True})})
+    assert "fetch('/refine'" in render_index([], 0, cfg)
 
 
 def test_the_manifest_is_served_under_the_prefix(config, fake_client):
