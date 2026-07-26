@@ -695,7 +695,10 @@ build, which is what lets the whole existing web test suite stand unchanged and 
 exactly the places a browser resolves against the origin: the server-rendered links and
 form actions, the `303` `Location` after a submit or resume, the manifest's `id`,
 `start_url`, `scope` and icon `src`s, the worker's precache list, its `OFFLINE` fallback and
-its registration scope, and the `Service-Worker-Allowed` header.
+its registration scope, the `Service-Worker-Allowed` header, and — when refinement is
+enabled (D26) — the `fetch()` the inline refinement script issues to `/refine`. That last
+one is a browser-origin URL like the rest and carries the prefix for the same reason; it was
+missed when D26 and D29 landed in separate PRs and is corrected in PR #66.
 
 **A stripping proxy, so the routes do not move.** The proxy removes `/app/` before the
 request arrives, so the app still serves at `/runs`, `/sw.js`, `/manifest.webmanifest`. The

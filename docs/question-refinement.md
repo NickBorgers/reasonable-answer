@@ -48,8 +48,11 @@ can cheaply act on it: the asker, before the run starts.
 1. User types in the existing question textarea on `/`
    (`render_index`, `web/render.py:116-153`).
 2. Inline JS debounces: after ~1.5 s of typing pause and ≥ 20 characters, it
-   `fetch()`es `POST /refine` with the current text (same-origin; permitted by
-   the existing CSP, `connect-src 'self'`). Each request aborts any in-flight
+   `fetch()`es the refinement route with the current text (same-origin; permitted
+   by the existing CSP, `connect-src 'self'`). The route is `POST /refine`; the
+   browser-facing URL the script actually emits is base-path aware —
+   `RA_ROOT_PATH + "/refine"` (D29), which is the bare `/refine` root-origin
+   identity only when `RA_ROOT_PATH` is unset. Each request aborts any in-flight
    predecessor (`AbortController`) and carries the exact text it was issued
    for; a response is applied only if that text still matches the textarea,
    so a slow response for stale text can never replace fresher chips.
