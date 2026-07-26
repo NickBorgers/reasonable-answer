@@ -181,6 +181,17 @@ That count is over distinct *identities*, not families — two checkpoints of th
 satisfy it while decorrelating very little. `make doctor` warns separately when a lens pool
 collapses to a single family.
 
+Structural eligibility is necessary but not sufficient: a model can be non-author and distinct yet
+still unable to perform its lens. `make doctor` therefore also reports each critic's **cached
+audition status** alongside the structural check — but it never measures. `make audition` is what
+measures, grading every rostered critic `fit` / `marginal` / `unfit` against fixtures and caching
+the verdict. With `audition.enforce: true`, a critic assigned to a lens it holds a usable cached
+**`unfit`** verdict on fails startup closed, before any tokens are spent; `marginal`, stale, and
+not-yet-audited verdicts stay warnings, since they are absences of evidence rather than evidence of
+incapacity. `make doctor` also warns when `enforce` is on but no assigned critic has a usable
+verdict — an enforcement gate with nothing to read blocks nothing. (`audition.enabled` is not a
+valid key; with `extra="forbid"` a roster still carrying it fails to load.)
+
 Point `proxy.base_url` at any OpenAI-compatible endpoint. If yours needs a key, set
 `LITELLM_API_KEY` (or change `api_key_env`).
 
