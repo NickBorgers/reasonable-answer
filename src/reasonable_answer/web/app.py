@@ -5,7 +5,7 @@ Design notes worth keeping in mind while reading:
 * **Every request carries an identity, and the app does not verify it.** It comes
   from a header set by Cloudflare Access or by `tailscale serve` (`identity.py`),
   which is only meaningful while the app's port is unreachable except through one of
-  them. A caller who can reach the port directly can claim to be anyone (D30,
+  them. A caller who can reach the port directly can claim to be anyone (D31,
   docs/authentication.md).
 * **Authentication is enforced by middleware, not by each route.** Every route but
   `/healthz` is behind it, including routes nobody has written yet — the failure mode
@@ -518,7 +518,7 @@ def _reject_cross_site(request: Request) -> None:
     A plain HTML form POST triggers no CORS preflight, and the CSP's `form-action 'self'`
     only constrains forms *this* app serves — neither stops a foreign page from
     auto-submitting a run to a guessable hostname and burning a full 10–25-minute run.
-    This matters more since D30, not less: Cloudflare Access sets a `CF_Authorization`
+    This matters more since D31, not less: Cloudflare Access sets a `CF_Authorization`
     cookie, so such a POST now arrives *authenticated*, as a real user, and would create
     a run they own. The app sets no session cookie of its own to hang a SameSite
     attribute on, so the request context itself is the only signal.

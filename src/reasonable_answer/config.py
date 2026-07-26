@@ -175,7 +175,7 @@ class SeedConfig(BaseModel):
     #: Off by default, like `search.enabled` and `search.verify_sources` (D17/D18):
     #: a URL seed makes the server fetch a caller-chosen URL and hand the body back
     #: as the run's first report — a read proxy into whatever the host can reach, for
-    #: anyone who can submit. Authentication (D30) narrows *who* that is; it does not
+    #: anyone who can submit. Authentication (D31) narrows *who* that is; it does not
     #: shrink what the host can reach, and the people invited in are not the threat
     #: model this guards against. The network-layer egress boundary that makes it
     #: acceptable is still a deployment concern outside this repo

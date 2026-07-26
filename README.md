@@ -86,7 +86,7 @@ runs, anyone signed in who has a run id can read that run, and only its owner ca
 Because the header is not verified, anyone who can reach the port directly can claim to be any
 user. `ra serve` binds `127.0.0.1` by default and `compose.yaml` publishes only to loopback for
 that reason: keep the proxy the only way in. See [docs/authentication.md](docs/authentication.md)
-for the Cloudflare Access setup, and D30 in [docs/decisions.md](docs/decisions.md) for what that
+for the Cloudflare Access setup, and D31 in [docs/decisions.md](docs/decisions.md) for what that
 trade does and does not buy.
 
 Showing reports and critiques to a *human* does not weaken the isolation design — blindness is

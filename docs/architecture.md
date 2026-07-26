@@ -243,7 +243,7 @@ carried no headings is accepted with a warning; the warning rides the run's exis
   queue's waiting depth reaches `max_queue_depth`, and a fixed-window `submit_rate_max` /
   `submit_rate_window_seconds` limiter caps how fast one caller may open new runs — keyed by the
   caller's resolved identity (Cloudflare Access email first, then the Tailscale header, then the
-  optional `auth.dev_identity`), the same identity the auth middleware enforces (D30). There is no
+  optional `auth.dev_identity`), the same identity the auth middleware enforces (D31). There is no
   shared global bucket: a request carrying no identity is refused by the middleware before it
   reaches submission at all. Both checks run **before** any run directory is written, so a refused
   submission costs no disk.
