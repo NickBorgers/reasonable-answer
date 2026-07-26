@@ -110,9 +110,11 @@ it holds `contents: read`, so it could not push if it tried.
   re-reviewed. Re-reviewing identical content can only cost tokens and risk a different
   verdict.
 - **NO-GO is not.** A push that tries to address the blockers gets reviewed again.
-- **`/review` always forces a fresh review run.** It is the human override, and it bypasses
-  both the prior-GO short-circuit and the dedup claim. It does *not* reset the counter: the
-  run it starts is the next cycle, so on a PR already at the cap it produces a
+- **`/review` always forces a fresh review run.** It is the human override: the prior-GO
+  short-circuit is `pull_request`-only, so a comment trigger re-reviews a SHA that already
+  cleared. It still goes through the SHA-keyed dedup claim like every other trigger, so it
+  cannot start while a pending `review/pipeline` claim is held on that SHA. It does *not*
+  reset the counter: the run it starts is the next cycle, so on a PR already at the cap it produces a
   `cycle_capped` NO-GO with no reviewers. Rebasing the branch is what resets the counter —
   `review/cycle` lives on the commits, and a rebase leaves those SHAs out of the chain
   `read-cycle` walks.
