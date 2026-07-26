@@ -126,12 +126,16 @@ disputes:
 # Position 3 is unreachable on the first pass and is reached on the rule 8 confirmation
 # top-up — where a false clean raises cleared_count to 2, satisfies strong_met, and
 # terminates the run `accepted`. Audition it before trusting that lineup.
+# Measuring is opt-in by being its own command (`ra audition`) — there is no `enabled`
+# flag here. Everything below only shapes what that command measures and what the two
+# cache readers, `ra doctor` and the `enforce` gate, make of the result.
 audition:
-  enabled: false
   # Warn rather than abort when a critic grades `unfit`. Fail-closed is the right
   # instinct — the soundness claim is void without capable reviewers — but coupling
   # every run to a cache whose freshness depends on a rate-limited proxy means an
-  # operator blocked by an expired audition disables the harness outright.
+  # operator blocked by an expired audition disables the harness outright. Turning this
+  # on makes `ra run` and the web server refuse to start while an assigned critic is
+  # measured `unfit`; `marginal`, `stale` and `not audited` stay warnings regardless.
   enforce: false
   cache_path: .ra-audition.json
   max_age_days: 30
@@ -167,13 +171,71 @@ budgets:
   max_concurrency: 3
 
 # Identity comes from a header set by whatever fronts the app — Cloudflare Access or
-# `tailscale serve` — and a request carrying neither is refused (D26,
+# `tailscale serve` — and a request carrying neither is refused (D30,
 # docs/authentication.md). `dev_identity` gives such a request an identity instead:
 # what local development needs, and a public login anywhere else. $RA_DEV_IDENTITY
 # overrides it and is how `make serve` sets it, so this stays unset in the file a
 # deployment mounts.
 # auth:
 #   dev_identity: you@example.com
+
+# Pre-run question refinement (D26, docs/question-refinement.md). While the asker
+# pauses after typing, a small model is asked whether the question as worded encodes a
+# framing that will fight the pipeline — a false either/or, an unverified premise, an
+# unscoped "net positive?" verdict — and up to three reframe chips appear under the
+# textarea when it finds one. Nothing is ever blocked, corrected on screen, or applied
+# without a tap.
+#
+# The code default is off; THIS deployment opts in, because the run history is what
+# motivated the feature: run-75eb136b9bfb (false either/or, 7 rounds, needs human
+# review), run-40de6a7cdbf9 (unverified premise plus a buried practical goal, 8 rounds,
+# exhausted), run-3e184fb11a36 and run-5af587189b89 (unscoped "net X" scalar verdicts).
+# A ~3-second suggestion is cheap next to a 10-25 minute run that was unanswerable as
+# asked.
+#
+# One availability consequence of turning this on, stated plainly: when enabled, the
+# refine alias joins startup identity resolution and structured-output probing, so the
+# web server now needs the proxy reachable to boot at all. With it off, the UI came up
+# regardless and only a run needed the proxy. That is the fail-closed trade the design
+# chose (a schema-incapable alias must not surface on a user's first pause) — set
+# `enabled: false` if browsing past runs during a proxy outage matters more.
+#
+# That boot dependency is also why this file is no longer the one baked into the image:
+# config/roster.default.yaml is, and it leaves refinement off so the image still starts
+# with nothing mounted and no network. compose.yaml mounts THIS file over it.
+#
+# `alias` is left empty, so refinement uses the orchestrator alias (gemma4-small):
+# local, free, already resolved and probed at startup, and orchestrator-class judgment
+# is exactly the shape of this task. Naming a different alias here would only buy real
+# isolation from run traffic if that alias is routed to a dedicated backend/resource
+# pool — the name alone proves nothing (see D26's isolation accounting).
+refine:
+  enabled: true
+  alias: ""
+  max_suggestions: 3
+  # Provider-level request timeout for the refine call only. The asker is waiting on
+  # this one, unlike a run's 300s writer call.
+  timeout_seconds: 5.0
+  cache_entries: 256
+  cache_ttl_seconds: 900
+  # Separate from submit_rate_max: a person pausing while typing triggers many more
+  # refine calls than submissions.
+  rate_max: 10
+  rate_window_seconds: 60
+  # A hard ceiling on live refine calls, shed (never queued) past it.
+  concurrency: 2
+  offer_entries: 512
+  offer_ttl_seconds: 1800
+  orphan_linger_seconds: 30
+  # `question_behind_the_question` is deliberately absent: it is the only transform
+  # that lets the model infer an unstated concern, and it stays off until the
+  # paired-fixture audition in docs/question-refinement.md passes.
+  enabled_transforms:
+    - split_the_either_or
+    - check_the_premise_first
+    - name_the_outcome
+    - surface_the_real_goal
+    - ask_whats_answerable
 
 runs_dir: runs
 retention_days: 14

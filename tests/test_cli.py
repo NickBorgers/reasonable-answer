@@ -73,6 +73,19 @@ def test_doctor_reports_a_healthy_roster(doctor_config):
     assert "roster healthy" in result.stdout
 
 
+def test_doctor_says_so_when_enforcement_is_on_with_nothing_measured(doctor_config):
+    """`enforce: true` on an empty cache blocks nothing. Reporting that roster as simply
+    healthy is how a setting comes to read as a safety control while being inert — the
+    reason `audition.enabled` was deleted rather than wired up (D20)."""
+    data = yaml.safe_load(doctor_config.read_text())
+    data["audition"] = {"enforce": True}
+    doctor_config.write_text(yaml.safe_dump(data))
+
+    result = runner.invoke(cli.app, ["doctor", "--config", str(doctor_config)])
+    assert result.exit_code == 0
+    assert "cannot block anything" in result.stdout.replace("\n", " ")
+
+
 def test_doctor_warns_rather_than_claiming_health_when_a_lens_is_thin(tmp_path, monkeypatch):
     """One eligible non-author critic is legal but degrades acceptance, so doctor has
     to say so — a silent pass here would misrepresent what `accepted` will mean."""

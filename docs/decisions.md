@@ -154,7 +154,7 @@ extension:
 | RG-002 | high | The "2-model consecutive-clean fallback" was referenced but never represented in state | **Fixed by removal.** `weak_met` is now purely the per-lens `roster_limited` case (current-hash-only); all consecutive-clean language deleted. |
 | RG-003 | med | Tick/sequence/DESIGN diagrams still showed one critic for three lenses | **Fixed.** Diagrams relabeled to per-lens critics (each ≠ author); DESIGN core-loop reframed from "two-model ping-pong" to a role-structured alternating game. |
 | RG-004 | low | Stale `lens_set` / rule-number / flat-roster wording in the review log | **Fixed.** RC-002 → per-lens `CleanRecord`; RB-002 de-numbered; D9 annotated as superseded by D15; roster contract restated as per-lens eligibility. |
-| D24 | **Seed reports are converted to markdown at the edge; URL seeds are opt-in and off by default.** `--seed` and the web form accept PDF, `.docx`, HTML and `.txt`; `ingest` converts them before `graph.run` is called, which continues to require markdown. http(s) URL seeds exist behind `seed.allow_url`, default `false` (the D17/D18 posture): a URL seed makes the server fetch a caller-chosen URL and expose the body back through the run's report endpoints — on the web UI that is a read proxy into whatever the host can reach, and the egress boundary that makes it acceptable is a network-layer deployment concern outside this repo (docs/ssrf-egress-isolation.md). *(Written when the UI was unauthenticated. D26 identifies callers, which narrows who can submit a URL but not what the host can reach — the egress boundary remains the prerequisite.)* Turning it off hides the form field and rejects the parameter. A format that yields no headings is accepted with a warning, not rejected. | Markdown is not a preference here, it is load-bearing: `report.parse` builds the `[S<n>.P<m>]` loci critics must cite from `#` headings, and `extract_source_urls` reads only a markdown `## Sources` section, so an unconverted seed silently costs the evidence lens its fetch-backed checks. Converting at the **edge** rather than inside `_intake` keeps one artifact and one identity — `_run_fingerprint` and `artifact_hash` would otherwise hash different things (a URL vs. its converted text), letting a resume pass the fingerprint check while the checkpoint held different prose. It also keeps network I/O out of the graph, where every other fetch is injected through `Runtime` so tests stay offline. Accepting a heading-less seed reflects what the formats actually carry: PDF has no recoverable heading semantics without font heuristics, and refusing would block the most common real-world case to protect locus precision the source never had. PDF is the only format needing a dependency (`pypdf`, optional extra); `.docx` is a zip of XML and HTML is an `HTMLParser`, both standard library. |
+| D24 | **Seed reports are converted to markdown at the edge; URL seeds are opt-in and off by default.** `--seed` and the web form accept PDF, `.docx`, HTML and `.txt`; `ingest` converts them before `graph.run` is called, which continues to require markdown. http(s) URL seeds exist behind `seed.allow_url`, default `false` (the D17/D18 posture): a URL seed makes the server fetch a caller-chosen URL and expose the body back through the run's report endpoints — on the web UI that is a read proxy into whatever the host can reach, and the egress boundary that makes it acceptable is a network-layer deployment concern outside this repo (docs/ssrf-egress-isolation.md). *(Written when the UI was unauthenticated. D30 identifies callers, which narrows who can submit a URL but not what the host can reach — the egress boundary remains the prerequisite.)* Turning it off hides the form field and rejects the parameter. A format that yields no headings is accepted with a warning, not rejected. | Markdown is not a preference here, it is load-bearing: `report.parse` builds the `[S<n>.P<m>]` loci critics must cite from `#` headings, and `extract_source_urls` reads only a markdown `## Sources` section, so an unconverted seed silently costs the evidence lens its fetch-backed checks. Converting at the **edge** rather than inside `_intake` keeps one artifact and one identity — `_run_fingerprint` and `artifact_hash` would otherwise hash different things (a URL vs. its converted text), letting a resume pass the fingerprint check while the checkpoint held different prose. It also keeps network I/O out of the graph, where every other fetch is injected through `Runtime` so tests stay offline. Accepting a heading-less seed reflects what the formats actually carry: PDF has no recoverable heading semantics without font heuristics, and refusing would block the most common real-world case to protect locus precision the source never had. PDF is the only format needing a dependency (`pypdf`, optional extra); `.docx` is a zip of XML and HTML is an `HTMLParser`, both standard library. |
 
 ## D20 — critic eligibility becomes structural *and* demonstrated
 
@@ -196,6 +196,27 @@ a *default* because it couples every run to a cache whose freshness depends on a
 rate-limited proxy, and an operator blocked by an expired audition will disable the
 harness outright, which is strictly worse than a loud warning. `audition.enforce: true`
 turns an `unfit` assigned critic into a startup `ConfigError`.
+
+**The gate blocks only on `unfit`, and only ever reads the cache.** `audition.enforce_fitness`
+runs in `graph.build_runtime` beside `validate_roster_health`, before the structured-output
+probes, so a roster with a measured-incapable critic never reaches the point of spending
+tokens. `marginal`, `stale` and `not audited` stay warnings even with enforcement on: they
+are absences of evidence, not evidence of incapacity, and blocking on them is precisely the
+coupling to cache freshness the paragraph above rejects. A verdict about a model no longer
+rostered is ignored, so swapping the unfit model out takes effect immediately. The gate
+takes no `LLMClient` by signature — a test pins that — because it runs on every `ra run` and
+every web boot, where growing a call would bill an audition per run and break a keyless boot.
+
+**`audition.enabled` is deleted, not implemented.** It shipped `false`, was read by nothing,
+and there was nothing for it to gate: `ra audition` is the only thing that measures, and
+`ra doctor` and the gate above only read the cache it leaves behind. Auditioning is opt-in by
+being its own command. A knob that cannot change behaviour is worse than no knob, because it
+reads as a safety control — the same reason a blank audition cell in `ra doctor` is forbidden.
+`AuditionConfig` is `extra="forbid"`, so a config still carrying `enabled:` now fails to load
+rather than silently ignoring it — a loud break on a line that never did anything, which is the
+right trade for a two-file repo but is the one thing to know before pulling this into a
+deployment with a hand-edited roster. `config/roster.yaml` is updated;
+`config/roster.default.yaml` carries no `audition` block and takes the code defaults.
 
 One case is deliberately not tunable: a model scoring **zero** on `tier: obvious` fixtures
 grades `unfit` under every threshold configuration. That is the observed signature above,
@@ -436,80 +457,112 @@ and every citation dispute rides on the arbiter; the dispute config deliberately
 the resume fingerprint, so toggling it mid-run changes only whether the *privilege* exists going
 forward.
 
-## D26 — the interface has users: a trusted identity header, and runs that belong to someone
+## D26 — question refinement is offered at the edge, ambient and never blocking
 
-Every prior version of this document says there is no authentication and that Tailscale ACLs are
-the access control. That was true and deliberate for a single operator. Opening the interface to
-friends makes it false in a way that matters: without a user concept, everyone who reaches the
-app shares one index onto everyone's questions, seed material and audit trails.
+**The problem.** The pipeline already knows questions arrive loaded: `unexamined_presupposition`
+(D24, completeness lens, major floor) exists precisely to catch a writer who accepts a contested
+framing as settled. But that machinery fires only after a run is already underway, and the
+production run history shows what waiting until then costs. `run-75eb136b9bfb` ("Does Talarico
+back the police or support defunding them?") forced the report to spend its conclusion rejecting
+a false either/or; 7 rounds, terminated `needs_human_review`. `run-40de6a7cdbf9` ("Why is it
+illegal to move an opossum in tx?") let an unverified premise stand without a statute citation
+while the user's real, buried question — lawful removal options — went unaddressed; 8 rounds,
+`exhausted_unresolved` with the missing citation still blocking. `run-3e184fb11a36` and
+`run-5af587189b89` both posed a "net positive/negative" scalar verdict over an unscoped
+population, outcome set, and timeframe — unanswerable as asked. `run-85c88f8c6ba4` ("Is it better
+to be honest or nice?") posed a value question as an either/or with nothing for the evidence
+machinery to converge on; `exhausted_unresolved`. `run-4d350e1d27a8` asked a settled verification
+question ("Did Donald Trump win the 2020 presidential election?") when the report's real energy
+went to the adjacent, more interesting question of why the belief persists. In every case the
+category was already nameable — `unexamined_presupposition` (D24) would tag some of these on
+sight — but the finding lands 10–25 minutes and several critique rounds after the one party who
+could cheaply reframe the question, the asker, has already walked away from the keyboard. The
+fix that costs nothing is upstream: catch the same framing before the run starts, while the asker
+is still there to accept, ignore, or edit it.
 
-**Decision.** Identity comes from a request header set by whatever fronts the app —
-`Cf-Access-Authenticated-User-Email` from Cloudflare Access, or the `Tailscale-User-*` headers
-D21 already read — and every route but `/healthz` refuses a request that carries none. Runs
-record their submitter in `owner.txt`. The index is owner-scoped.
+**The mechanism** (opt-in, `refine.enabled: false` by default):
 
-**The header is trusted, not verified — and that is the accepted risk.** Cloudflare Access also
-sends a signed `Cf-Access-Jwt-Assertion` that could be checked against the team's JWKS with an
-`aud` claim, which is the real boundary. It is not implemented here. Cloudflare strips and
-rewrites `Cf-Access-*` on everything it proxies, so *through the tunnel* the email header is
-authoritative; the exposure is that the tailnet path is deliberately kept open, so any tailnet
-peer that can reach the port can set the header to any value and read or submit as that person.
-At the scale this serves — a handful of invited people, on a tailnet the operator controls —
-that is a trade taken knowingly, and revisiting it is the stated condition for exposing the
-service more broadly. All of it is confined to `web/identity.py:resolve_identity`, so verifying
-the JWT is a change to one function.
+1. **A closed enum of six transforms**, not free-form rewriting: split-the-either/or,
+   check-the-premise-first, name-the-outcome-you-care-about, surface-the-real-goal,
+   ask-what's-answerable, and ask-the-question-behind-the-question. Every transform preserves the
+   user's subject; the model may change *how* the question is posed, never *what* it is about.
+   The sixth — the only transform that lets the model infer an unstated concern rather than
+   rephrase what is already on the page — ships **disabled** and is enabled only after a
+   paired-fixture audition (mirror questions posed from opposing framings must yield mirror
+   suggestions) passes, the same deferred-audition pattern D24 uses for its own cross-critic
+   bias-correlation check.
+2. **Edge-only placement.** Refinement lives entirely in `web/refine.py`, never inside the graph.
+   `_intake` (RA-018) is unchanged; the graph still receives exactly one question and never knows
+   refinement existed. This follows the seed-ingestion precedent (PR #25): edge-side
+   transformation that is audited but never routes. Keeping it out of `_intake` also keeps the
+   resume fingerprint honest — the question the graph fingerprints never depends on a model call.
+3. **Server-side offer records are the provenance authority.** Client-submitted
+   `refine_offer_id`/`refine_selected` are *claims*, never evidence. They are verified only when
+   the offer exists server-side, the index is valid, and the submitted question exactly equals
+   that suggestion's stored text. A forged or stale claim degrades to an `unverified` mark; it
+   can never fabricate an audit trail, because the record it would have to fake was never written
+   from client input in the first place.
+4. **Two layers of guarantee.** Enforced: schema validation plus deterministic per-entry checks
+   (transform in the enabled set, length caps, ends with `?`, no control characters, no
+   duplicates, count bound) — any failure degrades silently to zero suggestions. Prompt policy:
+   no meta-commentary, no steering, subject preservation, silence-as-default, one transform per
+   suggestion — fixture-tested, never assumed, not enforced.
+5. **Retention follows content, not code path.** Full refinement content — question at offer,
+   suggestions offered, chosen text — is written to `runs/<id>/refinements/refinement.json`,
+   folded into `CONTENT_DIRS` so the existing directory-level content purge removes it alongside
+   reports and critiques. `events.jsonl`, which survives purges, gets only hashes and enum
+   fields: `{offer_id, transform, selected_index, question_sha256, original_sha256, provenance}`.
+   `question.txt` continues to hold exactly the question that ran, per the resume-fingerprint
+   rule.
 
-**Access is preferred over Tailscale, and every source is normalized identically.** Both
-headers are trusted equally; Access is checked first because it is how friends arrive. The
-operator reaches the app by both doors, so the same person must resolve to one identity either
-way — every source is lower-cased, and a value that is blank, over 320 characters, or carries
-control characters is treated as absent rather than truncated into an ownership key its own
-submitter could never match. Only `Tailscale-User-Login` is read; `Tailscale-User-Name` was
-fine as D21's rate-limit key, where any *stable* string worked, but an ownership key must be
-the *same* string the other door produces, and a display name is a different namespace from an
-address. What normalization cannot fix is a tailnet whose identity provider reports a different
-address than the Access policy lists — that is two people as far as this system can tell, and
-the check is to sign in each way and compare the *signed in as* line.
+**Alternatives rejected.**
+- *An interstitial confirmation step after "Start run"*: makes every user pay a click to benefit
+  a minority of loaded questions, and reads as a correction gate ("are you sure?") rather than
+  the felt experience of being understood.
+- *Refinement inside the graph, at `_intake`*: would make the question the graph fingerprints
+  depend on a model call, breaking resume, and would put the reframing decision in the pipeline's
+  hands rather than the asker's — the opposite of the intent.
+- *Trusting client-submitted provenance*: a `refine_offer_id`/`refine_selected` pair from the
+  client is exactly the kind of untrusted input RA-010 already treats every model-adjacent field
+  as; recording it as fact would let a forged or replayed claim write a false audit trail.
+- *A distinct alias name as an isolation claim*: a different alias name alone proves nothing
+  about backend isolation, and can even add contention rather than remove it, via model swapping
+  onto the same underlying resource pool.
 
-**Enforcement is middleware, not a call per route.** `_reject_cross_site` is invoked by hand at
-the top of each mutating handler, and that idiom is right for CSRF — it is a property of two
-specific routes. Authentication is a property of the app, and the failure mode of an opt-in
-check is a future route that forgets it. The middleware is the only fail-closed shape.
+**Isolation accounting** (the seven principles): refinement is not part of the alternating game —
+no writer, no critic, no orchestrator role is added or touched — so principles 2–7 hold by
+absence of contact: no new social context, no authorship question, no new lens, no new step
+inside the alternating loop, no new context accumulation, no critic-writer coupling. Principle 1
+is the one with an honest tension to name: refinement puts a model's words in front of the human
+*before* a run exists at all, a channel the pipeline otherwise does not have — there is no
+analogous point today where an artifact-first handoff rule even applies, since nothing has been
+produced yet. It is bounded the same way every other model-facing channel in this system is
+bounded: the transform enum forbids free-form rewriting, the subject is preserved (guardrail 6),
+the original wording is always one tap away and always wins ties (never auto-replaced, never
+required), and every offered suggestion is written to `refinements/refinement.json`, auditable
+per run exactly like a report or critique.
 
-**`auth.dev_identity` is the single knob, and its unset state is the safe one.** Set (via the
-roster or `$RA_DEV_IDENTITY`), it supplies an identity to requests with no header, which is what
-local development needs; unset, such a request is refused. A boolean `require_auth` alongside it
-would have been two settings that can disagree, and the disagreeing combination fails open.
-
-**Ownership scopes the index; it does not scope reads.** You see your own runs listed. Anyone
-signed in who holds a run id can read that run — sharing a link is the intended way to show
-someone a report, with export/publish to follow. Resume is the one exception: reading costs
-nothing, but resuming spends the owner's tokens for another 10–25 minutes, so it stays with the
-person who started it.
-
-**A run with no owner is served to nobody.** Runs written before this decision, and CLI runs
-started without `ra run --owner`, have no identity to attribute and none can be invented for
-them. They are 404 over HTTP — not listed, not readable, not resumable by hand — while remaining
-untouched on disk and through the CLI. There is deliberately no backfill: guessing an owner is
-how a stranger's run ends up in someone's index. Boot recovery is unaffected, because an
-interrupted run is work already owed and whether anyone can currently *see* it has no bearing on
-whether it should finish. `owner.txt` sits outside `CONTENT_DIRS` so that a retention sweep
-cannot silently retire a run from its owner's index.
-
-**D21's rate limiter is unchanged in mechanism and stronger in effect.** Its key was already the
-identity header; the difference is that there is no longer a shared `global` bucket to spill
-into, because an unauthenticated request never reaches the queue. The CSRF guard also matters
-more than it did: Access sets a `CF_Authorization` cookie, so a cross-site form POST would now
-ride an authenticated session, and `Sec-Fetch-Site` is what refuses it.
-
-**Isolation is untouched.** This is entirely upstream of run creation and moves no new data
-toward any model context. `owner` deliberately stays out of `_run_fingerprint`: the fingerprint
-guards against a run resuming under changed *inputs*, and attributing a run must never cost it
-its checkpoint. The `seed.allow_url` rationale changes slightly — authentication narrows *who*
-can make the server fetch a URL, but not what the host can reach, so the egress boundary in
-[ssrf-egress-isolation.md](./ssrf-egress-isolation.md) remains the prerequisite it was.
-
-Deployment is documented in [authentication.md](./authentication.md).
+**Known residuals, accepted and recorded:** refinement shares the LiteLLM proxy with runs, so the
+honest guarantee is a **small fixed ceiling on live client calls** (`refine.concurrency`), shed
+rather than queued when saturated — not zero contention with run traffic, which is a deployment
+property (an alias routed to a dedicated backend/resource pool), not something an alias name or
+client-side control can provide on its own. A timed-out call's orphan-linger window
+(`orphan_linger_seconds`) is best-effort damping on orphan accumulation, not a guarantee — a
+stalled backend can outlive any window, since the design does not assume verified
+disconnect-cancellation from the underlying proxy/backend. The suggester could itself introduce
+spin — a taste for one phrasing over another — mitigated by the closed transform enum, the
+prompt-policy guardrails, the highest-risk transform (`question_behind_the_question`) shipping
+disabled, and per-run auditability via `refinement.json`, but not eliminated as a possibility. An
+expired or evicted offer record downgrades an honest, unforged selection to `unverified`
+provenance — indistinguishable, downstream, from a forged one; the cost is a slightly less
+informative audit trail, never a false one. Enabling refinement also makes the proxy a **boot**
+dependency of the web server rather than only a run dependency — the refine alias joins startup
+identity resolution and structured-output probing, so an unreachable proxy stops the UI coming up
+at all. That is the intended fail-closed trade (a schema-incapable alias must not first surface on
+a user's pause), and it is why the roster baked into the image and the wheel is
+`config/roster.default.yaml`, which leaves refinement off so the image still boots with no network
+and no credential; `config/roster.yaml`, mounted over it by `compose.yaml`, is where this
+deployment opts in.
 
 ## D27 — installable on a phone, without letting anything cacheable be wrong
 
@@ -625,11 +678,23 @@ labels the PR `needs-human-review`, and comments the unresolved paths. So the ho
 cheap and visible, which is what makes "do not guess" a real instruction rather than a wish.
 
 **What is not defended.** A resolution that is syntactically clean and semantically wrong passes
-every gate here — `ruff` sees Python, and nothing reads the merge for meaning. The next cycle's
-reviewers read the branch, but the merge commit itself arrives on the inherit path, so they read
-it as part of whatever comes next rather than as a change under review. This is the residual, and
-it is accepted for the same reason the feature exists: the alternative on offer is not a human
-reading the merge, it is a PR nobody merges.
+every gate here — `ruff` sees Python, and nothing reads the merge for meaning. What *does* read it
+is the next cycle's panel, on the fixed SHA, which is the same protection every other fixer output
+gets.
+
+**Correction, from PR #49.** The paragraph above originally said the merge commit "arrives on the
+inherit path", and treated that as an accepted cost. It was not a cost, it was a hole, and it was
+larger than described. Inherit re-stamps the *previous* verdict, and the previous verdict is the
+cycle-1 judge's reading of the **pre-fix** tree. So on #49: reviewers cleared the pre-fix tree, the
+judge issued a GO, the fixer pushed a merge carrying four conflict resolutions and two blocker
+fixes, gather saw merge-from-base and skipped all four reviewers, and that GO was re-stamped onto a
+tree nobody had read. Auto-merge fired three seconds later; 2105 lines landed on main unreviewed.
+
+The property "the fixed SHA earns its own cycle with its own reviewers" was never a consequence of
+the inherit rule being careful — it held by accident, because fixer commits used to have one parent
+and so could not match the inherit test. Teaching the fixer to merge silently removed that
+accident. Gather now refuses to inherit any commit authored as `AGENT_COMMIT_EMAIL`, which restores
+the property by stating it rather than relying on commit shape.
 
 ## D29 — servable under a URL base path, without relaxing the same-origin posture
 
@@ -692,11 +757,86 @@ does touch is D27's, and it is generalized, not relaxed: "served from the root s
 is the whole origin" becomes "served from the mount point so its scope is the app," with the
 root case as `base = ''`.
 
+## D30 — the interface has users: a trusted identity header, and runs that belong to someone
+
+Every prior version of this document says there is no authentication and that Tailscale ACLs are
+the access control. That was true and deliberate for a single operator. Opening the interface to
+friends makes it false in a way that matters: without a user concept, everyone who reaches the
+app shares one index onto everyone's questions, seed material and audit trails.
+
+**Decision.** Identity comes from a request header set by whatever fronts the app —
+`Cf-Access-Authenticated-User-Email` from Cloudflare Access, or the `Tailscale-User-*` headers
+D21 already read — and every route but `/healthz` refuses a request that carries none. Runs
+record their submitter in `owner.txt`. The index is owner-scoped.
+
+**The header is trusted, not verified — and that is the accepted risk.** Cloudflare Access also
+sends a signed `Cf-Access-Jwt-Assertion` that could be checked against the team's JWKS with an
+`aud` claim, which is the real boundary. It is not implemented here. Cloudflare strips and
+rewrites `Cf-Access-*` on everything it proxies, so *through the tunnel* the email header is
+authoritative; the exposure is that the tailnet path is deliberately kept open, so any tailnet
+peer that can reach the port can set the header to any value and read or submit as that person.
+At the scale this serves — a handful of invited people, on a tailnet the operator controls —
+that is a trade taken knowingly, and revisiting it is the stated condition for exposing the
+service more broadly. All of it is confined to `web/identity.py:resolve_identity`, so verifying
+the JWT is a change to one function.
+
+**Access is preferred over Tailscale, and every source is normalized identically.** Both
+headers are trusted equally; Access is checked first because it is how friends arrive. The
+operator reaches the app by both doors, so the same person must resolve to one identity either
+way — every source is lower-cased, and a value that is blank, over 320 characters, or carries
+control characters is treated as absent rather than truncated into an ownership key its own
+submitter could never match. Only `Tailscale-User-Login` is read; `Tailscale-User-Name` was
+fine as D21's rate-limit key, where any *stable* string worked, but an ownership key must be
+the *same* string the other door produces, and a display name is a different namespace from an
+address. What normalization cannot fix is a tailnet whose identity provider reports a different
+address than the Access policy lists — that is two people as far as this system can tell, and
+the check is to sign in each way and compare the *signed in as* line.
+
+**Enforcement is middleware, not a call per route.** `_reject_cross_site` is invoked by hand at
+the top of each mutating handler, and that idiom is right for CSRF — it is a property of two
+specific routes. Authentication is a property of the app, and the failure mode of an opt-in
+check is a future route that forgets it. The middleware is the only fail-closed shape.
+
+**`auth.dev_identity` is the single knob, and its unset state is the safe one.** Set (via the
+roster or `$RA_DEV_IDENTITY`), it supplies an identity to requests with no header, which is what
+local development needs; unset, such a request is refused. A boolean `require_auth` alongside it
+would have been two settings that can disagree, and the disagreeing combination fails open.
+
+**Ownership scopes the index; it does not scope reads.** You see your own runs listed. Anyone
+signed in who holds a run id can read that run — sharing a link is the intended way to show
+someone a report, with export/publish to follow. Resume is the one exception: reading costs
+nothing, but resuming spends the owner's tokens for another 10–25 minutes, so it stays with the
+person who started it.
+
+**A run with no owner is served to nobody.** Runs written before this decision, and CLI runs
+started without `ra run --owner`, have no identity to attribute and none can be invented for
+them. They are 404 over HTTP — not listed, not readable, not resumable by hand — while remaining
+untouched on disk and through the CLI. There is deliberately no backfill: guessing an owner is
+how a stranger's run ends up in someone's index. Boot recovery is unaffected, because an
+interrupted run is work already owed and whether anyone can currently *see* it has no bearing on
+whether it should finish. `owner.txt` sits outside `CONTENT_DIRS` so that a retention sweep
+cannot silently retire a run from its owner's index.
+
+**D21's rate limiter is unchanged in mechanism and stronger in effect.** Its key was already the
+identity header; the difference is that there is no longer a shared `global` bucket to spill
+into, because an unauthenticated request never reaches the queue. The CSRF guard also matters
+more than it did: Access sets a `CF_Authorization` cookie, so a cross-site form POST would now
+ride an authenticated session, and `Sec-Fetch-Site` is what refuses it.
+
+**Isolation is untouched.** This is entirely upstream of run creation and moves no new data
+toward any model context. `owner` deliberately stays out of `_run_fingerprint`: the fingerprint
+guards against a run resuming under changed *inputs*, and attributing a run must never cost it
+its checkpoint. The `seed.allow_url` rationale changes slightly — authentication narrows *who*
+can make the server fetch a URL, but not what the host can reach, so the egress boundary in
+[ssrf-egress-isolation.md](./ssrf-egress-isolation.md) remains the prerequisite it was.
+
+Deployment is documented in [authentication.md](./authentication.md).
+
 ## Open items for a future round
 
 - Whether `misrepresented_source` can be meaningfully checked without fetching the source
   (v1 only checks on-its-face support); a later evidence layer (RA-011) would strengthen this.
 - Calibration of `K` (plateau window), the hard cap, and defect-score weights against real runs.
 - Verifying `Cf-Access-Jwt-Assertion` against the team's JWKS with an `aud` check, replacing the
-  trusted email header (D26). The prerequisite for exposing the service beyond a small invited
+  trusted email header (D30). The prerequisite for exposing the service beyond a small invited
   group, or for closing the direct-to-origin forgery path the tailnet posture leaves open.

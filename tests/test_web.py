@@ -1002,7 +1002,7 @@ def test_a_submitted_run_is_owned_by_its_submitter(config):
 
 def test_the_access_email_is_lowercased(owned, config):
     """An identity that varies by case would split one person's runs across two owners
-    (D26): `Viewer@Example.com` submitting a run and `viewer@example.com` returning for
+    (D30): `Viewer@Example.com` submitting a run and `viewer@example.com` returning for
     it must be the same person. `resolve_identity` lower-cases the Access email, so the
     run is filed under — and the owner-scoped index queried by — the lower-cased form
     whatever casing the header arrives in. Drop the `.lower()` and this run would be
@@ -1368,7 +1368,7 @@ def _prefixed_client(config, fake_client, base_path=BASE):
     worker = RunWorker(config, max_concurrent=1, runner=runner)
     try:
         app = create_app(config, worker=worker)
-        # Signed in as the default viewer: the auth middleware (D26) refuses every
+        # Signed in as the default viewer: the auth middleware (D30) refuses every
         # route but /healthz, and these tests assert URL-prefixing behaviour that is
         # only reachable past that gate.
         with web_client(app) as c:

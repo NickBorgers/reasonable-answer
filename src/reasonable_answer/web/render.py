@@ -100,7 +100,22 @@ CSP = (
 # --------------------------------------------------------------------- layout
 
 
-def render_layout(title: str, body: str, live: bool = False, base_path: str = "") -> str:
+def render_layout(
+    title: str,
+    body: str,
+    live: bool = False,
+    base_path: str = "",
+    extra_css: str = "",
+    extra_script: str = "",
+) -> str:
+    # `extra_css`/`extra_script` default to "", so when neither is supplied this page
+    # is byte-for-byte the non-refine build -- load-bearing for `render_index`'s promise
+    # that `refine.enabled = false` renders an unchanged page (docs/question-refinement.md).
+    # The service-worker + live-progress tag is emitted exactly as it is without refine
+    # (D27); the refine script, when enabled, is appended as its own separate tag.
+    scripts = f"<script>{_register_sw_js(base_path)}{LIVE_JS if live else ''}</script>" + (
+        "<script>" + extra_script + "</script>" if extra_script else ""
+    )
     return f"""<!doctype html>
 <html lang="en">
 <head>
@@ -139,7 +154,7 @@ def render_layout(title: str, body: str, live: bool = False, base_path: str = ""
 <!-- iOS ignores the manifest's icons for the home screen and reads this one. -->
 <link rel="apple-touch-icon" href="{base_path}/static/icons/apple-touch-icon.png">
 <link rel="manifest" href="{base_path}/manifest.webmanifest">
-<style>{CSS}</style>
+<style>{CSS}{extra_css}</style>
 </head>
 <body>
 <header>
@@ -147,7 +162,7 @@ def render_layout(title: str, body: str, live: bool = False, base_path: str = ""
   <span class="tag">consensus-reviewed with in-artifact sourcing</span>
 </header>
 <main>{body}</main>
-<script>{_register_sw_js(base_path)}{LIVE_JS if live else ''}</script>
+{scripts}
 </body>
 </html>"""
 
@@ -183,6 +198,18 @@ def render_index(
         if config.seed.allow_url
         else ""
     )
+    # Omitted entirely when refinement is off, so the disabled page is byte-identical to
+    # a build without the feature at all (docs/question-refinement.md). Appended directly
+    # onto the textarea's closing tag rather than on its own line so an empty string here
+    # leaves no stray blank line behind either.
+    refine_block = (
+        """
+    <input type="hidden" id="refine_offer_id" name="refine_offer_id" value="">
+    <input type="hidden" id="refine_selected" name="refine_selected" value="">
+    <div id="refine-chips" class="refine-chips" hidden></div>"""
+        if config.refine.enabled
+        else ""
+    )
     body = f"""
 <section class="panel">
   <h1>Ask a question</h1>
@@ -192,7 +219,7 @@ def render_index(
   <form method="post" action="{base_path}/runs">
     <label for="question">Question</label>
     <textarea id="question" name="question" rows="3" required maxlength="{config.max_question_chars}"
-      placeholder="Is remote work better for software team productivity?"></textarea>
+      placeholder="Is remote work better for software team productivity?"></textarea>{refine_block}
     <label for="seed">Seed report <span class="hint">optional &mdash; an existing draft to improve
       instead of starting from scratch</span></label>
     <textarea id="seed" name="seed" rows="5" maxlength="{config.max_report_chars}"
@@ -221,7 +248,13 @@ def render_index(
   </div>
 </section>
 """
-    return render_layout("reasonable-answer", body, base_path=base_path)
+    return render_layout(
+        "reasonable-answer",
+        body,
+        base_path=base_path,
+        extra_css=REFINE_CSS if config.refine.enabled else "",
+        extra_script=REFINE_JS if config.refine.enabled else "",
+    )
 
 
 def _model_list(models: list[str]) -> str:
@@ -499,6 +532,196 @@ LIVE_JS = """
     location.reload();
   });
   src.onerror = function () { /* browser retries on its own */ };
+})();
+"""
+
+# Pre-run question refinement (D26, docs/question-refinement.md "UX flow"). Every DOM
+# node that carries model- or user-derived text is built with createElement/textContent
+# only -- never innerHTML -- because the page's CSP allows `script-src 'unsafe-inline'`,
+# which would make DOM XSS exploitable if a suggestion's text were ever concatenated into
+# markup instead of assigned as a text node.
+REFINE_JS = """
+(function () {
+  var textarea = document.getElementById('question');
+  var chipsEl = document.getElementById('refine-chips');
+  var offerIdField = document.getElementById('refine_offer_id');
+  var selectedField = document.getElementById('refine_selected');
+  if (!textarea || !chipsEl || !offerIdField || !selectedField) return;
+
+  var DEBOUNCE_MS = 1500;
+  var MIN_CHARS = 20;
+  var EDIT_THRESHOLD = 12;
+  var MAX_ATTEMPTS = 5;
+  // Levenshtein is O(n*m); capping both operands bounds the worst case to a fixed,
+  // small cost regardless of how long the question gets (a 4000-char question must
+  // never make every keystroke pause cost a quadratic blow-up). Any divergence beyond
+  // this many characters already clears the edit-distance threshold in practice.
+  var COMPARE_LIMIT = 500;
+
+  var attempts = 0;
+  var debounceTimer = null;
+  var controller = null; // AbortController for the in-flight request, if any
+  var lastRequested = null; // whitespace-normalized text of the last dispatched request
+  var currentOfferId = '';
+  var restoreText = null; // captured on the first swap within the current offer
+
+  function normalize(text) {
+    return text.trim().replace(/\\s+/g, ' ');
+  }
+
+  // Bounded two-row Levenshtein distance test: returns true once the distance is
+  // *known* to be >= threshold, without necessarily computing the exact value. A whole
+  // row already at or past the threshold means no cheaper path through the remaining
+  // rows can bring it back down, so this can return early instead of finishing the DP
+  // table -- a second, independent bound on top of COMPARE_LIMIT above.
+  function distanceAtLeast(a, b, threshold) {
+    a = a.slice(0, COMPARE_LIMIT);
+    b = b.slice(0, COMPARE_LIMIT);
+    if (Math.abs(a.length - b.length) >= threshold) return true;
+    var prev = [];
+    var curr = [];
+    for (var j = 0; j <= b.length; j++) prev[j] = j;
+    for (var i = 1; i <= a.length; i++) {
+      curr[0] = i;
+      var rowMin = curr[0];
+      for (var k = 1; k <= b.length; k++) {
+        var cost = a.charAt(i - 1) === b.charAt(k - 1) ? 0 : 1;
+        curr[k] = Math.min(prev[k] + 1, curr[k - 1] + 1, prev[k - 1] + cost);
+        if (curr[k] < rowMin) rowMin = curr[k];
+      }
+      if (rowMin >= threshold) return true;
+      var tmp = prev;
+      prev = curr;
+      curr = tmp;
+    }
+    return prev[b.length] >= threshold;
+  }
+
+  function resetSelection() {
+    offerIdField.value = '';
+    selectedField.value = '';
+  }
+
+  function clearChipsDom() {
+    while (chipsEl.firstChild) chipsEl.removeChild(chipsEl.firstChild);
+  }
+
+  function hideChips() {
+    clearChipsDom();
+    chipsEl.hidden = true;
+    currentOfferId = '';
+    restoreText = null;
+  }
+
+  function chipButton(label, questionText, extraClass) {
+    var btn = document.createElement('button');
+    btn.type = 'button'; // never a submit trigger
+    btn.className = extraClass ? 'refine-chip ' + extraClass : 'refine-chip';
+    var labelEl = document.createElement('span');
+    labelEl.className = 'refine-chip-label';
+    labelEl.textContent = label; // textContent only -- see module docstring
+    var qEl = document.createElement('span');
+    qEl.className = 'refine-chip-question';
+    qEl.textContent = questionText;
+    btn.appendChild(labelEl);
+    btn.appendChild(qEl);
+    return btn;
+  }
+
+  function setTextareaValue(value) {
+    // Setting .value programmatically fires no 'input' event, so this does not trip
+    // the manual-edit handler below -- a chip tap is a selection, not an edit.
+    textarea.value = value;
+    textarea.focus();
+  }
+
+  function applySelection(questionText, index) {
+    if (restoreText === null) {
+      // First swap within this offer: capture what the user had and offer it back.
+      restoreText = textarea.value;
+      chipsEl.insertBefore(makeRestoreChip(), chipsEl.firstChild);
+    }
+    setTextareaValue(questionText);
+    offerIdField.value = currentOfferId;
+    selectedField.value = String(index);
+  }
+
+  function makeRestoreChip() {
+    var btn = chipButton('your wording', restoreText, 'refine-chip-restore');
+    btn.addEventListener('click', function () {
+      setTextareaValue(restoreText);
+      resetSelection(); // switching back is not itself a selection
+    });
+    return btn;
+  }
+
+  function showSuggestions(offerId, suggestions) {
+    currentOfferId = offerId;
+    restoreText = null;
+    clearChipsDom();
+    suggestions.slice(0, 3).forEach(function (s, index) {
+      var btn = chipButton(s.label, s.question, '');
+      btn.addEventListener('click', function () {
+        applySelection(s.question, index);
+      });
+      chipsEl.appendChild(btn);
+    });
+    chipsEl.hidden = false;
+  }
+
+  function dispatch(raw, normalized) {
+    if (attempts >= MAX_ATTEMPTS) return; // budget exhausted for this page load
+    attempts++; // counted at dispatch, before the fetch, regardless of outcome
+    lastRequested = normalized;
+    if (controller) controller.abort(); // supersede any in-flight predecessor
+    var myController = new AbortController();
+    controller = myController;
+    var requestText = raw; // the exact text this request was issued for
+
+    var body = new URLSearchParams();
+    body.set('question', raw);
+
+    fetch('/refine', {
+      method: 'POST',
+      headers: { 'Content-Type': 'application/x-www-form-urlencoded' },
+      body: body.toString(),
+      signal: myController.signal,
+    })
+      .then(function (resp) {
+        return resp.ok ? resp.json() : null;
+      })
+      .then(function (data) {
+        if (!data) return; // non-200: swallow silently, change nothing
+        // A slow response for stale text must never replace fresher chips.
+        if (textarea.value !== requestText) return;
+        if (!data.suggestions || data.suggestions.length === 0) {
+          hideChips();
+          return;
+        }
+        showSuggestions(data.offer_id, data.suggestions);
+      })
+      .catch(function () {
+        // Aborted (superseded or navigated away) or a network error -- either way,
+        // this endpoint's contract is silence on failure.
+      });
+  }
+
+  function maybeFetch() {
+    var raw = textarea.value;
+    var normalized = normalize(raw);
+    if (normalized.length < MIN_CHARS) return;
+    // After a completed request, a new one fires only on a non-trivial edit.
+    if (lastRequested !== null && !distanceAtLeast(normalized, lastRequested, EDIT_THRESHOLD)) {
+      return;
+    }
+    dispatch(raw, normalized);
+  }
+
+  textarea.addEventListener('input', function () {
+    resetSelection(); // a manual edit clears provenance but leaves chips visible
+    if (debounceTimer) clearTimeout(debounceTimer);
+    debounceTimer = setTimeout(maybeFetch, DEBOUNCE_MS);
+  });
 })();
 """
 
@@ -816,4 +1039,26 @@ main {
   .decision { margin-left: 0; }
   .hash { margin-left: 0; }
 }
+"""
+
+# Appended onto CSS only when refine.enabled (see render_index) so a disabled build's
+# <style> tag is unchanged. No motion is used, so there is nothing here for
+# @media (prefers-reduced-motion: reduce) to turn off (docs/question-refinement.md).
+REFINE_CSS = """
+.refine-chips { display: flex; flex-direction: column; gap: .4rem; margin: .5rem 0 0; }
+/* margin-top resets the global `button` rule's 1rem, which would otherwise stack on
+   top of the flex `gap` and space the chips like separate form controls. */
+.refine-chip {
+  display: flex; flex-direction: column; gap: .1rem; text-align: left; width: 100%;
+  margin-top: 0; padding: .5rem .7rem; border: 1px solid var(--line); border-radius: 8px;
+  background: var(--chip); color: var(--ink); font: inherit; font-size: .85rem;
+  line-height: 1.4; cursor: pointer;
+}
+.refine-chip:hover, .refine-chip:focus-visible { border-color: var(--accent); }
+.refine-chip-label {
+  font-weight: 650; font-size: .72rem; text-transform: uppercase; letter-spacing: .05em;
+  color: var(--accent);
+}
+.refine-chip-question { color: var(--ink); }
+.refine-chip-restore .refine-chip-label { color: var(--dim); }
 """

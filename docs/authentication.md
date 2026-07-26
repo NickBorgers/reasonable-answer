@@ -1,7 +1,7 @@
 # Authentication — Cloudflare Access in front, a trusted header behind
 
 The app does not authenticate anyone. It reads a header, believes it, and treats the
-value as both the rate-limit key and the run's owner (D26). Everything that makes that
+value as both the rate-limit key and the run's owner (D30). Everything that makes that
 safe is deployment: the port must not be reachable except through a proxy that sets the
 header and strips any the client supplied.
 

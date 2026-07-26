@@ -52,8 +52,13 @@ ENV PATH="/app/.venv/bin:$PATH" \
 
 # The audit trail and the SQLite checkpoints live here. Mount a volume over it or
 # every run — and every chance of resuming one — dies with the container.
+#
+# roster.default.yaml, not roster.yaml: the baked copy has to boot with no network and
+# no credential (scripts/smoke-test-image.sh), and roster.yaml carries this deployment's
+# opt-ins — including refine, which makes the proxy a boot dependency. compose.yaml
+# mounts roster.yaml over this path, so the deployment is unaffected.
 RUN mkdir -p /data/runs /etc/ra \
-    && cp /app/config/roster.yaml /etc/ra/roster.yaml \
+    && cp /app/config/roster.default.yaml /etc/ra/roster.yaml \
     && chown -R ra:ra /data /etc/ra
 
 WORKDIR /data

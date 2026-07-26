@@ -18,6 +18,13 @@ dimension can be independently double-checked (see Acceptance in
 [convergence.md](./convergence.md)); a lens with only one eligible model degrades that dimension to
 `converged_unconfirmed`.
 
+"Eligible" in this structural sense — non-author, distinct identity, distinct family — is what the
+convergence controller counts. D20 adds an orthogonal **demonstrated-capability** term: `ra audition`
+measures whether each critic can actually perform its lens (`fit` / `marginal` / `unfit`), `ra doctor`
+reports the cached status, and `audition.enforce` fails startup closed on a cached `unfit` verdict
+(`marginal` / stale / not-audited stay warnings). That gate runs in `build_runtime` before any tokens
+are spent; it does not feed the stop decision.
+
 The diagram below shows a minimal roster for clarity; generator selection is round-robin among
 writers excluding the current artifact's author, preserving `critic(Rₙ) ≠ generator(Rₙ)`.
 
@@ -236,7 +243,7 @@ carried no headings is accepted with a warning; the warning rides the run's exis
   queue's waiting depth reaches `max_queue_depth`, and a fixed-window `submit_rate_max` /
   `submit_rate_window_seconds` limiter caps how fast one caller may open new runs — keyed by the
   caller's resolved identity (Cloudflare Access email first, then the Tailscale header, then the
-  optional `auth.dev_identity`), the same identity the auth middleware enforces (D26). There is no
+  optional `auth.dev_identity`), the same identity the auth middleware enforces (D30). There is no
   shared global bucket: a request carrying no identity is refused by the middleware before it
   reaches submission at all. Both checks run **before** any run directory is written, so a refused
   submission costs no disk.

@@ -86,7 +86,7 @@ runs, anyone signed in who has a run id can read that run, and only its owner ca
 Because the header is not verified, anyone who can reach the port directly can claim to be any
 user. `ra serve` binds `127.0.0.1` by default and `compose.yaml` publishes only to loopback for
 that reason: keep the proxy the only way in. See [docs/authentication.md](docs/authentication.md)
-for the Cloudflare Access setup, and D26 in [docs/decisions.md](docs/decisions.md) for what that
+for the Cloudflare Access setup, and D30 in [docs/decisions.md](docs/decisions.md) for what that
 trade does and does not buy.
 
 Showing reports and critiques to a *human* does not weaken the isolation design — blindness is
@@ -128,6 +128,11 @@ docker compose up -d
 | the host can reach the LiteLLM proxy | assumed, not configured here — on this network that means the host is on the tailnet |
 | a volume at `/data/runs` | holds the audit trail *and* the SQLite checkpoints; resumability dies without it |
 | `roster.yaml` at `/etc/ra/roster.yaml` | change models without rebuilding |
+
+The image bakes [config/roster.default.yaml](./config/roster.default.yaml) at that path, so it starts
+with no mount at all — that copy leaves every opt-in that needs a reachable proxy or a credential
+(search, refinement) off. `docker compose` mounts [config/roster.yaml](./config/roster.yaml) over it,
+which is where this deployment's opt-ins live.
 
 Use a **named volume** if you can. A bind-mounted host directory arrives owned by root while the
 container runs unprivileged; the app detects this at startup and tells you what to chown rather
@@ -183,6 +188,17 @@ Every lens wants **≥2 eligible non-author models**. `make doctor` tells you wh
 That count is over distinct *identities*, not families — two checkpoints of the same base model
 satisfy it while decorrelating very little. `make doctor` warns separately when a lens pool
 collapses to a single family.
+
+Structural eligibility is necessary but not sufficient: a model can be non-author and distinct yet
+still unable to perform its lens. `make doctor` therefore also reports each critic's **cached
+audition status** alongside the structural check — but it never measures. `make audition` is what
+measures, grading every rostered critic `fit` / `marginal` / `unfit` against fixtures and caching
+the verdict. With `audition.enforce: true`, a critic assigned to a lens it holds a usable cached
+**`unfit`** verdict on fails startup closed, before any tokens are spent; `marginal`, stale, and
+not-yet-audited verdicts stay warnings, since they are absences of evidence rather than evidence of
+incapacity. `make doctor` also warns when `enforce` is on but no assigned critic has a usable
+verdict — an enforcement gate with nothing to read blocks nothing. (`audition.enabled` is not a
+valid key; with `extra="forbid"` a roster still carrying it fails to load.)
 
 Point `proxy.base_url` at any OpenAI-compatible endpoint. If yours needs a key, set
 `LITELLM_API_KEY` (or change `api_key_env`).

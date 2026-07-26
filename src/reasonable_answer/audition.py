@@ -45,7 +45,7 @@ import yaml
 from pydantic import BaseModel, ConfigDict, Field
 
 from . import prompts
-from .config import AuditionConfig, AuditionThresholds, Roster
+from .config import AuditionConfig, AuditionThresholds, ConfigError, Roster
 from .critique import critique_once
 from .llm import LLMClient
 from .schemas import LensResult, RawIssue, StructuralRef
@@ -665,6 +665,72 @@ class Status(str, Enum):
 
     NOT_AUDITED = "not audited"
     STALE = "stale"
+
+
+def cached_judgements(
+    cfg: AuditionConfig,
+    roster: Roster,
+    identities: dict[str, str],
+    now: float | None = None,
+) -> dict[tuple[str, Lens], Judgement]:
+    """Verdicts for the roster's current critic slots, read from the cache only.
+
+    Never spends a call. Both callers — `ra doctor` and the `enforce` startup gate —
+    sit on paths where quietly auditioning a roster's worth of models would be a
+    surprise bill. A slot whose entry is missing, stale, or graded against a different
+    corpus, prompt surface or repetition count is simply absent from the result: an
+    unmeasured critic must read as unmeasured, never as a pass.
+    """
+    try:
+        corpus_hash = load_fixtures().corpus_hash
+    except FixtureError:
+        return {}
+    cache = load_cache(cfg.cache_path)
+    ph = prompt_hash()
+    at = time.time() if now is None else now
+
+    out: dict[tuple[str, Lens], Judgement] = {}
+    for slot in assignments(roster, identities):
+        entry = cache.get(cache_key(slot.identity, slot.lens))
+        if entry is None or not entry.matches(corpus_hash, ph, cfg.repetitions):
+            continue
+        if entry.is_stale(at, cfg.max_age_days):
+            continue
+        out[(slot.identity, slot.lens)] = judge(entry.metrics, cfg.thresholds)
+    return out
+
+
+def enforce_fitness(
+    cfg: AuditionConfig,
+    roster: Roster,
+    identities: dict[str, str],
+    now: float | None = None,
+) -> None:
+    """Under `audition.enforce`, refuse to start with an `unfit` critic assigned.
+
+    Off by default (D20: warn by default, enforce opt-in). The asymmetry inside the
+    gate is deliberate. `unfit` is a positive measurement that the model cannot perform
+    the lens, so a run staffed by one is not reviewing that lens whatever its counters
+    say — that is exactly the case fail-closed exists for. `marginal`, `stale` and
+    `not audited` stay warnings even with enforcement on: they are absences of evidence,
+    and blocking on them couples every run to the freshness of a cache only a paid,
+    rate-limited proxy can refill.
+    """
+    if not cfg.enforce:
+        return
+    judgements = cached_judgements(cfg, roster, identities, now=now)
+    unfit = sorted(
+        f"'{slot.alias}' ({slot.identity}) on {slot.lens.value}"
+        for slot in assignments(roster, identities)
+        if (j := judgements.get((slot.identity, slot.lens))) is not None
+        and j.verdict is Verdict.UNFIT
+    )
+    if unfit:
+        raise ConfigError(
+            "fail closed: audition.enforce is on and these assigned critics graded "
+            f"unfit: {'; '.join(unfit)} — re-roster them, or re-measure with "
+            "`ra audition --force` if the verdict is out of date"
+        )
 
 
 def roster_warnings(

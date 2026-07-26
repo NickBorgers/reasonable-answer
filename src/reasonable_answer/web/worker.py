@@ -21,13 +21,19 @@ import uuid
 from collections import deque
 from collections.abc import Callable
 from dataclasses import dataclass
-from typing import Any
+from typing import TYPE_CHECKING, Any
 
 from .. import shutdown
 from ..config import Config
 from ..graph import GracefulStop, ResumeMismatch
 from ..graph import run as run_graph
 from ..store import RunStore
+
+if TYPE_CHECKING:
+    # Deferred: `refine.py` imports `RateLimiter` from this module, so a real
+    # module-level import here would be circular. `from __future__ import annotations`
+    # (above) means these annotations are never evaluated at runtime, so this is safe.
+    from .refine import Refinement
 
 log = logging.getLogger(__name__)
 
@@ -107,6 +113,10 @@ class Job:
     seed_format: str | None = None
     seed_source: str | None = None
     seed_warnings: tuple[str, ...] = ()
+    #: Already written to disk by `submit()` before this job was queued (D26) -- carried
+    #: here for parity with the job's other provenance fields, not re-written by
+    #: `resume()`/`recover()`/`_drain()`, which never touch it.
+    refinement: Refinement | None = None
 
 
 class RunWorker:
@@ -158,6 +168,7 @@ class RunWorker:
         seed_format: str | None = None,
         seed_source: str | None = None,
         seed_warnings: tuple[str, ...] = (),
+        refinement: Refinement | None = None,
     ) -> str:
         """`seed` is markdown — `web.app` converts at the edge via `ingest`.
 
@@ -193,6 +204,13 @@ class RunWorker:
         # a run exists, survives a restart, and belongs to nobody.
         store.owner(identity)
         store.event("queued", attempt=1, auto=False)
+        if refinement is not None:
+            # Written right alongside the question, for the same reason: the run must be
+            # auditable the instant it is queued, not only once it starts. Content goes to
+            # the purgeable `refinements/` dir; `events.jsonl` (survives purges) gets only
+            # the non-content fields (D26).
+            store.refinement(refinement.content())
+            store.event("refinement", **refinement.event_fields())
         with self._lock:
             self._status[run_id] = "queued"
         self._queue.put(
@@ -203,6 +221,7 @@ class RunWorker:
                 seed_format=seed_format,
                 seed_source=seed_source,
                 seed_warnings=seed_warnings,
+                refinement=refinement,
             )
         )
         log.info("queued %s", run_id)
