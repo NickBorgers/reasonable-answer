@@ -837,5 +837,18 @@ table.runs { width: 100%; border-collapse: collapse; }
   /* Chips are background-coloured, and print engines drop backgrounds by default. */
   .chip { background: none !important; border: 1px solid var(--line); color: var(--ink); }
   .defects li { margin-bottom: .4rem; }
+  /* Undo the phone layout, which a printed page also matches. A width media query in
+     print is evaluated against the *page box*: A4 less the margins above is about
+     42rem, so the 48rem rules apply on paper. There they are actively wrong — paper
+     cannot scroll, so a table sized to `max-content` inside `overflow-x: auto` is
+     silently clipped and the reader loses columns without a hint that they existed.
+     Everything here reverts to the desktop behaviour, which is what fits a page. */
+  .report .table-scroll { overflow: visible; max-width: none; }
+  .report .table-scroll > table { width: 100%; min-width: 0; }
+  /* Full-bleed at 34rem cancels the panel padding with a negative margin; with the
+     panel padding already zeroed for print, it would pull the report off the page. */
+  .panel > .report {
+    margin-left: 0; margin-right: 0; padding: 0; border: 0;
+  }
 }
 """

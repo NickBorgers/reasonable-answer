@@ -246,6 +246,18 @@ def test_the_printed_page_keeps_the_verdict_and_drops_the_chrome(client, finishe
     assert "Does a four-day week work?" in page
 
 
+def test_printing_undoes_the_phone_layout_it_would_otherwise_match(client, finished_run):
+    """A width media query in print is evaluated against the page box, not a viewport.
+    A4 less the print margins is about 42rem, so the 48rem phone rules apply on paper —
+    where a table sized to `max-content` inside `overflow-x: auto` loses columns with
+    no scrollbar to reveal them."""
+    printed = client.get(f"/runs/{finished_run}/report").text.split("@media print")[1]
+
+    assert ".report .table-scroll { overflow: visible; max-width: none; }" in printed
+    assert ".report .table-scroll > table { width: 100%; min-width: 0; }" in printed
+    assert ".panel > .report {" in printed
+
+
 def test_the_exported_file_and_the_printed_page_share_one_stylesheet(client, finished_run):
     page = client.get(f"/runs/{finished_run}/report").text
     document = client.get(f"/runs/{finished_run}/export.html").text
