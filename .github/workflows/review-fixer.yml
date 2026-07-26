@@ -744,6 +744,8 @@ jobs:
           # whole point is bumping ruff is linted by the outgoing version) is the correct
           # direction to be wrong in.
           MAIN_LOCK: ${{ github.workspace }}/uv.lock
+          PR_DIR: ${{ github.workspace }}/${{ env.PR_WORKSPACE }}
+          CI_IMAGE: ${{ vars.CI_IMAGE || format('ghcr.io/nickborgers/{0}-ci:latest', 'reasonable-answer') }}
         run: |
           set -euo pipefail
           # PR Validation runs ruff as a required check. Pushing a commit that fails it
@@ -766,17 +768,38 @@ jobs:
             exit 1
           fi
 
-          # Installing and linting are separated on purpose. `uvx ruff@X check ...` folds a
-          # PyPI fetch into the lint result, so a registry hiccup or an egress blip on this
-          # self-hosted runner reported as "the tree does not lint" — and spent the PR's
-          # single fix attempt on a network error. These two failures need different words
-          # because they need different responses: retry vs. read the diff.
-          if ! uvx "ruff@${RUFF_VERSION}" --version >/dev/null 2>&1; then
-            echo "::error::could not install ruff ${RUFF_VERSION} — infrastructure failure, not a lint failure. The fix was NOT pushed; re-run this job."
+          # ruff runs inside the CI image, invoked as `uv tool run`, and neither half of that
+          # is incidental.
+          #
+          # `uvx` does not exist here. The runner has no uv at all, and the CI image copies
+          # only the `uv` binary out of the astral image — `uvx` is a second binary that
+          # never came with it. Every invocation failed with "command not found", which the
+          # old single-expression gate reported as "the tree does not lint". That is how
+          # three PRs lost their one automated fix attempt to a linter that never ran: #49,
+          # #51 and #52 all died here, and every one of those trees linted clean by hand.
+          # `uv tool run` is the same thing spelled with the binary that is present.
+          #
+          # The image is already on this runner — the agent just ran in it — and it is the
+          # environment the fixer prompt tells the agent to verify its own work in, so the
+          # gate and the agent now agree on what "lints" means.
+          #
+          # The workspace mounts read-only because ruff only reads, and the cache is
+          # redirected out of it: ruff writes `.ruff_cache/` next to the code by default and
+          # fails outright on a read-only mount.
+          #
+          # Installing and linting stay separate expressions. Folding the fetch into the
+          # lint result is what made an infrastructure failure indistinguishable from a real
+          # finding, and the two need different responses: retry versus read the diff.
+          LINT_IN_IMAGE=(docker run --rm --network host
+            -v "${PR_DIR}:/workspace:ro" -w /workspace
+            -e RUFF_CACHE_DIR=/tmp/ruff-cache "$CI_IMAGE" -lc)
+
+          if ! "${LINT_IN_IMAGE[@]}" "uv tool run ruff@${RUFF_VERSION} --version" >/dev/null 2>&1; then
+            echo "::error::could not run ruff ${RUFF_VERSION} in ${CI_IMAGE} — infrastructure failure, not a lint failure. The fix was NOT pushed; re-run this job."
             exit 1
           fi
 
-          uvx "ruff@${RUFF_VERSION}" check src/ tests/ || {
+          "${LINT_IN_IMAGE[@]}" "uv tool run ruff@${RUFF_VERSION} check src/ tests/" || {
             echo "::error::ruff ${RUFF_VERSION} failed on the fixed tree; refusing to push."
             exit 1
           }
