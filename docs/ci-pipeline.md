@@ -126,12 +126,16 @@ it holds `contents: read`, so it could not push if it tried.
   re-reviewed. Re-reviewing identical content can only cost tokens and risk a different
   verdict.
 - **NO-GO is not.** A push that tries to address the blockers gets reviewed again.
-- **`/review` always forces a fresh review run.** It is the human override: the prior-GO
-  short-circuit is `pull_request`-only, so a comment trigger re-reviews a SHA that already
-  cleared. It still goes through the SHA-keyed dedup claim like every other trigger, so it
-  cannot start while a pending `review/pipeline` claim is held on that SHA. It does *not*
-  reset the counter: the run it starts is the next cycle on the same SHA, so re-running a
-  capped PR still produces `cycle_capped`. Pushing a commit is what resets it (next bullet).
+- **`/review` always forces a fresh review run.** It is the human override, and it now
+  outranks every "should this cycle run at all" short-circuit: the prior-GO check is
+  `pull_request`-only, and `force_review` suppresses the merge-from-base inherit path. That
+  second one mattered — a PR whose head was a merge from the base could not be re-reviewed
+  by any gesture, because the override was answered by skipping the panel and re-publishing
+  the prior verdict. It still goes through the SHA-keyed dedup claim like every other
+  trigger, so it cannot start while a pending `review/pipeline` claim is held on that SHA.
+  It does not *bypass* the counter, but on a human-authored head it does effectively reset
+  it, since the reset below keys on the author of HEAD rather than on what triggered the
+  run. On a head the fixer authored, `/review` advances the count as usual.
 - **A human commit resets the counter to 1.** `MAX_CYCLES` bounds the *agent* loop —
   review → fix → push → review — so only agent-authored commits are billed against it.
   A human push means someone read the blockers and answered them: that is a new
@@ -145,7 +149,9 @@ it holds `contents: read`, so it could not push if it tried.
   started the burn, and force-pushing was the only way out.
 - **A merge of the base branch into the PR inherits the previous verdict** instead of
   burning a cycle. Without this, routinely resyncing a long-lived branch can push a PR
-  into the cap without a single substantive change.
+  into the cap without a single substantive change. It re-stamps that verdict without
+  reading anything, which is why `/review` overrides it: inheriting a NO-GO is the right
+  answer to an automatic resync and the wrong answer to a person asking to be re-reviewed.
 - **A run that reviewed nothing does not consume a cycle.** `review/cycle` is written by
   `record-cycle`, after the panel has read the code, and only when at least one reviewer's
   guard cleared. Every guard refusing — PR Validation red on the reviewed SHA, the branch

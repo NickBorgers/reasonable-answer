@@ -28,6 +28,13 @@ on:
       base_sha:
         required: true
         type: string
+      force_review:
+        description: >
+          Set when a human typed `/review`. Suppresses the merge-from-base inherit
+          short-circuit, which otherwise re-stamps the prior verdict and skips the panel.
+        required: false
+        default: false
+        type: boolean
     secrets:
       WORKFLOW_PAT:
         required: true
@@ -103,11 +110,27 @@ jobs:
           SHA: ${{ inputs.reviewed_sha }}
           BASE_REF: ${{ inputs.base_ref }}
           PRIOR_CYCLE_SHA: ${{ steps.prior.outputs.cycle_sha }}
+          FORCE_REVIEW: ${{ inputs.force_review }}
         run: |
           set -euo pipefail
 
           inherit=false
           inherited=""
+
+          # `/review` outranks this. Inheriting is an optimisation for automatic triggers —
+          # a resync should not burn a cycle — but it also re-stamps the prior verdict
+          # without reading anything, so a PR whose head is a merge-from-base had no way to
+          # be re-reviewed at all: the one gesture documented as the human override was
+          # answered by skipping the panel and re-publishing the old NO-GO. PR #56 sat in
+          # exactly that state.
+          if [ "$FORCE_REVIEW" = "true" ]; then
+            echo "gather: /review requested; not inheriting, reviewing this SHA on its merits"
+            {
+              echo "inherit=false"
+              echo "inherited_verdict="
+            } >> "$GITHUB_OUTPUT"
+            exit 0
+          fi
 
           # A merge commit has two or more parents: "<sha> <parent1> <parent2>" is 3 words.
           parents=$(git rev-list --parents -n 1 "$SHA" | wc -w)

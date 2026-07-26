@@ -276,5 +276,10 @@ jobs:
       head_ref: ${{ needs.resolve.outputs.head_ref }}
       base_ref: ${{ needs.resolve.outputs.base_ref }}
       base_sha: ${{ needs.resolve.outputs.base_sha }}
+      # A human typed `/review`. Every "should this cycle run at all" short-circuit
+      # downstream is an optimisation for automatic triggers, and a person asking for a
+      # review by hand has already decided the answer. Only `issue_comment` reaches here,
+      # and only after the body matched `/review`.
+      force_review: ${{ github.event_name == 'issue_comment' }}
     secrets:
       WORKFLOW_PAT: ${{ secrets.WORKFLOW_PAT }}
