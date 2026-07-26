@@ -55,6 +55,34 @@ def config(roster: Roster, tmp_path) -> Config:
     )
 
 
+#: The identity web tests sign in as. Tests about ownership use a second one.
+WEB_IDENTITY = "viewer@example.com"
+
+
+def access_headers(identity: str = WEB_IDENTITY) -> dict[str, str]:
+    """The header Cloudflare Access sets on everything it proxies."""
+    return {"Cf-Access-Authenticated-User-Email": identity}
+
+
+def web_client(app, identity: str | None = WEB_IDENTITY):
+    """A `TestClient` that is signed in, or — with `identity=None` — one that is not.
+
+    Every route but `/healthz` refuses a request with no identity, so a bare
+    `TestClient` would make each test assert 403 instead of what it is about. Signing
+    in by default keeps the unauthenticated path as something tests opt into, either
+    to assert the refusal or to supply a different header themselves.
+
+    `TestClient` is imported here rather than at module scope because `conftest` is
+    loaded for the whole suite, and fastapi is an optional extra — importing it up
+    top would make every non-web test require it.
+    """
+    from fastapi.testclient import TestClient
+
+    if identity is None:
+        return TestClient(app)
+    return TestClient(app, headers=access_headers(identity))
+
+
 def make_view(**overrides) -> OrchestratorView:
     base = dict(
         counts={},

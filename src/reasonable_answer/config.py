@@ -173,9 +173,11 @@ class SeedConfig(BaseModel):
     #:
     #: Off by default, like `search.enabled` and `search.verify_sources` (D17/D18):
     #: a URL seed makes the server fetch a caller-chosen URL and hand the body back
-    #: as the run's first report, which on the unauthenticated web UI is a read
-    #: proxy into whatever the host can reach. The network-layer egress boundary
-    #: that makes that acceptable is a deployment concern outside this repo
+    #: as the run's first report — a read proxy into whatever the host can reach, for
+    #: anyone who can submit. Authentication (D26) narrows *who* that is; it does not
+    #: shrink what the host can reach, and the people invited in are not the threat
+    #: model this guards against. The network-layer egress boundary that makes it
+    #: acceptable is still a deployment concern outside this repo
     #: (docs/ssrf-egress-isolation.md) — enable this only behind one.
     allow_url: bool = False
     fetch_timeout_seconds: float = Field(default=30.0, gt=0, le=300)
@@ -297,10 +299,33 @@ class DisputeConfig(BaseModel):
     arbiter_max_tokens: int = Field(default=4000, ge=500, le=16000)
 
 
+class AuthConfig(BaseModel):
+    """Who the web layer believes is asking.
+
+    Identity arrives in a header, either from Cloudflare Access
+    (`Cf-Access-Authenticated-User-Email`) or from `tailscale serve`. Neither is
+    verified cryptographically, so both are only trustworthy when the app's port is
+    unreachable except through the fronting proxy — see docs/authentication.md.
+
+    There is exactly one knob, and its unset state is the safe one: with no
+    `dev_identity`, a request carrying neither header is refused. A boolean
+    `require_auth` beside a `dev_identity` string would have two settings that can
+    disagree, and the disagreeing combination is the one that fails open.
+    """
+
+    model_config = ConfigDict(extra="forbid")
+
+    #: Identity granted to requests that carry no identity header at all. Set it for
+    #: local development (`make serve`, `$RA_DEV_IDENTITY`); leave it unset anywhere
+    #: the app is reachable by anyone else, where it would be a public login.
+    dev_identity: str | None = None
+
+
 class Config(BaseModel):
     model_config = ConfigDict(extra="forbid")
 
     proxy: ProxyConfig = Field(default_factory=ProxyConfig)
+    auth: AuthConfig = Field(default_factory=AuthConfig)
     roster: Roster
     budgets: Budgets = Field(default_factory=Budgets)
     search: SearchConfig = Field(default_factory=SearchConfig)
@@ -324,8 +349,10 @@ class Config(BaseModel):
     #: writes on the way in. A cap on the queue's waiting depth turns a burst into
     #: HTTP 429s instead of unbounded memory and disk. Set to 0 to leave it unbounded.
     max_queue_depth: int = 32
-    #: Submissions allowed per identity (or globally, if no Tailscale identity header
-    #: is present) inside `submit_rate_window_seconds`. Set to 0 to disable the limit.
+    #: Submissions allowed per authenticated identity inside
+    #: `submit_rate_window_seconds`. Set to 0 to disable the limit. Every submission
+    #: now carries an identity — an unauthenticated request never reaches the queue —
+    #: so there is no shared fallback bucket left to spill into.
     submit_rate_max: int = 20
     submit_rate_window_seconds: float = 60.0
     max_report_chars: int = 60_000

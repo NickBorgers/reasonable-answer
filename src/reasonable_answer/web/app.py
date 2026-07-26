@@ -2,10 +2,18 @@
 
 Design notes worth keeping in mind while reading:
 
-* **No auth here on purpose.** The deployment posture is tailnet-only; Tailscale ACLs
-  are the access control. Do not expose this to the internet without putting real
-  authentication in front of it — anyone who can reach it can spend tokens and read
-  the audit trail, which holds seed material.
+* **Every request carries an identity, and the app does not verify it.** It comes
+  from a header set by Cloudflare Access or by `tailscale serve` (`identity.py`),
+  which is only meaningful while the app's port is unreachable except through one of
+  them. A caller who can reach the port directly can claim to be anyone (D26,
+  docs/authentication.md).
+* **Authentication is enforced by middleware, not by each route.** Every route but
+  `/healthz` is behind it, including routes nobody has written yet — the failure mode
+  of a per-route call is a new handler that forgets to make it.
+* **Ownership is per run and scopes the index, not each read.** You see your own runs
+  listed; anyone signed in who holds a run id can read that run. Sharing a link is
+  the intended way to show someone a report. Runs with no owner — written before
+  ownership existed, or by `ra run` without `--owner` — are served to nobody.
 * **Showing reports to a human does not weaken the isolation design.** Blindness is
   about what enters a *model's* context. This UI is a window onto the audit trail,
   which is the whole reason the pipeline keeps one.
@@ -27,14 +35,16 @@ from fastapi.responses import HTMLResponse, PlainTextResponse, RedirectResponse,
 
 from .. import ingest, shutdown
 from ..config import Config, ConfigError
+from .identity import resolve_identity
 from .registry import Registry, RunSummary
 from .render import render_index, render_report, render_run, render_run_progress
 from .retention import RetentionSweeper
 from .worker import QueueFull, RateLimited, RunWorker
 
-#: Set by `tailscale serve` when it fronts the app; carries the calling node's user.
-#: Present ⇒ rate-limit that identity; absent ⇒ fall back to one global bucket.
-_IDENTITY_HEADERS = ("tailscale-user-login", "tailscale-user-name")
+#: The one route that must answer an anonymous caller: the container healthcheck runs
+#: inside the container, with no proxy in front of it to attach an identity header.
+#: It reports liveness only, and nothing about any run.
+_UNAUTHENTICATED_PATHS = frozenset({"/healthz"})
 
 log = logging.getLogger(__name__)
 
@@ -49,6 +59,21 @@ def create_app(
     concurrent = max_concurrent or int(os.environ.get("RA_MAX_CONCURRENT_RUNS", "1"))
     if (cap := os.environ.get("RA_MAX_RESUME_ATTEMPTS")):
         config = config.model_copy(update={"max_resume_attempts": int(cap)})
+    if (dev_identity := os.environ.get("RA_DEV_IDENTITY")):
+        # An env var rather than only a roster key because the roster is mounted
+        # read-only in the container: this is the local-development escape hatch, and
+        # it has to be settable from the same place `make serve` already lives.
+        config = config.model_copy(
+            update={"auth": config.auth.model_copy(update={"dev_identity": dev_identity})}
+        )
+    if config.auth.dev_identity:
+        # Warned about wherever it is set from, because it turns "no identity header"
+        # from a refusal into a login — which is what you want on a laptop and never
+        # what you want anywhere someone else can reach.
+        log.warning(
+            "auth.dev_identity is set: unauthenticated requests are treated as %s",
+            config.auth.dev_identity,
+        )
     worker = worker or RunWorker(config, max_concurrent=concurrent)
     registry = Registry(config.runs_dir)
     # A never-live run cannot be older than the retention window, but skipping the live
@@ -83,12 +108,37 @@ def create_app(
     app.state.worker = worker
     app.state.registry = registry
 
+    # ------------------------------------------------------------------- auth
+
+    @app.middleware("http")
+    async def authenticate(request: Request, call_next: Any) -> Any:
+        """Resolve the caller once, and refuse the request if there is nobody there.
+
+        A middleware rather than a `Depends` or a hand-written call per route,
+        because those are opt-in and this must not be: the cost of forgetting is an
+        open route onto other people's seed material. Every handler below can assume
+        `request.state.viewer` is a real identity.
+
+        `HTTPException` is not available here — it is raised past the exception
+        middleware that would turn it into a response — so the refusal is returned
+        directly. Nothing is logged about the failed attempt: the header is
+        attacker-controlled, and a rejected request has no identity to attribute.
+        """
+        if request.url.path not in _UNAUTHENTICATED_PATHS:
+            viewer = resolve_identity(request, config.auth)
+            if viewer is None:
+                return PlainTextResponse("authentication required", status_code=403)
+            request.state.viewer = viewer
+        return await call_next(request)
+
     # ------------------------------------------------------------------ pages
 
     @app.get("/", response_class=HTMLResponse)
-    def index() -> str:
-        runs = registry.list(active=worker.active())
-        return render_index(runs, queue_depth=worker.queue_depth, config=config)
+    def index(request: Request) -> str:
+        runs = registry.list(active=worker.active(), owner=request.state.viewer)
+        return render_index(
+            runs, queue_depth=worker.queue_depth, config=config, viewer=request.state.viewer
+        )
 
     # A seed reaches this handler as pasted text or as an http(s) URL, and never as a
     # filesystem path: no code path in the web layer may construct a `Path` from
@@ -145,7 +195,7 @@ def create_app(
             run_id = worker.submit(
                 question,
                 ingested.markdown if ingested else None,
-                identity=_identity(request),
+                identity=request.state.viewer,
                 seed_format=ingested.format if ingested else None,
                 seed_source=ingested.source if ingested else None,
                 seed_warnings=ingested.warnings if ingested else (),
@@ -165,7 +215,7 @@ def create_app(
         return RedirectResponse(url=f"/runs/{run_id}", status_code=303)
 
     @app.get("/runs/{run_id}", response_class=HTMLResponse)
-    def run_detail(run_id: str) -> str:
+    def run_detail(run_id: str, request: Request) -> str:
         summary = _require(registry, worker, run_id)
         return render_run(
             summary=summary,
@@ -173,12 +223,19 @@ def create_app(
             report=registry.report(run_id),
             final=registry.final(run_id),
             lens_names=registry.lens_names(),
+            viewer=request.state.viewer,
         )
 
     @app.post("/runs/{run_id}/resume")
     def resume(run_id: str, request: Request) -> RedirectResponse:
         _reject_cross_site(request)
         summary = _require(registry, worker, run_id)
+        # The one place ownership gates more than the index. Reading a run costs
+        # nothing, but resuming one spends its owner's tokens for another 10–25
+        # minutes, so it stays with the person who started it. 404 rather than 403,
+        # matching `_require`: a stranger learns nothing about which ids are real.
+        if summary.owner != request.state.viewer:
+            raise HTTPException(status_code=404, detail=f"no such run: {run_id}")
         # `abandoned` is accepted on purpose: it means automatic recovery gave up, and a
         # human overriding that is the entire point of the escape hatch. A manual resume
         # is not counted against the attempt cap, so this always works.
@@ -307,11 +364,13 @@ def _reject_cross_site(request: Request) -> None:
     """Refuse browser-driven cross-site POSTs — the CSRF guard for the two
     state-changing routes.
 
-    A plain HTML form POST triggers no CORS preflight, so the tailnet-only posture and
-    the CSP's `form-action 'self'` (which only constrains forms *this* app serves) do
-    nothing to stop a foreign page from auto-submitting a run to a guessable MagicDNS
-    host and burning a full 10–25-minute run. There is no cookie or session to lean on
-    a SameSite attribute for, so the request context itself is the only signal.
+    A plain HTML form POST triggers no CORS preflight, and the CSP's `form-action 'self'`
+    only constrains forms *this* app serves — neither stops a foreign page from
+    auto-submitting a run to a guessable hostname and burning a full 10–25-minute run.
+    This matters more since D26, not less: Cloudflare Access sets a `CF_Authorization`
+    cookie, so such a POST now arrives *authenticated*, as a real user, and would create
+    a run they own. The app sets no session cookie of its own to hang a SameSite
+    attribute on, so the request context itself is the only signal.
 
     `Sec-Fetch-Site` is sent by every current browser and is authoritative when present:
     a form this app served reads `same-origin`, a sibling host under the same site reads
@@ -348,25 +407,20 @@ def _same_host(candidate_url: str, request: Request) -> bool:
 
 
 def _require(registry: Registry, worker: RunWorker, run_id: str) -> RunSummary:
+    """The run, or 404 — the single gate every per-run route passes through.
+
+    An owner-less run is a 404 and not a 403: there is nobody it could be served to,
+    so from the web layer's side it does not exist. It takes no viewer argument
+    because reading is not owner-scoped — the middleware has already established that
+    *somebody* is asking, and that is the whole requirement. `resume` adds the
+    ownership check it needs on top.
+    """
     if not registry.exists(run_id) and worker.status(run_id) is None:
         raise HTTPException(status_code=404, detail=f"no such run: {run_id}")
-    return registry.summary(run_id, worker.active())
-
-
-def _identity(request: Request) -> str:
-    """The rate-limit key: the Tailscale identity when the app is fronted so that the
-    header is present, otherwise one shared `global` bucket.
-
-    These headers are only trustworthy behind `tailscale serve` on the tailnet posture
-    the deployment assumes — anyone reaching the app directly could forge them, but such
-    a caller could also just vary them to defeat any per-identity limit, so nothing is
-    lost by trusting them here. The global fallback still bounds the forged-header case.
-    """
-    for header in _IDENTITY_HEADERS:
-        value = request.headers.get(header)
-        if value:
-            return value.strip()
-    return "global"
+    summary = registry.summary(run_id, worker.active())
+    if summary.owner is None:
+        raise HTTPException(status_code=404, detail=f"no such run: {run_id}")
+    return summary
 
 
 def _sse(event: str, data: str) -> str:

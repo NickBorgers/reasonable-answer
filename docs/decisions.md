@@ -154,7 +154,7 @@ extension:
 | RG-002 | high | The "2-model consecutive-clean fallback" was referenced but never represented in state | **Fixed by removal.** `weak_met` is now purely the per-lens `roster_limited` case (current-hash-only); all consecutive-clean language deleted. |
 | RG-003 | med | Tick/sequence/DESIGN diagrams still showed one critic for three lenses | **Fixed.** Diagrams relabeled to per-lens critics (each ≠ author); DESIGN core-loop reframed from "two-model ping-pong" to a role-structured alternating game. |
 | RG-004 | low | Stale `lens_set` / rule-number / flat-roster wording in the review log | **Fixed.** RC-002 → per-lens `CleanRecord`; RB-002 de-numbered; D9 annotated as superseded by D15; roster contract restated as per-lens eligibility. |
-| D24 | **Seed reports are converted to markdown at the edge; URL seeds are opt-in and off by default.** `--seed` and the web form accept PDF, `.docx`, HTML and `.txt`; `ingest` converts them before `graph.run` is called, which continues to require markdown. http(s) URL seeds exist behind `seed.allow_url`, default `false` (the D17/D18 posture): a URL seed makes the server fetch a caller-chosen URL and expose the body back through the run's report endpoints — on the unauthenticated web UI that is a read proxy into whatever the host can reach, and the egress boundary that makes it acceptable is a network-layer deployment concern outside this repo (docs/ssrf-egress-isolation.md). Turning it off hides the form field and rejects the parameter. A format that yields no headings is accepted with a warning, not rejected. | Markdown is not a preference here, it is load-bearing: `report.parse` builds the `[S<n>.P<m>]` loci critics must cite from `#` headings, and `extract_source_urls` reads only a markdown `## Sources` section, so an unconverted seed silently costs the evidence lens its fetch-backed checks. Converting at the **edge** rather than inside `_intake` keeps one artifact and one identity — `_run_fingerprint` and `artifact_hash` would otherwise hash different things (a URL vs. its converted text), letting a resume pass the fingerprint check while the checkpoint held different prose. It also keeps network I/O out of the graph, where every other fetch is injected through `Runtime` so tests stay offline. Accepting a heading-less seed reflects what the formats actually carry: PDF has no recoverable heading semantics without font heuristics, and refusing would block the most common real-world case to protect locus precision the source never had. PDF is the only format needing a dependency (`pypdf`, optional extra); `.docx` is a zip of XML and HTML is an `HTMLParser`, both standard library. |
+| D24 | **Seed reports are converted to markdown at the edge; URL seeds are opt-in and off by default.** `--seed` and the web form accept PDF, `.docx`, HTML and `.txt`; `ingest` converts them before `graph.run` is called, which continues to require markdown. http(s) URL seeds exist behind `seed.allow_url`, default `false` (the D17/D18 posture): a URL seed makes the server fetch a caller-chosen URL and expose the body back through the run's report endpoints — on the web UI that is a read proxy into whatever the host can reach, and the egress boundary that makes it acceptable is a network-layer deployment concern outside this repo (docs/ssrf-egress-isolation.md). *(Written when the UI was unauthenticated. D26 identifies callers, which narrows who can submit a URL but not what the host can reach — the egress boundary remains the prerequisite.)* Turning it off hides the form field and rejects the parameter. A format that yields no headings is accepted with a warning, not rejected. | Markdown is not a preference here, it is load-bearing: `report.parse` builds the `[S<n>.P<m>]` loci critics must cite from `#` headings, and `extract_source_urls` reads only a markdown `## Sources` section, so an unconverted seed silently costs the evidence lens its fetch-backed checks. Converting at the **edge** rather than inside `_intake` keeps one artifact and one identity — `_run_fingerprint` and `artifact_hash` would otherwise hash different things (a URL vs. its converted text), letting a resume pass the fingerprint check while the checkpoint held different prose. It also keeps network I/O out of the graph, where every other fetch is injected through `Runtime` so tests stay offline. Accepting a heading-less seed reflects what the formats actually carry: PDF has no recoverable heading semantics without font heuristics, and refusing would block the most common real-world case to protect locus precision the source never had. PDF is the only format needing a dependency (`pypdf`, optional extra); `.docx` is a zip of XML and HTML is an `HTMLParser`, both standard library. |
 
 ## D20 — critic eligibility becomes structural *and* demonstrated
 
@@ -436,8 +436,81 @@ and every citation dispute rides on the arbiter; the dispute config deliberately
 the resume fingerprint, so toggling it mid-run changes only whether the *privilege* exists going
 forward.
 
+## D26 — the interface has users: a trusted identity header, and runs that belong to someone
+
+Every prior version of this document says there is no authentication and that Tailscale ACLs are
+the access control. That was true and deliberate for a single operator. Opening the interface to
+friends makes it false in a way that matters: without a user concept, everyone who reaches the
+app shares one index onto everyone's questions, seed material and audit trails.
+
+**Decision.** Identity comes from a request header set by whatever fronts the app —
+`Cf-Access-Authenticated-User-Email` from Cloudflare Access, or the `Tailscale-User-*` headers
+D21 already read — and every route but `/healthz` refuses a request that carries none. Runs
+record their submitter in `owner.txt`. The index is owner-scoped.
+
+**The header is trusted, not verified — and that is the accepted risk.** Cloudflare Access also
+sends a signed `Cf-Access-Jwt-Assertion` that could be checked against the team's JWKS with an
+`aud` claim, which is the real boundary. It is not implemented here. Cloudflare strips and
+rewrites `Cf-Access-*` on everything it proxies, so *through the tunnel* the email header is
+authoritative; the exposure is that the tailnet path is deliberately kept open, so any tailnet
+peer that can reach the port can set the header to any value and read or submit as that person.
+At the scale this serves — a handful of invited people, on a tailnet the operator controls —
+that is a trade taken knowingly, and revisiting it is the stated condition for exposing the
+service more broadly. All of it is confined to `web/identity.py:resolve_identity`, so verifying
+the JWT is a change to one function.
+
+**Access is preferred over Tailscale, and the fallback order is fixed.** Both headers are
+trusted equally; Access is checked first because it is how friends arrive, and a deployment
+fronted both ways must not file one person's runs under two owners depending on which header a
+request happened to carry. The email is lower-cased for the same reason. A value that is blank,
+over 320 characters, or carries control characters is treated as absent rather than truncated:
+it would otherwise become an ownership key that its own submitter could never match.
+
+**Enforcement is middleware, not a call per route.** `_reject_cross_site` is invoked by hand at
+the top of each mutating handler, and that idiom is right for CSRF — it is a property of two
+specific routes. Authentication is a property of the app, and the failure mode of an opt-in
+check is a future route that forgets it. The middleware is the only fail-closed shape.
+
+**`auth.dev_identity` is the single knob, and its unset state is the safe one.** Set (via the
+roster or `$RA_DEV_IDENTITY`), it supplies an identity to requests with no header, which is what
+local development needs; unset, such a request is refused. A boolean `require_auth` alongside it
+would have been two settings that can disagree, and the disagreeing combination fails open.
+
+**Ownership scopes the index; it does not scope reads.** You see your own runs listed. Anyone
+signed in who holds a run id can read that run — sharing a link is the intended way to show
+someone a report, with export/publish to follow. Resume is the one exception: reading costs
+nothing, but resuming spends the owner's tokens for another 10–25 minutes, so it stays with the
+person who started it.
+
+**A run with no owner is served to nobody.** Runs written before this decision, and CLI runs
+started without `ra run --owner`, have no identity to attribute and none can be invented for
+them. They are 404 over HTTP — not listed, not readable, not resumable by hand — while remaining
+untouched on disk and through the CLI. There is deliberately no backfill: guessing an owner is
+how a stranger's run ends up in someone's index. Boot recovery is unaffected, because an
+interrupted run is work already owed and whether anyone can currently *see* it has no bearing on
+whether it should finish. `owner.txt` sits outside `CONTENT_DIRS` so that a retention sweep
+cannot silently retire a run from its owner's index.
+
+**D21's rate limiter is unchanged in mechanism and stronger in effect.** Its key was already the
+identity header; the difference is that there is no longer a shared `global` bucket to spill
+into, because an unauthenticated request never reaches the queue. The CSRF guard also matters
+more than it did: Access sets a `CF_Authorization` cookie, so a cross-site form POST would now
+ride an authenticated session, and `Sec-Fetch-Site` is what refuses it.
+
+**Isolation is untouched.** This is entirely upstream of run creation and moves no new data
+toward any model context. `owner` deliberately stays out of `_run_fingerprint`: the fingerprint
+guards against a run resuming under changed *inputs*, and attributing a run must never cost it
+its checkpoint. The `seed.allow_url` rationale changes slightly — authentication narrows *who*
+can make the server fetch a URL, but not what the host can reach, so the egress boundary in
+[ssrf-egress-isolation.md](./ssrf-egress-isolation.md) remains the prerequisite it was.
+
+Deployment is documented in [authentication.md](./authentication.md).
+
 ## Open items for a future round
 
 - Whether `misrepresented_source` can be meaningfully checked without fetching the source
   (v1 only checks on-its-face support); a later evidence layer (RA-011) would strengthen this.
 - Calibration of `K` (plateau window), the hard cap, and defect-score weights against real runs.
+- Verifying `Cf-Access-Jwt-Assertion` against the team's JWKS with an `aud` check, replacing the
+  trusted email header (D26). The prerequisite for exposing the service beyond a small invited
+  group, or for closing the direct-to-origin forgery path the tailnet posture leaves open.

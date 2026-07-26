@@ -166,5 +166,14 @@ budgets:
   timeout_seconds: 300
   max_concurrency: 3
 
+# Identity comes from a header set by whatever fronts the app — Cloudflare Access or
+# `tailscale serve` — and a request carrying neither is refused (D26,
+# docs/authentication.md). `dev_identity` gives such a request an identity instead:
+# what local development needs, and a public login anywhere else. $RA_DEV_IDENTITY
+# overrides it and is how `make serve` sets it, so this stays unset in the file a
+# deployment mounts.
+# auth:
+#   dev_identity: you@example.com
+
 runs_dir: runs
 retention_days: 14

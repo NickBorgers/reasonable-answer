@@ -94,11 +94,16 @@ def render_layout(title: str, body: str, live: bool = False) -> str:
 # ---------------------------------------------------------------------- index
 
 
-def render_index(runs: list[RunSummary], queue_depth: int, config: Config) -> str:
+def render_index(
+    runs: list[RunSummary], queue_depth: int, config: Config, viewer: str | None = None
+) -> str:
     rows = (
         "\n".join(_run_row(r) for r in runs)
         or '<tr><td colspan="5" class="empty">No runs yet. Ask something above.</td></tr>'
     )
+    # The list is yours alone, so say whose it is. It also makes a misconfigured
+    # identity header visible immediately, rather than as a mysteriously empty table.
+    signed_in = f'<span class="dim">signed in as {esc(viewer)}</span>' if viewer else ""
     depth = (
         f'<p class="queued-note">{queue_depth} run(s) waiting for a worker.</p>'
         if queue_depth
@@ -134,7 +139,7 @@ def render_index(runs: list[RunSummary], queue_depth: int, config: Config) -> st
 </section>
 
 <section class="panel">
-  <h2>Runs</h2>
+  <h2>Your runs {signed_in}</h2>
   <table class="runs">
     <thead><tr><th>status</th><th>question</th><th>rounds</th><th>started</th><th></th></tr></thead>
     <tbody>{rows}</tbody>
@@ -185,11 +190,24 @@ def render_run(
     report: str | None,
     final: dict[str, Any] | None,
     lens_names: list[str],
+    viewer: str | None = None,
 ) -> str:
+    mine = viewer is not None and summary.owner == viewer
+    # Anyone signed in can open a run they hold the id for, but only its owner can
+    # resume it — so only its owner is offered the button. Showing it to everyone
+    # would be an invitation to a 404.
     resume = (
         f"""<form method="post" action="/runs/{esc(summary.run_id)}/resume" class="inline">
         <button type="submit" class="secondary">Resume this run</button></form>"""
-        if summary.status == "interrupted"
+        if summary.status == "interrupted" and mine
+        else ""
+    )
+
+    # A run reached by a shared link is otherwise unattributed, and "whose question is
+    # this?" is the first thing a reader needs. Your own runs need no byline.
+    byline = (
+        f'<span class="dim">submitted by {esc(summary.owner)}</span>'
+        if summary.owner and not mine
         else ""
     )
 
@@ -224,6 +242,7 @@ def render_run(
       {_badge(summary.status)}
       <span class="dim mono">{esc(summary.run_id)}</span>
       <span class="dim">started {_ago(summary.started_at)}</span>
+      {byline}
     </div>
     <p class="lede">{esc(STATUS_MEANING.get(summary.status, ""))}
     {(" — " + esc(summary.terminal_note)) if summary.terminal_note else ""}</p>
