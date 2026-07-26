@@ -203,14 +203,16 @@ inside the graph.
   are coalesced so simultaneous requests for the same text cost one
   completion. Serving a cache hit still mints a fresh offer record.
 - **Offer records**: every non-empty response is recorded server-side before
-  it is returned: `{offer_id, question_at_offer, suggestions, created_at}`,
-  held in an in-memory map bounded by `offer_entries` with TTL
-  `offer_ttl_seconds` and LRU eviction when full. `offer_id` is
-  `secrets.token_urlsafe(24)` — a fixed 32-character URL-safe token. At
-  submit, the claimed id is validated against that exact format and length
-  **before** any lookup; a malformed value short-circuits to a constant
-  `unverified` status and the supplied bytes are never written to
-  `events.jsonl` or anywhere else.
+  it is returned, keyed by `offer_id` in an in-memory map: `_OfferRecord`
+  holds `{question_at_offer, suggestions, expires_at}` (`web/refine.py`) —
+  there is no `created_at` field; the record tracks its own expiry directly,
+  and `offer_id` itself is the map key rather than a field inside the record.
+  The map is bounded by `offer_entries` with TTL `offer_ttl_seconds` and LRU
+  eviction when full. `offer_id` is `secrets.token_urlsafe(24)` — a fixed
+  32-character URL-safe token. At submit, the claimed id is validated against
+  that exact format and length **before** any lookup; a malformed value
+  short-circuits to a constant `unverified` status and the supplied bytes are
+  never written to `events.jsonl` or anywhere else.
   At submit, `refine_offer_id`/`refine_selected` are looked up: provenance is
   marked `verified` only when the offer exists, the index is valid, **and the
   submitted question (after the same trim applied by `POST /runs`) is exactly
@@ -224,10 +226,18 @@ inside the graph.
   to `runs/<run_id>/refinements/refinement.json`, with `refinements` added to
   `CONTENT_DIRS` so the existing directory-level `purge()` removes it
   alongside reports and critiques (the purge mechanism only handles
-  directories, so a root-level file would silently escape it). `events.jsonl` (which survives purges) gets only non-content
+  directories, so a root-level file would silently escape it). This only
+  happens when `RefinementService.resolve()` actually returns a
+  `Refinement`. `resolve()` returns `None` — and `RunWorker.submit()` then
+  writes **neither** `refinement.json` **nor** a `refinement` event, not even
+  one with a placeholder status — when nothing was claimed at submit time (no
+  `refine_offer_id` and no `refine_selected`). When `resolve()` does return a
+  `Refinement`, `events.jsonl` (which survives purges) gets only non-content
   signal: `{offer_id, transform, selected_index, question_sha256,
-  original_sha256, provenance: verified|unverified|none}`. `question.txt`
-  continues to hold exactly the question that ran, per the
+  original_sha256, provenance: verified|unverified}`. There is no `none`
+  provenance value; "nothing was claimed" is signaled by the *absence* of a
+  `refinement` event for the run, never by a value carried inside one.
+  `question.txt` continues to hold exactly the question that ran, per the
   resume-fingerprint rule.
 - **Rendering** (`web/render.py`): chips container + debounce/fetch/swap JS
   added to the index page. Inline script is CSP-compatible
@@ -313,7 +323,7 @@ do", applied to suggestions; fixture-tested per transform):
 
 ## Implementation map
 
-The design above is normative; this section maps it to where it landed, not to remaining work.
+The design above is normative; this section maps it to where it landed, not to remaining work — except item 9's tests, which are split into what landed and what is still intended coverage, since test surface is the one place this PR's actual state and the original design diverge.
 
 1. `config.py`: `RefineConfig` (`extra="forbid"`, bounded fields, default
    off) + prod config enablement; startup alias resolution/probing when
@@ -333,7 +343,8 @@ The design above is normative; this section maps it to where it landed, not to r
    valid-ID allowlist in `.github/scripts/review/prompts/invariant.md` bumped
    to `D1`–`D26`, this file registered in `DESIGN.md`'s Document map, and a
    cross-reference from `bias.md §4`.
-9. Tests:
+9. Tests — what actually landed in this PR (`tests/test_refine.py`,
+   `tests/test_refine_web.py`, `tests/test_report_store_llm.py`):
    - Service unit tests: schema + deterministic validation (each rule),
      zero-suggestion path, cache hit/expiry/eviction, coalesced concurrent
      identical misses, timeout and semaphore-saturation shedding (permit held
@@ -341,24 +352,38 @@ The design above is normative; this section maps it to where it landed, not to r
      orphan-linger window on timeout — asserting client-call termination and
      permit lifetime, not upstream cancellation, which is only tested via
      backend observation in deployments that claim it), offer expiry/restart
-     → `unverified` provenance, disabled transform filtered.
-   - Route tests: CSRF rejection, rate-limit by identity, forged/expired
-     offer claims on `POST /runs`, valid offer id with a submitted question
-     that does not exactly equal the selected suggestion → `unverified`,
-     malformed/oversized `refine_offer_id` → constant `unverified` with the
-     supplied value never persisted, oversized question, offer-map LRU
-     eviction at `offer_entries`.
-   - Edit-distance gate: normalized-Levenshtein threshold behavior for
-     insertions, deletions, substitutions, and short substantive edits.
-   - Rendering/JS integration tests: stale-response race (slow old response
-     must not clobber new chips), edit-after-selection clears provenance,
-     submit while refinement pending, adversarial HTML/event-handler payloads
-     in suggestion fields render inert, `refine.enabled = false` produces
-     byte-identical index HTML.
-   - Store tests: `refinement.json` purged by content purge; `events.jsonl`
-     entry contains hashes and no content.
-   - Startup test: enabled config with unknown/schema-incapable alias fails
-     at boot.
-   - Prompt fixtures: each enabled transform against the production
+     and a non-matching selection → `unverified` provenance,
+     nothing-claimed → `resolve()` returns `None`, disabled transform
+     filtered, offer-map LRU eviction at `offer_entries`.
+   - Route tests: CSRF rejection, `/refine` 404s when disabled, rate-limit
+     degrading to an empty 200, oversized question rejected, forged/expired/
+     malformed offer claims on `POST /runs` never persisting the raw claimed
+     bytes, no-refinement-fields writes no refinement record, resuming a run
+     does not rewrite an existing refinement record.
+   - Rendering tests: `refine.enabled = false` produces byte-identical index
+     HTML; the enabled index carries the chips container, hidden fields, and
+     inline script; hostile suggestion text is proven inert two ways — the
+     `/refine` JSON response round-trips it as an inert string (server-side
+     half), and static assertions on the emitted `REFINE_JS` string confirm
+     it never uses `innerHTML` and only builds chip text via `textContent`
+     (client-side half). These are string/JSON-level checks against server
+     output, not a browser/DOM execution harness.
+   - Store tests: `refinement.json` purged by the content purge;
+     `events.jsonl` entry contains hashes and enum fields, no question or
+     suggestion text.
+   - Startup test: enabled config with an unknown/schema-incapable alias
+     fails at boot.
+
+   Not covered by this PR — listed here as intended coverage, not landed:
+   - **Edit-distance gate.** The normalized-Levenshtein threshold that gates
+     re-request dispatch lives entirely in client-side JS (`web/render.py`);
+     no test exercises insertion/deletion/substitution/short-edit behavior
+     against it.
+   - **A real rendering/JS execution harness**, as opposed to the static
+     string checks above: the stale-response race (a slow, superseded
+     response must not clobber newer chips), edit-after-selection clearing
+     provenance, and submit-while-refinement-pending are all unexercised.
+   - **Prompt fixtures**: each enabled transform against the production
      questions above, plus paired ideological mirror fixtures gating
-     `question_behind_the_question`.
+     `question_behind_the_question`, are design intent for a later pass —
+     none exist yet.

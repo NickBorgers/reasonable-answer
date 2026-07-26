@@ -18,6 +18,7 @@ from __future__ import annotations
 from types import SimpleNamespace
 
 import pytest
+from pydantic import BaseModel
 
 from reasonable_answer.config import Budgets, Config, ProxyConfig, Roster
 from reasonable_answer.llm import (
@@ -315,3 +316,52 @@ def test_a_tool_call_with_no_prose_is_not_treated_as_empty(client):
     )
     assert client.probe_tool_calling("writer-a") is True
     assert len(calls) == 1  # not retried as an empty answer
+
+
+# ------------------------------------------------------------------ the timeout kwarg
+
+
+class _Echo(BaseModel):
+    value: str
+
+
+def test_timeout_is_forwarded_to_the_real_sdk_call(client):
+    """`complete(..., timeout=...)` is documented as passed straight through to the
+    OpenAI SDK's per-request `timeout` kwarg (`web.refine.RefinementService`'s
+    client-occupancy bound and orphan-linger depend on that being true). Every other
+    test in this suite stubs `_create`/`structured` a layer above the SDK call, so
+    this is the one place `_invoke_create`'s and `_create`'s `if timeout is not None`
+    arms actually run against something that looks like the real `create(**kwargs)`."""
+    calls: list[dict] = []
+    _sdk_scripted(client, ["REAL REPORT"], record=calls)
+
+    client.complete("writer-a", system="s", user="u", timeout=12.5)
+
+    assert calls[0]["timeout"] == 12.5
+
+
+def test_timeout_is_forwarded_through_structured_to_the_real_sdk_call(client):
+    """`structured()` reaches the SDK via `complete()` -> `_invoke_create` ->
+    `_create`; this pins the passthrough survives that whole chain, not just the
+    `complete()` entry point."""
+    calls: list[dict] = []
+    _sdk_scripted(client, ['{"value": "ok"}'], record=calls)
+
+    result = client.structured(
+        "writer-a", system="s", user="u", schema=_Echo, timeout=3.0
+    )
+
+    assert result.value == "ok"
+    assert calls[0]["timeout"] == 3.0
+
+
+def test_timeout_is_absent_from_the_sdk_call_when_not_given(client):
+    """`_invoke_create`'s docstring promises `None` and "omitted" mean the same thing
+    to `_create` — verify the SDK kwargs never carry a `timeout` key at all when no
+    caller-supplied deadline exists, rather than merely carrying `timeout=None`."""
+    calls: list[dict] = []
+    _sdk_scripted(client, ["REAL REPORT"], record=calls)
+
+    client.complete("writer-a", system="s", user="u")
+
+    assert "timeout" not in calls[0]
