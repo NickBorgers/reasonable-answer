@@ -132,6 +132,31 @@ jobs:
             exit 0
           fi
 
+          # A commit the fixer wrote is never inherited, even when it is a textbook
+          # merge-from-base.
+          #
+          # Inherit exists for a human resyncing a branch: no PR-side content, nothing new
+          # to read, so re-stamp and move on. It was safe alongside the fixer only because
+          # fixer commits used to have one parent, which meant they always earned their own
+          # cycle — the property the whole fix/judge ordering rests on, since the judge
+          # grades the PRE-fix tree.
+          #
+          # Then the fixer learned to sync (D28), and its commits became merge commits. On
+          # PR #49 that inverted the safety property: the cycle-1 judge issued a GO for the
+          # pre-fix tree, the fixer pushed a merge carrying four conflict resolutions and
+          # two blocker fixes, gather saw merge-from-base, skipped all four reviewers, and
+          # re-stamped that GO onto a tree nobody had read. Auto-merge fired three seconds
+          # later. 2105 lines merged unreviewed.
+          author_email=$(git log -1 --format='%ae' "$SHA")
+          if [ "$author_email" = "$AGENT_COMMIT_EMAIL" ]; then
+            echo "gather: ${SHA} was authored by the fixer; not inheriting — a fix is reviewed by its own cycle"
+            {
+              echo "inherit=false"
+              echo "inherited_verdict="
+            } >> "$GITHUB_OUTPUT"
+            exit 0
+          fi
+
           # A merge commit has two or more parents: "<sha> <parent1> <parent2>" is 3 words.
           parents=$(git rev-list --parents -n 1 "$SHA" | wc -w)
           if [ "$parents" -ge 3 ]; then

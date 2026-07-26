@@ -152,6 +152,14 @@ it holds `contents: read`, so it could not push if it tried.
   into the cap without a single substantive change. It re-stamps that verdict without
   reading anything, which is why `/review` overrides it: inheriting a NO-GO is the right
   answer to an automatic resync and the wrong answer to a person asking to be re-reviewed.
+- **A fixer-authored commit is never inherited**, however textbook a merge-from-base it
+  looks. This is what keeps "the fixed SHA earns its own cycle" true. It used to be free:
+  fixer commits had one parent, so they could not match the inherit test at all. Once the
+  fixer learned to sync (D28) its commits became merge commits, and on PR #49 that
+  inverted the property — the cycle-1 judge issued a GO for the **pre-fix** tree, the
+  fixer pushed a merge carrying four conflict resolutions and two blocker fixes, gather
+  skipped every reviewer, and re-stamped that GO onto a tree nobody had read. Auto-merge
+  fired three seconds later.
 - **A run that reviewed nothing does not consume a cycle.** `review/cycle` is written by
   `record-cycle`, after the panel has read the code, and only when at least one reviewer's
   guard cleared. Every guard refusing — PR Validation red on the reviewed SHA, the branch

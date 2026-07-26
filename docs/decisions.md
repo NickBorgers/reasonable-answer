@@ -678,11 +678,23 @@ labels the PR `needs-human-review`, and comments the unresolved paths. So the ho
 cheap and visible, which is what makes "do not guess" a real instruction rather than a wish.
 
 **What is not defended.** A resolution that is syntactically clean and semantically wrong passes
-every gate here — `ruff` sees Python, and nothing reads the merge for meaning. The next cycle's
-reviewers read the branch, but the merge commit itself arrives on the inherit path, so they read
-it as part of whatever comes next rather than as a change under review. This is the residual, and
-it is accepted for the same reason the feature exists: the alternative on offer is not a human
-reading the merge, it is a PR nobody merges.
+every gate here — `ruff` sees Python, and nothing reads the merge for meaning. What *does* read it
+is the next cycle's panel, on the fixed SHA, which is the same protection every other fixer output
+gets.
+
+**Correction, from PR #49.** The paragraph above originally said the merge commit "arrives on the
+inherit path", and treated that as an accepted cost. It was not a cost, it was a hole, and it was
+larger than described. Inherit re-stamps the *previous* verdict, and the previous verdict is the
+cycle-1 judge's reading of the **pre-fix** tree. So on #49: reviewers cleared the pre-fix tree, the
+judge issued a GO, the fixer pushed a merge carrying four conflict resolutions and two blocker
+fixes, gather saw merge-from-base and skipped all four reviewers, and that GO was re-stamped onto a
+tree nobody had read. Auto-merge fired three seconds later; 2105 lines landed on main unreviewed.
+
+The property "the fixed SHA earns its own cycle with its own reviewers" was never a consequence of
+the inherit rule being careful — it held by accident, because fixer commits used to have one parent
+and so could not match the inherit test. Teaching the fixer to merge silently removed that
+accident. Gather now refuses to inherit any commit authored as `AGENT_COMMIT_EMAIL`, which restores
+the property by stating it rather than relying on commit shape.
 
 ## D29 — servable under a URL base path, without relaxing the same-origin posture
 
