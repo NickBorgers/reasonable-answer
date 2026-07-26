@@ -623,6 +623,28 @@ jobs:
         run: |
           set -euo pipefail
 
+          # Take the canonical name away from the agent BEFORE anything is checked.
+          #
+          # `fixer-result.json` is the exact path the judge downloads and reads, the agent
+          # wrote it, and the artifact uploads under `if: always()` — so every gate below
+          # is a gate the agent survives by failing it, as long as the file keeps that
+          # name. An artifact with the right `input_sha`, a fabricated `new_sha` and a
+          # wrong `cycle` fails validation here and still gets its `addressed[]` credited,
+          # because the judge re-checks neither cycle nor mode.
+          #
+          # From this line the canonical name exists only if the host creates it, which it
+          # does at the end of this step from validated, stamped content. Anything that
+          # goes wrong in between leaves no canonical artifact at all, and the judge treats
+          # a missing one as "nothing was fixed" — the fail-closed direction. The agent's
+          # original stays under a name the judge never looks up and the `fixer-*` upload
+          # glob still collects, so a failure here is still diagnosable.
+          UNSTAMPED="$(dirname "$RESULT_JSON")/fixer-unstamped-result.json"
+          mv "$RESULT_JSON" "$UNSTAMPED" || {
+            rm -f "$RESULT_JSON"
+            echo "::error::could not quarantine the fixer artifact; refusing to leave an unvalidated one where the judge reads."
+            exit 1
+          }
+
           # `npm ci` from a committed lockfile, never `npx --yes ajv-cli@5`.
           #
           # This job checks out the PR with WORKFLOW_PAT and can push to the branch. A
@@ -659,7 +681,7 @@ jobs:
           # MODULE_NOT_FOUND. Skipping only removes a tolerance — ajv still fails closed.
           NORMALIZER=".github/scripts/review/normalize-artifact.mjs"
           if [ -f "$NORMALIZER" ]; then
-            node "$NORMALIZER" --schema "$FIX_SCHEMA" --data "$RESULT_JSON"
+            node "$NORMALIZER" --schema "$FIX_SCHEMA" --data "$UNSTAMPED"
           else
             echo "::notice::normalize-artifact.mjs is not on main yet; skipping length normalization (bootstrap)"
           fi
@@ -667,14 +689,14 @@ jobs:
           # Main's schema, never the PR's — a PR cannot redefine the contract its own
           # fixer output is checked against.
           "${AJV[@]}" validate --spec=draft2020 --strict=false \
-            -s "$FIX_SCHEMA" -d "$RESULT_JSON"
+            -s "$FIX_SCHEMA" -d "$UNSTAMPED"
 
           # The fixer declares which tree it worked from. If that is not the tree the
           # reviewers read, its changes answer findings that were never made about this
           # code, and pushing them is worse than doing nothing.
-          actual_sha=$(jq -r '.input_sha' "$RESULT_JSON")
-          actual_cycle=$(jq -r '.cycle' "$RESULT_JSON")
-          actual_mode=$(jq -r '.mode' "$RESULT_JSON")
+          actual_sha=$(jq -r '.input_sha' "$UNSTAMPED")
+          actual_cycle=$(jq -r '.cycle' "$UNSTAMPED")
+          actual_mode=$(jq -r '.mode' "$UNSTAMPED")
 
           fail=0
           [ "$actual_sha" = "$EXPECTED_SHA" ] || { echo "::error::input_sha mismatch: $actual_sha != $EXPECTED_SHA"; fail=1; }
@@ -686,7 +708,7 @@ jobs:
           # intent of its own to appeal to. Left unchecked it becomes a way to close
           # every blocker without changing code.
           if [ "$actual_mode" != "author-resume" ]; then
-            n=$(jq '[.addressed[] | select(.resolution == "body_clarification")] | length' "$RESULT_JSON")
+            n=$(jq '[.addressed[] | select(.resolution == "body_clarification")] | length' "$UNSTAMPED")
             [ "$n" -eq 0 ] || { echo "::error::cold fixer claimed $n body_clarification resolution(s)"; fail=1; }
           fi
           [ "$fail" -eq 0 ] || exit "$fail"
@@ -701,18 +723,10 @@ jobs:
           # the exact bug the crediting rule exists to close, re-entered through the field
           # it keys on.
           #
-          # Stamping the input SHA now makes the field host-owned from this point on: it
-          # reads "nothing landed" unless the push step overwrites it with a real one.
-          #
-          # The canonical name is moved aside FIRST, and only re-created from the stamped
-          # content. Stamping in place would leave the agent's own file at the path the
-          # judge consumes if `jq` or the disk failed — an infrastructure failure would
-          # hand the agent back the field this exists to take away from it. This way the
-          # failure mode is a missing artifact, which the judge already treats as "nothing
-          # was fixed"; the unstamped copy survives under a name the judge never reads and
-          # the `fixer-*` upload glob still collects, so it stays diagnosable.
-          UNSTAMPED="$(dirname "$RESULT_JSON")/fixer-unstamped-result.json"
-          mv "$RESULT_JSON" "$UNSTAMPED"
+          # Everything above passed, so the canonical name can exist again — created here,
+          # by the host, from the quarantined content, with `new_sha` stamped to the input
+          # SHA. The field is host-owned from this point on: it reads "nothing landed"
+          # unless the push step overwrites it with a real SHA.
           if jq --arg s "$EXPECTED_SHA" '.new_sha = $s' "$UNSTAMPED" > "$RESULT_JSON"; then
             rm -f "$UNSTAMPED"
           else
