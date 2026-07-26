@@ -42,6 +42,30 @@ def esc(value: Any) -> str:
     return html.escape(str(value if value is not None else ""))
 
 
+def normalize_base_path(raw: str | None) -> str:
+    """Normalize an operator-supplied URL base path to ``''`` or ``'/seg[/seg...]'``.
+
+    RA is served at the origin root by default; a reverse proxy can relocate it under a
+    stripped prefix (``RA_ROOT_PATH=/app`` behind ``location /app/ { proxy_pass .../; }``).
+    The app still *receives* the stripped path — the prefix only shapes the absolute URLs it
+    *emits*, so every value here is joined as ``base + "/..."``. The empty string is the
+    identity: ``"" + "/runs"`` is ``"/runs"``, which is exactly today's behaviour, so an
+    unset env leaves every URL byte-identical to before.
+
+    A bare ``/`` and an unset value both collapse to ``''``; a trailing slash is dropped so
+    the join never doubles it, and a missing leading slash is added so a value like ``app``
+    still anchors at the origin rather than escaping to some sibling path.
+    """
+    if not raw:
+        return ""
+    trimmed = raw.strip()
+    if not trimmed or trimmed == "/":
+        return ""
+    if not trimmed.startswith("/"):
+        trimmed = "/" + trimmed
+    return trimmed.rstrip("/")
+
+
 def _ago(ts: float | None) -> str:
     if not ts:
         return "—"
@@ -76,7 +100,7 @@ CSP = (
 # --------------------------------------------------------------------- layout
 
 
-def render_layout(title: str, body: str, live: bool = False) -> str:
+def render_layout(title: str, body: str, live: bool = False, base_path: str = "") -> str:
     return f"""<!doctype html>
 <html lang="en">
 <head>
@@ -110,20 +134,20 @@ def render_layout(title: str, body: str, live: bool = False) -> str:
      which would put the clock on top of the header. -->
 <meta name="apple-mobile-web-app-status-bar-style" content="default">
 <meta name="apple-mobile-web-app-title" content="reasonable-answer">
-<link rel="icon" href="/static/icons/favicon.svg" type="image/svg+xml">
-<link rel="icon" href="/static/icons/icon-192.png" sizes="192x192" type="image/png">
+<link rel="icon" href="{base_path}/static/icons/favicon.svg" type="image/svg+xml">
+<link rel="icon" href="{base_path}/static/icons/icon-192.png" sizes="192x192" type="image/png">
 <!-- iOS ignores the manifest's icons for the home screen and reads this one. -->
-<link rel="apple-touch-icon" href="/static/icons/apple-touch-icon.png">
-<link rel="manifest" href="/manifest.webmanifest">
+<link rel="apple-touch-icon" href="{base_path}/static/icons/apple-touch-icon.png">
+<link rel="manifest" href="{base_path}/manifest.webmanifest">
 <style>{CSS}</style>
 </head>
 <body>
 <header>
-  <a class="brand" href="/">reasonable&#8209;answer</a>
+  <a class="brand" href="{base_path}/">reasonable&#8209;answer</a>
   <span class="tag">consensus-reviewed with in-artifact sourcing</span>
 </header>
 <main>{body}</main>
-<script>{REGISTER_SW_JS}{LIVE_JS if live else ''}</script>
+<script>{_register_sw_js(base_path)}{LIVE_JS if live else ''}</script>
 </body>
 </html>"""
 
@@ -131,9 +155,11 @@ def render_layout(title: str, body: str, live: bool = False) -> str:
 # ---------------------------------------------------------------------- index
 
 
-def render_index(runs: list[RunSummary], queue_depth: int, config: Config) -> str:
+def render_index(
+    runs: list[RunSummary], queue_depth: int, config: Config, base_path: str = ""
+) -> str:
     rows = (
-        "\n".join(_run_row(r) for r in runs)
+        "\n".join(_run_row(r, base_path) for r in runs)
         or '<tr><td colspan="5" class="empty">No runs yet. Ask something above.</td></tr>'
     )
     depth = (
@@ -156,7 +182,7 @@ def render_index(runs: list[RunSummary], queue_depth: int, config: Config) -> st
   <p class="lede">A roster of models will take turns writing and critiquing an answer until no
   eligible reviewer can find a material defect &mdash; or until the cap stops them.
   Expect this to take <strong>10&ndash;25 minutes</strong>.</p>
-  <form method="post" action="/runs">
+  <form method="post" action="{base_path}/runs">
     <label for="question">Question</label>
     <textarea id="question" name="question" rows="3" required maxlength="{config.max_question_chars}"
       placeholder="Is remote work better for software team productivity?"></textarea>
@@ -188,14 +214,14 @@ def render_index(runs: list[RunSummary], queue_depth: int, config: Config) -> st
   </div>
 </section>
 """
-    return render_layout("reasonable-answer", body)
+    return render_layout("reasonable-answer", body, base_path=base_path)
 
 
 def _model_list(models: list[str]) -> str:
     return "".join(f"<li>{esc(m)}</li>" for m in models)
 
 
-def _run_row(run: RunSummary) -> str:
+def _run_row(run: RunSummary, base_path: str = "") -> str:
     question = run.question if len(run.question) <= 90 else run.question[:87] + "…"
     # `data-label` mirrors the `<th>` text above it. Below 34rem the stylesheet hides the
     # header row and restacks each `<tr>` as a card, where a bare "2" means nothing; the
@@ -204,7 +230,7 @@ def _run_row(run: RunSummary) -> str:
     # Status needs none — the badge says what it is — and neither does the question.
     return f"""<tr>
   <td>{_badge(run.status)}</td>
-  <td class="q"><a href="/runs/{esc(run.run_id)}">{esc(question)}</a></td>
+  <td class="q"><a href="{base_path}/runs/{esc(run.run_id)}">{esc(question)}</a></td>
   <td class="num" data-label="rounds">{run.rounds or "—"}</td>
   <td class="dim" data-label="started">{_ago(run.started_at)}</td>
   <td class="dim mono" data-label="id">{esc(run.run_id)}</td>
@@ -227,27 +253,28 @@ def render_run(
     report: str | None,
     final: dict[str, Any] | None,
     lens_names: list[str],
+    base_path: str = "",
 ) -> str:
     resume = (
-        f"""<form method="post" action="/runs/{esc(summary.run_id)}/resume" class="inline">
+        f"""<form method="post" action="{base_path}/runs/{esc(summary.run_id)}/resume" class="inline">
         <button type="submit" class="secondary">Resume this run</button></form>"""
         if summary.status == "interrupted"
         else ""
     )
 
     downloads = (
-        f"""<a class="button" href="/runs/{esc(summary.run_id)}/report">Read the report</a>
-        <a class="secondary button" href="/runs/{esc(summary.run_id)}/report.md">report.md</a>
-        <a class="secondary button" href="/runs/{esc(summary.run_id)}/audit.json">audit.json</a>"""
+        f"""<a class="button" href="{base_path}/runs/{esc(summary.run_id)}/report">Read the report</a>
+        <a class="secondary button" href="{base_path}/runs/{esc(summary.run_id)}/report.md">report.md</a>
+        <a class="secondary button" href="{base_path}/runs/{esc(summary.run_id)}/audit.json">audit.json</a>"""
         if report
-        else f'<a class="secondary button" href="/runs/{esc(summary.run_id)}/audit.json">audit.json</a>'
+        else f'<a class="secondary button" href="{base_path}/runs/{esc(summary.run_id)}/audit.json">audit.json</a>'
     )
 
     # Once there is a report to read, the report is the page and the round-by-round
     # trail is supporting evidence — so it moves below and folds away. While the run is
     # live it is the only thing there is to look at, so it stays open.
     progress = f"""<section class="panel" id="progress"
-   data-stream="/runs/{esc(summary.run_id)}/stream"
+   data-stream="{base_path}/runs/{esc(summary.run_id)}/stream"
    data-live="{'1' if summary.is_live else '0'}">
 {render_run_progress(summary, timeline, lens_names)}
 </section>"""
@@ -277,7 +304,12 @@ def render_run(
 
 {progress}
 """
-    return render_layout(f"{summary.question[:60]} — reasonable-answer", body, live=summary.is_live)
+    return render_layout(
+        f"{summary.question[:60]} — reasonable-answer",
+        body,
+        live=summary.is_live,
+        base_path=base_path,
+    )
 
 
 def render_run_progress(
@@ -381,7 +413,9 @@ def _report_section(report: str | None, final: dict[str, Any] | None) -> str:
 </section>"""
 
 
-def render_report(summary: RunSummary, report: str, final: dict[str, Any] | None) -> str:
+def render_report(
+    summary: RunSummary, report: str, final: dict[str, Any] | None, base_path: str = ""
+) -> str:
     """The report on its own page — the thing to hand to someone who wants to *read* it,
     rather than watch the pipeline that produced it."""
     chosen = (final or {}).get("chosen_round")
@@ -390,14 +424,14 @@ def render_report(summary: RunSummary, report: str, final: dict[str, Any] | None
 <section class="panel reading">
   <div class="run-meta">
     {_badge(summary.status)}
-    <a class="dim" href="/runs/{esc(summary.run_id)}">back to the run</a>
+    <a class="dim" href="{base_path}/runs/{esc(summary.run_id)}">back to the run</a>
     <span class="dim mono">{esc(summary.run_id)}{provenance}</span>
-    <a class="dim" href="/runs/{esc(summary.run_id)}/report.md">report.md</a>
+    <a class="dim" href="{base_path}/runs/{esc(summary.run_id)}/report.md">report.md</a>
   </div>
   <p class="question">{esc(summary.question)}</p>
   <article class="report">{to_html(report)}</article>
 </section>"""
-    return render_layout(f"{summary.question[:60]} — reasonable-answer", body)
+    return render_layout(f"{summary.question[:60]} — reasonable-answer", body, base_path=base_path)
 
 
 # ------------------------------------------------------------------- assets
@@ -409,17 +443,27 @@ def render_report(summary: RunSummary, report: str, final: dict[str, Any] | None
 #: nothing at all and the page behaves exactly as it did before; over `tailscale serve`'s
 #: HTTPS — or `http://localhost`, which also counts — it installs.
 #:
+#: The script URL and scope carry the base path so that behind a stripping proxy the worker
+#: registers under `/app/` and controls the app where it actually lives, rather than
+#: escaping to the origin root the way an unprefixed `/sw.js` would. `__RA_BASE__` is a
+#: literal placeholder substituted per request, not a real path, so the empty base leaves
+#: this byte-identical to `register('/sw.js', { scope: '/' })`.
+#:
 #: MUST end in a semicolon. This is concatenated with LIVE_JS into one <script>, and
 #: without it `})()` followed by `(function` parses as a call and takes the live stream
 #: down with it. There is a test for exactly that.
-REGISTER_SW_JS = """
+_REGISTER_SW_JS = """
 (function () {
   if (!('serviceWorker' in navigator) || !window.isSecureContext) return;
   window.addEventListener('load', function () {
-    navigator.serviceWorker.register('/sw.js', { scope: '/' }).catch(function () {});
+    navigator.serviceWorker.register('__RA_BASE__/sw.js', { scope: '__RA_BASE__/' }).catch(function () {});
   });
 })();
 """
+
+
+def _register_sw_js(base_path: str = "") -> str:
+    return _REGISTER_SW_JS.replace("__RA_BASE__", base_path)
 
 LIVE_JS = """
 (function () {

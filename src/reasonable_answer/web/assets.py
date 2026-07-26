@@ -94,7 +94,9 @@ def cache_version(bodies: dict[str, bytes]) -> str:
     """A short digest over the precached bytes, stable across processes and machines.
 
     Names are folded in as well as contents so that renaming a file — which changes the
-    URL the worker precaches — also changes the version.
+    URL the worker precaches — also changes the version. The names carry the base path, so
+    a deployment under a prefix keys its cache distinctly from one at the root, which is
+    correct: the two precache different URLs.
     """
     digest = hashlib.sha256()
     for name in sorted(bodies):
@@ -105,7 +107,48 @@ def cache_version(bodies: dict[str, bytes]) -> str:
     return digest.hexdigest()[:12]
 
 
-def load() -> Assets:
+#: Manifest members whose values are root-absolute URLs the browser resolves against the
+#: origin. Under a base path they have to carry the prefix or the installed app's scope and
+#: launch URL escape back to the root, past the Access policy scoped to the prefix. `id`,
+#: `start_url` and `scope` are single paths; icon `src`es are rewritten separately.
+_MANIFEST_PATH_KEYS = ("id", "start_url", "scope")
+
+
+def _rewrite_manifest(body: bytes, base_path: str) -> bytes:
+    """Prefix the path-valued members of the manifest with the base path.
+
+    Returns the input untouched when there is no prefix (and on the two failure modes a
+    swapped-in manifest can present — invalid JSON, or a non-object top level), so the
+    root-origin deployment and a hand-broken manifest both degrade exactly as before.
+    """
+    if not base_path:
+        return body
+    try:
+        doc = json.loads(body)
+    except (json.JSONDecodeError, UnicodeDecodeError):
+        return body
+    if not isinstance(doc, dict):
+        return body
+    for key in _MANIFEST_PATH_KEYS:
+        value = doc.get(key)
+        if isinstance(value, str) and value.startswith("/"):
+            doc[key] = base_path + value
+    for icon in doc.get("icons", []) or []:
+        src = isinstance(icon, dict) and icon.get("src")
+        if isinstance(src, str) and src.startswith("/"):
+            icon["src"] = base_path + src
+    return json.dumps(doc).encode()
+
+
+def load(base_path: str = "") -> Assets:
+    """Resolve everything served from `static/`, prefixing every browser-facing URL with
+    `base_path` (`''` for a root-origin deployment, `'/app'` behind a stripping proxy).
+
+    The route paths in `web/app.py` are unaffected — the proxy strips the prefix before the
+    request arrives, so the app still serves at `/manifest.webmanifest`. It is the URLs the
+    *manifest names* and the worker *precaches and fetches* that carry the prefix, because a
+    browser resolves those against the origin, not the app's mount point.
+    """
     icons = {}
     for name, media_type in ICON_TYPES.items():
         asset = _read(ICONS_DIR / name, media_type)
@@ -113,25 +156,31 @@ def load() -> Assets:
             icons[name] = asset
 
     manifest = _read(STATIC_DIR / "manifest.webmanifest", _MANIFEST_TYPE)
+    if manifest is not None:
+        manifest = Asset(_rewrite_manifest(manifest.body, base_path), manifest.media_type)
     offline = _read(STATIC_DIR / "offline.html", _OFFLINE_TYPE)
 
     # The precache list, and therefore the only set of URLs the worker is able to store.
-    # It holds no run URL, and there is no code path that adds one.
+    # It holds no run URL, and there is no code path that adds one. Each key is a
+    # browser-facing URL, so it carries the base path.
+    offline_url = base_path + OFFLINE_PATH
     cached: dict[str, bytes] = {}
     if offline is not None:
-        cached[OFFLINE_PATH] = offline.body
+        cached[offline_url] = offline.body
     if manifest is not None:
-        cached[MANIFEST_PATH] = manifest.body
+        cached[base_path + MANIFEST_PATH] = manifest.body
     for name, asset in icons.items():
-        cached[ICONS_PREFIX + name] = asset.body
+        cached[base_path + ICONS_PREFIX + name] = asset.body
 
     version = cache_version(cached)
     precache = sorted(cached)
 
     worker = _read(STATIC_DIR / "sw.js", "text/javascript")
     source = worker.body.decode() if worker is not None else ""
-    service_worker = source.replace("__RA_CACHE_VERSION__", version).replace(
-        "__RA_PRECACHE__", json.dumps(precache)
+    service_worker = (
+        source.replace("__RA_CACHE_VERSION__", version)
+        .replace("__RA_PRECACHE__", json.dumps(precache))
+        .replace("__RA_OFFLINE__", offline_url)
     )
 
     return Assets(

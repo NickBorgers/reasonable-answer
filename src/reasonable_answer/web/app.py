@@ -29,7 +29,13 @@ from .. import ingest, shutdown
 from ..config import Config, ConfigError
 from . import assets as static_assets
 from .registry import Registry, RunSummary
-from .render import render_index, render_report, render_run, render_run_progress
+from .render import (
+    normalize_base_path,
+    render_index,
+    render_report,
+    render_run,
+    render_run_progress,
+)
 from .retention import RetentionSweeper
 from .worker import QueueFull, RateLimited, RunWorker
 
@@ -47,6 +53,13 @@ def create_app(
 ) -> FastAPI:
     config = config or Config.load(os.environ.get("RA_CONFIG"))
     _check_runs_dir_writable(config)
+    # The URL prefix the app is served under behind a stripping reverse proxy (e.g.
+    # `RA_ROOT_PATH=/app` fronted by `location /app/ { proxy_pass http://ra:8080/; }`).
+    # Empty by default, which leaves every emitted URL byte-identical to a root-origin
+    # deployment. Resolved once here, like the static assets, and only ever prepended to
+    # URLs the app *emits* — the proxy strips it from the path before the request lands, so
+    # the routes below stay unprefixed. See D29.
+    base_path = normalize_base_path(os.environ.get("RA_ROOT_PATH"))
     concurrent = max_concurrent or int(os.environ.get("RA_MAX_CONCURRENT_RUNS", "1"))
     if (cap := os.environ.get("RA_MAX_RESUME_ATTEMPTS")):
         config = config.model_copy(update={"max_resume_attempts": int(cap)})
@@ -83,16 +96,21 @@ def create_app(
     app.state.config = config
     app.state.worker = worker
     app.state.registry = registry
+    app.state.base_path = base_path
     # Read once here rather than per request: these files do not change while the process
     # runs, and resolving them at startup means a missing one is a 404 rather than a 500.
-    app.state.assets = assets = static_assets.load()
+    # The base path shapes the URLs the manifest names and the worker precaches, so it is
+    # baked in at the same point.
+    app.state.assets = assets = static_assets.load(base_path)
 
     # ------------------------------------------------------------------ pages
 
     @app.get("/", response_class=HTMLResponse)
     def index() -> str:
         runs = registry.list(active=worker.active())
-        return render_index(runs, queue_depth=worker.queue_depth, config=config)
+        return render_index(
+            runs, queue_depth=worker.queue_depth, config=config, base_path=base_path
+        )
 
     # A seed reaches this handler as pasted text or as an http(s) URL, and never as a
     # filesystem path: no code path in the web layer may construct a `Path` from
@@ -166,7 +184,7 @@ def create_app(
             raise HTTPException(
                 status_code=429, detail="the run queue is full; try again shortly"
             ) from exc
-        return RedirectResponse(url=f"/runs/{run_id}", status_code=303)
+        return RedirectResponse(url=f"{base_path}/runs/{run_id}", status_code=303)
 
     @app.get("/runs/{run_id}", response_class=HTMLResponse)
     def run_detail(run_id: str, response: Response) -> str:
@@ -183,6 +201,7 @@ def create_app(
             report=registry.report(run_id),
             final=registry.final(run_id),
             lens_names=registry.lens_names(),
+            base_path=base_path,
         )
 
     @app.post("/runs/{run_id}/resume")
@@ -199,7 +218,7 @@ def create_app(
         # `interrupted` forever. `seed.md` holds the converted markdown that was
         # hashed, so reading it back reproduces the fingerprint exactly.
         worker.resume(run_id, summary.question, registry.seed(run_id))
-        return RedirectResponse(url=f"/runs/{run_id}", status_code=303)
+        return RedirectResponse(url=f"{base_path}/runs/{run_id}", status_code=303)
 
     # ------------------------------------------------------------- fragments
 
@@ -265,7 +284,7 @@ def create_app(
         report = registry.report(run_id)
         if report is None:
             raise HTTPException(status_code=404, detail="this run has not produced a report yet")
-        return render_report(summary, report, registry.final(run_id))
+        return render_report(summary, report, registry.final(run_id), base_path=base_path)
 
     @app.get("/runs/{run_id}/report.md", response_class=PlainTextResponse)
     def report_markdown(run_id: str) -> str:
@@ -307,14 +326,16 @@ def create_app(
     def service_worker() -> Response:
         if not assets.service_worker:
             raise HTTPException(status_code=404, detail="no service worker")
-        # Served from the root so its scope is the whole origin; the header says so
-        # explicitly as well, which costs nothing and survives the file being moved.
-        # `no-cache` means the browser revalidates on every navigation, so a fix to this
-        # file reaches an installed app immediately rather than whenever a cache expires.
+        # Scoped to the app's own mount point so it controls every page the app serves; the
+        # header says so explicitly, which costs nothing and survives the file being moved.
+        # Under a base path this is `/app/` — the browser fetches `/app/sw.js` (which the
+        # proxy strips to this route) and the worker claims `/app/`, not the origin root it
+        # would otherwise escape to. `no-cache` means the browser revalidates on every
+        # navigation, so a fix to this file reaches an installed app immediately.
         return Response(
             assets.service_worker,
             media_type="text/javascript",
-            headers={"Cache-Control": "no-cache", "Service-Worker-Allowed": "/"},
+            headers={"Cache-Control": "no-cache", "Service-Worker-Allowed": f"{base_path}/"},
         )
 
     @app.get(static_assets.ICONS_PREFIX + "{name}")

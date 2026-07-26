@@ -8,6 +8,7 @@ import re
 import threading
 import time
 import urllib.request
+from contextlib import contextmanager
 
 import pytest
 from fakes import FakeClient
@@ -1044,3 +1045,152 @@ def test_service_worker_registration_is_guarded_and_cannot_break_the_live_script
     # whichever page the user last had open.
     assert "isSecureContext" in client.get("/").text
     assert "isSecureContext" in client.get(f"/runs/{run_id}/report").text
+
+
+# ------------------------------------------------------ base path (reverse-proxy prefix)
+#
+# The deployment model is a *stripping* proxy: `location /app/ { proxy_pass .../; }` removes
+# `/app/` before the request reaches the app, so the app serves at its normal stripped
+# routes. The TestClient stands in for that proxy by requesting those stripped paths — the
+# thing under test is that every URL the app *emits* carries the prefix and nothing escapes
+# back to the origin root, past the Access policy scoped to the prefix. See D29.
+
+BASE = "/app"
+
+#: Every attribute a browser resolves as a navigable/subresource URL. The event stream is
+#: `data-stream`, read by the inline live script and handed to `EventSource`.
+_URL_ATTRS = re.compile(r'(?:href|src|action|data-stream)="(/[^"]*)"')
+
+
+def _absolute_urls(html: str) -> list[str]:
+    """Every root-absolute URL the page emits, from the URL-bearing attributes and from the
+    service-worker `register(...)` call the attribute scan cannot see."""
+    urls = _URL_ATTRS.findall(html)
+    urls += re.findall(r"register\('(/[^']*)'", html)
+    urls += re.findall(r"scope:\s*'(/[^']*)'", html)
+    return urls
+
+
+@contextmanager
+def _prefixed_client(config, fake_client, base_path=BASE):
+    """A client whose app is built with `RA_ROOT_PATH` set, driven by the same fake graph
+    the default `client` fixture uses."""
+
+    def runner(cfg, *, question, seed, run_id, stop=None, **seed_provenance):
+        return run_graph(
+            cfg, question=question, seed=seed, run_id=run_id, client=fake_client, **seed_provenance
+        )
+
+    previous = os.environ.get("RA_ROOT_PATH")
+    os.environ["RA_ROOT_PATH"] = base_path
+    worker = RunWorker(config, max_concurrent=1, runner=runner)
+    try:
+        app = create_app(config, worker=worker)
+        with TestClient(app) as c:
+            yield c
+    finally:
+        worker.shutdown()
+        if previous is None:
+            os.environ.pop("RA_ROOT_PATH", None)
+        else:
+            os.environ["RA_ROOT_PATH"] = previous
+
+
+@pytest.mark.parametrize(
+    "raw, expected",
+    [
+        (None, ""),
+        ("", ""),
+        ("   ", ""),
+        ("/", ""),
+        ("/app", "/app"),
+        ("/app/", "/app"),
+        ("  /app/  ", "/app"),
+        ("app", "/app"),  # a missing leading slash anchors at the origin, not a sibling
+        ("/app/v2/", "/app/v2"),
+    ],
+)
+def test_normalize_base_path_collapses_to_the_join_identity(raw, expected):
+    from reasonable_answer.web.render import normalize_base_path
+
+    assert normalize_base_path(raw) == expected
+
+
+def test_an_unset_prefix_leaves_every_url_at_the_root(client):
+    """The empty base is the join identity: with no `RA_ROOT_PATH`, every emitted URL is
+    byte-identical to before this feature existed."""
+    for url in _absolute_urls(client.get("/").text):
+        assert not url.startswith(f"{BASE}/"), url
+    assert '<link rel="manifest" href="/manifest.webmanifest">' in client.get("/").text
+
+
+def test_the_index_stays_entirely_under_the_prefix(config, fake_client):
+    with _prefixed_client(config, fake_client) as c:
+        page = c.get("/").text
+    urls = _absolute_urls(page)
+    assert urls, "the page emits URLs; the scan found none, so it is not asserting anything"
+    for url in urls:
+        # `/app` itself (the brand link is `/app/`) and everything below it are in; anything
+        # else is a link that escapes the Access-scoped prefix back to the origin root.
+        assert url == BASE or url.startswith(f"{BASE}/"), url
+    assert f'action="{BASE}/runs"' in page
+    assert f'href="{BASE}/manifest.webmanifest"' in page
+    assert f"register('{BASE}/sw.js', {{ scope: '{BASE}/' }})" in page
+
+
+def test_the_manifest_is_served_under_the_prefix(config, fake_client):
+    with _prefixed_client(config, fake_client) as c:
+        manifest = json.loads(c.get("/manifest.webmanifest").text)
+        # start_url, scope and id are what scope the installed app; unprefixed, the app
+        # launches at the origin root and its scope no longer contains its own pages.
+        assert manifest["start_url"] == f"{BASE}/"
+        assert manifest["scope"] == f"{BASE}/"
+        assert manifest["id"] == f"{BASE}/"
+        for icon in manifest["icons"]:
+            assert icon["src"].startswith(f"{BASE}/static/icons/"), icon["src"]
+            # The proxy strips the prefix, so the stripped path is what the app serves.
+            assert c.get(icon["src"][len(BASE):]).status_code == 200, icon["src"]
+
+
+def test_the_service_worker_registers_and_precaches_under_the_prefix(config, fake_client):
+    with _prefixed_client(config, fake_client) as c:
+        response = c.get("/sw.js")
+        # Without the prefixed scope the worker would claim the origin root, not `/app/`.
+        assert response.headers["service-worker-allowed"] == f"{BASE}/"
+        source = response.text
+        declared = json.loads(re.search(r"var ASSETS = (\[.*?\]);", source, re.S).group(1))
+        assert declared == c.app.state.assets.precache
+        assert declared, "the precache list must not be templated away to nothing"
+        for path in declared:
+            assert path.startswith(f"{BASE}/"), path
+        # OFFLINE has to match its precached entry or the navigate fallback misses the cache.
+        offline = re.search(r"var OFFLINE = '([^']*)'", source).group(1)
+        assert offline == f"{BASE}/offline.html"
+        assert offline in declared
+        # The structural no-run-caching property is unchanged under a prefix.
+        assert not [p for p in declared if "/runs" in p]
+
+
+def test_a_submit_redirect_carries_the_prefix(config, fake_client):
+    """A `303` to an unprefixed `/runs/<id>` would bounce the browser straight out of the
+    Access-scoped prefix on the very first submission."""
+    with _prefixed_client(config, fake_client) as c:
+        response = c.post("/runs", data={"question": "Under a prefix?"}, follow_redirects=False)
+        assert response.status_code == 303
+        assert response.headers["location"].startswith(f"{BASE}/runs/")
+
+
+def test_the_run_page_stays_entirely_under_the_prefix(config, fake_client):
+    with _prefixed_client(config, fake_client) as c:
+        response = c.post("/runs", data={"question": "A prefixed run?"}, follow_redirects=False)
+        run_id = response.headers["location"].rsplit("/", 1)[-1]
+        _wait_for_final(config, run_id)
+
+        for path in (f"/runs/{run_id}", f"/runs/{run_id}/report"):
+            page = c.get(path).text
+            for url in _absolute_urls(page):
+                assert url == BASE or url.startswith(f"{BASE}/"), (path, url)
+        run_page = c.get(f"/runs/{run_id}").text
+        # The live stream is the `connect-src 'self'` target; it has to stay under the prefix
+        # too or the EventSource escapes it.
+        assert f'data-stream="{BASE}/runs/{run_id}/stream"' in run_page
