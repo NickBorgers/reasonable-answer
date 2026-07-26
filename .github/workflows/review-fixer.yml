@@ -703,9 +703,23 @@ jobs:
           #
           # Stamping the input SHA now makes the field host-owned from this point on: it
           # reads "nothing landed" unless the push step overwrites it with a real one.
-          tmp=$(mktemp)
-          jq --arg s "$EXPECTED_SHA" '.new_sha = $s' "$RESULT_JSON" > "$tmp"
-          mv "$tmp" "$RESULT_JSON"
+          #
+          # The canonical name is moved aside FIRST, and only re-created from the stamped
+          # content. Stamping in place would leave the agent's own file at the path the
+          # judge consumes if `jq` or the disk failed — an infrastructure failure would
+          # hand the agent back the field this exists to take away from it. This way the
+          # failure mode is a missing artifact, which the judge already treats as "nothing
+          # was fixed"; the unstamped copy survives under a name the judge never reads and
+          # the `fixer-*` upload glob still collects, so it stays diagnosable.
+          UNSTAMPED="$(dirname "$RESULT_JSON")/fixer-unstamped-result.json"
+          mv "$RESULT_JSON" "$UNSTAMPED"
+          if jq --arg s "$EXPECTED_SHA" '.new_sha = $s' "$UNSTAMPED" > "$RESULT_JSON"; then
+            rm -f "$UNSTAMPED"
+          else
+            rm -f "$RESULT_JSON"
+            echo "::error::could not stamp new_sha on the fixer artifact; the unstamped copy is preserved as fixer-unstamped-result.json and this cycle will be judged as having fixed nothing."
+            exit 1
+          fi
 
       - name: Refuse to push a tree that does not lint
         if: steps.work.outputs.push == 'true'
