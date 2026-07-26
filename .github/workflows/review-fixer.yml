@@ -494,6 +494,9 @@ jobs:
           && steps.run.outcome != 'success'
         env:
           REVIEWED_SHA: ${{ inputs.reviewed_sha }}
+          BASE_REF: ${{ inputs.base_ref }}
+          HEAD_REF: ${{ inputs.head_ref }}
+          MERGE_STATE: ${{ steps.sync.outputs.merge_state }}
         run: |
           set -euo pipefail
           echo "::warning::Author-resume fixer did not succeed (outcome=${{ steps.run.outcome }}); falling back to a cold fixer."
@@ -520,6 +523,31 @@ jobs:
           # — untouched.
           git -C "${PR_DIR}" reset --hard "${REVIEWED_SHA}"
           git -C "${PR_DIR}" clean -fd
+
+          # That reset also undid the base-branch sync — a clean merge commit, or a
+          # conflicted index with its markers. The cold fixer is handed the same
+          # MERGE_STATE the sync step recorded, so leaving the tree unsynced here would
+          # tell it to resolve conflicts that are no longer in front of it, and would
+          # quietly drop the sync: a conflicts-only cycle would then reach the commit
+          # step with a clean tree, report nothing to do, and push nothing at all.
+          #
+          # Replaying the same merge is deterministic — same two commits, same strategy —
+          # so it reproduces the recorded state rather than inventing a new one. If it
+          # somehow does not, fail rather than run an agent against a state nobody
+          # described to it.
+          if [ "${MERGE_STATE}" != "none" ]; then
+            REPLAYED=conflicts
+            if git -C "${PR_DIR}" merge --no-commit --no-ff "origin/${BASE_REF}"; then
+              git -C "${PR_DIR}" commit -m "Merge origin/${BASE_REF} into ${HEAD_REF}" \
+                                        -m "Pipeline-driven sync to keep the PR mergeable; no PR-side content delta."
+              REPLAYED=clean
+            fi
+            if [ "$REPLAYED" != "${MERGE_STATE}" ]; then
+              echo "::error::re-applying the base merge produced '${REPLAYED}' where the sync step recorded '${MERGE_STATE}'; refusing to run the cold fixer against an undescribed tree."
+              exit 1
+            fi
+            echo "Re-applied the ${MERGE_STATE} merge from origin/${BASE_REF} for the cold run."
+          fi
 
           # Swap the resume prompt out for the cold one. Same destination path the
           # primary run read, staged from main's checkout so the PR cannot edit it.
@@ -661,7 +689,23 @@ jobs:
             n=$(jq '[.addressed[] | select(.resolution == "body_clarification")] | length' "$RESULT_JSON")
             [ "$n" -eq 0 ] || { echo "::error::cold fixer claimed $n body_clarification resolution(s)"; fail=1; }
           fi
-          exit "$fail"
+          [ "$fail" -eq 0 ] || exit "$fail"
+
+          # Take `new_sha` away from the agent, here, before any gate below can fail.
+          #
+          # The judge credits `addressed[]` only when `new_sha` differs from `input_sha`,
+          # which is meant to prove the host pushed. But the agent writes this artifact and
+          # the artifact uploads under `if: always()` — so an agent that guessed any
+          # non-equal value, on a run that then died at the lint gate or the marker gate,
+          # would have every claimed fix credited for work that is not in the tree. That is
+          # the exact bug the crediting rule exists to close, re-entered through the field
+          # it keys on.
+          #
+          # Stamping the input SHA now makes the field host-owned from this point on: it
+          # reads "nothing landed" unless the push step overwrites it with a real one.
+          tmp=$(mktemp)
+          jq --arg s "$EXPECTED_SHA" '.new_sha = $s' "$RESULT_JSON" > "$tmp"
+          mv "$tmp" "$RESULT_JSON"
 
       - name: Refuse to push a tree that does not lint
         if: steps.work.outputs.push == 'true'
@@ -864,19 +908,28 @@ jobs:
 
           # `new_sha` in the artifact is the judge's only evidence that a fix actually
           # landed, so it is written here — the one place that knows. The agent cannot
-          # know it (it never touches .git) and the schema has always said the host
-          # overwrites it; until now nothing did, leaving the field at whatever the agent
-          # guessed. Every early return below stamps the reviewed SHA, which is exactly
-          # what "nothing landed" means to aggregate.mjs.
+          # know it (it never touches .git), and the validate step has already stamped the
+          # reviewed SHA, so the artifact reads "nothing landed" unless this overwrites it.
+          #
+          # A merge-only cycle runs no agent and has no artifact at all; that is the
+          # `-f` guard, and it is not an error.
           stamp_new_sha() {
             [ -n "${RESULT_JSON:-}" ] && [ -f "$RESULT_JSON" ] || return 0
             local tmp
-            tmp=$(mktemp)
-            jq --arg s "$1" '.new_sha = $s' "$RESULT_JSON" > "$tmp" && mv "$tmp" "$RESULT_JSON"
+            tmp=$(mktemp) || return 1
+            if jq --arg s "$1" '.new_sha = $s' "$RESULT_JSON" > "$tmp"; then
+              mv "$tmp" "$RESULT_JSON"
+            else
+              rm -f "$tmp"
+              return 1
+            fi
           }
 
           if [ "$CHANGED" != "true" ]; then
-            stamp_new_sha "$REVIEWED_SHA"
+            stamp_new_sha "$REVIEWED_SHA" || {
+              echo "::error::could not stamp the fixer artifact; nothing was pushed."
+              exit 1
+            }
             echo "pushed=false" >> "$GITHUB_OUTPUT"
             echo "new_sha=${REVIEWED_SHA}" >> "$GITHUB_OUTPUT"
             exit 0
@@ -888,7 +941,10 @@ jobs:
           REMOTE_HEAD=$(git ls-remote --heads origin "refs/heads/${HEAD_REF}" | awk 'NR==1 {print $1}')
           if [ -z "$REMOTE_HEAD" ] || [ "$REMOTE_HEAD" != "$REVIEWED_SHA" ]; then
             echo "::warning::${HEAD_REF} moved from ${REVIEWED_SHA} to ${REMOTE_HEAD:-<gone>}; discarding the fix."
-            stamp_new_sha "$REVIEWED_SHA"
+            stamp_new_sha "$REVIEWED_SHA" || {
+              echo "::error::could not stamp the fixer artifact; nothing was pushed."
+              exit 1
+            }
             echo "pushed=false" >> "$GITHUB_OUTPUT"
             echo "new_sha=${REVIEWED_SHA}" >> "$GITHUB_OUTPUT"
             exit 0
@@ -915,7 +971,11 @@ jobs:
           # Duplicate work on the *same* SHA is still prevented: review-entry.yml claims
           # each SHA before dispatching, and NEW_SHA is a SHA no run has claimed yet.
 
-          stamp_new_sha "$NEW_SHA"
+          # Deliberately not fatal. The commit is already on the branch; failing the
+          # step here would not unpush it, and would trade a wasted cycle for a red
+          # job that says nothing useful. Unstamped means uncredited, which is the
+          # direction that costs a cycle rather than merging unaddressed blockers.
+          stamp_new_sha "$NEW_SHA" || echo "::warning::pushed ${NEW_SHA} but could not stamp the artifact; the judge will read this cycle as having landed nothing."
           echo "pushed=true" >> "$GITHUB_OUTPUT"
           echo "new_sha=${NEW_SHA}" >> "$GITHUB_OUTPUT"
           echo "Pushed ${NEW_SHA} to ${HEAD_REF}."
