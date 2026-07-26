@@ -108,13 +108,14 @@ fi
 
 {
   echo "---"
-  # `/review` re-runs the panel; it does not reset the counter, and saying so here was
-  # actively misleading on a PR already at the cap — where it returns a reviewer-less
-  # `cycle_capped` NO-GO. Rebasing is what resets the cycle (docs/ci-pipeline.md).
+  # `/review` re-runs the panel on the same SHA; it does not reset the counter, and saying
+  # otherwise was actively misleading on a PR already at the cap — where it returns a
+  # reviewer-less `cycle_capped` NO-GO. Pushing a human-authored commit is what resets the
+  # count (docs/ci-pipeline.md, cycle control).
   if [ -n "$RUN_URL" ]; then
-    echo "<sub>Cycle ${CYCLE} · [run log](${RUN_URL}) · \`/review\` re-runs the panel; rebase to reset the cycle count.</sub>"
+    echo "<sub>Cycle ${CYCLE} · [run log](${RUN_URL}) · \`/review\` re-runs the panel; pushing a commit resets the cycle count.</sub>"
   else
-    echo "<sub>Cycle ${CYCLE} · \`/review\` re-runs the panel; rebase to reset the cycle count.</sub>"
+    echo "<sub>Cycle ${CYCLE} · \`/review\` re-runs the panel; pushing a commit resets the cycle count.</sub>"
   fi
 } >> "$BODY"
 
