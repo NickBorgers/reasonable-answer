@@ -1,4 +1,4 @@
-.PHONY: help install test cov doctor audition run serve docker docker-run lint clean
+.PHONY: help install test cov doctor audition run serve docs docs-serve docker docker-run lint clean
 
 help:
 	@echo "install  install dependencies into .venv"
@@ -8,6 +8,8 @@ help:
 	@echo "audition measure whether each rostered critic can actually find defects"
 	@echo "run      refine a report: make run Q='your question' [SEED=path.md]"
 	@echo "serve    run the web interface on http://127.0.0.1:8080"
+	@echo "docs     build the documentation site into site/ — fails on a dead link"
+	@echo "docs-serve  preview the documentation on http://127.0.0.1:8000"
 	@echo "docker   build the container image"
 
 install:
@@ -40,6 +42,17 @@ RA_DEV_IDENTITY ?= dev@localhost
 serve:
 	RA_DEV_IDENTITY=$(RA_DEV_IDENTITY) uv run ra serve -v
 
+# --strict promotes MkDocs' warnings to errors: a dead ./x.md link, an #anchor no heading
+# produces, or a page under docs/ missing from nav fails here instead of shipping a 404.
+# The `Docs Build` job in pr-validation.yml and pages.yml run this same command.
+docs:
+	uv run --group docs mkdocs build --strict
+
+# Live-reload preview, and the only way to check a diagram: mermaid renders in the browser,
+# so the strict build above cannot see inside a mermaid fence.
+docs-serve:
+	uv run --group docs mkdocs serve
+
 docker:
 	docker build -t reasonable-answer:latest .
 
@@ -50,4 +63,4 @@ docker-run: docker
 		reasonable-answer:latest
 
 clean:
-	rm -rf .pytest_cache .coverage **/__pycache__
+	rm -rf .pytest_cache .coverage site **/__pycache__

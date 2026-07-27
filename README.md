@@ -8,8 +8,9 @@ argument is *sound* — where "sound" means **no eligible reviewer can find a ma
 not that anyone asserted it was good.
 
 New here? Start with [docs/concepts.md](./docs/concepts.md) — the approachable tour of *why* the
-system is shaped this way. The design specs are in [docs/](./docs/), hub at
-[docs/DESIGN.md](./docs/DESIGN.md). This README is about running it.
+system is shaped this way. The design specs are in [docs/DESIGN.md](./docs/DESIGN.md), and the
+whole set is published at <https://nickborgers.github.io/reasonable-answer/>. This README is
+about running it.
 
 ## How it works, in one paragraph
 

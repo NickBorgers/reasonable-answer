@@ -12,8 +12,9 @@ than reproducing that archaeology.
 
 | workflow | trigger | runner | what it does |
 |---|---|---|---|
-| `pr-validation.yml` | every PR | `ubuntu-latest` | ruff, offline pytest on 3.11 + 3.12, lockfile check, actionlint, judge unit tests, decision-number collision check, docker build + smoke test |
+| `pr-validation.yml` | every PR | `ubuntu-latest` | ruff, offline pytest on 3.11 + 3.12, lockfile check, strict docs build, actionlint, judge unit tests, decision-number collision check, docker build + smoke test |
 | `docker-release.yml` | push to `main`, `v*` tags | `ubuntu-latest` | multi-arch build and push to GHCR, then pull back **by digest** and smoke test |
+| `pages.yml` | push to `main` touching `docs/**`, `mkdocs.yml`, `pyproject.toml`, `uv.lock`, or `pages.yml`; manual | `ubuntu-latest` | strict MkDocs build, then deploy `docs/` to GitHub Pages |
 | `ci-image.yml` | changes to `.github/ci/**`, manual | `ubuntu-latest` | builds the agent image and verifies every tool inside it runs |
 | `resolve-issue.yml` | issue opened/reopened/unlabeled, `/autoresolve` comment | `[self-hosted, homelab]` | an agent implements the issue and opens a PR |
 | `review-entry.yml` → `review-pipeline.yml` | PR events, `/review` | mixed | authorize → gather → reviewers → judge → finalize |
@@ -66,7 +67,7 @@ review; the same reasoning applies to its CI.
 ### Reviewer contract
 
 A reviewer is strictly read-only. It produces a JSON artifact conforming to
-[`reviewer-v1.json`](../.github/scripts/review/schema/reviewer-v1.json) and a PR comment,
+[`reviewer-v1.json`](https://github.com/NickBorgers/reasonable-answer/blob/main/.github/scripts/review/schema/reviewer-v1.json) and a PR comment,
 and has no path to the branch. **No stage in this pipeline can push.**
 
 The judge consumes only those artifacts — never PR comments, never PR reviews. A reviewer
@@ -84,7 +85,7 @@ addressed — its artifact would have failed validation against main's schema if
 
 ### The judge fails closed
 
-[`aggregate.mjs`](../.github/scripts/review/aggregate.mjs) returns NO-GO rather than
+[`aggregate.mjs`](https://github.com/NickBorgers/reasonable-answer/blob/main/.github/scripts/review/aggregate.mjs) returns NO-GO rather than
 guessing whenever it cannot trust its inputs: reviewer artifacts spanning multiple
 `reviewed_sha` values or multiple cycles, a fix result that started from a different SHA,
 an empty reviewer set, or every reviewer abstaining. It has unit tests, which
@@ -538,7 +539,7 @@ will ever gate it.
 
 ## Container topology
 
-Every knob lives in [`review-agent-run`](../.github/actions/review-agent-run/action.yml):
+Every knob lives in [`review-agent-run`](https://github.com/NickBorgers/reasonable-answer/blob/main/.github/actions/review-agent-run/action.yml):
 
 - `--network host` — the only thing granting tailnet reachability to the proxy.
 - `.review-output` is `chmod 777` before the run: the runner uid is not the container's
@@ -577,6 +578,31 @@ Every knob lives in [`review-agent-run`](../.github/actions/review-agent-run/act
   is loaded.
 - `github.repository` preserves capitalisation and Docker rejects uppercase; the image
   name is lowercased everywhere.
+- `mkdocs build --strict` fails on any relative link that leaves `docs/`, because the site
+  is built from that directory alone. The links to the README, to the icons README under
+  `src/`, and to files under `.github/` are absolute `https://github.com/...` URLs for
+  exactly that reason. Making one relative again turns `Docs Build` red, and the diff does
+  not explain why.
+- Mermaid renders in the browser, so the strict build **cannot** fail on a broken diagram —
+  it sees an opaque code block. A diagram change is verified by eye with `make docs-serve`.
+  Note the escaping asymmetry the blocks rely on: `&amp;` inside a flowchart label, a raw
+  `&` inside a `sequenceDiagram` message. Both survive the site build byte-for-byte, so a
+  block that renders on github.com renders on the site.
+- The published site fetches Mermaid at runtime from `https://unpkg.com/mermaid@11/...`.
+  That URL is baked into Material's own bundle, is **not** pinned below the major, and is
+  not something the build vendors: diagrams therefore depend on a third-party CDN at read
+  time, and a Mermaid release inside 11.x can change how they render without any change
+  here. Nothing else on the site needs egress. Readers behind a filtering proxy see the
+  prose and no diagrams — which is also why the diagrams carry no information that the
+  surrounding text does not.
+- Material injects each rendered diagram into a **closed** shadow root, so
+  `document.querySelector(".mermaid svg")` finds nothing even when rendering succeeded.
+  Anything automating a check of the diagrams has to measure the host `div`'s laid-out
+  height instead, or it will report a false failure.
+- A `classDef` with a hard-coded pale `fill:` goes unreadable in dark mode: the label
+  colour follows the theme and the fill does not. `classDef ... color:` does not rescue it,
+  because Material's injected theme CSS sets `.nodeLabel { color: … }` and wins. Style
+  those nodes with `stroke:` alone and let the renderer pick the background.
 
 ## Deliberately not built
 

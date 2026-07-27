@@ -1,0 +1,94 @@
+name: Pages
+
+# Publishes docs/ as the project site at https://nickborgers.github.io/reasonable-answer/.
+#
+# Runs after merge, never on a PR. The `Docs Build` job in pr-validation.yml already runs
+# the identical `mkdocs build --strict` without deploying, so a dead link, a missing nav
+# entry or a broken anchor is caught before it reaches here. Like Docker Release this is
+# NOT a required check: a failed deploy leaves the previously published site standing, and
+# docs/ci-setup.md keeps the required-check set at exactly two entries.
+#
+# Security model:
+#   * `pages: write` and `id-token: write` are what actions/deploy-pages needs to mint an
+#     OIDC token for the Pages service. They are confined to the deploy job, which checks
+#     nothing out and runs no repository code. The build job, which does run repository
+#     code, is read-only and structurally cannot deploy.
+#   * No secrets. GITHUB_TOKEN is the only credential and it is read-only by default.
+#   * `on: push` to main is unreachable from a fork, so the same-repo-only policy that
+#     pr-validation.yml has to enforce with an inline `if:` is structural here.
+#
+# One manual prerequisite: the repository's Pages source must be set to "GitHub Actions"
+# (docs/ci-setup.md, step 6a). Until it is, actions/configure-pages fails with a bare
+# "Not Found".
+
+on:
+  push:
+    branches: [main]
+    # The site is a function of exactly these inputs. pyproject.toml and uv.lock are
+    # listed because they pin MkDocs itself; this file is listed so that changing the
+    # deployment redeploys.
+    paths:
+      - 'docs/**'
+      - 'mkdocs.yml'
+      - 'pyproject.toml'
+      - 'uv.lock'
+      - '.github/workflows/pages.yml'
+  workflow_dispatch:
+
+permissions:
+  contents: read
+
+# Never cancel a deployment in flight: interrupting actions/deploy-pages mid-apply can
+# leave the Pages service holding a partial deployment for the next run to reconcile.
+concurrency:
+  group: pages
+  cancel-in-progress: false
+
+jobs:
+  build:
+    name: Build Site
+    runs-on: ubuntu-latest
+    timeout-minutes: 30
+    permissions:
+      contents: read
+      # Read-only on purpose: this is the job that runs repository code, so it must not
+      # be able to publish. Deploying is the other job's privilege.
+      pages: read
+    steps:
+      - uses: actions/checkout@v4
+
+      - uses: astral-sh/setup-uv@v5
+        with:
+          enable-cache: true
+          cache-dependency-glob: uv.lock
+
+      # MkDocs emits relative URLs and takes its canonical URL from `site_url`, so this
+      # step changes nothing about the build. It is kept because it is also the step that
+      # fails loudly and early when Pages has not been enabled, instead of letting the
+      # deploy fail further along with less context. Do not add `enablement: true` — that
+      # would require `pages: write` here, which is the escalation this split avoids.
+      - uses: actions/configure-pages@v5
+
+      # Identical to the `Docs Build` step in pr-validation.yml. If these two diverge, a
+      # PR can go green and this deploy still fail.
+      - run: uv run --frozen --group docs mkdocs build --strict
+
+      - uses: actions/upload-pages-artifact@v3
+        with:
+          path: site
+
+  deploy:
+    name: Deploy to Pages
+    needs: build
+    runs-on: ubuntu-latest
+    timeout-minutes: 30
+    permissions:
+      contents: read
+      pages: write
+      id-token: write
+    environment:
+      name: github-pages
+      url: ${{ steps.deployment.outputs.page_url }}
+    steps:
+      - id: deployment
+        uses: actions/deploy-pages@v4
