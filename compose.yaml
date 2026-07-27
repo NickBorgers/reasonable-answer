@@ -18,6 +18,27 @@ services:
     # does not depend on the number: the checkpointer bounds a hard kill to the node in
     # flight. Shortening it only means re-paying for that node.
     stop_grace_period: 120s
+    # Nothing this container runs needs to write outside the audit trail, so nothing is
+    # allowed to. The image already puts /app out of reach by owning it as root; this
+    # closes the rest of the filesystem, and the two together mean a compromise cannot
+    # leave anything behind that survives the next restart.
+    #
+    # Mounts stay writable under read_only — that is the point. The writable surface is
+    # exactly ra-runs below, plus the /tmp scratch space.
+    read_only: true
+    # Required, not precautionary. Starlette spools a multipart part carrying a filename=
+    # to a temp file once it exceeds 1MB, and it does so *before* FastAPI checks the route
+    # signature — so an oversized file part on POST /runs reaches /tmp even though this app
+    # declares only string form fields and serves no upload. SQLite also spills here.
+    # noexec/nosuid keep it from being somewhere to stage a dropped payload; the size cap
+    # keeps that spool from filling the host's memory.
+    tmpfs:
+      - /tmp:rw,noexec,nosuid,size=64m
+    # The app binds 8080, which needs no capability at all, and nothing here is setuid.
+    cap_drop:
+      - ALL
+    security_opt:
+      - no-new-privileges:true
     ports:
       - "127.0.0.1:8080:8080"
     volumes:

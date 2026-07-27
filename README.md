@@ -165,6 +165,37 @@ Use a **named volume** if you can. A bind-mounted host directory arrives owned b
 container runs unprivileged; the app detects this at startup and tells you what to chown rather
 than failing on your first submission.
 
+### The container is immutable at runtime
+
+`compose.yaml` runs it `read_only`, with `cap_drop: ALL` and `no-new-privileges`, and the image
+owns `/app` as **root** while the process runs as uid 10001. So the code cannot rewrite itself:
+a compromised run has nowhere to leave anything that the next restart would execute — which
+matters here more than usual, because restarts are routine (an interrupted run is re-enqueued at
+boot). Root ownership of `/app` is not conditional on compose; it holds for a plain `docker run`
+too.
+
+Exactly two paths are writable: the `/data/runs` volume — the audit trail and the SQLite
+checkpoints, which is all the app ever writes — and a 64 MB `noexec` `/tmp`. `/tmp` is needed
+because Starlette spools an oversized multipart part to a temp file before FastAPI can reject it,
+and because SQLite spills there.
+
+`scripts/smoke-test-image.sh` asserts both properties against every built image, so neither can
+regress quietly. Three consequences worth knowing:
+
+- **`ra audition` cannot save its cache inside the container.** It writes `.ra-audition.json`
+  relative to the working directory (`/data`), which is read-only. Run it from a checkout with
+  `make audition`, or point `audition.cache_path` at `/data/runs/.ra-audition.json` in the mounted
+  roster. *Reading* the cache — all that `ra doctor` and the roster eligibility checks do — is
+  unaffected.
+- **`ra export -o <path>`** must write somewhere under `/data/runs`.
+- **`search.token_file`** is likewise `/data`-relative, so it is unreadable here. That was already
+  true (the file is not in the image) and nothing depends on it: the env var wins by design, and
+  `compose.yaml` supplies `BRAVE_SEARCH_API_KEY`.
+
+What this does *not* cover is the image's provenance. `compose.yaml` builds from the checkout, so
+the running code is whatever the host's working tree held — not the digest-verified image
+`Docker Release` publishes to GHCR.
+
 No database, no broker, no GPU, no model weights — all inference goes through the proxy.
 
 **Behind a reverse proxy that strips a path prefix** (e.g. Cloudflare Access serving the app

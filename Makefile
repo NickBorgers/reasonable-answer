@@ -56,8 +56,15 @@ docs-serve:
 docker:
 	docker build -t reasonable-answer:latest .
 
+# The security flags mirror compose.yaml exactly. Without them this target would answer
+# "does it work in Docker?" for a posture nothing actually deploys, and a change that only
+# breaks under a read-only rootfs would pass here and fail in production.
 docker-run: docker
 	docker run --rm -p 127.0.0.1:8080:8080 \
+		--read-only \
+		--tmpfs /tmp:rw,noexec,nosuid,size=64m \
+		--cap-drop ALL \
+		--security-opt no-new-privileges:true \
 		-v ra-runs:/data/runs \
 		-v $(PWD)/config/roster.yaml:/etc/ra/roster.yaml:ro \
 		reasonable-answer:latest
