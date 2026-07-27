@@ -1,0 +1,10 @@
+# A pure value question with no factual core — the ask_whats_answerable trigger,
+# shaped like the prompt's own example. split_the_either_or is a legitimate
+# alternative reading of the two labels.
+tier: moderate
+question: "Is it better to be {{a}} or {{b}}?"
+slots:
+  a: [honest, loyal, ambitious]
+  b: [kind, successful, content]
+expected_transform: ask_whats_answerable
+allowed_transforms: [ask_whats_answerable, split_the_either_or]

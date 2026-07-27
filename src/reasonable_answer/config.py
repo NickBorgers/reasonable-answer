@@ -261,6 +261,53 @@ class AuditionThresholds(BaseModel):
     max_schema_failure_rate: float = Field(default=0.2, ge=0.0, le=1.0)
 
 
+class RefineAuditionThresholds(BaseModel):
+    """Where the refine audition's verdicts fall (docs/question-refinement.md, D33).
+
+    The asymmetry relative to `AuditionThresholds` is deliberate: for a critic,
+    silence is the failure being measured; for refinement, silence is the designed
+    default (D26), so a low fire rate only warns while a *violation* — a suggestion
+    that narrows scope, fires a disallowed transform, or drops the subject — gates.
+    """
+
+    model_config = ConfigDict(extra="forbid")
+
+    #: Violation rate tolerated on `tier: obvious` fixtures. Zero: an obvious fixture
+    #: is the pinned regression class (the fluoride down-scoping), silence is always
+    #: a safe out, and a model that narrows even once in the sample is doing the one
+    #: thing the guardrails exist to prevent.
+    max_obvious_violation_rate: float = Field(default=0.0, ge=0.0, le=1.0)
+    warn_violation_rate: float = Field(default=0.1, ge=0.0, le=1.0)
+    #: Mean suggestions offered per control (well-posed) question. Above this the
+    #: model manufactures chips for questions that needed none — the noise direction.
+    max_control_suggestion_rate: float = Field(default=0.5, ge=0.0)
+    warn_control_suggestion_rate: float = Field(default=0.2, ge=0.0)
+    #: Below this share of expected-transform fixtures actually drawing their
+    #: transform, the feature is mostly dormant — degraded, not dangerous, so warn.
+    warn_fire_rate: float = Field(default=0.5, ge=0.0, le=1.0)
+    max_schema_failure_rate: float = Field(default=0.2, ge=0.0, le=1.0)
+
+
+class RefineAuditionConfig(BaseModel):
+    """Fixture audition for the refine prompt surface (D33). Same doctrine as
+    `AuditionConfig`: no `enabled` flag — measuring costs proxy calls, only the
+    explicit `ra audition-refine` command spends them, and `ra doctor` only reads
+    the cache left behind."""
+
+    model_config = ConfigDict(extra="forbid")
+
+    #: Separate file from the critic audition cache: the entries have a different
+    #: shape and a different key scheme, and a shared file would let one command's
+    #: rewrite clobber the other's verdicts.
+    cache_path: Path = Path(".ra-refine-audition.json")
+    max_age_days: int = Field(default=30, ge=1, le=365)
+    #: Higher than the critic default: refine calls are short and cheap, and the
+    #: silence-vs-fire outcome is stochastic enough that small samples mislead.
+    repetitions: int = Field(default=5, ge=1, le=20)
+    max_concurrency: int = Field(default=3, ge=1, le=16)
+    thresholds: RefineAuditionThresholds = Field(default_factory=RefineAuditionThresholds)
+
+
 class AuditionConfig(BaseModel):
     """Auditioning is opt-in by being a separate command, not by a flag.
 
@@ -292,6 +339,9 @@ class AuditionConfig(BaseModel):
     repetitions: int = Field(default=3, ge=1, le=20)
     max_concurrency: int = Field(default=3, ge=1, le=16)
     thresholds: AuditionThresholds = Field(default_factory=AuditionThresholds)
+    #: The refine prompt surface's own audition (D33) — separate corpus, separate
+    #: cache, separate command (`ra audition-refine`).
+    refine: RefineAuditionConfig = Field(default_factory=RefineAuditionConfig)
 
 
 class DisputeConfig(BaseModel):

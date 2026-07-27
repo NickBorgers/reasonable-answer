@@ -1,0 +1,13 @@
+# Two labels for what is actually a record: the split_the_either_or trigger,
+# nearly verbatim from the prompt's own example. The rewrite must drop both labels
+# without dropping the subject — the city and the policing topic must survive.
+tier: obvious
+question: "Is {{city}}'s government pro-police or anti-police?"
+slots:
+  city:
+    - Chicago
+    - Houston
+    - Seattle
+expected_transform: split_the_either_or
+allowed_transforms: [split_the_either_or]
+require_terms: ["{{city}}", "polic"]
