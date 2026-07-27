@@ -3,7 +3,7 @@
 This is the approachable tour. It explains *why* the system is shaped the way it is, with the
 minimum of jargon. If you want the full design — schemas, invariants, proofs of termination —
 follow the pointers at the [end](#where-to-go-deeper). If you want to run it, see the
-[README](../README.md).
+[README on GitHub](https://github.com/NickBorgers/reasonable-answer#readme).
 
 ## The problem: LLMs are bad judges of their own work
 
@@ -197,4 +197,4 @@ calibration or restraint is taken away from the models entirely and given to cod
 | the bias rulebook | [bias.md](./bias.md) |
 | who can see which runs, and how to sign in | [authentication.md](./authentication.md) |
 | why each decision was made (and what reviews found) | [decisions.md](./decisions.md) |
-| running it | [../README.md](../README.md) |
+| running it | [README on GitHub](https://github.com/NickBorgers/reasonable-answer#readme) |

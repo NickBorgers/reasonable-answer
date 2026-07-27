@@ -20,3 +20,7 @@ runs/
 
 # Cached critic-audition verdicts; a property of the deployment, not the repo.
 .ra-audition.json
+
+# The built documentation site. pages.yml rebuilds it from source on every merge to
+# main, so a committed copy could only ever be stale.
+site/

@@ -104,7 +104,8 @@ runs:
           case "$f" in
             # Anything that can change the pipeline's own guarantees, the runtime
             # surface, or the dependency set gets the security reviewer.
-            .github/*|scripts/*|Dockerfile|compose.yaml|pyproject.toml|uv.lock|config/*|src/*)
+            # mkdocs.yml is here because it decides what a public repository publishes.
+            .github/*|scripts/*|Dockerfile|compose.yaml|mkdocs.yml|pyproject.toml|uv.lock|config/*|src/*)
               want_security=true
               ;;
           esac

@@ -68,8 +68,12 @@ flowchart TB
         CTno["NEVER: report content"]
     end
 
-    classDef see fill:#e7f7e7,stroke:#3a3;
-    classDef no fill:#fdeaea,stroke:#c33;
+    %% Stroke only, no fill: a hard-coded pale fill keeps its colour in dark mode while
+    %% the label turns light, leaving unreadable text. Leaving the fill alone lets the
+    %% renderer pick a background that matches the surrounding page in either theme,
+    %% and the see/never distinction rides on the border colour instead.
+    classDef see stroke:#3a3,stroke-width:2px;
+    classDef no stroke:#c33,stroke-width:2px;
     class Gin,Cin,Oin,CTin see;
     class Gno,Cno,Ono,CTno no;
 ```
