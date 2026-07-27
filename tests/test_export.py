@@ -11,7 +11,7 @@ import json
 
 import pytest
 import yaml
-from fastapi.testclient import TestClient
+from conftest import WEB_IDENTITY, web_client
 from typer.testing import CliRunner
 
 from reasonable_answer import cli, export
@@ -69,6 +69,8 @@ def finished_run(config):
     """A run directory as `finalize` would leave it — no graph, no models."""
     store = RunStore(config.runs_dir, "run-shared")
     store.question("Does a four-day week work?")
+    # Owned, because an owner-less run is a 404 on every route these tests exercise.
+    store.owner(WEB_IDENTITY)
     store.event("intake", path="question")
     store.final(REPORT, FINAL)
     return "run-shared"
@@ -78,7 +80,7 @@ def finished_run(config):
 def client(config, finished_run):
     """No runner is needed: every route under test reads a run that already finished."""
     worker = RunWorker(config, max_concurrent=1, runner=lambda *a, **k: None)
-    with TestClient(create_app(config, worker=worker)) as c:
+    with web_client(create_app(config, worker=worker)) as c:
         yield c
     worker.shutdown()
 
@@ -328,7 +330,7 @@ def test_the_export_routes_refuse_a_run_whose_record_cannot_be_read(client, conf
         assert "cannot be read" in response.json()["detail"]
         assert "aborted" not in response.text
         # The exception names the file it could not parse; that is for the operator's
-        # log, not for a response body on an unauthenticated service.
+        # log, not for a response body served on a trusted header.
         assert str(config.runs_dir) not in response.text
         assert "final.json" not in response.text
 

@@ -1114,11 +1114,20 @@ def run(
     seed_format: str | None = None,
     seed_source: str | None = None,
     seed_warnings: list[str] | None = None,
+    owner: str | None = None,
 ) -> dict:
     """`seed` is markdown. Callers holding a PDF, a .docx or a URL convert it first
     with `ingest`, at the edge, and pass the provenance it returns through the
-    `seed_*` parameters."""
+    `seed_*` parameters.
+
+    `owner` is the identity this run belongs to, and is what makes a CLI run visible
+    in the web interface. It stays out of `_run_fingerprint` on purpose: the
+    fingerprint guards against a run resuming under changed *inputs*, and who owns a
+    run is not one — attributing an existing run must never cost it its checkpoint.
+    """
     rt = build_runtime(config, run_id, client)
+    if owner:
+        rt.store.owner(owner)
     checkpointer = checkpointer if checkpointer is not None else _checkpointer(rt)
     compiled = build_graph(rt).compile(checkpointer=checkpointer)
     invoke_config = {

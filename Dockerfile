@@ -69,7 +69,8 @@ EXPOSE 8080
 HEALTHCHECK --interval=30s --timeout=3s --start-period=10s --retries=3 \
     CMD python -c "import urllib.request,sys; sys.exit(0 if urllib.request.urlopen('http://127.0.0.1:8080/healthz', timeout=2).status==200 else 1)"
 
-# Binds to 0.0.0.0 because a container has to. There is NO authentication in the
-# app: publish this port only onto a tailnet or a trusted network.
+# Binds to 0.0.0.0 because a container has to. The app identifies callers by a header
+# it trusts without verifying, so publish this port only where the proxy that sets that
+# header is the sole way to reach it — loopback or a tailnet (docs/authentication.md).
 ENTRYPOINT ["ra"]
 CMD ["serve", "--host", "0.0.0.0", "--port", "8080"]

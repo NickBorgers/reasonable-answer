@@ -170,6 +170,15 @@ budgets:
   timeout_seconds: 300
   max_concurrency: 3
 
+# Identity comes from a header set by whatever fronts the app — Cloudflare Access or
+# `tailscale serve` — and a request carrying neither is refused (D32,
+# docs/authentication.md). `dev_identity` gives such a request an identity instead:
+# what local development needs, and a public login anywhere else. $RA_DEV_IDENTITY
+# overrides it and is how `make serve` sets it, so this stays unset in the file a
+# deployment mounts.
+# auth:
+#   dev_identity: you@example.com
+
 # Pre-run question refinement (D26, docs/question-refinement.md). While the asker
 # pauses after typing, a small model is asked whether the question as worded encodes a
 # framing that will fight the pipeline — a false either/or, an unverified premise, an

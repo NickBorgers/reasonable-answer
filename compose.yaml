@@ -1,7 +1,9 @@
 # Assumes the host can already reach the LiteLLM proxy — on this network that means
 # the host is on the tailnet. Nothing here configures that.
 #
-# The app has NO authentication. Keep the published port off any public interface.
+# Callers are identified by a header the app trusts without verifying, so anyone who can
+# reach the published port can claim to be any user. Keep it on loopback and let the
+# proxy that sets the header be the only way in — docs/authentication.md.
 #
 #   docker compose up -d
 
@@ -46,6 +48,17 @@ services:
       interval: 30s
       timeout: 3s
       retries: 3
+
+  # Cloudflare Access, the way friends reach this. Sharing the app's network namespace
+  # means the tunnel talks to it over loopback, so the port above need not be published
+  # at all. Create the tunnel and its Access application first — docs/authentication.md.
+  # cloudflared:
+  #   image: cloudflare/cloudflared:latest
+  #   restart: unless-stopped
+  #   command: tunnel --no-autoupdate run
+  #   environment:
+  #     TUNNEL_TOKEN: ${TUNNEL_TOKEN}
+  #   network_mode: "service:ra"
 
 volumes:
   ra-runs:

@@ -95,6 +95,17 @@ class RunStore:
         if seed:
             self.seed(seed)
 
+    def owner(self, identity: str) -> None:
+        """Who submitted this run — its own file, and the only record of ownership.
+
+        Not a field on the `queued` event: `resume` appends more `queued` events, so
+        reading ownership off "the queued event" would need a rule about which one.
+        Deliberately outside `CONTENT_DIRS`, so a content purge (manual or by the
+        retention sweep) leaves the run owned and therefore still visible; losing the
+        owner would silently retire the run from its owner's index.
+        """
+        self._write(Path("owner.txt"), identity)
+
     def seed(self, seed: str) -> str:
         """The seed exactly as the graph will hash it — already markdown, since
         `ingest` converts at the edge.

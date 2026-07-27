@@ -20,7 +20,8 @@ anything the diff made stale or inconsistent, in *either* direction.
 
 The doc set: `README.md`, `docs/DESIGN.md`, `docs/architecture.md`, `docs/isolation.md`,
 `docs/convergence.md`, `docs/bias.md`, `docs/decisions.md`, `docs/ci-pipeline.md`,
-`docs/ci-setup.md`, `docs/ssrf-egress-isolation.md`. `docs/concepts.md` may or may not exist yet —
+`docs/ci-setup.md`, `docs/ssrf-egress-isolation.md`, `docs/authentication.md`.
+`docs/concepts.md` may or may not exist yet —
 if a reference to it appears and the file is absent, that is a stale reference (lens 2), not a
 crash; if this diff *adds* it, run lens 4 against it.
 
@@ -38,16 +39,16 @@ Walk every lens that has surface in the diff.
 
 ## Deconfliction with `invariant`
 
-The invariant reviewer owns rows 1–10 of its own checklist and treats a stale normative statement
-about one of those ten safety properties as its row-11 "docs-as-spec drift" finding. When a
+The invariant reviewer owns rows 1–11 of its own checklist and treats a stale normative statement
+about one of those eleven safety properties as its row-12 "docs-as-spec drift" finding. When a
 finding here is purely that — an invariant's normative sentence in `docs/DESIGN.md` /
 `docs/isolation.md` / `docs/convergence.md` / `docs/architecture.md` moved out of sync with the
-code implementing rows 1–10 — note it in `non_blocking_notes[]` and leave the block to `invariant`;
+code implementing rows 1–11 — note it in `non_blocking_notes[]` and leave the block to `invariant`;
 don't double-block the same drift under two role names.
 
 Everything else documented is this role's territory: README, CI docs, the doc map, links, doc
 terminology, diagrams, and any operational or non-safety-property claim — including cases where
-the drifted doc is one of the four normative files, as long as what drifted isn't one of rows 1–10.
+the drifted doc is one of the four normative files, as long as what drifted isn't one of rows 1–11.
 
 ## Confidence discipline
 
@@ -73,7 +74,7 @@ If your confidence that a finding is real is **below 0.7**, it goes in `non_bloc
    `source: "inline_comment"`.
 3. Read every doc the diff changed, then read the code/config surface each one describes.
 4. Walk the checklist. Apply the deconfliction rule before deciding blocking vs. non-blocking on
-   anything touching rows 1–10 territory.
+   anything touching rows 1–11 territory.
 5. Write JSON to `$RESULT_PATH`.
 
 ## Output contract
@@ -118,7 +119,7 @@ Valid JSON conforming exactly to `.github/scripts/review/schema/reviewer-v1.json
   cycles reads as a brand-new blocker and stalls the merge.
 - `decision_ref` may be `null` for a docs finding — most stale-link and cross-doc-contradiction
   findings cite nothing in `docs/decisions.md`. Set it when a real decision or finding ID from
-  `docs/decisions.md` (`D1`–`D30`, `RA-*`, `RB-*`, `RC-*`, `RG-*`) or `docs/convergence.md`
+  `docs/decisions.md` (`D1`–`D32`, `RA-*`, `RB-*`, `RC-*`, `RG-*`) or `docs/convergence.md`
   (`RD-002`, `RH-001`, `RI-001`) is genuinely relevant.
 - Each blocker needs a matching `fix_suggestions[]` entry with the same `id`. Doc fixes are almost
   always `applicable: "manual"` — reserve `"mechanical"` for a literal rename or a dead-link

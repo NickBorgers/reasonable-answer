@@ -148,7 +148,14 @@ def render_layout(
 <link rel="icon" href="{base_path}/static/icons/icon-192.png" sizes="192x192" type="image/png">
 <!-- iOS ignores the manifest's icons for the home screen and reads this one. -->
 <link rel="apple-touch-icon" href="{base_path}/static/icons/apple-touch-icon.png">
-<link rel="manifest" href="{base_path}/manifest.webmanifest">
+<!-- `crossorigin="use-credentials"` because a manifest is the one subresource a browser
+     fetches with credentials *omitted* by default, even same-origin. Every route but
+     `/healthz` now needs an identity (D32), and through Cloudflare Access the fetch has
+     to carry the `CF_Authorization` cookie to get past the edge at all — without this
+     attribute the manifest request is refused, the browser has no manifest, and the app
+     silently stops being installable (D27). Same-origin, so this asks for credentials
+     without opting into CORS. -->
+<link rel="manifest" href="{base_path}/manifest.webmanifest" crossorigin="use-credentials">
 <style>{CSS}{extra_css}</style>
 </head>
 <body>
@@ -166,12 +173,19 @@ def render_layout(
 
 
 def render_index(
-    runs: list[RunSummary], queue_depth: int, config: Config, base_path: str = ""
+    runs: list[RunSummary],
+    queue_depth: int,
+    config: Config,
+    base_path: str = "",
+    viewer: str | None = None,
 ) -> str:
     rows = (
         "\n".join(_run_row(r, base_path) for r in runs)
         or '<tr><td colspan="5" class="empty">No runs yet. Ask something above.</td></tr>'
     )
+    # The list is yours alone, so say whose it is. It also makes a misconfigured
+    # identity header visible immediately, rather than as a mysteriously empty table.
+    signed_in = f'<span class="dim">signed in as {esc(viewer)}</span>' if viewer else ""
     depth = (
         f'<p class="queued-note">{queue_depth} run(s) waiting for a worker.</p>'
         if queue_depth
@@ -219,7 +233,7 @@ def render_index(
 </section>
 
 <section class="panel">
-  <h2>Runs</h2>
+  <h2>Your runs {signed_in}</h2>
   <table class="runs">
     <thead><tr><th>status</th><th>question</th><th>rounds</th><th>started</th><th></th></tr></thead>
     <tbody>{rows}</tbody>
@@ -283,11 +297,24 @@ def render_run(
     lens_names: list[str],
     record: str = "",
     base_path: str = "",
+    viewer: str | None = None,
 ) -> str:
+    mine = viewer is not None and summary.owner == viewer
+    # Anyone signed in can open a run they hold the id for, but only its owner can
+    # resume it — so only its owner is offered the button. Showing it to everyone
+    # would be an invitation to a 404.
     resume = (
         f"""<form method="post" action="{base_path}/runs/{esc(summary.run_id)}/resume" class="inline">
         <button type="submit" class="secondary">Resume this run</button></form>"""
-        if summary.status == "interrupted"
+        if summary.status == "interrupted" and mine
+        else ""
+    )
+
+    # A run reached by a shared link is otherwise unattributed, and "whose question is
+    # this?" is the first thing a reader needs. Your own runs need no byline.
+    byline = (
+        f'<span class="dim">submitted by {esc(summary.owner)}</span>'
+        if summary.owner and not mine
         else ""
     )
 
@@ -322,6 +349,7 @@ def render_run(
       {_badge(summary.status)}
       <span class="dim mono">{esc(summary.run_id)}</span>
       <span class="dim">started {_ago(summary.started_at)}</span>
+      {byline}
     </div>
     <p class="lede">{esc(STATUS_MEANING.get(summary.status, ""))}
     {(" — " + esc(summary.terminal_note)) if summary.terminal_note else ""}</p>

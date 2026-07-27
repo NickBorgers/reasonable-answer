@@ -165,6 +165,8 @@ can't game because none can see the whole board.
   boundary; the "own-critique" anti-sycophancy property; the prompt-injection threat model.
 - **[convergence.md](./convergence.md)** — the observable-category taxonomy, the OrchestratorView
   schema, the ordered stop-decision (guaranteed to terminate), and terminal statuses.
+- **[authentication.md](./authentication.md)** — who the web interface believes you are, what
+  a run's owner does and does not gate, and the Cloudflare Access setup behind it.
 - **[decisions.md](./decisions.md)** — design decisions, the Codex review, and how each of the
   20 findings was resolved.
 - **[question-refinement.md](./question-refinement.md)** — the edge-side, ambient
