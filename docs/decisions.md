@@ -758,9 +758,16 @@ static, hashed artifact into a request-varying one. A single startup value keeps
 "these files do not change while the process runs" true. One process serves one prefix;
 that is the residual, and it matches the one-deployment-one-mount reality.
 
-**The CSP does not change, and that is the point.** Everything stays same-origin, so
-`connect-src 'self'` / `form-action 'self'` / `base-uri 'none'` are exactly as D27 pinned
-them, and that test stays green. `base-uri 'none'` also forecloses the obvious shortcut — a
+**The CSP does not change, and that is the point.** Every URL the app *fetches from or
+submits to* stays same-origin, so `connect-src 'self'` / `form-action 'self'` /
+`base-uri 'none'` are exactly as D27 pinned them, and that test stays green. (There is a
+single off-origin URL the app emits — the static "how this works" navigation link to the
+published docs site, added later. It is an anchor `href`, not a subresource fetch or a form
+submit, so no CSP directive here governs it; it carries `rel="noreferrer"` so following it
+from a per-run page hands no run id to that host. The same-origin guarantee this section
+makes is therefore about the URLs the browser *resolves against the origin* — links back
+into the app, redirects, streams, the manifest and the worker — not this one outbound
+navigation link.) `base-uri 'none'` also forecloses the obvious shortcut — a
 single `<base href="/app/">` tag — so each URL is prefixed individually instead. The prefix
 is the application naming its own same-origin paths, which is what `'self'` already permits;
 it opens nothing.
