@@ -41,6 +41,22 @@ dev = [
     # So CI exercises the PDF path; the tests that need it skip without it.
     "pypdf>=5.1.0",
 ]
+# Builds docs/ into the published site. A group rather than an extra because nobody
+# installing this package wants a site generator, and because uv's default-groups is
+# ["dev"] — so `uv sync --frozen` in .devcontainer/setup.sh and `uv sync --frozen
+# --extra web` in the Dockerfile both skip it. Do not add it to default-groups.
+docs = [
+    # 1.6 is where validation.links.anchors landed, which is what checks the one
+    # cross-file anchor link in docs/ against the heading it points at. Capped below 2.0
+    # deliberately: that release removes the plugin system and rewrites theming with no
+    # migration path, so it would take the search plugin and the mermaid fence with it.
+    # Lifting the cap is a decision to re-do this setup, not a routine bump.
+    "mkdocs>=1.6,<2",
+    "mkdocs-material>=9.5,<10",
+    # Direct, not incidental: mkdocs.yml names pymdownx.superfences and pymdownx.slugs,
+    # so this must not ride on mkdocs-material happening to depend on it.
+    "pymdown-extensions>=10.0",
+]
 
 [build-system]
 requires = ["hatchling"]

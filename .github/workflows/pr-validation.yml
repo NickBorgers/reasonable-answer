@@ -51,6 +51,7 @@ jobs:
       docker: ${{ steps.filter.outputs.docker }}
       review_scripts: ${{ steps.filter.outputs.review_scripts }}
       decisions: ${{ steps.filter.outputs.decisions }}
+      docs: ${{ steps.filter.outputs.docs }}
     steps:
       - uses: actions/checkout@v4
 
@@ -83,6 +84,14 @@ jobs:
             decisions:
               - 'docs/decisions.md'
               - 'scripts/validate-decision-numbers.sh'
+            # pyproject.toml and uv.lock are here because they pin MkDocs: a dependency
+            # bump that breaks the site build should turn a PR red, not the post-merge
+            # deploy. README.md is deliberately absent — it is not a page of the site.
+            docs:
+              - 'docs/**'
+              - 'mkdocs.yml'
+              - 'pyproject.toml'
+              - 'uv.lock'
 
   lint:
     name: Ruff
@@ -142,6 +151,29 @@ jobs:
       # This is the one place a pyproject.toml edit that forgot to relock gets caught.
       - name: Verify uv.lock matches pyproject.toml
         run: uv lock --check
+
+  docs-build:
+    name: Docs Build
+    needs: changes
+    if: needs.changes.outputs.docs == 'true'
+    runs-on: ubuntu-latest
+    timeout-minutes: 30
+    steps:
+      - uses: actions/checkout@v4
+
+      - uses: astral-sh/setup-uv@v5
+        with:
+          enable-cache: true
+          cache-dependency-glob: uv.lock
+
+      # --strict promotes MkDocs' warnings to errors, which is the whole value of this
+      # job: a dead `[x](./y.md)` link, an `#anchor` no heading produces, or a new page
+      # under docs/ missing from `nav` fails here instead of shipping a 404 on the
+      # published site. It cannot check the mermaid blocks — those render client-side.
+      #
+      # Identical to the build step in pages.yml on purpose: if the two ever diverge, a
+      # PR can go green and the deploy still fail.
+      - run: uv run --frozen --group docs mkdocs build --strict
 
   workflows:
     name: Workflow Validation
@@ -239,7 +271,7 @@ jobs:
     name: PR Validation Required
     runs-on: ubuntu-latest
     timeout-minutes: 30
-    needs: [changes, lint, tests, lockfile, workflows, review-scripts, decisions, docker-build]
+    needs: [changes, lint, tests, lockfile, docs-build, workflows, review-scripts, decisions, docker-build]
     # `always()` bypasses needs-based skipping, so the fork check is repeated here.
     if: always() && (github.event_name != 'pull_request' || github.event.pull_request.head.repo.full_name == github.repository)
     steps:
@@ -259,6 +291,7 @@ jobs:
           check "Ruff"                "${{ needs.lint.result }}"          || failed=true
           check "Tests"               "${{ needs.tests.result }}"         || failed=true
           check "Lockfile"            "${{ needs.lockfile.result }}"      || failed=true
+          check "Docs Build"          "${{ needs.docs-build.result }}"    || failed=true
           check "Workflow Validation" "${{ needs.workflows.result }}"     || failed=true
           check "Review Scripts"      "${{ needs.review-scripts.result }}" || failed=true
           check "Decision Numbers"    "${{ needs.decisions.result }}"     || failed=true

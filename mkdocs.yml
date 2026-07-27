@@ -1,0 +1,131 @@
+# Publishes docs/ at https://nickborgers.github.io/reasonable-answer/.
+#
+# Two constraints shape everything below.
+#
+#   * These files are read on github.com too — the invariant reviewer audits code against
+#     them in the blob view, and ~25 docstrings under src/ cite their filenames as plain
+#     text. So no page may require syntax GitHub renders differently (no front matter, no
+#     admonitions, no snippets), and no doc may be renamed for a prettier URL.
+#
+#   * `docs_dir: docs` is the entire allow-list, and it is load-bearing. This repository
+#     also contains Markdown under `.github/` (agent prompts full of ${VAR} placeholders),
+#     under `tests/fixtures/audition/` (seeded-defect fixtures), and — locally — under
+#     `.claude/worktrees/`, which holds complete clones of this repository and is hidden by
+#     `.git/info/exclude` rather than `.gitignore`: invisible to git, plainly visible to
+#     anything that walks the filesystem. Scoping the build to one directory means none of
+#     it can reach the published site and there is no exclude list to keep correct. Adding
+#     `mkdocs-gen-files`, an `!include`, or a root-scoped `exclude_docs` brings it back.
+
+site_name: reasonable-answer
+site_description: >-
+  A report is sound when no eligible reviewer can find a material defect in it. This is the
+  design documentation for the system that tries to make that true.
+site_url: https://nickborgers.github.io/reasonable-answer/
+repo_url: https://github.com/NickBorgers/reasonable-answer
+repo_name: NickBorgers/reasonable-answer
+edit_uri: edit/main/docs/
+
+docs_dir: docs
+site_dir: site
+
+# `make docs`, the `Docs Build` job in pr-validation.yml, and pages.yml all pass --strict,
+# which promotes every warning below to a build failure. That is the point of having a
+# build at all: a dead `[x](./y.md)` link, an `#anchor` no heading produces, or a new page
+# missing from `nav` fails here instead of shipping a 404 — which is also what turns lens 2
+# of the docs reviewer from a judgment call into a mechanical check.
+validation:
+  nav:
+    omitted_files: warn
+    not_found: warn
+  links:
+    not_found: warn
+    anchors: warn
+    unrecognized_links: warn
+
+theme:
+  name: material
+  icon:
+    repo: fontawesome/brands/github
+  palette:
+    - media: '(prefers-color-scheme: light)'
+      scheme: default
+      primary: teal
+      accent: teal
+      toggle:
+        icon: material/weather-night
+        name: Switch to dark mode
+    - media: '(prefers-color-scheme: dark)'
+      scheme: slate
+      primary: teal
+      accent: teal
+      toggle:
+        icon: material/weather-sunny
+        name: Switch to light mode
+  features:
+    # Deliberately NOT navigation.instant: it swaps pages via XHR, so Mermaid has to be
+    # re-initialised on every navigation. It works, but it is one more thing between a
+    # correct diagram and a rendered one, for no benefit on a site this size.
+    - navigation.sections
+    - navigation.top
+    - navigation.tracking
+    - toc.follow
+    - content.code.copy
+    - content.action.edit
+    - search.highlight
+    - search.suggest
+
+plugins:
+  - search
+
+markdown_extensions:
+  - tables
+  - attr_list
+  - md_in_html
+  - toc:
+      permalink: true
+      # Keeps decisions.md's right-hand TOC at its ## D-headings plus one level, rather
+      # than a wall of every sub-heading in a 990-line append-only log.
+      toc_depth: 3
+      # GitHub-compatible slugs. Not byte-identical — a heading whose words are separated
+      # by a spaced em-dash slugifies with one hyphen here and two on GitHub — but every
+      # anchor this repository actually links to resolves under both.
+      slugify: !!python/object/apply:pymdownx.slugs.slugify {kwds: {case: lower}}
+  # The only thing that makes the mermaid blocks render. `fence_code_format` emits the
+  # fence body HTML-escaped inside <pre class="mermaid"><code>, and Material reads it back
+  # with textContent, which un-escapes exactly one level. Mermaid therefore receives the
+  # source byte-for-byte as written — which is why this repo's escaping asymmetry (`&amp;`
+  # inside a flowchart label, a raw `&` inside a sequenceDiagram message) behaves here
+  # exactly as it does on github.com.
+  - pymdownx.superfences:
+      custom_fences:
+        - name: mermaid
+          class: mermaid
+          format: !!python/name:pymdownx.superfences.fence_code_format
+  - pymdownx.highlight:
+      anchor_linenums: true
+  - pymdownx.inlinehilite
+
+# README.md is deliberately absent: it is the operator contract, read at the repository,
+# and it lives outside docs_dir. index.md links out to it.
+#
+# decisions.md gets its own top-level entry, last and outside any group, under a nav title
+# that differs from its H1. At 990 lines it is an append-only record rather than a chapter;
+# inside a group it would dwarf the sidebar. It is not split — README.md and DESIGN.md link
+# to it by filename.
+nav:
+  - Home: index.md
+  - Start here:
+      - The concept: concepts.md
+      - Design overview: DESIGN.md
+  - How it works:
+      - Architecture: architecture.md
+      - Epistemic isolation: isolation.md
+      - Convergence and stopping: convergence.md
+      - Question refinement: question-refinement.md
+      - Social bias rules: bias.md
+  - Operating it:
+      - Authentication: authentication.md
+      - SSRF egress isolation: ssrf-egress-isolation.md
+      - CI and the review pipeline: ci-pipeline.md
+      - CI setup: ci-setup.md
+  - Decision log: decisions.md

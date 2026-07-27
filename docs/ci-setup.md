@@ -146,6 +146,23 @@ set both GHCR packages to **public** visibility:
 Without this the pull-back verification job needs credentials it may not have, and nobody
 else can pull the image.
 
+## 6a. Enable GitHub Pages
+
+`Settings → Pages → Build and deployment → Source: **GitHub Actions**`.
+
+Nothing creates this setting automatically, and until it exists `pages.yml` fails at
+`actions/configure-pages` with a bare `Not Found`. There is no branch to pick and no
+`gh-pages` branch to create: the workflow uploads an artifact and `actions/deploy-pages`
+serves it.
+
+Leave the `github-pages` environment without protection rules. A required reviewer there
+would hang every documentation deploy behind a manual approval for no benefit — the content
+has already passed the merge gate.
+
+The site is then live at <https://nickborgers.github.io/reasonable-answer/>. `Pages` is not a
+required check; like `Docker Release` it runs after merge, and a failed deploy leaves the
+previously published site standing.
+
 ## 7. Enable branch protection — last
 
 Do this only after one green run of each workflow, so the check names are known rather
@@ -195,3 +212,4 @@ break every time the matrix changes.
 | `startup_failure` with no logs | a `uses:` path is wrong, or a reusable workflow declares a permission its caller does not — the subset rule is transitive |
 | Reviewer fails on `.review-output` permissions | the runner uid does not match the container's uid 1000 and the directory was not made world-writable |
 | Next job's checkout fails on `.git/index.lock` | the post-container `chown` did not run; it is under `if: always()` for this reason |
+| `Pages` fails at `configure-pages` with `Not Found` | the Pages source is not set to "GitHub Actions" — see step 6a |

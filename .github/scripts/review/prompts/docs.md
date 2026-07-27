@@ -18,12 +18,15 @@ anything the diff made stale or inconsistent, in *either* direction.
 - **Docs moved, code didn't.** A doc edited to describe new behavior that the diff's code doesn't
   actually implement — a promise nothing backs.
 
-The doc set: `README.md`, `docs/DESIGN.md`, `docs/architecture.md`, `docs/isolation.md`,
-`docs/convergence.md`, `docs/bias.md`, `docs/decisions.md`, `docs/ci-pipeline.md`,
-`docs/ci-setup.md`, `docs/ssrf-egress-isolation.md`, `docs/authentication.md`.
-`docs/concepts.md` may or may not exist yet —
-if a reference to it appears and the file is absent, that is a stale reference (lens 2), not a
-crash; if this diff *adds* it, run lens 4 against it.
+The doc set: `README.md`, `docs/index.md`, `docs/concepts.md`, `docs/DESIGN.md`,
+`docs/architecture.md`, `docs/isolation.md`, `docs/convergence.md`, `docs/bias.md`,
+`docs/question-refinement.md`, `docs/decisions.md`, `docs/ci-pipeline.md`, `docs/ci-setup.md`,
+`docs/ssrf-egress-isolation.md`, `docs/authentication.md`.
+
+Everything under `docs/` is also published as a static site by `.github/workflows/pages.yml`
+(MkDocs, configured by `mkdocs.yml` at the repository root). That adds two mechanical
+invariants, noted in lenses 2 and 4 below. The site is built from `docs/` alone — `README.md`
+is read at the repository and is not a page of it.
 
 ## The checklist
 
@@ -32,9 +35,9 @@ Walk every lens that has surface in the diff.
 | # | Lens | Blocking? |
 |---|------|-----------|
 | 1 | **Cross-doc contradictions.** The diff updates one doc's description of a behavior. Find every other doc describing the *same* behavior and check they still agree — e.g. a roster-shape change touching `README.md`'s `config/roster.yaml` snippet must still match `docs/DESIGN.md`'s account of it, and vice versa. | Yes |
-| 2 | **Stale references.** A renamed or removed file, a dead relative link (`[x](./y.md)`), a gone `make` target, a CLI flag or subcommand no longer in `src/reasonable_answer/cli.py`, a config key no longer in `config/roster.yaml`, a workflow filename under `.github/workflows/` that changed. Check every relative link and every `make`/`uv run ra`/workflow-name mention in a changed doc. | Yes |
+| 2 | **Stale references.** A renamed or removed file, a dead relative link (`[x](./y.md)`), a gone `make` target, a CLI flag or subcommand no longer in `src/reasonable_answer/cli.py`, a config key no longer in `config/roster.yaml`, a workflow filename under `.github/workflows/` that changed. Check every relative link and every `make`/`uv run ra`/workflow-name mention in a changed doc. Also: a relative link in `docs/*.md` that leaves the `docs/` tree (`../README.md`, `../src/...`, `../.github/...`) breaks the strict site build, so it must be written as an absolute `https://github.com/NickBorgers/reasonable-answer/...` URL. | Yes |
 | 3 | **Doc↔runtime drift.** A doc describing runtime behavior — the roster shape, CLI usage, the run/output directory layout, Docker/volume setup, CI workflow behavior — must match the code or config it describes. Concrete pairs to check when the diff touches either side: README's `roster.yaml` snippet vs `config/roster.yaml` itself; the terminal-status table in `docs/convergence.md` vs the status literals actually produced (`src/reasonable_answer/controller.py`); `docs/ci-pipeline.md`'s workflow table vs `.github/workflows/*.yml` names and triggers; `docs/ci-setup.md` vs the secrets/env it walks through setting up. | Yes, when the diff touches the divergent surface |
-| 4 | **Index / map freshness.** A new doc, or a file newly spec-bearing, must appear in `docs/DESIGN.md`'s "Document map". If it is spec-critical (normative, not just descriptive), it also belongs in the `is_spec_critical` allowlist in `.github/actions/review-classify/action.yml` — flag that as a `followup_issues[]` entry if you can't confirm it was updated. | Blocking only when the file was **added by this PR**; otherwise `non_blocking_notes[]` |
+| 4 | **Index / map freshness.** A new doc, or a file newly spec-bearing, must appear in `docs/DESIGN.md`'s "Document map". If it is spec-critical (normative, not just descriptive), it also belongs in the `is_spec_critical` allowlist in `.github/actions/review-classify/action.yml` — flag that as a `followup_issues[]` entry if you can't confirm it was updated. A new file under `docs/` must also appear in `nav:` in `mkdocs.yml` — `mkdocs build --strict` fails otherwise, so `Docs Build` will already be red. | Blocking only when the file was **added by this PR**; otherwise `non_blocking_notes[]` |
 | 5 | **Mermaid validity.** Any mermaid block the diff **adds or modifies**: labels double-quoted; `<` inside a flowchart label written `&lt;`; no bare `;` inside a `sequenceDiagram` message. Note the asymmetry — inside a `sequenceDiagram` message, raw `&` is fine and `&amp;` breaks the parser; inside a flowchart label, `&amp;` is correct and is what the rest of this repo's diagrams use. | Blocking only when the block clearly cannot render |
 
 ## Deconfliction with `invariant`

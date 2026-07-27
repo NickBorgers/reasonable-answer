@@ -1,6 +1,7 @@
 # reasonable-answer — Design Overview
 
-> **Status:** design v3, **implemented** — see [../README.md](../README.md) for running it and
+> **Status:** design v3, **implemented** — see the
+> [README](https://github.com/NickBorgers/reasonable-answer#readme) for running it and
 > `src/reasonable_answer/` for the code. v3 incorporates four rounds of adversarial design review
 > (Codex) and the resulting design decisions — see [decisions.md](./decisions.md).
 >
@@ -113,7 +114,9 @@ flowchart TD
     CTRL -->|"cap reached, only non-blocking"| EXH["terminal: exhausted_unresolved"]
     CTRL -->|fatal| AB["terminal: aborted"]
 
-    classDef blind fill:#fde,stroke:#c39,stroke-width:2px;
+    %% Stroke only, no fill — see the note in isolation.md: a hard-coded pale fill goes
+    %% unreadable in dark mode, where the label colour flips but the fill does not.
+    classDef blind stroke:#c39,stroke-width:3px;
     class CTRL blind;
 ```
 
@@ -156,6 +159,14 @@ can't game because none can see the whole board.
 
 ## Document map
 
+Everything under `docs/` is also published, unchanged, at
+<https://nickborgers.github.io/reasonable-answer/> by `pages.yml`. A new file here must be
+listed both in this map and in `nav:` in `mkdocs.yml` — the strict build fails on the second,
+and the docs reviewer blocks on the first.
+
+- **[index.md](./index.md)** — the landing page of the published site. It carries no content
+  of its own; it exists so the site root has a front door, and routes a cold reader to
+  concepts.md rather than to the operator quick-start.
 - **[concepts.md](./concepts.md)** — the approachable tour: what LLMs are good and bad at, and
   how the multi-lens / multi-model / multi-tick design presses the strengths against the
   weaknesses. Start here if this document feels dense.
@@ -172,7 +183,16 @@ can't game because none can see the whole board.
 - **[question-refinement.md](./question-refinement.md)** — the edge-side, ambient
   pre-run reframing suggestions (D26): what they are, the reframe taxonomy, and the
   provenance/retention mechanism.
-- **[../src/reasonable_answer/web/static/icons/README.md](../src/reasonable_answer/web/static/icons/README.md)**
+- **[bias.md](./bias.md)** — the observable-text social-bias rulebook (D24): the three
+  categories, what a bias finding may not be, and the residual the rules do not catch.
+- **[ssrf-egress-isolation.md](./ssrf-egress-isolation.md)** — the infrastructure half of the
+  fetch boundary: the internal network and filtering proxy that enforce what the application
+  cannot.
+- **[ci-pipeline.md](./ci-pipeline.md)** — what CI runs, the agentic review graph, the merge
+  gate, and which properties of it are load-bearing.
+- **[ci-setup.md](./ci-setup.md)** — the manual, admin-only setup: runners, secrets, repo
+  variables, Pages, branch protection.
+- **[src/reasonable_answer/web/static/icons/README.md](https://github.com/NickBorgers/reasonable-answer/blob/main/src/reasonable_answer/web/static/icons/README.md)**
   — the icon-replacement contract for the installable app (D27): which file each platform
   reads, what each one has to be, and why nothing needs clearing on an installed device
   afterwards. It lives beside the files it describes because that is where an operator
