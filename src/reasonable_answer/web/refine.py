@@ -49,7 +49,7 @@ log = logging.getLogger(__name__)
 #: Bump whenever `refine_system`'s text or `RefinementSuggestions` changes. The
 #: cache key includes this, so a stale suggestion set produced under an old prompt
 #: or schema can never outlive the prompt/schema that produced it.
-PROMPT_VERSION = 1
+PROMPT_VERSION = 2
 
 #: Exactly `secrets.token_urlsafe(24)`'s output shape (24 bytes -> 32 base64url
 #: chars, no padding since 24 is a multiple of 3). Validated before any map lookup so
@@ -311,8 +311,38 @@ class RefinementService:
             return
         if self._client is None:
             raise ConfigError("refine.enabled is true but RefinementService has no LLMClient")
-        self._client.resolve_identities([self._alias])
+        identities = self._client.resolve_identities([self._alias])
         self._client.probe_structured_output(self._alias)
+        self._warn_if_unfit(identities[self._alias])
+
+    def _warn_if_unfit(self, identity: str) -> None:
+        """Warn — never block — when the refine model's cached audition verdict is
+        `unfit` (D33). Blocking would invert this feature's own doctrine: every
+        refine failure degrades to silence, and a chip-suggester's fitness must not
+        gate serving runs. Under `audition.enforce` the warning is the whole
+        enforcement; auto-disabling refinement was rejected in D33 because a stale
+        cache could silently turn a feature off."""
+        if not self._config.audition.enforce:
+            return
+        # Local import: refine_audition imports this module for the filter, so a
+        # module-level import here would be a cycle.
+        from ..audition import Verdict
+        from ..refine_audition import refine_cached_judgement
+
+        judgement = refine_cached_judgement(
+            self._config.audition.refine,
+            identity,
+            frozenset(self._enabled_transforms),
+        )
+        if judgement is not None and judgement.verdict is Verdict.UNFIT:
+            log.warning(
+                "refine model '%s' (%s) graded unfit on the refine audition: %s — "
+                "refinement stays enabled (warn-only, D33); re-roster refine.alias "
+                "or re-measure with `ra audition-refine --force`",
+                self._alias,
+                identity,
+                "; ".join(judgement.reasons),
+            )
 
     def shutdown(self) -> None:
         """Cancel any pending orphan-linger timers. A timer that has already fired

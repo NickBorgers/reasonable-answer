@@ -8,14 +8,31 @@ so a small purpose-built stub is clearer here than bending that one to fit.
 
 from __future__ import annotations
 
+import logging
 import threading
+import time
 from collections.abc import Callable
 from dataclasses import dataclass, field
 from typing import Any
 
 import pytest
 
-from reasonable_answer.config import Config, ConfigError, RefineConfig, Roster
+from reasonable_answer.config import (
+    AuditionConfig,
+    Config,
+    ConfigError,
+    RefineAuditionConfig,
+    RefineConfig,
+    Roster,
+)
+from reasonable_answer.refine_audition import (
+    RefineCacheEntry,
+    RefineMetrics,
+    load_refine_fixtures,
+    refine_cache_key,
+    refine_prompt_hash,
+    save_refine_cache,
+)
 from reasonable_answer.schemas import RefinementSuggestion, RefinementSuggestions
 from reasonable_answer.web import refine as refine_mod
 from reasonable_answer.web.refine import RefinementService, _filter_suggestions
@@ -143,6 +160,94 @@ def test_start_is_a_noop_when_disabled(roster):
     service = RefinementService(config, client=client)
     service.start()  # must not raise even though the alias is unknown to the stub
     assert client.resolve_calls == []
+
+
+def _audition_config(roster: Roster, tmp_path, *, enforce: bool) -> Config:
+    """A config whose refine audition cache lives in `tmp_path`, with `enforce`
+    toggled — the only knob `_warn_if_unfit` reads before it consults the cache."""
+    return Config(
+        roster=roster,
+        refine=RefineConfig(enabled=True),
+        audition=AuditionConfig(
+            enforce=enforce,
+            refine=RefineAuditionConfig(cache_path=tmp_path / "refine-audition.json"),
+        ),
+    )
+
+
+def _seed_refine_cache(config: Config, identity: str, *, obvious_violation_runs: int) -> None:
+    """Write a fresh, matching refine-audition cache entry for `identity` so
+    `refine_cached_judgement` accepts it (corpus/prompt/repetitions all current).
+    `obvious_violation_runs` steers the verdict: 5 -> `unfit` (obvious-tier tolerance
+    is zero), 0 -> `fit`."""
+    enabled = frozenset(config.refine.enabled_transforms)
+    cfg = config.audition.refine
+    metrics = RefineMetrics(
+        alias=config.refine.effective_alias(config.roster),
+        identity=identity,
+        transforms=tuple(sorted(enabled)),
+        calls=5,
+        graded_runs=5,
+        violation_runs=obvious_violation_runs,
+        obvious_runs=5,
+        obvious_violation_runs=obvious_violation_runs,
+    )
+    entry = RefineCacheEntry(
+        metrics=metrics,
+        corpus_hash=load_refine_fixtures().corpus_hash,
+        prompt_hash=refine_prompt_hash(enabled),
+        repetitions=cfg.repetitions,
+        recorded_at=time.time(),
+    )
+    save_refine_cache(cfg.cache_path, {refine_cache_key(identity, enabled): entry})
+
+
+def test_start_warns_but_never_blocks_on_unfit_refine_verdict(roster, tmp_path, caplog):
+    """D33's load-bearing invariant: an `unfit` cached refine verdict WARNS at
+    startup and refinement stays enabled — blocking would invert this feature's own
+    degrade-to-silence doctrine. This is the regression `_warn_if_unfit` exists to
+    prevent, previously unguarded."""
+    config = _audition_config(roster, tmp_path, enforce=True)
+    identity = f"vendor/{config.refine.effective_alias(roster)}"
+    _seed_refine_cache(config, identity, obvious_violation_runs=5)
+    service = RefinementService(config, client=StubClient(respond=lambda _a, _u: one_suggestion()))
+
+    with caplog.at_level(logging.WARNING, logger=refine_mod.log.name):
+        service.start()  # must NOT raise — warn-only
+
+    assert service.enabled  # never disabled by the verdict
+    unfit_warnings = [
+        r for r in caplog.records if r.levelno == logging.WARNING and "unfit" in r.getMessage()
+    ]
+    assert unfit_warnings, "an unfit refine verdict must log a startup warning"
+
+
+def test_start_is_silent_when_enforce_off_even_with_an_unfit_verdict(roster, tmp_path, caplog):
+    """The enforce-off arm: the cache says `unfit`, but `audition.enforce` is False,
+    so `_warn_if_unfit` returns before ever reading it."""
+    config = _audition_config(roster, tmp_path, enforce=False)
+    identity = f"vendor/{config.refine.effective_alias(roster)}"
+    _seed_refine_cache(config, identity, obvious_violation_runs=5)
+    service = RefinementService(config, client=StubClient(respond=lambda _a, _u: one_suggestion()))
+
+    with caplog.at_level(logging.WARNING, logger=refine_mod.log.name):
+        service.start()
+
+    assert not [r for r in caplog.records if "unfit" in r.getMessage()]
+
+
+def test_start_is_silent_when_verdict_is_fit(roster, tmp_path, caplog):
+    """The not-UNFIT arm: enforce is on and the cache is consulted, but a `fit`
+    verdict draws no warning."""
+    config = _audition_config(roster, tmp_path, enforce=True)
+    identity = f"vendor/{config.refine.effective_alias(roster)}"
+    _seed_refine_cache(config, identity, obvious_violation_runs=0)
+    service = RefinementService(config, client=StubClient(respond=lambda _a, _u: one_suggestion()))
+
+    with caplog.at_level(logging.WARNING, logger=refine_mod.log.name):
+        service.start()
+
+    assert not [r for r in caplog.records if "unfit" in r.getMessage()]
 
 
 # -------------------------------------------------------------------------- basic

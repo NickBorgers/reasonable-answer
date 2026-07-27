@@ -1,0 +1,29 @@
+# The pinned regression (D33). In production this exact question shape drew a
+# rewrite that narrowed "public health" to children's dental health — silently
+# answering a smaller question than the user asked. A sound model either stays
+# silent (the question names its population and outcome domain) or enumerates the
+# domain's components; keeping one component and dropping the rest is the violation.
+tier: obvious
+question: "Is fluoride in tap water a net positive for public health in {{country}}?"
+slots:
+  country:
+    - the United States
+    - Canada
+    - Australia
+allowed_transforms: [name_the_outcome]
+silence_ok: true
+scope:
+  # Either keep the stated breadth by name. These must be surface forms that only
+  # a breadth-preserving rewrite would contain: bare "health outcomes" is NOT here
+  # because the down-scoped production rewrite ("dental health outcomes") contains
+  # it too — a domain term that survives narrowing detects nothing.
+  domain_terms: ["public health", "overall health"]
+  # ...or unpack it into at least two distinct components. Groups are synonym
+  # stems: hitting two stems inside one group is still one component.
+  enumeration_groups:
+    - ["dental", "teeth", "tooth", "caries", "cavit", "fluorosis", "oral"]
+    - ["skeletal", "bone"]
+    - ["neuro", "cognitive", "IQ", "brain", "development"]
+    - ["cardio", "thyroid", "kidney", "cancer"]
+  min_groups: 2
+require_terms: ["fluorid"]
