@@ -44,7 +44,7 @@ on:
       cycle:
         required: true
         type: string
-      # Set by the caller's sync-only path (D33): the reviewer panel was guarded off, so
+      # Set by the caller's sync-only path (D34): the reviewer panel was guarded off, so
       # nothing on this SHA has been validated by PR Validation or read by a reviewer.
       #
       # It makes this workflow non-agentic. The fixer agent runs on the self-hosted runner
@@ -167,7 +167,7 @@ jobs:
       #   conflicts markers left in the working tree for the agent to resolve as ordinary
       #             file edits; the commit step below seals it or aborts
       #   blocked   conflicts, but `sync_only` forbids an agent — the merge is abandoned
-      #             and the PR is left for a human (D33)
+      #             and the PR is left for a human (D34)
       - name: Sync with the base branch
         id: sync
         working-directory: ${{ env.PR_WORKSPACE }}
@@ -242,7 +242,7 @@ jobs:
         run: |
           set -euo pipefail
 
-          # The sync-only path is non-agentic by construction, not by circumstance (D33).
+          # The sync-only path is non-agentic by construction, not by circumstance (D34).
           # It is reached only when every reviewer guard refused, so `agent=false` here does
           # not depend on the blocker count happening to be zero: the guarantee holds even
           # if an artifact were somehow present. `Sync with the base branch` has already

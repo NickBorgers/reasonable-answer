@@ -107,7 +107,7 @@ jobs:
 
       # Whether the reviewed SHA is behind the base branch, i.e. a base-branch sync (D28)
       # is needed. This is the one thing that lets `fix` run when every reviewer guard
-      # refused (D33, issue #70).
+      # refused (D34, issue #70).
       #
       # A reviewer's guard requires a completed `PR Validation Required` on the reviewed
       # SHA. Whenever that check is absent or red while the base has moved underneath the
@@ -118,7 +118,7 @@ jobs:
       # state, but with the panel guarded off the run did nothing. A sync consumes no
       # reviewer findings, so it does not need the reviewers to have run; `fix` keys its
       # sync-only path on this output. That path is non-agentic, so it repairs a
-      # behind-the-base PR but not an already-conflicting one — see D33.
+      # behind-the-base PR but not an already-conflicting one — see D34.
       #
       # `merge-base --is-ancestor origin/<base> HEAD` is exactly the test the fixer's own
       # sync step uses, so the two agree on when a sync is due. Deliberately not a shallow
@@ -419,13 +419,13 @@ jobs:
   #       path, unchanged. The fixer addresses blockers and, if the base moved, syncs in
   #       the same commit.
   #   (b) reviewers did NOT run (`record-cycle` was skipped: every guard refused) but the
-  #       branch is behind the base — the sync-only path (D33, issue #70). A base-branch
+  #       branch is behind the base — the sync-only path (D34, issue #70). A base-branch
   #       sync consumes no reviewer findings, so it does not need `record-cycle` to have
   #       written a cycle. It is passed `sync_only: true`, which makes the fixer
   #       **non-agentic**: it commits a clean host-side merge and nothing else, and a
   #       merge that conflicts is abandoned rather than handed to the fixer agent. That
   #       restriction is the whole safety argument — see review-fixer.yml's `sync_only`
-  #       input, and D33 for why an unvalidated, unreviewed tree must never reach a
+  #       input, and D34 for why an unvalidated, unreviewed tree must never reach a
   #       credentialed agent on the self-hosted runner.
   #
   #       Path (b) deliberately does NOT require `fix_allowed`. `fix_allowed` bars a

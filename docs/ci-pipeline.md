@@ -54,7 +54,7 @@ review-entry            authorize · fork-reject · resolve SHA · prior-GO chec
        ├─ fix           the ONLY branch-writing stage; syncs with the base branch and
        │                addresses blockers; skipped on the last cycle, but still runs a
        │                non-agentic, clean-merge-only sync pass when the panel was guarded
-       │                off and the branch is behind the base (D33)
+       │                off and the branch is behind the base (D34)
        ├─ judge         deterministic, from main, contents: read
        └─ finalize      labels · summary comment · merge gate
 ```
@@ -184,7 +184,7 @@ it holds `contents: read`, so it could not push if it tried.
   guard cleared. Every guard refusing — PR Validation red on the reviewed SHA, the branch
   moved on mid-run, an untrusted author — means no code was read, and the next push starts
   from the same cycle number. This is fail-open on the counter and safe because the only
-  way `fix` can push on an unrecorded cycle is the **sync-only** path (D33), which
+  way `fix` can push on an unrecorded cycle is the **sync-only** path (D34), which
   addresses no blockers and writes no `review/cycle` of its own: it commits a clean merge of
   the base and nothing else, so it cannot advance the review → fix → push → review loop the
   cap bounds. Every *blocker-fixing* run still needs `record-cycle` to have succeeded. PR
@@ -268,7 +268,7 @@ does not burn a cycle. The conflicted-path list travels in a file rather than an
 environment variable: paths are contributor-controlled, and the agent's environment is
 assembled from an `--env-file`, where a newline in a path would inject arbitrary variables.
 
-**The sync still runs when the panel was guarded off (D33).** Every reviewer guard refusing
+**The sync still runs when the panel was guarded off (D34).** Every reviewer guard refusing
 normally means the fixer does not run either, because `fix` was gated on `record-cycle`
 having written a cycle. That left the D28 sync unreachable on any PR whose guards refuse for
 a reason a sync would repair — most sharply a PR whose `PR Validation Required` check is
@@ -293,7 +293,7 @@ The consequence is worth stating plainly: this does **not** rescue a PR that alr
 conflicts with its base. Such a PR has no computable merge ref, so GitHub fires no
 `pull_request` event, PR Validation never runs, every guard refuses, and the sync-only pass
 it reaches then hits conflicts and blocks. Clearing a true conflict still takes a human
-merging the base in by hand (as #54 and #56 did). What D33 fixes is the strictly larger,
+merging the base in by hand (as #54 and #56 did). What D34 fixes is the strictly larger,
 non-conflicting case: a behind-the-base PR whose panel was guarded off for any reason gets
 its sync, becomes mergeable, earns its `pull_request` event, gets validated, and is reviewed
 by its own cycle like any other D28 sync.

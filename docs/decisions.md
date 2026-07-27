@@ -980,7 +980,7 @@ can make the server fetch a URL, but not what the host can reach, so the egress 
 
 Deployment is documented in [authentication.md](./authentication.md).
 
-## D33 — the base-branch sync runs even when the panel was guarded off, and stays non-agentic when it does
+## D34 — the base-branch sync runs even when the panel was guarded off, and stays non-agentic when it does
 
 **The problem.** The base-branch sync D28 built to keep agent-authored PRs mergeable was
 unreachable in a family of cases it exists for. `fix` was gated on `record-cycle` succeeding, and
