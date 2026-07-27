@@ -894,6 +894,14 @@ the secret-free posture of the PR gate and is exercised offline by
 untouched. This is repository governance in CI — it constrains how a *document* is numbered,
 not what enters any model's context.
 
+**A gap in the sequence is legal; a duplicate is not.** The check refuses a number defined
+twice and says nothing about numbers left unused, which is the right asymmetry: renumbering
+*your own* unmerged PR out of a collision is cheap, while renaming a merged `D<n>` across
+`config/`, `src/`, `tests/` and docs is the expensive thing this exists to prevent. So when two
+open PRs pick the same number, one simply moves up and leaves a hole until the other lands. A
+reader who finds a missing `D<n>` in this file is looking at a number allocated to a PR still
+in flight, not at a deleted decision — decisions are never deleted, only superseded in place.
+
 ## D32 — the interface has users: a trusted identity header, and runs that belong to someone
 
 Every prior version of this document says there is no authentication and that Tailscale ACLs are

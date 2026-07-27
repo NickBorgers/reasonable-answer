@@ -120,7 +120,9 @@ Valid JSON conforming exactly to `.github/scripts/review/schema/reviewer-v1.json
 - `decision_ref` may be `null` for a docs finding — most stale-link and cross-doc-contradiction
   findings cite nothing in `docs/decisions.md`. Set it when a real decision or finding ID from
   `docs/decisions.md` (`D1`–`D34`, `RA-*`, `RB-*`, `RC-*`, `RG-*`) or `docs/convergence.md`
-  (`RD-002`, `RH-001`, `RI-001`) is genuinely relevant.
+  (`RD-002`, `RH-001`, `RI-001`) is genuinely relevant. The `D` range is an outer bound, not a
+  promise that every number in it is defined: a number allocated to a PR still in flight leaves
+  a gap until it lands (D31). Cite what `docs/decisions.md` actually defines.
 - Each blocker needs a matching `fix_suggestions[]` entry with the same `id`. Doc fixes are almost
   always `applicable: "manual"` — reserve `"mechanical"` for a literal rename or a dead-link
   correction where the replacement target is unambiguous.
