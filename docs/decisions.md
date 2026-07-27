@@ -1024,11 +1024,16 @@ gates.
 
 **The gating asymmetry is inverted from the critic audition, deliberately.** For a critic,
 silence is the measured failure; for refinement, silence is the designed default (D26), so a
-low fire rate only warns while violations gate. On `tier: obvious` fixtures the tolerance is
-zero — the fluoride fixture is obvious precisely because it is the pinned regression, and a
-model that narrows even once when silence was freely available is doing the one thing the
-guardrails exist to prevent. Noise gates too: chips manufactured for the well-posed controls
-above `max_control_suggestion_rate` are `unfit`, same as a critic that invents defects.
+low fire rate only warns while an obvious-tier violation gates. On `tier: obvious` fixtures the
+tolerance is zero — the fluoride fixture is obvious precisely because it is the pinned
+regression, and a model that narrows even once when silence was freely available is doing the
+one thing the guardrails exist to prevent. Violations outside that pinned class do *not* make
+the verdict `unfit`: the aggregate non-obvious violation rate (above `warn_violation_rate`)
+only marginalizes, matching `judge_refine()`, which reserves `unfit` for obvious-tier
+violations, schema failure, and control noise. Noise gates too, but only past the hard bound:
+chips manufactured for the well-posed controls above `max_control_suggestion_rate` are `unfit`,
+same as a critic that invents defects, while a lighter rate above `warn_control_suggestion_rate`
+only warns.
 
 **Enforcement is warn-only, and that is not a gap.** Refinement already degrades to silence on
 every failure; its fitness must never gate serving runs, and blocking startup over a

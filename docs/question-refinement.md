@@ -309,8 +309,10 @@ controls that must draw silence) runs through the production prompt, schema
 and deterministic filter, and a **pure, never-LLM grader** scores what a
 user would actually have seen. `ra audition-refine` spends the calls and
 caches a verdict per (identity, enabled-transform set); `ra doctor` reads
-the cache and shows `fit`/`marginal`/`unfit`/`not audited`. Violations and
-control noise gate; a low fire rate only warns — silence is this feature's
+the cache and shows `fit`/`marginal`/`unfit`/`not audited`. Obvious-tier
+violations, schema failure, and control noise above the hard threshold gate
+to `unfit`; the aggregate non-obvious violation rate, lighter control noise,
+and a low fire rate only warn (`marginal`) — silence is this feature's
 designed default, so the asymmetry is the mirror image of the critic
 audition's. The verdict is warn-only everywhere: refinement degrades to
 silence by design, so its fitness never blocks serving. The corpus includes
