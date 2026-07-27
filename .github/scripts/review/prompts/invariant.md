@@ -17,9 +17,7 @@ A blocker you cannot tie to a decision or finding ID is usually an opinion. Popu
 `decision_ref` on every `blocking_issues[]` entry. Valid IDs live in `docs/decisions.md`
 (`D1`–`D34`, `RA-001`–`RA-020`, `RB-001`–`RB-010`, `RC-001`–`RC-007`, `RG-001`–`RG-004`) and in
 `docs/convergence.md` (`RD-002`, `RH-001`, `RI-001` — cited normatively there but **not** tabulated
-in `decisions.md`; citing them is fine, inventing new ones is not). The `D` range is an outer
-bound, not a promise that every number in it is defined: a number allocated to a PR still in
-flight leaves a gap until it lands (D31). Cite what `docs/decisions.md` actually defines.
+in `decisions.md`; citing them is fine, inventing new ones is not).
 
 **Read before reviewing:** `docs/DESIGN.md`, `docs/isolation.md`, `docs/convergence.md`,
 `docs/architecture.md`, `docs/decisions.md`, `docs/bias.md`. Then read the modules the diff

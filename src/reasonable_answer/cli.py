@@ -160,6 +160,10 @@ def doctor(
     if not warnings:
         console.print("[green]roster healthy: every lens has >=2 eligible non-author models[/green]")
 
+    refine_line = _refine_doctor_line(config, client)
+    if refine_line:
+        console.print(refine_line)
+
     if not config.search.enabled:
         console.print("[dim]web search: disabled (writers cite from model memory)[/dim]")
     else:
@@ -426,6 +430,182 @@ def audition(
         console.print(f"[red]unfit critics assigned to lens pools: {sorted(set(unfit))}[/red]")
         raise typer.Exit(code=1)
     raise typer.Exit(code=0)
+
+
+@app.command(name="audition-refine")
+def audition_refine(
+    config_path: Path | None = typer.Option(None, "--config", "-c", help="Roster config YAML."),
+    fixtures_dir: Path | None = typer.Option(None, "--fixtures", help="Fixture corpus dir."),
+    transforms: str | None = typer.Option(
+        None,
+        "--transforms",
+        help="Comma-separated transform set to audition (default: the configured "
+        "enabled set). Lets an operator measure a candidate set — e.g. with "
+        "question_behind_the_question — without editing config.",
+    ),
+    force: bool = typer.Option(False, "--force", help="Ignore cached results and re-run."),
+    as_json: bool = typer.Option(False, "--json", help="Emit the report as JSON."),
+    verbose: bool = typer.Option(False, "--verbose", "-v"),
+) -> None:
+    """Measure whether the refine model respects the D26 guardrails (D33).
+
+    Graded mechanically against the fixture corpus: scope narrowing, disallowed
+    transforms, dropped subjects, and chips manufactured for well-posed questions.
+    Exits non-zero on `unfit` — but note that even then serving only warns:
+    refinement degrades to silence by design, so fitness never gates runs.
+    """
+    _setup_logging(verbose)
+    config = Config.load(config_path)
+    try:
+        from . import refine_audition as refine_mod
+    except ImportError as exc:
+        if exc.name not in _WEB_EXTRA_MODULES:
+            raise
+        console.print(f"[red]the refine audition needs the web extra[/red] ({exc}): uv sync --extra web")
+        raise typer.Exit(code=2) from None
+
+    cfg = config.audition.refine
+    if transforms is not None:
+        enabled = frozenset(t.strip() for t in transforms.split(",") if t.strip())
+        unknown = enabled - set(refine_mod.REFINE_TRANSFORMS)
+        if unknown or not enabled:
+            console.print(f"[red]unknown transforms:[/red] {sorted(unknown) or '(none given)'}")
+            raise typer.Exit(code=2)
+    else:
+        enabled = frozenset(config.refine.enabled_transforms)
+
+    try:
+        fixtures = refine_mod.load_refine_fixtures(fixtures_dir)
+    except refine_mod.FixtureError as exc:
+        console.print(f"[red]fixtures:[/red] {exc}")
+        raise typer.Exit(code=2) from exc
+    skipped = [f.id for f in fixtures.fixtures if not f.runnable(enabled)]
+    if skipped:
+        # No silent caps: a skipped fixture must never read as a passed one.
+        console.print(
+            f"[dim]skipping {sorted(skipped)} — their transform is outside the "
+            f"audited set (pass --transforms to include it)[/dim]"
+        )
+
+    client = LLMClient(config)
+    alias = config.refine.effective_alias(config.roster)
+    identity = client.resolve_identities([alias])[alias]
+
+    now = time.time()
+    ph = refine_mod.refine_prompt_hash(enabled)
+    cache = {} if force else refine_mod.load_refine_cache(cfg.cache_path)
+    key = refine_mod.refine_cache_key(identity, enabled)
+    entry = cache.get(key)
+    if (
+        entry is None
+        or not entry.matches(fixtures.corpus_hash, ph, cfg.repetitions)
+        or entry.is_stale(now, cfg.max_age_days)
+    ):
+        runnable = fixtures.runnable(enabled)
+        console.print(
+            f"auditioning '{alias}' ({identity}) against {len(runnable)} fixtures "
+            f"x{cfg.repetitions} — up to {len(runnable) * cfg.repetitions} calls"
+        )
+        metrics = refine_mod.run_refine_audition(client, alias, identity, enabled, fixtures, cfg)
+        entry = refine_mod.RefineCacheEntry(
+            metrics=metrics,
+            corpus_hash=fixtures.corpus_hash,
+            prompt_hash=ph,
+            repetitions=cfg.repetitions,
+            recorded_at=now,
+        )
+        cache[key] = entry
+        refine_mod.save_refine_cache(cfg.cache_path, cache)
+
+    metrics = entry.metrics
+    judgement = refine_mod.judge_refine(metrics, cfg.thresholds)
+    asymmetries = refine_mod.pair_asymmetries(fixtures, metrics)
+
+    if as_json:
+        console.print_json(
+            data={
+                "corpus_hash": fixtures.corpus_hash,
+                "prompt_hash": ph,
+                "alias": alias,
+                "identity": identity,
+                "transforms": sorted(enabled),
+                "skipped_fixtures": sorted(skipped),
+                "metrics": metrics.model_dump(mode="json"),
+                "pair_asymmetries": asymmetries,
+                "verdict": judgement.verdict.value,
+                "reasons": list(judgement.reasons),
+            }
+        )
+    else:
+        _render_refine_audition(alias, metrics, judgement, asymmetries)
+
+    raise typer.Exit(code=1 if judgement.verdict is refine_mod.Verdict.UNFIT else 0)
+
+
+def _render_refine_audition(alias, metrics, judgement, asymmetries) -> None:
+    table = Table(title="refine audition")
+    for column in ("alias", "fire", "violations", "obvious", "ctrl/run", "schema", "verdict"):
+        table.add_column(column)
+    colour = {
+        audition_mod.Verdict.FIT: "green",
+        audition_mod.Verdict.MARGINAL: "yellow",
+        audition_mod.Verdict.UNFIT: "red",
+        audition_mod.Verdict.INSUFFICIENT: "dim",
+    }
+    style = colour[judgement.verdict]
+    table.add_row(
+        alias,
+        f"{metrics.fire_rate:.2f}",
+        f"{metrics.violation_rate:.2f}",
+        f"{metrics.obvious_violation_rate:.2f}",
+        f"{metrics.control_suggestion_rate:.2f}",
+        f"{metrics.schema_failure_rate:.2f}",
+        f"[{style}]{judgement.verdict.value}[/{style}]",
+    )
+    console.print(table)
+    for reason in judgement.reasons:
+        console.print(f"[yellow]{alias}:[/yellow] {reason}")
+    for pair, spread in sorted(asymmetries.items()):
+        # Diagnostic only, never a gate — the number the question_behind_the_question
+        # enablement decision (D26) was waiting on.
+        console.print(f"[dim]mirror pair '{pair}': fire-rate spread {spread:.2f}[/dim]")
+
+
+def _refine_doctor_line(config: Config, client: LLMClient) -> str | None:
+    """One line for `ra doctor` when refinement is enabled: the cached refine
+    audition verdict, never a fresh measurement. None when refinement is off."""
+    if not config.refine.enabled:
+        return None
+    try:
+        from . import refine_audition as refine_mod
+    except ImportError:
+        return "refine: [dim]web extra not installed[/dim]"
+    alias = config.refine.effective_alias(config.roster)
+    try:
+        identity = client.resolve_identities([alias])[alias]
+    except ConfigError as exc:
+        return f"refine ('{alias}'): [red]{exc}[/red]"
+    judgement = refine_mod.refine_cached_judgement(
+        config.audition.refine, identity, frozenset(config.refine.enabled_transforms)
+    )
+    if judgement is None:
+        return (
+            f"refine ('{alias}'): [dim]{audition_mod.Status.NOT_AUDITED.value}[/dim] — "
+            f"run `ra audition-refine` to measure it"
+        )
+    style = {
+        audition_mod.Verdict.FIT: "green",
+        audition_mod.Verdict.MARGINAL: "yellow",
+        audition_mod.Verdict.UNFIT: "red",
+        audition_mod.Verdict.INSUFFICIENT: "dim",
+    }[judgement.verdict]
+    line = f"refine ('{alias}'): [{style}]{judgement.verdict.value}[/{style}]"
+    if judgement.verdict is audition_mod.Verdict.UNFIT:
+        line += (
+            " — suggestions may steer; refinement stays enabled (warn-only, D33): "
+            "re-roster refine.alias or re-measure with `ra audition-refine --force`"
+        )
+    return line
 
 
 def _cache_usable(cache, slot, corpus_hash, ph, cfg, now) -> bool:

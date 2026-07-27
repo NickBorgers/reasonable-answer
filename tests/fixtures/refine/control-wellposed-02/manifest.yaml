@@ -1,0 +1,10 @@
+# A second well-posed control from a different policy area, so the noise measure
+# does not hinge on one topic: outcome, population, and evidence basis all named.
+tier: obvious
+kind: control
+question: "What does peer-reviewed research say about the effect of minimum-wage increases on employment in {{sector}}?"
+slots:
+  sector:
+    - the restaurant industry
+    - retail
+    - agriculture

@@ -180,3 +180,34 @@ def test_the_graph_receives_converted_markdown_not_the_original(doctor_config, t
     assert captured["seed"] == "# Title\n\nBody text."
     assert captured["seed_format"] == "html"
     assert captured["seed_source"] == "file:draft.html"
+
+
+def test_doctor_shows_refine_verdict_line_when_refinement_is_enabled(doctor_config, tmp_path):
+    """An enabled refine channel must appear in doctor's output, and an unmeasured
+    one must read as unmeasured — never as a pass (D33)."""
+    data = yaml.safe_load(doctor_config.read_text())
+    data["refine"] = {"enabled": True}
+    data["audition"] = {"refine": {"cache_path": str(tmp_path / "refine-cache.json")}}
+    doctor_config.write_text(yaml.safe_dump(data))
+
+    result = runner.invoke(cli.app, ["doctor", "--config", str(doctor_config)])
+    assert result.exit_code == 0
+    out = result.stdout.replace("\n", " ")
+    # The default refine alias is the orchestrator's.
+    assert "refine ('referee')" in out
+    assert "not audited" in out
+
+
+def test_doctor_says_nothing_about_refine_when_disabled(doctor_config):
+    result = runner.invoke(cli.app, ["doctor", "--config", str(doctor_config)])
+    assert result.exit_code == 0
+    assert "refine (" not in result.stdout
+
+
+def test_audition_refine_rejects_unknown_transforms(doctor_config):
+    result = runner.invoke(
+        cli.app,
+        ["audition-refine", "--config", str(doctor_config), "--transforms", "bogus_transform"],
+    )
+    assert result.exit_code == 2
+    assert "unknown transforms" in result.stdout

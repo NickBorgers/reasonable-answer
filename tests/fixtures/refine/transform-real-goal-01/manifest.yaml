@@ -1,0 +1,12 @@
+# A practical need buried in a factual framing: the asker almost certainly wants
+# the lawful way to do the thing, not a statutory history. check_the_premise_first
+# is a legitimate alternative (the blanket "illegal" is itself contestable).
+tier: moderate
+question: "Why is it illegal to ship {{item}} to another state?"
+slots:
+  item:
+    - homemade jam
+    - garden seeds
+    - home-distilled spirits
+expected_transform: surface_the_real_goal
+allowed_transforms: [surface_the_real_goal, check_the_premise_first]

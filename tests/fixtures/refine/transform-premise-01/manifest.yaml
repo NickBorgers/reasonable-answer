@@ -1,0 +1,15 @@
+# A contested premise presented as settled ("why is it illegal" assumes it is —
+# rainwater collection is legal in most of these states, with bounded exceptions).
+# check_the_premise_first is the built-for transform; surface_the_real_goal is a
+# legitimate alternative reading (the asker may want the lawful how-to), so firing
+# it is not a violation.
+tier: obvious
+question: "Why is it illegal to collect rainwater at home in {{state}}?"
+slots:
+  state:
+    - Colorado
+    - Oregon
+    - Utah
+expected_transform: check_the_premise_first
+allowed_transforms: [check_the_premise_first, surface_the_real_goal]
+require_terms: ["rainwater", "{{state}}"]
