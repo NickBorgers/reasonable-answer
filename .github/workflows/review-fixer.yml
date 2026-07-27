@@ -44,6 +44,20 @@ on:
       cycle:
         required: true
         type: string
+      # Set by the caller's sync-only path (D34): the reviewer panel was guarded off, so
+      # nothing on this SHA has been validated by PR Validation or read by a reviewer.
+      #
+      # It makes this workflow non-agentic. The fixer agent runs on the self-hosted runner
+      # with host networking and pipeline credentials, and its inputs — the working tree,
+      # the PR body, the conflict contents — are all contributor-controlled. On the normal
+      # path a cleared reviewer guard is what licenses that; here there is no such
+      # clearance, so the pass is reduced to what needs no judgement at all: a clean
+      # host-side merge, committed and pushed, or nothing. A merge that conflicts is
+      # abandoned and left for a human rather than resolved by an agent.
+      sync_only:
+        required: false
+        default: false
+        type: boolean
     secrets:
       WORKFLOW_PAT:
         required: true
@@ -152,12 +166,15 @@ jobs:
       #   clean     merged without conflict — committed here, on the host
       #   conflicts markers left in the working tree for the agent to resolve as ordinary
       #             file edits; the commit step below seals it or aborts
+      #   blocked   conflicts, but `sync_only` forbids an agent — the merge is abandoned
+      #             and the PR is left for a human (D34)
       - name: Sync with the base branch
         id: sync
         working-directory: ${{ env.PR_WORKSPACE }}
         env:
           BASE_REF: ${{ inputs.base_ref }}
           HEAD_REF: ${{ inputs.head_ref }}
+          SYNC_ONLY: ${{ inputs.sync_only }}
           CONFLICT_LIST: .review-output/merge-conflicts.txt
         run: |
           set -euo pipefail
@@ -188,6 +205,23 @@ jobs:
             # assembled from an --env-file: a newline in a path would inject arbitrary
             # variables into the container, and a comma would corrupt a delimited list.
             git diff --name-only --diff-filter=U > "$CONFLICT_LIST"
+
+            # Resolving these means an agent editing files, and on the sync-only path no
+            # reviewer guard has cleared this SHA — PR Validation may be absent or red and
+            # no reviewer has read a line of it. Feeding that tree to the write-capable
+            # fixer is precisely what `sync_only` exists to prevent, so the merge is
+            # abandoned: the tree goes back to the reviewed SHA and the PR waits for a
+            # human. Aborting rather than leaving markers also means no later step can
+            # mistake a half-merged tree for something pushable.
+            if [ "${SYNC_ONLY}" = "true" ]; then
+              git merge --abort
+              echo "merge_state=blocked" >> "$GITHUB_OUTPUT"
+              echo "Merge from origin/${BASE_REF} conflicts, and this is a sync-only pass:"
+              sed 's/^/  /' "$CONFLICT_LIST"
+              echo "Abandoned the merge; an agent may not resolve conflicts on a SHA no reviewer cleared."
+              exit 0
+            fi
+
             echo "merge_state=conflicts" >> "$GITHUB_OUTPUT"
             echo "Merge produced conflicts in:"
             sed 's/^/  /' "$CONFLICT_LIST"
@@ -204,8 +238,26 @@ jobs:
         env:
           BLOCKERS: ${{ steps.blockers.outputs.count }}
           MERGE_STATE: ${{ steps.sync.outputs.merge_state }}
+          SYNC_ONLY: ${{ inputs.sync_only }}
         run: |
           set -euo pipefail
+
+          # The sync-only path is non-agentic by construction, not by circumstance (D34).
+          # It is reached only when every reviewer guard refused, so `agent=false` here does
+          # not depend on the blocker count happening to be zero: the guarantee holds even
+          # if an artifact were somehow present. `Sync with the base branch` has already
+          # reduced a conflicting merge to `blocked`, so `clean` is the only state with
+          # anything to push.
+          if [ "${SYNC_ONLY}" = "true" ]; then
+            push=false
+            if [ "$MERGE_STATE" = "clean" ]; then
+              push=true
+            fi
+            echo "agent=false" >> "$GITHUB_OUTPUT"
+            echo "push=${push}" >> "$GITHUB_OUTPUT"
+            echo "work: sync-only, blockers=${BLOCKERS} merge_state=${MERGE_STATE} agent=false push=${push}"
+            exit 0
+          fi
 
           agent=false
           if [ "$BLOCKERS" != "0" ] || [ "$MERGE_STATE" = "conflicts" ]; then
@@ -958,6 +1010,7 @@ jobs:
           CYCLE: ${{ inputs.cycle }}
           CHANGED: ${{ steps.commit.outputs.changed }}
           RESULT_JSON: ${{ steps.fixer.outputs.result_json }}
+          SYNC_ONLY: ${{ inputs.sync_only }}
         run: |
           set -euo pipefail
 
@@ -1029,10 +1082,26 @@ jobs:
           # itself needed review; the owner has since confirmed that was an invented
           # divergence from the design being ported here, not an intended safety
           # property. See docs/decisions.md D28.
-          gh api -X POST "repos/${REPO}/statuses/${NEW_SHA}" \
-            -f state=pending \
-            -f context=review/pipeline \
-            -f description="cycle=${CYCLE} (fixer post-push claim)" >/dev/null
+          #
+          # The sync-only path is the one exception, and for the reason that justifies
+          # the claim everywhere else (D34). The claim is licensed by "the pre-fix panel
+          # is the review" — but a sync-only pass runs precisely because there was no
+          # panel: every guard refused and nothing was read. Claiming here would leave a
+          # successor SHA that has no verdict of its own, cannot earn one because dedup
+          # short-circuits its `pull_request` event, and so can never satisfy the merge
+          # gate — trading the deadlock this path exists to break for a new one a SHA
+          # further along. Not claiming lets the merged SHA do what it was synced to do:
+          # earn its event, get validated, and become reachable by a panel. Reachable,
+          # not guaranteed — a merge-from-base successor can still take gather's inherit
+          # short-circuit, and `/review` is the override for that. See D34.
+          if [ "${SYNC_ONLY}" = "true" ]; then
+            echo "sync-only: not claiming ${NEW_SHA}; it needs the panel this pass could not run."
+          else
+            gh api -X POST "repos/${REPO}/statuses/${NEW_SHA}" \
+              -f state=pending \
+              -f context=review/pipeline \
+              -f description="cycle=${CYCLE} (fixer post-push claim)" >/dev/null
+          fi
 
           # Deliberately not fatal. The commit is already on the branch; failing the
           # step here would not unpush it, and would trade a wasted cycle for a red
