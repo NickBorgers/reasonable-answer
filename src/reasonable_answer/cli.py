@@ -50,6 +50,12 @@ def run(
     ),
     config_path: Path | None = typer.Option(None, "--config", "-c", help="Roster config YAML."),
     run_id: str | None = typer.Option(None, "--run-id", help="Reuse a run id (resumes its dir)."),
+    owner: str | None = typer.Option(
+        None,
+        "--owner",
+        help="Identity this run belongs to; without it the run is CLI-only "
+        "and the web interface will not serve it.",
+    ),
     verbose: bool = typer.Option(False, "--verbose", "-v"),
 ) -> None:
     """Refine a report until no eligible reviewer can find a material defect."""
@@ -82,6 +88,7 @@ def run(
             seed_format=ingested.format if ingested else None,
             seed_source=ingested.source if ingested else None,
             seed_warnings=list(ingested.warnings) if ingested else None,
+            owner=owner,
         )
     except ConfigError as exc:
         console.print(f"[red]fail closed:[/red] {exc}")
@@ -183,9 +190,14 @@ def serve(
 ) -> None:
     """Serve the web interface.
 
-    There is no authentication: the intended posture is tailnet-only, with Tailscale
-    ACLs as the access control. Anyone who can reach this can spend tokens and read
-    every stored run, so do not bind it to a public interface.
+    Callers are identified by a header set by whatever fronts the app — Cloudflare
+    Access or `tailscale serve` — and a request carrying none is refused. The header
+    is trusted rather than verified, so anyone who can reach this port directly can
+    claim to be any user: keep it bound to loopback or the tailnet and let the proxy
+    be the only way in (docs/authentication.md).
+
+    For local development, `$RA_DEV_IDENTITY` (or `auth.dev_identity`) supplies an
+    identity when no header is present.
     """
     _setup_logging(verbose)
     import uvicorn
@@ -195,8 +207,9 @@ def serve(
     config = Config.load(config_path)
     if host not in ("127.0.0.1", "localhost", "::1"):
         console.print(
-            f"[yellow]note:[/yellow] binding {host}:{port} with no authentication — "
-            f"make sure this interface is not publicly reachable"
+            f"[yellow]note:[/yellow] binding {host}:{port} — identity headers are trusted, "
+            f"not verified, so make sure this interface is only reachable through the "
+            f"proxy that sets them"
         )
     console.print(f"serving on http://{host}:{port}  (runs dir: {config.runs_dir})")
     # Deadlines nest: the platform's SIGTERM-to-SIGKILL budget contains uvicorn's

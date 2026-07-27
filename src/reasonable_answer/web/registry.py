@@ -83,6 +83,10 @@ class RunSummary:
     started_at: float | None
     finished_at: float | None
     terminal_note: str = ""
+    #: The identity that submitted the run, or None for a run that predates ownership
+    #: or was started from the CLI without `--owner`. None means the web layer will
+    #: not serve it at all (D26); the run itself is untouched and still resumes.
+    owner: str | None = None
 
     @property
     def is_live(self) -> bool:
@@ -101,9 +105,20 @@ class Registry:
 
     # ---------------------------------------------------------------- listing
 
-    def list(self, active: dict[str, str] | None = None) -> list[RunSummary]:
+    def list(
+        self, active: dict[str, str] | None = None, owner: str | None = None
+    ) -> list[RunSummary]:
+        """Every run, newest first — or just `owner`'s, when one is given.
+
+        The filter is opt-in because the two callers want opposite things. The web
+        index is a per-user view and always passes a viewer. `RunWorker.recover()`
+        must not: an interrupted run is work already owed, and whether anyone can
+        currently *see* it has no bearing on whether it should finish.
+        """
         active = active or {}
         out = [self.summary(d.name, active) for d in self._run_dirs()]
+        if owner is not None:
+            out = [r for r in out if r.owner == owner]
         return sorted(out, key=lambda r: (r.started_at or 0), reverse=True)
 
     def _run_dirs(self) -> Iterator[Path]:
@@ -144,6 +159,7 @@ class Registry:
             started_at=started,
             finished_at=finished,
             terminal_note=note,
+            owner=self.owner(run_id),
         )
 
     @staticmethod
@@ -246,6 +262,16 @@ class Registry:
     def question(self, run_id: str) -> str:
         path = self.dir(run_id) / "question.txt"
         return path.read_text().strip() if path.exists() else "(question not recorded)"
+
+    def owner(self, run_id: str) -> str | None:
+        """The identity that submitted the run, or None if it has none.
+
+        None is the honest answer for a run written before ownership existed or by
+        `ra run` without `--owner`, and there is no safe identity to invent for it —
+        so the web layer refuses to serve it rather than handing it to whoever asks.
+        """
+        path = self.dir(run_id) / "owner.txt"
+        return path.read_text().strip() or None if path.exists() else None
 
     def drafts(self, run_id: str) -> list[tuple[str, str]]:
         """(filename, body) for every draft, oldest first."""

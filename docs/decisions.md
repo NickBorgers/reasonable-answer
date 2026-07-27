@@ -154,7 +154,7 @@ extension:
 | RG-002 | high | The "2-model consecutive-clean fallback" was referenced but never represented in state | **Fixed by removal.** `weak_met` is now purely the per-lens `roster_limited` case (current-hash-only); all consecutive-clean language deleted. |
 | RG-003 | med | Tick/sequence/DESIGN diagrams still showed one critic for three lenses | **Fixed.** Diagrams relabeled to per-lens critics (each ≠ author); DESIGN core-loop reframed from "two-model ping-pong" to a role-structured alternating game. |
 | RG-004 | low | Stale `lens_set` / rule-number / flat-roster wording in the review log | **Fixed.** RC-002 → per-lens `CleanRecord`; RB-002 de-numbered; D9 annotated as superseded by D15; roster contract restated as per-lens eligibility. |
-| D24 | **Seed reports are converted to markdown at the edge; URL seeds are opt-in and off by default.** `--seed` and the web form accept PDF, `.docx`, HTML and `.txt`; `ingest` converts them before `graph.run` is called, which continues to require markdown. http(s) URL seeds exist behind `seed.allow_url`, default `false` (the D17/D18 posture): a URL seed makes the server fetch a caller-chosen URL and expose the body back through the run's report endpoints — on the unauthenticated web UI that is a read proxy into whatever the host can reach, and the egress boundary that makes it acceptable is a network-layer deployment concern outside this repo (docs/ssrf-egress-isolation.md). Turning it off hides the form field and rejects the parameter. A format that yields no headings is accepted with a warning, not rejected. | Markdown is not a preference here, it is load-bearing: `report.parse` builds the `[S<n>.P<m>]` loci critics must cite from `#` headings, and `extract_source_urls` reads only a markdown `## Sources` section, so an unconverted seed silently costs the evidence lens its fetch-backed checks. Converting at the **edge** rather than inside `_intake` keeps one artifact and one identity — `_run_fingerprint` and `artifact_hash` would otherwise hash different things (a URL vs. its converted text), letting a resume pass the fingerprint check while the checkpoint held different prose. It also keeps network I/O out of the graph, where every other fetch is injected through `Runtime` so tests stay offline. Accepting a heading-less seed reflects what the formats actually carry: PDF has no recoverable heading semantics without font heuristics, and refusing would block the most common real-world case to protect locus precision the source never had. PDF is the only format needing a dependency (`pypdf`, optional extra); `.docx` is a zip of XML and HTML is an `HTMLParser`, both standard library. |
+| D24 | **Seed reports are converted to markdown at the edge; URL seeds are opt-in and off by default.** `--seed` and the web form accept PDF, `.docx`, HTML and `.txt`; `ingest` converts them before `graph.run` is called, which continues to require markdown. http(s) URL seeds exist behind `seed.allow_url`, default `false` (the D17/D18 posture): a URL seed makes the server fetch a caller-chosen URL and expose the body back through the run's report endpoints — on the web UI that is a read proxy into whatever the host can reach, and the egress boundary that makes it acceptable is a network-layer deployment concern outside this repo (docs/ssrf-egress-isolation.md). *(Written when the UI was unauthenticated. D32 identifies callers, which narrows who can submit a URL but not what the host can reach — the egress boundary remains the prerequisite.)* Turning it off hides the form field and rejects the parameter. A format that yields no headings is accepted with a warning, not rejected. | Markdown is not a preference here, it is load-bearing: `report.parse` builds the `[S<n>.P<m>]` loci critics must cite from `#` headings, and `extract_source_urls` reads only a markdown `## Sources` section, so an unconverted seed silently costs the evidence lens its fetch-backed checks. Converting at the **edge** rather than inside `_intake` keeps one artifact and one identity — `_run_fingerprint` and `artifact_hash` would otherwise hash different things (a URL vs. its converted text), letting a resume pass the fingerprint check while the checkpoint held different prose. It also keeps network I/O out of the graph, where every other fetch is injected through `Runtime` so tests stay offline. Accepting a heading-less seed reflects what the formats actually carry: PDF has no recoverable heading semantics without font heuristics, and refusing would block the most common real-world case to protect locus precision the source never had. PDF is the only format needing a dependency (`pypdf`, optional extra); `.docx` is a zip of XML and HTML is an `HTMLParser`, both standard library. |
 
 ## D20 — critic eligibility becomes structural *and* demonstrated
 
@@ -275,12 +275,16 @@ the restart path — precisely the runs the checkpointer exists to protect. Dept
 checked before the rate limit is *recorded*, so a caller turned away by a full queue does
 not also burn its own per-identity allowance on the attempt.
 
-The rate limiter is keyed by the Tailscale identity header when the app is fronted so the
-header is present, and by a single global bucket otherwise. On the tailnet posture the
-header is trustworthy; a caller reaching the app directly could forge it, but such a caller
-could equally vary it to defeat any per-identity scheme, and the global fallback still
-bounds that case. This is backpressure against bursts, not an auth boundary — the design
-already states there is none here (Tailscale ACLs are the access control).
+The rate limiter is keyed by the caller's resolved identity — Cloudflare Access email
+first, then the Tailscale header, then `auth.dev_identity` — the same identity the auth
+middleware enforces. *(Written when the UI was unauthenticated: the limiter then keyed on
+the Tailscale header when present and a single global bucket otherwise. D32 superseded that
+— every request now carries a resolved identity or is refused by the middleware before it
+reaches `submit()`, so there is no shared global fallback bucket left.)* On the tailnet
+posture the header is trustworthy; a caller reaching the app directly could forge it, but
+such a caller could equally vary it to defeat any per-identity scheme. This is backpressure
+against bursts, not itself the access boundary — that is D32's trusted-header gate, with
+Tailscale ACLs / Cloudflare Access in front of it.
 
 Retention gains an automatic **content-only** sweep on a timer (`purge --content-only`,
 run for you), matching the documented posture — reports/critiques after N days, the
@@ -324,9 +328,9 @@ work); the context record still cannot widen scope and is still untrusted text; 
 fixer still cannot claim `body_clarification` (schema-enforced — recorded intent is not the
 author's own); the docs-coupling rule for invariant-touching fixes still applies; and the
 verification run before exit matters *more* under a wider reach, not less. The safety story
-moves from "the fixer cannot do much" to "the fixed SHA earns its own review cycle with its
-own reviewers" — which was always the real backstop, since the judge grades the reviewed
-SHA, not the fixer's output.
+is not "the fixer cannot do much" but that the judge grades the pre-fix reviewed SHA, not the
+fixer's output: the fixed SHA is not reviewed again (D28), so the pre-fix panel, the fixer's own
+gates, and this verification run are the backstop.
 
 ## D24 — social-bias categories on existing lenses, governed by docs/bias.md
 
@@ -604,7 +608,8 @@ the presence of a nonce or a hash. The whole policy is now pinned by an exact-ma
 widening it further fails a test rather than passing quietly.
 
 **A service worker is the first persistent client-side execution surface this project ships** —
-code that keeps running after the tab closes, on an interface with no authentication. Three
+code that keeps running after the tab closes, on an interface whose only authentication is a
+trusted header (D32). Three
 properties bound it:
 
 1. **Its cache is an inclusion allowlist, not an exclusion list.** It precaches the icons, the
@@ -679,23 +684,38 @@ labels the PR `needs-human-review`, and comments the unresolved paths. So the ho
 cheap and visible, which is what makes "do not guess" a real instruction rather than a wish.
 
 **What is not defended.** A resolution that is syntactically clean and semantically wrong passes
-every gate here — `ruff` sees Python, and nothing reads the merge for meaning. What *does* read it
-is the next cycle's panel, on the fixed SHA, which is the same protection every other fixer output
-gets.
+every gate here — `ruff` sees Python, and nothing reads the merge for meaning. The owner's
+confirmed intent (see the correction below) is that fixer output — a conflict resolution included
+— reaches main without a further review cycle. The protection is the pre-fix panel plus the
+fixer's own gates: schema validation against `fix-result-v1.json`, `ruff` at the version pinned in
+main's lockfile, the marker gate (no unmerged index entry, no conflict marker in the staged
+content), and the remote-head-equality check. None of those reads a merge for meaning, so the
+residual is real and it is accepted, not defended against: a wrong-but-clean conflict resolution,
+or any other wrong-but-clean fixer output, can reach main unread.
 
-**Correction, from PR #49.** The paragraph above originally said the merge commit "arrives on the
-inherit path", and treated that as an accepted cost. It was not a cost, it was a hole, and it was
-larger than described. Inherit re-stamps the *previous* verdict, and the previous verdict is the
-cycle-1 judge's reading of the **pre-fix** tree. So on #49: reviewers cleared the pre-fix tree, the
-judge issued a GO, the fixer pushed a merge carrying four conflict resolutions and two blocker
-fixes, gather saw merge-from-base and skipped all four reviewers, and that GO was re-stamped onto a
-tree nobody had read. Auto-merge fired three seconds later; 2105 lines landed on main unreviewed.
+**Correction, from PR #49, and a second correction on top of it.** The paragraph above originally
+said the merge commit "arrives on the inherit path", and treated that as an accepted cost. On PR
+#49 it was worse than described: reviewers cleared the pre-fix tree, the judge issued a GO, the
+fixer pushed a merge carrying four conflict resolutions and two blocker fixes, gather saw
+merge-from-base and skipped all four reviewers, and that GO was re-stamped onto a tree nobody had
+read. Auto-merge fired three seconds later; 2105 lines landed on main unreviewed.
 
-The property "the fixed SHA earns its own cycle with its own reviewers" was never a consequence of
-the inherit rule being careful — it held by accident, because fixer commits used to have one parent
-and so could not match the inherit test. Teaching the fixer to merge silently removed that
-accident. Gather now refuses to inherit any commit authored as `AGENT_COMMIT_EMAIL`, which restores
-the property by stating it rather than relying on commit shape.
+PR #65's response (`docs/ci-pipeline.md`, `review-pipeline.yml`'s inherit check) was to have gather
+refuse to inherit any commit authored as `AGENT_COMMIT_EMAIL`, on the theory that "the fixed SHA
+earns its own cycle with its own reviewers" was a property worth restoring by rule rather than
+letting it hold by the accident of fixer commits having one parent. That was an agent's invention,
+not a design decision the repo owner had made, and it inverted the intent this design was ported
+from: the owner has since confirmed that fixer output — including a fixer-authored merge — was
+always meant to reach main on the strength of the pre-fix panel and the fixer's own gates, without
+a second cycle reading it. The per-author inherit check has been removed accordingly (see the
+fixer's claim on its own post-push SHA in `review-fixer.yml`'s Push step, which is what actually
+stops a second panel from running).
+
+What PR #49 got wrong that is still worth fixing on its own merits: the merge-gate status must land
+on the SHA the fixer actually produced (`post_fix_sha`), never the pre-fix `reviewed_sha` — a gate
+written on a SHA that is no longer the PR's head protects nothing. `review-finalize.yml` now takes
+`post_fix_sha` as an explicit input and writes `review/cycle`, `review/verdict`, and the merge gate
+on it.
 
 ## D29 — servable under a URL base path, without relaxing the same-origin posture
 
@@ -764,7 +784,8 @@ root case as `base = ''`.
 ## D30 — a report leaves the system with its verdict attached, or it does not leave
 
 **The problem.** There was no export. `final.md` and `GET /runs/<id>/report.md` served the report
-alone, and the deployment posture (tailnet-only, unauthenticated) means sharing a result is
+alone, and the deployment posture (tailnet-only, and — until D32 — unauthenticated) means
+sharing a result is
 handing over a *file* — the recipient has no run page, no badge, no event log. As prose, an
 `accepted` report and a `needs_human_review` report shipped with blocking defects outstanding are
 indistinguishable. An export that carried only the text would make the system's one distinction
@@ -786,8 +807,9 @@ hash, outstanding defects, warnings. Three surfaces, one renderer (`export.py`):
 report is unaffected by the record being added elsewhere.
 
 **Why these three and not a share link.** A hosted link is the obvious answer and the wrong one
-here: it needs authentication and public exposure, which is precisely the posture D22 and the
-README refuse to take on in this repo. Files need neither. PDF is generated by the browser rather
+here: it needs public exposure and an account for the recipient, which is well past the trusted-header
+identity D32 gives a handful of invited people, and past the posture D22 and the README take on.
+Files need neither. PDF is generated by the browser rather
 than by a server-side engine — the alternative costs a large dependency to reproduce a rendering
 path every reader already has, and the print stylesheet is the same stylesheet as the screen, so
 the printed page cannot drift from the page it was printed from.
@@ -832,16 +854,145 @@ the run page already showed, but it now leaves the host. A `purge --content-only
 `final.md`, so exporting is the thing that outlives retention; the CLI says so rather than
 reporting a corrupt run.
 
-## D31 — a conflicted PR can be synced back to mergeable even with the review panel guarded off
+## D31 — decision numbers are checked for collision at the gate, not renamed after merge
+
+**The problem.** A decision number (`## D<n>`) is allocated by whoever writes the PR, against
+the highest number on main at authoring time. The number is not just prose: it appears in
+`config/`, `src/`, `tests/` and several docs, so it is effectively a shared identifier
+allocated without a lock. Two PRs open at once each pick the same next-free number and collide
+when both merge; worse, when a subagent notices the clash and *independently* renumbers, both
+land on the same replacement. This happened three times, most visibly with #54 and #56 both
+claiming D30 (issue #71). Every collision costs a repo-wide rename.
+
+**The decision.** Keep authoring-time allocation — it is simple, and the number wants to be
+chosen while the decision is being written, not minted by machinery at merge — but refuse the
+collision at the gate. `scripts/validate-decision-numbers.sh` fails when any `## D<n>` is
+defined twice in `decisions.md`, and runs as a required `Decision Numbers` job in
+`pr-validation.yml`. The alternative fix idea — allocate the number at merge time — was
+rejected: it would have to rewrite the number across `config/`, `src/`, `tests/` and docs in a
+merge-time job with write access, which is exactly the kind of branch-writing, credentialed
+step the PR gate is built to avoid.
+
+**Why a duplicate on the PR is a collision on main.** On a `pull_request` event GitHub checks
+out the *merge ref* — the PR already merged into its base branch — so the file the check reads
+is the file that will exist on main once the PR lands. A duplicate there is a collision that
+would otherwise reach main, caught before it does. Two simultaneously-open PRs that both add
+`D<n>` do not collide against each other's unmerged branches; the first to merge advances main,
+and the second's merge ref then carries two `D<n>` and fails. That is why the reviewer should
+keep branch protection's "require branches to be up to date before merging" on — it forces the
+second PR's check to re-run against the advanced main before it can merge.
+
+**Why its own job, and why it stays pure.** The `tests` job is path-filtered to Python, so a
+docs-only PR that adds a colliding section would skip it entirely; the collision check is a
+separate path-filtered job (`docs/decisions.md` or the script itself) so that case is covered.
+The script reads one file and touches nothing else — no git, no network, no token — so it fits
+the secret-free posture of the PR gate and is exercised offline by
+`tests/test_decision_numbers.py`, which also asserts the shipped log is collision-free.
+
+**Invariants.** None of the pipeline invariants are in reach: author exclusion, the blind
+`OrchestratorView`, fail-closed lenses, severity floors and controller termination are all
+untouched. This is repository governance in CI — it constrains how a *document* is numbered,
+not what enters any model's context.
+
+## D32 — the interface has users: a trusted identity header, and runs that belong to someone
+
+Every prior version of this document says there is no authentication and that Tailscale ACLs are
+the access control. That was true and deliberate for a single operator. Opening the interface to
+friends makes it false in a way that matters: without a user concept, everyone who reaches the
+app shares one index onto everyone's questions, seed material and audit trails.
+
+**Decision.** Identity comes from a request header set by whatever fronts the app —
+`Cf-Access-Authenticated-User-Email` from Cloudflare Access, or the `Tailscale-User-*` headers
+D21 already read — and every route but `/healthz` refuses a request that carries none. Runs
+record their submitter in `owner.txt`. The index is owner-scoped.
+
+**The header is trusted, not verified — and that is the accepted risk.** Cloudflare Access also
+sends a signed `Cf-Access-Jwt-Assertion` that could be checked against the team's JWKS with an
+`aud` claim, which is the real boundary. It is not implemented here. Cloudflare strips and
+rewrites `Cf-Access-*` on everything it proxies, so *through the tunnel* the email header is
+authoritative; the exposure is that the tailnet path is deliberately kept open, so any tailnet
+peer that can reach the port can set the header to any value and read or submit as that person.
+At the scale this serves — a handful of invited people, on a tailnet the operator controls —
+that is a trade taken knowingly, and revisiting it is the stated condition for exposing the
+service more broadly. All of it is confined to `web/identity.py:resolve_identity`, so verifying
+the JWT is a change to one function.
+
+**Access is preferred over Tailscale, and every source is normalized identically.** Both
+headers are trusted equally; Access is checked first because it is how friends arrive. The
+operator reaches the app by both doors, so the same person must resolve to one identity either
+way — every source is lower-cased, and a value that is blank, over 320 characters, or carries
+control characters is treated as absent rather than truncated into an ownership key its own
+submitter could never match. Only `Tailscale-User-Login` is read; `Tailscale-User-Name` was
+fine as D21's rate-limit key, where any *stable* string worked, but an ownership key must be
+the *same* string the other door produces, and a display name is a different namespace from an
+address. What normalization cannot fix is a tailnet whose identity provider reports a different
+address than the Access policy lists — that is two people as far as this system can tell, and
+the check is to sign in each way and compare the *signed in as* line.
+
+**Enforcement is middleware, not a call per route.** `_reject_cross_site` is invoked by hand at
+the top of each mutating handler, and that idiom is right for CSRF — it is a property of two
+specific routes. Authentication is a property of the app, and the failure mode of an opt-in
+check is a future route that forgets it. The middleware is the only fail-closed shape.
+
+**`/healthz` stays the only exemption, including for D27's app shell.** The manifest, service
+worker, offline page and icons are static files that hold nothing private, so exempting them
+would have been defensible — and it is still declined, because an exemption list is a thing that
+grows and every future entry is argued against a precedent rather than against this decision. The
+price is paid in the `<head>` instead: a manifest is the one subresource a browser fetches with
+credentials *omitted* by default, even same-origin, so the link carries
+`crossorigin="use-credentials"`. Without it the fetch reaches Access with no `CF_Authorization`
+cookie and is bounced at the edge — where an app-level exemption could not have helped anyway —
+and the only symptom is that the app quietly stops being installable. The container smoke test
+asserts both halves: `/` with no header is a 403, and the shell is there once a header is set.
+
+**`auth.dev_identity` is the single knob, and its unset state is the safe one.** Set (via the
+roster or `$RA_DEV_IDENTITY`), it supplies an identity to requests with no header, which is what
+local development needs; unset, such a request is refused. A boolean `require_auth` alongside it
+would have been two settings that can disagree, and the disagreeing combination fails open.
+
+**Ownership scopes the index; it does not scope reads.** You see your own runs listed. Anyone
+signed in who holds a run id can read that run — sharing a link is the intended way to show
+someone a report, with export/publish to follow. Resume is the one exception: reading costs
+nothing, but resuming spends the owner's tokens for another 10–25 minutes, so it stays with the
+person who started it.
+
+**A run with no owner is served to nobody.** Runs written before this decision, and CLI runs
+started without `ra run --owner`, have no identity to attribute and none can be invented for
+them. They are 404 over HTTP — not listed, not readable, not resumable by hand — while remaining
+untouched on disk and through the CLI. There is deliberately no backfill: guessing an owner is
+how a stranger's run ends up in someone's index. Boot recovery is unaffected, because an
+interrupted run is work already owed and whether anyone can currently *see* it has no bearing on
+whether it should finish. `owner.txt` sits outside `CONTENT_DIRS` so that a retention sweep
+cannot silently retire a run from its owner's index.
+
+**D21's rate limiter is unchanged in mechanism and stronger in effect.** Its key was already the
+identity header; the difference is that there is no longer a shared `global` bucket to spill
+into, because an unauthenticated request never reaches the queue. The CSRF guard also matters
+more than it did: Access sets a `CF_Authorization` cookie, so a cross-site form POST would now
+ride an authenticated session, and `Sec-Fetch-Site` is what refuses it.
+
+**Isolation is untouched.** This is entirely upstream of run creation and moves no new data
+toward any model context. `owner` deliberately stays out of `_run_fingerprint`: the fingerprint
+guards against a run resuming under changed *inputs*, and attributing a run must never cost it
+its checkpoint. The `seed.allow_url` rationale changes slightly — authentication narrows *who*
+can make the server fetch a URL, but not what the host can reach, so the egress boundary in
+[ssrf-egress-isolation.md](./ssrf-egress-isolation.md) remains the prerequisite it was.
+
+Deployment is documented in [authentication.md](./authentication.md).
+
+## D33 — the base-branch sync runs even when the panel was guarded off, and stays non-agentic when it does
 
 **The problem.** The base-branch sync D28 built to keep agent-authored PRs mergeable was
-unreachable in exactly the case it exists for. GitHub cannot compute a merge ref for a PR that
-conflicts with its base, so it fires no `pull_request` event. No event means `pr-validation.yml`
-never runs, which means the `PR Validation Required` check never appears on the reviewed SHA. Every
-reviewer's guard requires that check to have completed successfully before it will spend agent time,
-so with it absent every guard refuses. The panel is skipped, `record-cycle` writes nothing, and
-`fix` — the one stage that could resync and clear the conflict — was gated on `record-cycle`
-succeeding, so it never ran. The deadlock is self-sustaining:
+unreachable in a family of cases it exists for. `fix` was gated on `record-cycle` succeeding, and
+`record-cycle` only writes when at least one reviewer's guard cleared. Every reviewer's guard
+requires a completed, successful `PR Validation Required` check on the reviewed SHA. So whenever
+that check is absent or red while the base has moved underneath the branch, every guard refuses,
+the panel is skipped, `record-cycle` writes nothing, and the one stage that could resync never
+runs.
+
+The sharpest form is a PR that already *conflicts* with its base. GitHub cannot compute a merge
+ref for it, so it fires no `pull_request` event, so `pr-validation.yml` never runs, so the check
+never appears, and the deadlock is self-sustaining:
 
 ```
 conflicted PR → no merge ref → no pull_request event → no PR Validation
@@ -849,61 +1000,91 @@ conflicted PR → no merge ref → no pull_request event → no PR Validation
   → the conflict is never resolved
 ```
 
-`/review` reaches the graph through `issue_comment`, which fires regardless of merge state, but with
-the panel guarded off the run did nothing but re-publish a fail-closed NO-GO. PRs #54 and #56 both
-sat in this state and had to be unstuck by a human merging `main` in by hand.
+`/review` reaches the graph through `issue_comment`, which fires regardless of merge state, but
+with the panel guarded off the run did nothing but re-publish a fail-closed NO-GO. PRs #54 and #56
+both sat in this state and had to be unstuck by a human merging `main` in by hand.
 
-**Rejected: fixing it at PR Validation.** #67 added a `push` trigger to `pr-validation.yml` — a push
-needs no merge ref. But `pr-validation.yml`'s concurrency group keys on `head.ref`/`head.sha` with
-`cancel-in-progress: true`, so a push and its paired `pull_request` event land in the same group and
-one *cancels* the other. Both publish a check named `PR Validation Required`, and a cancelled
-required check is not a success, so the PR could show that required check as failed when nothing had
-failed. It was reverted in #68. The other options weighed in #68 — separate concurrency groups
+**Rejected: fixing it at PR Validation.** #67 added a `push` trigger to `pr-validation.yml` — a
+push needs no merge ref. But that workflow's concurrency group keys on `head.ref`/`head.sha` with
+`cancel-in-progress: true`, so a push and its paired `pull_request` event land in the same group
+and one *cancels* the other. Both publish a check named `PR Validation Required`, and a cancelled
+required check is not a success, so the PR could show that required check as failed when nothing
+had failed. It was reverted in #68. The other options weighed in #68 — separate concurrency groups
 (doubles CI on every push), a second check name the guard also accepts (widens what "validated"
 means), or relaxing the guard to proceed when validation is *absent* (loosens the gate that keeps
 reviewers off unvalidated code) — each pay a cost on the healthy path to fix the stuck one.
 
 **The decision.** Fix it at the fixer's gate instead, which is where the maintainer's analysis in
-#68 landed: *let the fix job run without the guard's PR-Validation precondition when the only work is
-a base-branch sync — a sync consumes no reviewer findings, so the precondition buys nothing there.*
-`gather` now computes `needs_sync` (is the reviewed SHA behind `origin/<base>`, by the same
+#68 landed: *let the fix job run without the guard's PR-Validation precondition when the only work
+is a base-branch sync — a sync consumes no reviewer findings, so the precondition buys nothing
+there.* `gather` now computes `needs_sync` (is the reviewed SHA behind `origin/<base>`, by the same
 `merge-base --is-ancestor` test the fixer's sync uses), and `fix` has a second, disjoint way in:
 
-- **normal path** — `record-cycle` succeeded (a reviewer ran) *and* `fix_allowed`. Blockers plus, if
-  the base moved, a sync in the same commit. Unchanged.
-- **sync-only path** — `record-cycle` was *skipped* (every guard refused) *and* `needs_sync`. With
-  the panel off there are no reviewer artifacts, so the fixer counts zero blockers and does nothing
-  but the merge. The merged SHA is mergeable, so it earns a `pull_request` event, gets validated, and
-  is reviewed by its own cycle — exactly as every other D28 sync is.
+- **normal path** — `record-cycle` succeeded (a reviewer ran) *and* `fix_allowed`. Blockers plus,
+  if the base moved, a sync in the same commit. Unchanged.
+- **sync-only path** — `record-cycle` was *skipped* (every guard refused) *and* `needs_sync`. The
+  fixer is called with `sync_only: true`.
+
+**`sync_only` makes the pass non-agentic, and that is the whole safety argument.** The first draft
+of this change simply dropped the `record-cycle` precondition and reasoned that with no reviewer
+artifacts the fixer would count zero blockers and "do nothing but the merge". That was wrong, and
+the security lens caught it on review: `review-fixer.yml`'s work gate sets `agent=true` when
+blockers are non-zero **or the base merge conflicts**. A conflicting merge is exactly the state the
+motivating case produces, so the sync-only path would have reached `review-agent-run` — the
+write-capable fixer, on the self-hosted runner, with host networking and pipeline credentials —
+carrying a tree, a PR body, and conflict contents that are all contributor-controlled and that *no
+reviewer has read and PR Validation may never have checked*. On the normal path a cleared reviewer
+guard is what licenses handing the agent that material; on this path there is no such clearance.
+
+So the pass is reduced to what needs no judgement at all: a clean host-side merge, committed and
+pushed, or nothing. `sync_only` forces `agent=false` unconditionally — not as a consequence of the
+blocker count happening to be zero — and a merge that conflicts is *abandoned* (`git merge --abort`,
+`merge_state=blocked`, nothing pushed) rather than left as markers for an agent to resolve. The
+abort matters twice: it keeps the agent out, and it means no later step can mistake a half-merged
+tree for something pushable.
+
+**What this does and does not fix.** It does not rescue a PR that already conflicts with its base;
+that still takes a human merge, as #54 and #56 got. Automating it would mean an unreviewed,
+unvalidated tree driving a credentialed agent, which is a worse trade than a human doing one merge.
+What it does fix is the strictly larger non-conflicting case: any behind-the-base PR whose panel was
+guarded off — validation red, the branch moved mid-run, an untrusted author — now gets its sync,
+becomes mergeable, earns its `pull_request` event, gets validated, and is reviewed by its own cycle
+like every other D28 sync. A conflicted PR at least now fails visibly, with `merge_state=blocked`
+and the conflicting paths in the run log, instead of silently doing nothing.
 
 **Why the sync-only path drops `fix_allowed` but keeps `cap_exhausted`.** `fix_allowed` bars a
 blocker-fix on the last permitted cycle because that fix would never be reviewed (its cycle is
 capped). A sync addresses no blockers, and its pushed SHA *is* reviewed the moment it is mergeable,
 so the reason does not apply — and the stuck PRs (#54, #56) were at a cycle where `fix_allowed` was
-already false, so honouring it would have left the deadlock intact. `cap_exhausted` is still honoured
-on both paths: a genuinely exhausted PR takes the terminal cap-exhausted NO-GO and waits for a human,
-rather than being kept alive indefinitely by resyncs.
+already false, so honouring it would have left the deadlock intact. `cap_exhausted` is still
+honoured on both paths: a genuinely exhausted PR takes the terminal cap-exhausted NO-GO and waits
+for a human, rather than being kept alive indefinitely by resyncs.
 
 **Why this does not weaken the loop bound.** `MAX_CYCLES` bounds the *agent fix loop*
-(review → fix → push → review). The sync-only path writes no `review/cycle` (that is `record-cycle`'s
-job, and it was skipped), so it consumes no cycle — consistent with "a run that reviewed nothing does
-not consume a cycle". It cannot advance the fix loop because it addresses no blockers, and it cannot
-run away: once merged, the SHA contains the base, `needs_sync` reads false, and no further sync
-fires until the base moves again — one sync per base movement, which is external and legitimate. The
-"a fixer-authored commit is never inherited" rule (D28, corrected on #49) still holds, so the merged
-SHA earns its own panel rather than re-stamping a stale verdict.
+(review → fix → push → review). The sync-only path writes no `review/cycle` (that is
+`record-cycle`'s job, and it was skipped), so it consumes no cycle — consistent with "a run that
+reviewed nothing does not consume a cycle". It cannot advance the fix loop because it runs no agent
+and addresses no blockers, and it cannot run away: once merged, the SHA contains the base,
+`needs_sync` reads false, and no further sync fires until the base moves again — one sync per base
+movement, which is external and legitimate. The "a fixer-authored commit is never inherited" rule
+(D28, corrected on #49) still holds, so the merged SHA earns its own panel rather than re-stamping a
+stale verdict.
 
-**Invariants.** None of the pipeline safety invariants are in reach. No blocker-fixing code lands
-unreviewed: the sync-only path pushes a merge and nothing else, and that merge is read by the next
-cycle's reviewers like any D28 sync. Author-exclusion, the blind orchestrator, fail-closed lenses,
-severity floors, controller termination, and the untrusted-text boundary are all in the Python
-review core and the convergence controller, none of which this touches — this is CI gating in
-`review-pipeline.yml`. The judge still fails closed on the sync-only cycle's empty reviewer set
-(pre-existing behaviour when guards refuse), publishing a NO-GO on the pre-sync SHA that the mergeable
-successor supersedes.
+**Invariants.** No blocker-fixing code lands unreviewed: the sync-only path pushes a clean merge and
+nothing else, and that merge is read by the next cycle's reviewers like any D28 sync. Author
+exclusion, the blind orchestrator, fail-closed lenses, severity floors, controller termination, and
+the untrusted-text boundary all live in the Python review core and the convergence controller, none
+of which this touches — this is CI gating in `review-pipeline.yml` and `review-fixer.yml`. The
+untrusted-text boundary is in fact *tightened*: one path that could have fed unvetted conflict
+contents to a generator no longer exists. The judge still fails closed on the sync-only cycle's
+empty reviewer set (pre-existing behaviour when guards refuse), publishing a NO-GO on the pre-sync
+SHA that the mergeable successor supersedes.
 
 ## Open items for a future round
 
 - Whether `misrepresented_source` can be meaningfully checked without fetching the source
   (v1 only checks on-its-face support); a later evidence layer (RA-011) would strengthen this.
 - Calibration of `K` (plateau window), the hard cap, and defect-score weights against real runs.
+- Verifying `Cf-Access-Jwt-Assertion` against the team's JWKS with an `aud` check, replacing the
+  trusted email header (D32). The prerequisite for exposing the service beyond a small invited
+  group, or for closing the direct-to-origin forgery path the tailnet posture leaves open.

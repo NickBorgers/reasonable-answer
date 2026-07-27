@@ -164,13 +164,19 @@ class RunWorker:
         question: str,
         seed: str | None = None,
         *,
-        identity: str = "global",
+        identity: str,
         seed_format: str | None = None,
         seed_source: str | None = None,
         seed_warnings: tuple[str, ...] = (),
         refinement: Refinement | None = None,
     ) -> str:
-        """`seed` is markdown — `web.app` converts at the edge via `ingest`."""
+        """`seed` is markdown — `web.app` converts at the edge via `ingest`.
+
+        `identity` is mandatory because it is now two things at once: the rate-limit
+        key it always was, and the run's owner. There is no default that could stand
+        in for it — a run submitted on nobody's behalf is one its submitter would
+        never see again.
+        """
         # Backpressure comes first, before the run id and before any disk write. A
         # refused submission must cost nothing — no queue entry, no run directory —
         # otherwise the cap that protects memory would still let disk grow unbounded.
@@ -193,6 +199,10 @@ class RunWorker:
         # nothing was promised.
         store = RunStore(self._config.runs_dir, run_id)
         store.question(question, seed)
+        # Ownership is written in the same breath as the question, and before the
+        # `queued` event that makes the run recoverable — so there is no window where
+        # a run exists, survives a restart, and belongs to nobody.
+        store.owner(identity)
         store.event("queued", attempt=1, auto=False)
         if refinement is not None:
             # Written right alongside the question, for the same reason: the run must be

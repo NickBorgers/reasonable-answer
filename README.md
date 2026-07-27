@@ -63,7 +63,8 @@ uv run ra export <run_id> [--format md|html] [-o out.html]
 ## Web interface
 
 `make serve`, or `ra serve --host 0.0.0.0 --port 8080` in a container. Submit a question, watch
-the loop converge live, and browse every past run.
+the loop converge live, and browse your own past runs — the index is scoped to whoever is asking,
+though anyone signed in can open a run they hold the id for.
 
 The run page streams the pipeline's own event log over server-sent events, so you see each round
 as it happens — which model wrote the draft, which critic drew which lens, what each one found,
@@ -77,10 +78,17 @@ round 2   writer deepseek-v4-flash
   1 major  ->  rule 14  generate  material issues remain
 ```
 
-**There is no authentication.** The intended posture is tailnet-only, with Tailscale ACLs as the
-access control; `ra serve` defaults to binding `127.0.0.1` for that reason. Anyone who can reach
-the interface can spend tokens and read every stored run, including seed material. Do not put it
-on a public interface without adding real auth in front of it.
+**Callers are identified by a header, and it is trusted rather than verified.** It comes from
+whatever fronts the app — `Cf-Access-Authenticated-User-Email` from Cloudflare Access, or the
+`Tailscale-User-*` headers from `tailscale serve` — and a request carrying neither is refused on
+every route but `/healthz`. Runs belong to whoever submitted them: your index shows only your own
+runs, anyone signed in who has a run id can read that run, and only its owner can resume it.
+
+Because the header is not verified, anyone who can reach the port directly can claim to be any
+user. `ra serve` binds `127.0.0.1` by default and `compose.yaml` publishes only to loopback for
+that reason: keep the proxy the only way in. See [docs/authentication.md](docs/authentication.md)
+for the Cloudflare Access setup, and D32 in [docs/decisions.md](docs/decisions.md) for what that
+trade does and does not buy.
 
 Showing reports and critiques to a *human* does not weaken the isolation design — blindness is
 about what enters a *model's* context. The UI is a window onto the audit trail, which is the
@@ -110,7 +118,9 @@ file has to be, and `scripts/make-icons.py` if you want to regenerate the placeh
 
 ## Sharing a result
 
-Since there is no auth, sharing means handing over a **file**, not a link. Every export carries
+Anyone signed in through the tailnet or Access who holds a run id can open that run, so sharing
+inside that audience is just handing over a **link**. Sharing with anyone *outside* it means
+handing over a **file** instead, not a link. Every export carries
 the report *and* its review record — status, sourcing label, which round shipped, the reviewers
 whose clean records key to that exact artifact, and any outstanding defects. As prose, an
 `accepted` report and a `needs_human_review` one look identical; that difference is the whole
@@ -285,6 +295,7 @@ Each run writes `runs/<run_id>/` (mode 0700):
 ```
 final.md              the report that shipped
 final.json            terminal status, clean records, outstanding defects, warnings
+owner.txt             who submitted it; absent means the web interface will not serve it
 events.jsonl          every stage: startup, intake, generate, critique, triage, control
 reports/              every draft, with its author
 critiques/            every lens result, with provenance
@@ -294,7 +305,7 @@ signals/decisions.jsonl  which rule fired, per round
 ```
 
 `reports/` and `critiques/` hold the sensitive material; `ra purge <id> --content-only` drops them
-and keeps the decision record.
+and keeps the decision record — and `owner.txt`, so a purged run stays in its owner's index.
 
 `final.md` is the report on its own, which says nothing about how it ended. `ra export <run_id>`
 joins it to `final.json` and writes the document you would actually give someone — see

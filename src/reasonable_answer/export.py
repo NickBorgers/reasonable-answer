@@ -1,7 +1,8 @@
 """Handing a finished run to someone who was not there.
 
-The deployment posture is tailnet-only and unauthenticated (see README), so sharing a
-result means handing over a *file*, not a link. That constrains what an export has to
+The deployment posture is tailnet-only, and callers are authenticated only against a
+trusted header (D32), so sharing a result with someone outside that means handing over a
+*file*, not a link. That constrains what an export has to
 carry: the recipient has no run page to check, no event log to read, and no way to ask
 what the badge said. `final.md` alone does not survive that trip — an `accepted` report
 and a `needs_human_review` report with three blocking defects are byte-indistinguishable

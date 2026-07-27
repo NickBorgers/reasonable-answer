@@ -13,7 +13,7 @@ import time
 from collections.abc import Callable
 
 import pytest
-from fastapi.testclient import TestClient
+from conftest import WEB_IDENTITY, web_client
 
 from reasonable_answer.web.app import create_app
 from reasonable_answer.web.refine import Offer, Refinement, Suggestion
@@ -78,7 +78,7 @@ def _wait_idle(worker: RunWorker, run_id: str, timeout: float = 5.0) -> None:
 def test_refine_cross_site_is_refused(config, fetch_site):
     app, worker = _make_app(config, StubRefiner(enabled=True))
     try:
-        with TestClient(app) as c:
+        with web_client(app) as c:
             resp = c.post(
                 "/refine",
                 data={"question": "Does this get refused cross-site?"},
@@ -92,7 +92,7 @@ def test_refine_cross_site_is_refused(config, fetch_site):
 def test_refine_is_404_when_disabled(config):
     app, worker = _make_app(config, StubRefiner(enabled=False))
     try:
-        with TestClient(app) as c:
+        with web_client(app) as c:
             resp = c.post("/refine", data={"question": "Anything at all?"})
             assert resp.status_code == 404
     finally:
@@ -102,7 +102,7 @@ def test_refine_is_404_when_disabled(config):
 def test_refine_oversized_question_is_rejected(config):
     app, worker = _make_app(config, StubRefiner(enabled=True))
     try:
-        with TestClient(app) as c:
+        with web_client(app) as c:
             huge = "x" * (config.max_question_chars + 1)
             resp = c.post("/refine", data={"question": huge})
             assert resp.status_code == 400
@@ -112,11 +112,13 @@ def test_refine_oversized_question_is_rejected(config):
 
 def test_refine_rate_limit_exceeded_degrades_to_an_empty_200(config):
     limiter = RateLimiter(1, 60.0, clock=lambda: 0.0)
-    limiter.check_and_record("global")  # consume the one slot before the request arrives
+    # Consume the one slot under the signed-in identity before the request arrives -- the
+    # limiter key is the authenticated viewer now (D32), not a shared "global" bucket.
+    limiter.check_and_record(WEB_IDENTITY)
     refiner = StubRefiner(enabled=True, limiter=limiter)
     app, worker = _make_app(config, refiner)
     try:
-        with TestClient(app) as c:
+        with web_client(app) as c:
             resp = c.post("/refine", data={"question": "A question nobody gets to see?"})
             assert resp.status_code == 200
             assert resp.json() == {"offer_id": "", "suggestions": []}
@@ -141,7 +143,7 @@ def test_refine_happy_path_returns_the_offer_as_json_uncached(config):
     refiner = StubRefiner(enabled=True, suggest_fn=lambda q: offer)
     app, worker = _make_app(config, refiner)
     try:
-        with TestClient(app) as c:
+        with web_client(app) as c:
             resp = c.post(
                 "/refine", data={"question": "Why is it illegal to move an opossum in tx?"}
             )
@@ -168,7 +170,7 @@ def test_refine_response_carries_hostile_suggestion_text_inertly(config):
     refiner = StubRefiner(enabled=True, suggest_fn=lambda q: offer)
     app, worker = _make_app(config, refiner)
     try:
-        with TestClient(app) as c:
+        with web_client(app) as c:
             resp = c.post("/refine", data={"question": "Is honesty better than niceness?"})
             assert resp.status_code == 200
             assert resp.headers["content-type"].startswith("application/json")
@@ -202,7 +204,7 @@ def test_runs_with_a_verified_offer_claim_writes_refinement_json_and_event(confi
     refiner = StubRefiner(enabled=True, resolve_fn=lambda o, s, q: refinement)
     app, worker = _make_app(config, refiner)
     try:
-        with TestClient(app) as c:
+        with web_client(app) as c:
             resp = c.post(
                 "/runs",
                 data={
@@ -261,7 +263,7 @@ def test_runs_with_an_unverifiable_offer_claim_still_starts_the_run(config):
     )
     app, worker = _make_app(config, refiner)
     try:
-        with TestClient(app) as c:
+        with web_client(app) as c:
             resp = c.post(
                 "/runs",
                 data={
@@ -305,7 +307,7 @@ def test_runs_with_a_malformed_offer_id_never_persists_the_raw_bytes(config):
     )
     app, worker = _make_app(config, refiner)
     try:
-        with TestClient(app) as c:
+        with web_client(app) as c:
             resp = c.post(
                 "/runs",
                 data={
@@ -332,7 +334,7 @@ def test_runs_with_no_refinement_fields_writes_no_refinement_record(config):
     refiner = StubRefiner(enabled=True)  # default resolve_fn returns None for no claim
     app, worker = _make_app(config, refiner)
     try:
-        with TestClient(app) as c:
+        with web_client(app) as c:
             resp = c.post(
                 "/runs", data={"question": "A perfectly ordinary question?"}, follow_redirects=False
             )
@@ -363,7 +365,7 @@ def test_resuming_a_run_does_not_rewrite_the_refinement_record(config):
     )
     worker = RunWorker(config, max_concurrent=1, runner=lambda *a, **k: None)
     try:
-        run_id = worker.submit("Q?", refinement=refinement)
+        run_id = worker.submit("Q?", identity="viewer@example.com", refinement=refinement)
         _wait_idle(worker, run_id)
 
         refinement_path = config.runs_dir / run_id / "refinements" / "refinement.json"

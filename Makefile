@@ -33,8 +33,12 @@ run:
 	@test -n "$(Q)" || (echo "usage: make run Q='your question' [SEED=path.md]"; exit 2)
 	uv run ra run -v -q "$(Q)" $(if $(SEED),--seed $(SEED),)
 
+# RA_DEV_IDENTITY because every route refuses a request with no identity header, and
+# nothing is fronting the app locally to set one. Override it to test as someone else:
+#   make serve RA_DEV_IDENTITY=friend@example.com
+RA_DEV_IDENTITY ?= dev@localhost
 serve:
-	uv run ra serve -v
+	RA_DEV_IDENTITY=$(RA_DEV_IDENTITY) uv run ra serve -v
 
 docker:
 	docker build -t reasonable-answer:latest .

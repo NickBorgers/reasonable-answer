@@ -5,9 +5,13 @@ name: Review pipeline — fixer
 # reviewers, judge, finalize — is read-only by construction.
 #
 # It runs after the reviewers and before the judge. The judge therefore grades the SHA
-# the reviewers actually read, not the one the fixer produced; the fixed SHA gets its
-# own cycle with its own reviewers. Grading a tree nobody reviewed would let a fixer
-# clear its own work.
+# the reviewers actually read, not the one the fixer produced. The fixed SHA is not
+# reviewed again in the normal case: the Push step below claims it before the
+# `synchronize` event it fires can start a second pipeline, so this one panel plus the
+# fixer's own gates (schema, lint, marker gate, remote-head check) is the whole review
+# — see docs/decisions.md D28. Grading a tree nobody reviewed would let a fixer clear
+# its own work; that risk is now accepted rather than defended against, and the gates
+# below are what stand in its place.
 #
 # Two modes, chosen by whether the PR carries an `Author-Session:` trailer:
 #
@@ -40,6 +44,20 @@ on:
       cycle:
         required: true
         type: string
+      # Set by the caller's sync-only path (D33): the reviewer panel was guarded off, so
+      # nothing on this SHA has been validated by PR Validation or read by a reviewer.
+      #
+      # It makes this workflow non-agentic. The fixer agent runs on the self-hosted runner
+      # with host networking and pipeline credentials, and its inputs — the working tree,
+      # the PR body, the conflict contents — are all contributor-controlled. On the normal
+      # path a cleared reviewer guard is what licenses that; here there is no such
+      # clearance, so the pass is reduced to what needs no judgement at all: a clean
+      # host-side merge, committed and pushed, or nothing. A merge that conflicts is
+      # abandoned and left for a human rather than resolved by an agent.
+      sync_only:
+        required: false
+        default: false
+        type: boolean
     secrets:
       WORKFLOW_PAT:
         required: true
@@ -148,12 +166,15 @@ jobs:
       #   clean     merged without conflict — committed here, on the host
       #   conflicts markers left in the working tree for the agent to resolve as ordinary
       #             file edits; the commit step below seals it or aborts
+      #   blocked   conflicts, but `sync_only` forbids an agent — the merge is abandoned
+      #             and the PR is left for a human (D33)
       - name: Sync with the base branch
         id: sync
         working-directory: ${{ env.PR_WORKSPACE }}
         env:
           BASE_REF: ${{ inputs.base_ref }}
           HEAD_REF: ${{ inputs.head_ref }}
+          SYNC_ONLY: ${{ inputs.sync_only }}
           CONFLICT_LIST: .review-output/merge-conflicts.txt
         run: |
           set -euo pipefail
@@ -184,6 +205,23 @@ jobs:
             # assembled from an --env-file: a newline in a path would inject arbitrary
             # variables into the container, and a comma would corrupt a delimited list.
             git diff --name-only --diff-filter=U > "$CONFLICT_LIST"
+
+            # Resolving these means an agent editing files, and on the sync-only path no
+            # reviewer guard has cleared this SHA — PR Validation may be absent or red and
+            # no reviewer has read a line of it. Feeding that tree to the write-capable
+            # fixer is precisely what `sync_only` exists to prevent, so the merge is
+            # abandoned: the tree goes back to the reviewed SHA and the PR waits for a
+            # human. Aborting rather than leaving markers also means no later step can
+            # mistake a half-merged tree for something pushable.
+            if [ "${SYNC_ONLY}" = "true" ]; then
+              git merge --abort
+              echo "merge_state=blocked" >> "$GITHUB_OUTPUT"
+              echo "Merge from origin/${BASE_REF} conflicts, and this is a sync-only pass:"
+              sed 's/^/  /' "$CONFLICT_LIST"
+              echo "Abandoned the merge; an agent may not resolve conflicts on a SHA no reviewer cleared."
+              exit 0
+            fi
+
             echo "merge_state=conflicts" >> "$GITHUB_OUTPUT"
             echo "Merge produced conflicts in:"
             sed 's/^/  /' "$CONFLICT_LIST"
@@ -200,8 +238,26 @@ jobs:
         env:
           BLOCKERS: ${{ steps.blockers.outputs.count }}
           MERGE_STATE: ${{ steps.sync.outputs.merge_state }}
+          SYNC_ONLY: ${{ inputs.sync_only }}
         run: |
           set -euo pipefail
+
+          # The sync-only path is non-agentic by construction, not by circumstance (D33).
+          # It is reached only when every reviewer guard refused, so `agent=false` here does
+          # not depend on the blocker count happening to be zero: the guarantee holds even
+          # if an artifact were somehow present. `Sync with the base branch` has already
+          # reduced a conflicting merge to `blocked`, so `clean` is the only state with
+          # anything to push.
+          if [ "${SYNC_ONLY}" = "true" ]; then
+            push=false
+            if [ "$MERGE_STATE" = "clean" ]; then
+              push=true
+            fi
+            echo "agent=false" >> "$GITHUB_OUTPUT"
+            echo "push=${push}" >> "$GITHUB_OUTPUT"
+            echo "work: sync-only, blockers=${BLOCKERS} merge_state=${MERGE_STATE} agent=false push=${push}"
+            exit 0
+          fi
 
           agent=false
           if [ "$BLOCKERS" != "0" ] || [ "$MERGE_STATE" = "conflicts" ]; then
@@ -1004,23 +1060,31 @@ jobs:
           git push origin "HEAD:${HEAD_REF}"
           NEW_SHA=$(git rev-parse HEAD)
 
-          # Deliberately NOT claiming review/pipeline on NEW_SHA.
+          # Push first, claim immediately after.
           #
-          # The reference implementation this was ported from writes a `pending` claim
-          # here, so the `synchronize` event the push fires finds the SHA taken and does
-          # not open a second pipeline. That is wrong for this graph: the pipeline that
-          # event opens IS cycle 2, the one that reviews this fix. Suppressing it would
-          # leave agent-written code on the branch that no reviewer ever read, while the
-          # judge reported on the pre-fix tree — the exact failure the fix/judge ordering
-          # exists to prevent.
+          # The owner's intent (confirmed after the divergence recorded below) is that
+          # fixer output reaches main without a further review cycle: the pre-fix panel
+          # plus the fixer's own gates (artifact quarantine, marker gate, remote-head
+          # check, this push) are the review. Claiming review/pipeline on NEW_SHA here
+          # makes the `synchronize` event this push fires land on an already-claimed
+          # SHA, so review-dedup short-circuits and no second pipeline opens to re-review
+          # the fix.
           #
-          # The contention that motivates the claim there does not exist here. `fix`
-          # needs all three reviewers, so when this runs the only remaining jobs are
-          # judge, finalize, and cleanup — all on ubuntu-latest. No self-hosted runner is
-          # held, so the incoming cycle can start its reviewers immediately.
+          # The claim has to come AFTER the push, not before: the commit-status API
+          # 422s on a SHA it has not seen, and NEW_SHA does not exist on the remote
+          # until the push above completes. The race window this leaves — GitHub takes
+          # a few seconds to schedule the synchronize event — is bounded by the cycle
+          # counter (gather's cycle cap and cleanup-claim below), so the worst case is
+          # one wasted extra cycle, not an infinite loop.
           #
-          # Duplicate work on the *same* SHA is still prevented: review-entry.yml claims
-          # each SHA before dispatching, and NEW_SHA is a SHA no run has claimed yet.
+          # This repo previously suppressed this claim on the theory that the fix
+          # itself needed review; the owner has since confirmed that was an invented
+          # divergence from the design being ported here, not an intended safety
+          # property. See docs/decisions.md D28.
+          gh api -X POST "repos/${REPO}/statuses/${NEW_SHA}" \
+            -f state=pending \
+            -f context=review/pipeline \
+            -f description="cycle=${CYCLE} (fixer post-push claim)" >/dev/null
 
           # Deliberately not fatal. The commit is already on the branch; failing the
           # step here would not unpush it, and would trade a wasted cycle for a red

@@ -11,8 +11,8 @@ import urllib.request
 from contextlib import contextmanager
 
 import pytest
+from conftest import WEB_IDENTITY, web_client
 from fakes import FakeClient
-from fastapi.testclient import TestClient
 
 from reasonable_answer.graph import run as run_graph
 from reasonable_answer.schemas import CritiqueOutput
@@ -53,7 +53,7 @@ def client(config, fake_client):
 
     worker = RunWorker(config, max_concurrent=1, runner=runner)
     app = create_app(config, worker=worker)
-    with TestClient(app) as c:
+    with web_client(app) as c:
         yield c
     worker.shutdown()
 
@@ -86,7 +86,7 @@ def test_a_queued_run_is_listed_before_it_produces_anything(config, identities):
     instant it is queued rather than only once the first draft lands."""
     worker = RunWorker(config, max_concurrent=1, runner=lambda *a, **k: time.sleep(5))
     try:
-        run_id = worker.submit("A distinctive question?")
+        run_id = worker.submit("A distinctive question?", identity=WEB_IDENTITY)
         registry = Registry(config.runs_dir)
         summary = registry.summary(run_id, worker.active())
         assert summary.question == "A distinctive question?"
@@ -267,12 +267,13 @@ def test_the_report_page_404s_before_there_is_a_report_and_for_unknown_runs(conf
     """Both of the new route's guards: no such run, and a run with nothing to show yet."""
     store = RunStore(config.runs_dir, "run-early")
     store.question("Too soon?")
+    store.owner(WEB_IDENTITY)
     store.event("intake", path="question")
 
     worker = RunWorker(config, max_concurrent=1, runner=lambda *a, **k: None)
     app = create_app(config, worker=worker)
     try:
-        with TestClient(app) as c:
+        with web_client(app) as c:
             assert c.get("/runs/run-early/report").status_code == 404
             assert c.get("/runs/run-doesnotexist/report").status_code == 404
     finally:
@@ -333,13 +334,14 @@ def test_a_report_that_contains_html_is_rendered_as_text_not_markup(config, iden
     )
     store = RunStore(config.runs_dir, "run-mdxss")
     store.question("Hostile?")
+    store.owner(WEB_IDENTITY)
     store.event("intake", path="question")
     store.final(hostile, {"status": "accepted", "chosen_round": 1})
 
     worker = RunWorker(config, max_concurrent=1, runner=lambda *a, **k: None)
     app = create_app(config, worker=worker)
     try:
-        with TestClient(app) as c:
+        with web_client(app) as c:
             for url in ("/runs/run-mdxss", "/runs/run-mdxss/report"):
                 page = c.get(url).text
                 assert "<script>alert" not in page
@@ -418,7 +420,7 @@ def test_the_worker_caps_concurrency(config):
     worker = RunWorker(config, max_concurrent=1, runner=slow_runner)
     try:
         for n in range(4):
-            worker.submit(f"question {n}?")
+            worker.submit(f"question {n}?", identity=WEB_IDENTITY)
         deadline = time.time() + 10
         while worker.active() and time.time() < deadline:
             time.sleep(0.05)
@@ -433,13 +435,13 @@ def test_a_crashing_run_leaves_the_worker_alive_and_the_run_resumable(config):
 
     worker = RunWorker(config, max_concurrent=1, runner=exploding)
     try:
-        crashed = worker.submit("Crash?")
+        crashed = worker.submit("Crash?", identity=WEB_IDENTITY)
         deadline = time.time() + 5
         while worker.status(crashed) and time.time() < deadline:
             time.sleep(0.05)
 
         # the worker survived and still accepts work
-        assert worker.submit("Next?")
+        assert worker.submit("Next?", identity=WEB_IDENTITY)
 
         summary = Registry(config.runs_dir).summary(crashed, worker.active())
         assert summary.status in ("interrupted", "queued", "running")
@@ -468,9 +470,10 @@ def test_resuming_a_seeded_run_passes_the_seed_back(config, monkeypatch):
     try:
         store = RunStore(config.runs_dir, "run-seeded")
         store.question("Does the seed survive?", "# A seed report")
+        store.owner(WEB_IDENTITY)
         store.event("intake", path="seed")
 
-        with TestClient(app) as c:
+        with web_client(app) as c:
             assert c.post("/runs/run-seeded/resume", follow_redirects=False).status_code == 303
 
         # Wait on the runner's own signal, not a wall clock: a busy full-suite run
@@ -490,7 +493,7 @@ def test_resuming_an_active_run_does_not_double_run(config):
 
     worker = RunWorker(config, max_concurrent=1, runner=slow)
     try:
-        run_id = worker.submit("Once?")
+        run_id = worker.submit("Once?", identity=WEB_IDENTITY)
         worker.resume(run_id, "Once?")
         worker.resume(run_id, "Once?")
         assert worker.queue_depth <= 1
@@ -506,12 +509,13 @@ def test_run_content_is_escaped_into_the_page(config, identities):
     hostile = '<script>alert("xss")</script>'
     store = RunStore(config.runs_dir, "run-xss")
     store.question(hostile)
+    store.owner(WEB_IDENTITY)
     store.event("intake", path="question")
 
     worker = RunWorker(config, max_concurrent=1, runner=lambda *a, **k: None)
     app = create_app(config, worker=worker)
     try:
-        with TestClient(app) as c:
+        with web_client(app) as c:
             page = c.get("/runs/run-xss").text
             assert "<script>alert" not in page
             assert "&lt;script&gt;" in page
@@ -565,12 +569,12 @@ def test_submit_is_rejected_when_the_queue_is_full_and_leaves_no_run_dir(config)
     cfg = config.model_copy(update={"max_queue_depth": 2, "submit_rate_max": 0})
     worker = RunWorker(cfg, max_concurrent=1, runner=blocking)
     try:
-        r1 = worker.submit("occupies the worker?")
+        r1 = worker.submit("occupies the worker?", identity=WEB_IDENTITY)
         _wait_running(worker)
-        r2 = worker.submit("waiting one?")
-        r3 = worker.submit("waiting two?")
+        r2 = worker.submit("waiting one?", identity=WEB_IDENTITY)
+        r3 = worker.submit("waiting two?", identity=WEB_IDENTITY)
         with pytest.raises(QueueFull):
-            worker.submit("one too many?")
+            worker.submit("one too many?", identity=WEB_IDENTITY)
         dirs = {p.name for p in cfg.runs_dir.iterdir() if p.is_dir()}
         assert dirs == {r1, r2, r3}  # the rejected submission wrote nothing
     finally:
@@ -589,11 +593,11 @@ def test_recover_and_resume_bypass_the_queue_cap(config):
     cfg = config.model_copy(update={"max_queue_depth": 1, "submit_rate_max": 0})
     worker = RunWorker(cfg, max_concurrent=1, runner=blocking)
     try:
-        worker.submit("occupies?")
+        worker.submit("occupies?", identity=WEB_IDENTITY)
         _wait_running(worker)
-        worker.submit("fills the one slot?")
+        worker.submit("fills the one slot?", identity=WEB_IDENTITY)
         with pytest.raises(QueueFull):
-            worker.submit("over the cap?")
+            worker.submit("over the cap?", identity=WEB_IDENTITY)
         # resume() represents already-owed work, so it is accepted past the cap
         assert worker.resume("run-owed", "owed?")
     finally:
@@ -607,12 +611,12 @@ def test_submission_rate_limit_rejects_then_recovers(config):
     cfg = config.model_copy(update={"max_queue_depth": 0})
     worker = RunWorker(cfg, max_concurrent=1, runner=lambda *a, **k: None, rate_limiter=limiter)
     try:
-        assert worker.submit("a?")
-        assert worker.submit("b?")
+        assert worker.submit("a?", identity=WEB_IDENTITY)
+        assert worker.submit("b?", identity=WEB_IDENTITY)
         with pytest.raises(RateLimited):
-            worker.submit("c?")  # allowance spent for this window
+            worker.submit("c?", identity=WEB_IDENTITY)  # allowance spent for this window
         ticks[0] += 61.0  # window rolls over
-        assert worker.submit("d?")
+        assert worker.submit("d?", identity=WEB_IDENTITY)
     finally:
         worker.shutdown()
 
@@ -653,7 +657,7 @@ def test_a_full_queue_surfaces_a_429(config):
     worker = RunWorker(cfg, max_concurrent=1, runner=blocking)
     app = create_app(cfg, worker=worker)
     try:
-        with TestClient(app) as c:
+        with web_client(app) as c:
             assert _post(c, "one?") == 303
             _wait_running(worker)
             assert _post(c, "two?") == 303  # fills the one queue slot
@@ -669,7 +673,7 @@ def test_a_rate_limited_submission_surfaces_429_with_retry_after(config):
     worker = RunWorker(cfg, max_concurrent=1, runner=lambda *a, **k: None, rate_limiter=limiter)
     app = create_app(cfg, worker=worker)
     try:
-        with TestClient(app) as c:
+        with web_client(app) as c:
             assert _post(c, "one?") == 303
             over = c.post("/runs", data={"question": "two?"}, follow_redirects=False)
             assert over.status_code == 429
@@ -684,7 +688,8 @@ def test_distinct_tailscale_identities_get_separate_allowances(config):
     worker = RunWorker(cfg, max_concurrent=1, runner=lambda *a, **k: None, rate_limiter=limiter)
     app = create_app(cfg, worker=worker)
     try:
-        with TestClient(app) as c:
+        # No default Access header: the tailnet path is the one under test here.
+        with web_client(app, identity=None) as c:
             alice = {"Tailscale-User-Login": "alice@example.com"}
             bob = {"Tailscale-User-Login": "bob@example.com"}
             assert _post(c, "a1?", alice) == 303
@@ -757,8 +762,9 @@ def test_the_sweeper_is_disabled_when_the_interval_is_not_positive(config):
 
 def test_url_seeds_are_refused_by_default(client):
     """The gate itself: `seed.allow_url` defaults to off, because a URL seed turns the
-    unauthenticated web UI into a read proxy for whatever the host can reach. A
-    deployment enables it only behind a network-layer egress boundary."""
+    web UI into a read proxy for whatever the host can reach. D32 narrows *who* can ask
+    for that fetch, not what the host reaches, so a deployment still enables it only
+    behind a network-layer egress boundary."""
     response = client.post(
         "/runs",
         data={"question": "Q?", "seed_url": "https://example.org/r"},
@@ -862,7 +868,7 @@ def test_resume_restores_the_seed(config, tmp_path):
 
     worker = RunWorker(config, max_concurrent=1, runner=runner)
     try:
-        run_id = worker.submit("Q?", "# Seeded\n\nBody.")
+        run_id = worker.submit("Q?", "# Seeded\n\nBody.", identity=WEB_IDENTITY)
         # Let the first run fully drain before resuming; a still-running run would
         # dedupe the resume rather than re-invoke the runner.
         deadline = time.time() + 5
@@ -885,7 +891,311 @@ def test_resume_restores_the_seed(config, tmp_path):
         worker.shutdown()
 
 
+# ------------------------------------------------- authentication & ownership
+
+
+FRIEND = "friend@example.com"
+
+
+@pytest.fixture
+def owned(config):
+    """An app plus a helper that plants a finished run owned by whoever you name."""
+    worker = RunWorker(config, max_concurrent=1, runner=lambda *a, **k: None)
+    app = create_app(config, worker=worker)
+
+    def plant(run_id: str, owner: str | None) -> str:
+        store = RunStore(config.runs_dir, run_id)
+        store.question(f"Whose run is {run_id}?")
+        if owner is not None:
+            store.owner(owner)
+        store.event("intake", path="question")
+        store.final("# a report", {"terminal_status": "accepted", "note": ""})
+        return run_id
+
+    try:
+        yield app, plant
+    finally:
+        worker.shutdown(timeout=0.1)
+
+
+def test_a_request_with_no_identity_is_refused(owned):
+    """The middleware is the whole boundary: with no header and no dev identity there
+    is nobody to serve, so nothing but the healthcheck answers."""
+    app, plant = owned
+    plant("run-mine", WEB_IDENTITY)
+    with web_client(app, identity=None) as c:
+        assert c.get("/").status_code == 403
+        assert c.get("/runs/run-mine").status_code == 403
+        assert c.get("/runs/run-mine/report.md").status_code == 403
+        assert c.get("/runs/run-mine/audit.json").status_code == 403
+        assert c.post("/runs", data={"question": "Anonymous?"}).status_code == 403
+
+
+def test_the_healthcheck_answers_without_an_identity(owned):
+    """The container healthcheck runs inside the container, where nothing has put a
+    header on the request. Exempting it is what keeps the container from being
+    restarted forever."""
+    app, _ = owned
+    with web_client(app, identity=None) as c:
+        assert c.get("/healthz").status_code == 200
+
+
+def test_the_access_header_wins_over_a_tailscale_one(owned):
+    """Both are trusted the same amount; Access is how friends arrive, so it decides.
+    Otherwise a tailnet-fronted deployment would file everyone's runs under whichever
+    header happened to be checked first."""
+    app, plant = owned
+    plant("run-access", "access@example.com")
+    with web_client(app, identity=None) as c:
+        body = c.get(
+            "/",
+            headers={
+                "Cf-Access-Authenticated-User-Email": "access@example.com",
+                "Tailscale-User-Login": "tailnet@example.com",
+            },
+        ).text
+    assert "run-access" in body
+    assert "access@example.com" in body
+
+
+def test_a_dev_identity_only_applies_when_no_header_is_present(config):
+    """The local-development escape hatch. It must not override a real identity, or a
+    machine that had it left on would file every friend's run under one owner."""
+    cfg = config.model_copy(update={"auth": config.auth.model_copy(update={"dev_identity": "dev@localhost"})})
+    worker = RunWorker(cfg, max_concurrent=1, runner=lambda *a, **k: None)
+    app = create_app(cfg, worker=worker)
+    try:
+        with web_client(app, identity=None) as c:
+            assert "dev@localhost" in c.get("/").text
+        with web_client(app, identity=FRIEND) as c:
+            assert FRIEND in c.get("/").text
+    finally:
+        worker.shutdown(timeout=0.1)
+
+
+def test_an_identity_header_that_is_not_one_is_ignored(owned):
+    """Control characters and unbounded values would end up in `owner.txt` and in
+    `audit.json`. Treating them as absent is the difference between a refused request
+    and an ownership key nobody can ever match."""
+    app, _ = owned
+    with web_client(app, identity=None) as c:
+        assert c.get("/", headers={"Tailscale-User-Login": "   "}).status_code == 403
+        assert c.get("/", headers={"Tailscale-User-Login": "x" * 400}).status_code == 403
+        # A control character is the case the reject exists for: the value still looks
+        # like an address, so nothing downstream would question it, and it would be
+        # written verbatim into `owner.txt` and `audit.json`. Drop the check and these
+        # two are 200.
+        assert c.get("/", headers={"Tailscale-User-Login": "who\x00is"}).status_code == 403
+        assert (
+            c.get("/", headers={"Cf-Access-Authenticated-User-Email": "a\nb@x.com"}).status_code
+            == 403
+        )
+
+
+def test_the_index_shows_only_your_own_runs(owned):
+    app, plant = owned
+    plant("run-mine", WEB_IDENTITY)
+    plant("run-theirs", FRIEND)
+
+    with web_client(app) as c:
+        mine = c.get("/").text
+    with web_client(app, identity=FRIEND) as c:
+        theirs = c.get("/").text
+
+    assert "run-mine" in mine and "run-theirs" not in mine
+    assert "run-theirs" in theirs and "run-mine" not in theirs
+
+
+def test_a_submitted_run_is_owned_by_its_submitter(config):
+    worker = RunWorker(config, max_concurrent=1, runner=lambda *a, **k: None)
+    try:
+        run_id = worker.submit("Whose?", identity=FRIEND)
+        assert (config.runs_dir / run_id / "owner.txt").read_text() == FRIEND
+        assert Registry(config.runs_dir).summary(run_id).owner == FRIEND
+    finally:
+        worker.shutdown(timeout=0.1)
+
+
+def test_the_access_email_is_lowercased(owned, config):
+    """An identity that varies by case would split one person's runs across two owners
+    (D32): `Viewer@Example.com` submitting a run and `viewer@example.com` returning for
+    it must be the same person. `resolve_identity` lower-cases the Access email, so the
+    run is filed under — and the owner-scoped index queried by — the lower-cased form
+    whatever casing the header arrives in. Drop the `.lower()` and this run would be
+    owned by `Viewer@Example.com` while the index is scoped to it verbatim, so a caller
+    whose header casing differed by one letter would lose sight of their own run."""
+    app, _ = owned
+    with web_client(app, identity="Viewer@Example.com") as c:
+        response = c.post("/runs", data={"question": "Whose casing?"}, follow_redirects=False)
+        run_id = response.headers["location"].rsplit("/", 1)[-1]
+        # Written by the middleware-resolved viewer, so the header's casing is gone.
+        assert (config.runs_dir / run_id / "owner.txt").read_text() == "viewer@example.com"
+        assert Registry(config.runs_dir).summary(run_id).owner == "viewer@example.com"
+        # The mixed-case caller still finds its own run in the owner-scoped index.
+        assert run_id in c.get("/").text
+
+
+def test_anyone_signed_in_can_read_a_run_they_hold_the_id_for(owned):
+    """Sharing a link is the intended way to show someone a report, so a read is not
+    owner-scoped — only the index is."""
+    app, plant = owned
+    plant("run-theirs", FRIEND)
+    with web_client(app) as c:
+        assert c.get("/runs/run-theirs").status_code == 200
+        assert c.get("/runs/run-theirs/report").status_code == 200
+        assert c.get("/runs/run-theirs/report.md").status_code == 200
+        assert c.get("/runs/run-theirs/audit.json").status_code == 200
+        assert c.get("/runs/run-theirs/progress").status_code == 200
+
+
+def test_a_shared_run_says_who_submitted_it(owned):
+    """A run reached by a link is otherwise unattributed. Your own runs need no byline."""
+    app, plant = owned
+    plant("run-theirs", FRIEND)
+    plant("run-mine", WEB_IDENTITY)
+    with web_client(app) as c:
+        assert f"submitted by {FRIEND}" in c.get("/runs/run-theirs").text
+        assert "submitted by" not in c.get("/runs/run-mine").text
+
+
+def test_only_the_owner_can_resume_a_run(config, monkeypatch):
+    """Reading costs nothing; resuming spends the owner's tokens for another 10-25
+    minutes, so it stays with the person who started it."""
+    # Boot recovery would otherwise pick the run up as the first client starts the
+    # app's lifespan, leaving nothing interrupted for the owner to resume by hand.
+    monkeypatch.setenv("RA_RESUME_ON_BOOT", "0")
+    store = RunStore(config.runs_dir, "run-stalled")
+    store.question("Interrupted?")
+    store.owner(FRIEND)
+    store.event("queued", attempt=1, auto=False)
+    store.event("generate", author="writer-a", round=1)
+
+    worker = RunWorker(config, max_concurrent=1, runner=lambda *a, **k: None)
+    app = create_app(config, worker=worker)
+    try:
+        with web_client(app) as c:  # signed in as someone else
+            assert c.post("/runs/run-stalled/resume", follow_redirects=False).status_code == 404
+        with web_client(app, identity=FRIEND) as c:
+            assert c.post("/runs/run-stalled/resume", follow_redirects=False).status_code == 303
+    finally:
+        worker.shutdown(timeout=0.1)
+
+
+def test_an_owner_less_run_is_served_to_nobody(owned):
+    """Runs written before ownership existed, or by `ra run` without `--owner`. There
+    is no identity to attribute them to, so the web layer declines to guess."""
+    app, plant = owned
+    plant("run-legacy", None)
+    for identity in (WEB_IDENTITY, FRIEND):
+        with web_client(app, identity=identity) as c:
+            assert "run-legacy" not in c.get("/").text
+            assert c.get("/runs/run-legacy").status_code == 404
+            assert c.get("/runs/run-legacy/report.md").status_code == 404
+            assert c.get("/runs/run-legacy/audit.json").status_code == 404
+            assert c.post("/runs/run-legacy/resume", follow_redirects=False).status_code == 404
+
+
+def test_recovery_still_picks_up_an_owner_less_run(config, monkeypatch):
+    """Invisibility is a read concern. An interrupted run is work already owed, and
+    whether anyone can currently see it has no bearing on whether it should finish."""
+    monkeypatch.setenv("RA_RESUME_ON_BOOT", "1")
+    store = RunStore(config.runs_dir, "run-orphan")
+    store.question("Owed?")
+    store.event("queued", attempt=1, auto=False)
+    store.event("generate", author="writer-a", round=1)
+
+    worker = RunWorker(config, max_concurrent=1, runner=lambda *a, **k: time.sleep(0.2))
+    try:
+        assert "run-orphan" in worker.recover(Registry(config.runs_dir))
+    finally:
+        worker.shutdown()
+
+
+def test_a_content_purge_leaves_the_run_owned(config):
+    """`owner.txt` sits outside CONTENT_DIRS on purpose: a retention sweep that took
+    ownership with it would silently retire the run from its owner's index."""
+    from reasonable_answer.store import purge
+
+    store = RunStore(config.runs_dir, "run-aged")
+    store.question("Old?")
+    store.owner(WEB_IDENTITY)
+    store.event("intake", path="question")
+    store.final("# a report", {"terminal_status": "accepted", "note": ""})
+
+    purge(config.runs_dir, "run-aged", content_only=True)
+
+    assert Registry(config.runs_dir).summary("run-aged").owner == WEB_IDENTITY
+
+
+def test_a_cli_run_is_invisible_unless_it_is_given_an_owner(config, fake_client):
+    """`ra run` has no request to read an identity from, so ownership is opt-in via
+    `--owner` — and without it the run stays a CLI artefact."""
+    run_graph(config, question="Anonymous?", run_id="run-cli", client=fake_client)
+    run_graph(config, question="Attributed?", run_id="run-cli-owned", client=fake_client, owner=FRIEND)
+
+    registry = Registry(config.runs_dir)
+    assert registry.summary("run-cli").owner is None
+    assert registry.summary("run-cli-owned").owner == FRIEND
+
+
+def test_the_same_person_is_one_owner_at_either_door(config):
+    """Access and the tailnet are two doors onto one index. A run submitted through
+    one must be listed through the other, or an operator who uses both silently sees
+    half their runs — which is why every source is normalized identically."""
+    worker = RunWorker(config, max_concurrent=1, runner=lambda *a, **k: None)
+    app = create_app(config, worker=worker)
+    try:
+        with web_client(app, identity=None) as c:
+            posted = c.post(
+                "/runs",
+                data={"question": "Submitted over Access?"},
+                headers={"Cf-Access-Authenticated-User-Email": "Nick@Example.COM"},
+                follow_redirects=False,
+            )
+            assert posted.status_code == 303
+            run_id = posted.headers["location"].rsplit("/", 1)[-1]
+
+            # Same person, other door, and a case the header happened to carry.
+            listed = c.get("/", headers={"Tailscale-User-Login": "nick@example.com"}).text
+            assert run_id in listed
+            shouty = c.get("/", headers={"Tailscale-User-Login": "NICK@EXAMPLE.COM"}).text
+            assert run_id in shouty
+
+        assert Registry(config.runs_dir).summary(run_id).owner == "nick@example.com"
+    finally:
+        worker.shutdown(timeout=0.1)
+
+
+def test_the_tailscale_display_name_is_not_an_identity(config):
+    """`Tailscale-User-Name` carries a display name, a different namespace from the
+    address Access reports. It was a fine rate-limit key under D21, where any stable
+    string worked; as an ownership key it would file one person under two owners."""
+    worker = RunWorker(config, max_concurrent=1, runner=lambda *a, **k: None)
+    app = create_app(config, worker=worker)
+    try:
+        with web_client(app, identity=None) as c:
+            assert c.get("/", headers={"Tailscale-User-Name": "Nick Borgers"}).status_code == 403
+    finally:
+        worker.shutdown(timeout=0.1)
 # ------------------------------------------------------- installable-app assets
+
+
+def test_the_app_shell_is_behind_the_same_gate_as_everything_else(owned):
+    """The manifest, the worker and the icons are routes like any other: no identity, no
+    asset (D32). Nothing about them is secret, but an exemption list is a thing that
+    grows, and `/healthz` stays the only entry on it.
+
+    The cost of that is paid in the `<head>`, not here: a manifest is fetched with
+    credentials *omitted* by default, so `crossorigin="use-credentials"` on the link is
+    what keeps the app installable (D27) once its manifest needs an identity."""
+    app, _ = owned
+    with web_client(app, identity=None) as c:
+        for path in ("/manifest.webmanifest", "/sw.js", "/offline.html"):
+            assert c.get(path).status_code == 403, path
+        assert c.get("/static/icons/icon-512.png").status_code == 403
+        # The one exemption, and the reason it exists: the container's own healthcheck
+        # runs inside the container with no header to attach.
+        assert c.get("/healthz").status_code == 200
 
 
 def test_the_manifest_names_only_icons_that_are_actually_served(client):
@@ -1000,7 +1310,9 @@ def test_a_run_page_is_never_cacheable(client, config):
 
 def test_the_head_advertises_the_installable_app(client):
     page = client.get("/").text
-    assert '<link rel="manifest" href="/manifest.webmanifest">' in page
+    assert (
+        '<link rel="manifest" href="/manifest.webmanifest" crossorigin="use-credentials">' in page
+    )
     assert '<link rel="apple-touch-icon" href="/static/icons/apple-touch-icon.png">' in page
     # iOS reads this and ignores the manifest's icons entirely.
     assert '<meta name="apple-mobile-web-app-capable" content="yes">' in page
@@ -1092,7 +1404,10 @@ def _prefixed_client(config, fake_client, base_path=BASE):
     worker = RunWorker(config, max_concurrent=1, runner=runner)
     try:
         app = create_app(config, worker=worker)
-        with TestClient(app) as c:
+        # Signed in as the default viewer: the auth middleware (D32) refuses every
+        # route but /healthz, and these tests assert URL-prefixing behaviour that is
+        # only reachable past that gate.
+        with web_client(app) as c:
             yield c
     finally:
         worker.shutdown()
@@ -1127,7 +1442,10 @@ def test_an_unset_prefix_leaves_every_url_at_the_root(client):
     byte-identical to before this feature existed."""
     for url in _absolute_urls(client.get("/").text):
         assert not url.startswith(f"{BASE}/"), url
-    assert '<link rel="manifest" href="/manifest.webmanifest">' in client.get("/").text
+    assert (
+        '<link rel="manifest" href="/manifest.webmanifest" crossorigin="use-credentials">'
+        in client.get("/").text
+    )
 
 
 def test_the_index_stays_entirely_under_the_prefix(config, fake_client):

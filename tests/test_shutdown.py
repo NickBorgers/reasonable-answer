@@ -11,8 +11,8 @@ import threading
 import time
 
 import pytest
+from conftest import WEB_IDENTITY, web_client
 from fakes import FakeClient
-from fastapi.testclient import TestClient
 
 from reasonable_answer import shutdown
 from reasonable_answer.graph import GracefulStop
@@ -46,6 +46,7 @@ def _interrupted_run(config, run_id: str, question: str = "Was it interrupted?")
     """A run dir that looks like the process died partway through it."""
     store = RunStore(config.runs_dir, run_id)
     store.question(question)
+    store.owner(WEB_IDENTITY)
     store.event("queued", attempt=1, auto=False)
     store.event("intake", path="question")
     store.event("generate", author="writer-a", round=1)
@@ -153,7 +154,7 @@ def test_shutdown_returns_while_a_job_is_still_running(config):
         stop.wait(timeout=10)  # stands in for a node that notices the boundary
 
     worker = RunWorker(config, max_concurrent=1, runner=watches_the_flag)
-    worker.submit("Long one?")
+    worker.submit("Long one?", identity=WEB_IDENTITY)
     assert entered.wait(timeout=5)
 
     started = time.monotonic()
@@ -171,8 +172,8 @@ def test_shutdown_leaves_queued_work_on_disk_for_the_next_process(config):
 
     worker = RunWorker(config, max_concurrent=1, runner=waits_for_the_flag)
     try:
-        worker.submit("First?")
-        queued = worker.submit("Second?")
+        worker.submit("First?", identity=WEB_IDENTITY)
+        queued = worker.submit("Second?", identity=WEB_IDENTITY)
     finally:
         worker.shutdown(timeout=2.0)
 
@@ -187,7 +188,7 @@ def test_a_graceful_stop_is_not_logged_as_a_crash(config, caplog):
 
     worker = RunWorker(config, max_concurrent=1, runner=pauses)
     try:
-        run_id = worker.submit("Paused?")
+        run_id = worker.submit("Paused?", identity=WEB_IDENTITY)
         deadline = time.time() + 5
         while worker.status(run_id) and time.time() < deadline:
             time.sleep(0.05)
@@ -220,6 +221,7 @@ def test_boot_recovery_re_enqueues_an_interrupted_run(config):
 def test_boot_recovery_skips_runs_that_already_finished(config):
     store = RunStore(config.runs_dir, "run-done")
     store.question("Finished?")
+    store.owner(WEB_IDENTITY)
     store.event("intake", path="question")
     store.final("# done", {"terminal_status": "accepted", "note": ""})
 
@@ -282,7 +284,7 @@ def test_a_human_can_resume_a_run_that_recovery_gave_up_on(config, monkeypatch):
     worker = RunWorker(config, max_concurrent=1, runner=lambda *a, **k: None)
     app = create_app(config, worker=worker)
     try:
-        with TestClient(app) as c:
+        with web_client(app) as c:
             assert c.post("/runs/run-revived/resume", follow_redirects=False).status_code == 303
     finally:
         worker.shutdown(timeout=1.0)
@@ -402,7 +404,7 @@ def test_the_event_stream_lets_go_when_the_process_is_stopping(config):
     worker = RunWorker(config, max_concurrent=1, runner=lambda *a, **k: time.sleep(30))
     app = create_app(config, worker=worker)
     try:
-        with TestClient(app) as c:
+        with web_client(app) as c:
             shutdown.request_stop("test")
             started = time.monotonic()
             with c.stream("GET", "/runs/run-watched/stream") as response:
@@ -417,13 +419,14 @@ def test_resuming_a_run_that_is_not_interrupted_is_a_conflict(config, monkeypatc
     monkeypatch.setenv("RA_RESUME_ON_BOOT", "0")
     store = RunStore(config.runs_dir, "run-finished")
     store.question("Already done?")
+    store.owner(WEB_IDENTITY)
     store.event("intake", path="question")
     store.final("# done", {"terminal_status": "accepted", "note": ""})
 
     worker = RunWorker(config, max_concurrent=1, runner=lambda *a, **k: None)
     app = create_app(config, worker=worker)
     try:
-        with TestClient(app) as c:
+        with web_client(app) as c:
             assert c.post("/runs/run-finished/resume").status_code == 409
     finally:
         worker.shutdown(timeout=1.0)

@@ -18,8 +18,10 @@ the same contract. The requirement `fetch.py` places on *any* of them is the sam
 
 ## Why the app needs this
 
-The service has no authentication (tailnet-only posture) and its evidence critic fetches
-web content **influenced by the user's question**. If that process can open arbitrary
+The service identifies its callers but does not constrain them (D32), and its evidence
+critic fetches web content **influenced by the user's question**. Authentication narrows
+*who* can pose a question; it does nothing about what the host can reach, and the people
+invited in are not the threat model. If that process can open arbitrary
 outbound connections, a crafted question can steer a fetch at an internal-only service —
 a classic SSRF pivot. Bounding it inside the app is not enough: the URL is chosen by a
 model reacting to untrusted input, so the guarantee has to be physical, not
