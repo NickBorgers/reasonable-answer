@@ -1056,13 +1056,30 @@ that still takes a human merge, as #54 and #56 got. Automating it would mean an 
 unvalidated tree driving a credentialed agent, which is a worse trade than a human doing one merge.
 What it does fix is the strictly larger non-conflicting case: any behind-the-base PR whose panel was
 guarded off — validation red, the branch moved mid-run, an untrusted author — now gets its sync,
-becomes mergeable, earns its `pull_request` event, gets validated, and is reviewed by its own cycle
+becomes mergeable, earns its `pull_request` event, gets validated, and is reachable by its own panel
 like every other D28 sync. A conflicted PR at least now fails visibly, with `merge_state=blocked`
 and the conflicting paths in the run log, instead of silently doing nothing.
 
+**The sync-only successor is the one SHA the fixer does not claim.** The second thing review caught
+was a contradiction between this decision and D28. Normally the fixer claims `review/pipeline` on
+the SHA it pushes so that dedup swallows the `synchronize` event and no second panel re-reads the
+fix — licensed by "the pre-fix panel plus the fixer's own gates *are* the review". A sync-only pass
+has no pre-fix panel to point at; it runs because every guard refused and nothing was read. Claiming
+there would have produced a successor with no verdict, no event left to earn one, and therefore no
+route through the merge gate: the deadlock this path exists to break, moved one commit forward. So
+`sync_only` suppresses the claim. Every other push still makes it, and the rule is unchanged — the
+exception falls out of the same justification.
+
+What this buys is worth stating exactly, since the first draft of this decision overstated it twice.
+The successor is a merge-from-base, so where a prior verdict exists in its chain the inherit
+short-circuit may re-stamp it rather than open a panel; that is fail-closed (a stale NO-GO, never a
+stale GO) and `/review` overrides it. The guarantee is therefore narrower than "it will be
+reviewed": the successor is mergeable, validated, and *reachable* by a panel, where before it was
+none of the three.
+
 **Why the sync-only path drops `fix_allowed` but keeps `cap_exhausted`.** `fix_allowed` bars a
 blocker-fix on the last permitted cycle because that fix would never be reviewed (its cycle is
-capped). A sync addresses no blockers, and its pushed SHA *is* reviewed the moment it is mergeable,
+capped). A sync addresses no blockers, and its pushed SHA becomes reviewable the moment it is mergeable,
 so the reason does not apply — and the stuck PRs (#54, #56) were at a cycle where `fix_allowed` was
 already false, so honouring it would have left the deadlock intact. `cap_exhausted` is still
 honoured on both paths: a genuinely exhausted PR takes the terminal cap-exhausted NO-GO and waits

@@ -430,7 +430,7 @@ jobs:
   #
   #       Path (b) deliberately does NOT require `fix_allowed`. `fix_allowed` bars a
   #       blocker-fix on the last cycle because that fix would go unreviewed — but a sync
-  #       addresses no blockers, and its pushed SHA is reviewed once it is mergeable, so
+  #       addresses no blockers, and its pushed SHA becomes reviewable once mergeable, so
   #       the reason does not apply. It also writes no `review/cycle` (that is
   #       `record-cycle`'s job, and it was skipped), so a sync-only cycle costs nothing on
   #       the counter, exactly as a run that reviewed nothing should. `cap_exhausted` is

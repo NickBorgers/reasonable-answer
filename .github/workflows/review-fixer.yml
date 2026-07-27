@@ -1010,6 +1010,7 @@ jobs:
           CYCLE: ${{ inputs.cycle }}
           CHANGED: ${{ steps.commit.outputs.changed }}
           RESULT_JSON: ${{ steps.fixer.outputs.result_json }}
+          SYNC_ONLY: ${{ inputs.sync_only }}
         run: |
           set -euo pipefail
 
@@ -1081,10 +1082,24 @@ jobs:
           # itself needed review; the owner has since confirmed that was an invented
           # divergence from the design being ported here, not an intended safety
           # property. See docs/decisions.md D28.
-          gh api -X POST "repos/${REPO}/statuses/${NEW_SHA}" \
-            -f state=pending \
-            -f context=review/pipeline \
-            -f description="cycle=${CYCLE} (fixer post-push claim)" >/dev/null
+          #
+          # The sync-only path is the one exception, and for the reason that justifies
+          # the claim everywhere else (D34). The claim is licensed by "the pre-fix panel
+          # is the review" — but a sync-only pass runs precisely because there was no
+          # panel: every guard refused and nothing was read. Claiming here would leave a
+          # successor SHA that has no verdict of its own, cannot earn one because dedup
+          # short-circuits its `pull_request` event, and so can never satisfy the merge
+          # gate — trading the deadlock this path exists to break for a new one a SHA
+          # further along. Not claiming lets the merged SHA do what it was synced to do:
+          # earn its event, get validated, and be read by its own panel.
+          if [ "${SYNC_ONLY}" = "true" ]; then
+            echo "sync-only: not claiming ${NEW_SHA}; it needs the panel this pass could not run."
+          else
+            gh api -X POST "repos/${REPO}/statuses/${NEW_SHA}" \
+              -f state=pending \
+              -f context=review/pipeline \
+              -f description="cycle=${CYCLE} (fixer post-push claim)" >/dev/null
+          fi
 
           # Deliberately not fatal. The commit is already on the branch; failing the
           # step here would not unpush it, and would trade a wasted cycle for a red
