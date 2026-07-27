@@ -1,0 +1,14 @@
+# A truly unscoped scalar verdict — no population, no outcome, no timeframe.
+# Guards against over-correcting the name_the_outcome trigger into silence: the
+# scope-preservation fix must not stop the transform firing where it genuinely
+# applies. Adjacent transforms are permitted because "better" also reads as a
+# two-label or value framing; the fire rate still measures the expected one.
+tier: obvious
+question: "Is {{policy}} better than the status quo?"
+slots:
+  policy:
+    - a four-day work week
+    - remote work
+    - year-round schooling
+expected_transform: name_the_outcome
+allowed_transforms: [name_the_outcome, split_the_either_or, ask_whats_answerable]

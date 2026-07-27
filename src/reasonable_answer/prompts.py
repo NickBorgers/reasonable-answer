@@ -485,9 +485,15 @@ _TRANSFORM_DESCRIPTIONS: dict[str, str] = {
         "Rewrite to ask whether the premise holds, before or alongside the original ask."
     ),
     "name_the_outcome": (
-        "name_the_outcome — trigger: an unscoped scalar verdict — 'net positive/"
-        "negative', 'better/worse' — with no population, outcome, or timeframe named. "
-        "Rewrite naming a concrete outcome, population, and timeframe to evaluate."
+        "name_the_outcome — trigger: a scalar verdict — 'net positive/negative', "
+        "'better/worse' — that names no outcome to measure it by, or names only a "
+        "broad domain ('public health', 'the economy') that a single number cannot "
+        "score. Rewrite to make the verdict measurable by enumerating the stated "
+        "domain's concrete component outcomes (e.g. 'a net positive for public "
+        "health' -> effects on dental, skeletal, and neurological health), keeping "
+        "the stated population and adding a population or timeframe only when none "
+        "is named. Enumerate, never select: a rewrite that keeps one component and "
+        "drops the rest asks a smaller question than the user did."
     ),
     "surface_the_real_goal": (
         "surface_the_real_goal — trigger: a practical need is buried inside a purely "
@@ -528,6 +534,11 @@ REFINE_GUARDRAILS = (
     "- Preserve the subject. The user's entities and topic must survive the "
     "rewrite exactly — never substitute a question about the asker or about people "
     "in general for a question about the subject they actually named.\n"
+    "- Preserve the scope. The rewrite must cover everything the original "
+    "question covered. When a stated domain is too broad to measure ('public "
+    "health'), unpack it into its component outcomes — never quietly substitute "
+    "one component ('dental health') for the whole. Narrowing the user's scope "
+    "reads as steering toward the sub-question with the most convenient answer.\n"
     "- Silence is the default and the correct, common answer. Only propose a "
     "suggestion when one of the transforms below genuinely applies. Returning zero "
     "suggestions for a well-posed question is success, not a missed opportunity — do "

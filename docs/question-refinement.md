@@ -108,7 +108,7 @@ question is about, only *how it is posed*.
 | --- | --- | --- |
 | **Split the either/or** | Question offers exactly two labels for something that is a record or a spectrum | Mayor/zoning → "What is the mayor's actual record on the zoning plan — where have they supported, amended, or opposed it?" |
 | **Check the premise first** | Question presupposes a contested or unverified fact | Chickens → "Is it actually against the local rules to keep backyard chickens, and what are my options if it is?" |
-| **Name the outcome you care about** | "Net positive/negative", "better/worse" with no population, outcome, or timeframe | Four-day week → "What were the effects of a four-day work week on output and on employee retention?" |
+| **Name the outcome you care about** | A scalar verdict ("net positive/negative", "better/worse") that names no measurable outcome, or only a broad domain no single number can score | Four-day week → "What were the effects of a four-day work week on output and on employee retention?"; fluoride/"public health" → enumerate the domain's components (dental, skeletal, neurological), **never** select one (D33) |
 | **Surface the real goal** | A practical need is buried inside a factual framing | Chickens (second half) → the options clause above |
 | **Ask what's answerable** | Pure value question with no factual core | Data-vs-intuition → "What does research say about when data-driven and intuition-driven decisions each perform better?" |
 | **Ask the question behind the question** | The literal question is settled; the live question is adjacent | Apollo 11 → offer *both*: keep the verification question, and add "Why does the belief that the Moon landing was faked persist?" |
@@ -260,7 +260,8 @@ inside the graph.
 
 Two distinct layers. **Enforced** means deterministic server-side validation;
 **prompt policy** means best-effort instructions whose adherence is tested
-statistically with fixtures, not assumed.
+statistically with fixtures, not assumed — since D33, by the mechanical
+grader behind `ra audition-refine` (see "Auditing the prompt surface" below).
 
 Enforced:
 
@@ -290,6 +291,33 @@ do", applied to suggestions; fixture-tested per transform):
    output. Showing chips for every question destroys the magic and turns the
    feature into a nag.
 8. **One transform per suggestion.**
+9. **Preserve the scope** (D33). The rewrite covers everything the original
+   covered. A domain too broad to measure ("public health") is *unpacked*
+   into component outcomes, never quietly replaced by one of them ("dental
+   health") — narrowing the user's scope reads as steering toward the
+   sub-question with the most convenient answer. Numbered after 8 so earlier
+   cross-references stay stable; conceptually it is 6's sibling: 6 protects
+   *what* the question is about, 9 protects *how much* of it.
+
+## Auditing the prompt surface (D33)
+
+Prompt policy that is never measured is indistinguishable from prompt policy
+that is ignored. `refine_audition.py` measures it: a fixture corpus at
+`tests/fixtures/refine/` (questions plus mechanical expectations — allowed
+transforms, scope synonym-groups, required subject terms, well-posed
+controls that must draw silence) runs through the production prompt, schema
+and deterministic filter, and a **pure, never-LLM grader** scores what a
+user would actually have seen. `ra audition-refine` spends the calls and
+caches a verdict per (identity, enabled-transform set); `ra doctor` reads
+the cache and shows `fit`/`marginal`/`unfit`/`not audited`. Violations and
+control noise gate; a low fire rate only warns — silence is this feature's
+designed default, so the asymmetry is the mirror image of the critic
+audition's. The verdict is warn-only everywhere: refinement degrades to
+silence by design, so its fitness never blocks serving. The corpus includes
+one ideologically mirrored pair for `question_behind_the_question`
+(diagnostic fire-rate asymmetry only, runnable via `--transforms`) — the
+paired-fixture measurement that transform's enablement was waiting on,
+though enabling it stays a human decision.
 
 ## Failure modes and costs
 
@@ -317,9 +345,11 @@ do", applied to suggestions; fixture-tested per transform):
   trail.
 - Bias surface: the suggester could itself introduce spin. Mitigations: the
   transform enum (no free-form rewriting rationale), prompt-policy guardrails
-  5–6, the highest-risk transform disabled until its paired-fixture audition
+  5–6 and 9, the highest-risk transform disabled until its paired-fixture audition
   passes, and `refinement.json` making every offered suggestion auditable
-  per run.
+  per run. The realized instance of this failure mode is scope narrowing —
+  the fluoride/dental-health incident that produced D33 — now pinned by the
+  `downscope-net-positive-01` fixture at zero tolerance.
 
 ## Non-goals
 
@@ -391,7 +421,13 @@ The design above is normative; this section maps it to where it landed, not to r
      string checks above: the stale-response race (a slow, superseded
      response must not clobber newer chips), edit-after-selection clearing
      provenance, and submit-while-refinement-pending are all unexercised.
-   - **Prompt fixtures**: each enabled transform against the production
-     questions above, plus paired ideological mirror fixtures gating
-     `question_behind_the_question`, are design intent for a later pass —
-     none exist yet.
+   - ~~**Prompt fixtures**~~ — landed with D33: `tests/fixtures/refine/`
+     carries a positive fixture per enabled transform, the pinned
+     down-scoping regression, two well-posed controls, and the
+     `question_behind_the_question` mirror pair (diagnostic only).
+     `refine_audition.py` grades them mechanically; `ra audition-refine`
+     runs them against the live proxy; `tests/test_refine_audition.py`
+     covers loader, grader, judge, cache and runner offline. What remains
+     intended, not landed: growing the corpus beyond one fixture per
+     transform, and any threshold on the mirror-pair asymmetry (the
+     enablement decision stays human).
