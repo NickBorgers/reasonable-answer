@@ -23,8 +23,10 @@
 //
 // Note what this judges. The reviewers read the PRE-fix tree, and so does this verdict —
 // `addressed[]` only records which of their blockers the fixer claims to have closed. The
-// fixed SHA is reviewed by its own cycle. Nothing here inspects the fixer's diff, which
-// is why the fixer cannot clear its own work.
+// fixed SHA is not reviewed again in the normal case (the fixer claims its own post-push
+// SHA before a second pipeline can start — see docs/decisions.md D28), so this verdict and
+// the fixer's own gates are the whole review. Nothing here inspects the fixer's diff,
+// which is why the fixer cannot clear its own work on the merits of this file alone.
 
 import { existsSync, readFileSync, readdirSync, writeFileSync } from "node:fs";
 import { join } from "node:path";

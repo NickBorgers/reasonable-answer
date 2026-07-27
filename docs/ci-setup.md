@@ -167,16 +167,23 @@ break every time the matrix changes.
 ## 8. Verify the loop end to end
 
 1. Open a trivial PR (a README typo). `PR Validation Required` should go green, and the
-   review pipeline should run the `invariant` reviewer only — a docs-only change does not
-   select `security` or `test`.
-2. Open a PR touching `src/reasonable_answer/controller.py`. All three reviewers should
-   run.
+   review pipeline should run the `invariant` and `docs` reviewers — every non-empty diff
+   selects both, and a docs-only change does not additionally select `security` or `test`.
+2. Open a PR touching `src/reasonable_answer/controller.py`. All four reviewers
+   (`invariant`, `docs`, `security`, and `test`) should run.
 3. File an issue with the **Agent task** template. An agent starts on it immediately. A PR
    should appear with `Resolves #N` — **and the review pipeline should fire on it.** If
    the PR appears but nothing reviews it, the resolver checkout is not using
    `WORKFLOW_PAT`.
-4. Push a commit to that PR and confirm cycle 2 runs.
-5. Comment `/review` on an already-cleared PR and confirm it forces a fresh cycle.
+4. Once the fixer pushes a fix commit (a PR with blockers a cold fix can address), confirm
+   the pipeline does **not** start a second run on the new SHA — the fixer's Push step
+   claims `review/pipeline` on it before GitHub schedules the `synchronize` event, so
+   dedup should short-circuit — and confirm `All Required Agent Reviews` lands on that new
+   SHA (the PR's actual head), not the pre-fix `reviewed_sha`.
+5. Push a **human** commit on top of a cycle that has already run and confirm the counter
+   resets to cycle 1, not the next number — a human push is a new conversation, not a
+   fixer retry.
+6. Comment `/review` on an already-cleared PR and confirm it forces a fresh cycle.
 
 ## Troubleshooting
 
