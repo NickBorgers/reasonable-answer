@@ -1167,9 +1167,17 @@ for a human, rather than being kept alive indefinitely by resyncs.
 reviewed nothing does not consume a cycle". It cannot advance the fix loop because it runs no agent
 and addresses no blockers, and it cannot run away: once merged, the SHA contains the base,
 `needs_sync` reads false, and no further sync fires until the base moves again — one sync per base
-movement, which is external and legitimate. The "a fixer-authored commit is never inherited" rule
-(D28, corrected on #49) still holds, so the merged SHA earns its own panel rather than re-stamping a
-stale verdict.
+movement, which is external and legitimate.
+
+An earlier draft of this decision claimed here that "a fixer-authored commit is never inherited", so
+the merged SHA would earn its own panel rather than re-stamp a stale verdict. That rule no longer
+exists: the inherit short-circuit in `review-pipeline.yml` is purely topological — a merge whose
+second parent is already on the base branch, with a prior verdict to copy — and checks no author.
+The sentence also contradicted this decision's own residual two paragraphs down, which says the
+opposite and is the accurate one. It is removed rather than repaired, because nothing in this
+decision needs it: the successor's protection is that it arrives *unclaimed and unstamped*, which is
+what makes a panel reachable at all. Whether one opens automatically is the inherit rule's business,
+and `/review` is the documented override when it does not.
 
 That property is not free, and review caught it going unbacked. `review-finalize.yml` stamps
 `review/cycle` and `review/verdict` on `post_fix_sha` — sound everywhere else, because the fixer's
