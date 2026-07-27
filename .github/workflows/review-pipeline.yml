@@ -48,17 +48,23 @@ permissions:
   actions: read
 
 env:
-  # With the fixer in the graph this is a real loop breaker, not just a cost backstop.
-  # The loop it bounds is: review → fix → push → review → fix → ...
+  # The fixer claims its own post-push SHA (review-fixer.yml's Push step), so the
+  # `synchronize` event that push fires is normally suppressed and no second pipeline
+  # reviews the fix — the owner's intent is that fixer output reaches main on the
+  # pre-fix panel plus the fixer's own gates (schema, lint, marker gate, remote-head
+  # check), without a further cycle. See docs/decisions.md D28.
   #
-  # At MAX_CYCLES=2 the sequence is: cycle 1 reviews and may fix; cycle 2 reviews the
-  # fix and may not fix again (see `fix_allowed`); a third cycle is capped and finalizes
-  # NO-GO. So a PR gets at most one automated fix attempt, and that attempt is always
-  # reviewed by a fresh panel before anything can merge.
+  # That means this is now mostly a race-window backstop, not a normal-path loop
+  # breaker. A genuine cycle 2 only happens if the claim loses the race against GitHub
+  # scheduling the synchronize event — the claim has to be written *after* the push
+  # completes, since the statuses API 422s on a SHA it hasn't seen, which leaves a real
+  # (if bounded) window. `fix_allowed` is false by cycle 2 (cycle < MAX_CYCLES is
+  # required), so an accidental re-review cannot also re-fix; a third cycle is capped
+  # and finalizes NO-GO. Worst case is one wasted extra cycle, not a loop.
   #
-  # The stop-on-GO / retry-on-NO-GO asymmetry still holds and is what makes the bound
-  # safe: a GO short-circuits in review-entry.yml, so a converged PR never re-enters the
-  # loop, while a NO-GO keeps trying only until this cap binds.
+  # Every other way a fresh cycle starts is a human commit, which always resets the
+  # counter (see `Compute cycle` below) — so day to day this cap bounds repeated NO-GO
+  # iterations on a PR a human keeps pushing to, not automated fix/review ping-pong.
   MAX_CYCLES: '2'
   # Commits authored by the resolver agent. Used to tell machine pushes from human ones.
   AGENT_COMMIT_EMAIL: 'ci@reasonable-answer.local'
@@ -125,31 +131,6 @@ jobs:
           # exactly that state.
           if [ "$FORCE_REVIEW" = "true" ]; then
             echo "gather: /review requested; not inheriting, reviewing this SHA on its merits"
-            {
-              echo "inherit=false"
-              echo "inherited_verdict="
-            } >> "$GITHUB_OUTPUT"
-            exit 0
-          fi
-
-          # A commit the fixer wrote is never inherited, even when it is a textbook
-          # merge-from-base.
-          #
-          # Inherit exists for a human resyncing a branch: no PR-side content, nothing new
-          # to read, so re-stamp and move on. It was safe alongside the fixer only because
-          # fixer commits used to have one parent, which meant they always earned their own
-          # cycle — the property the whole fix/judge ordering rests on, since the judge
-          # grades the PRE-fix tree.
-          #
-          # Then the fixer learned to sync (D28), and its commits became merge commits. On
-          # PR #49 that inverted the safety property: the cycle-1 judge issued a GO for the
-          # pre-fix tree, the fixer pushed a merge carrying four conflict resolutions and
-          # two blocker fixes, gather saw merge-from-base, skipped all four reviewers, and
-          # re-stamped that GO onto a tree nobody had read. Auto-merge fired three seconds
-          # later. 2105 lines merged unreviewed.
-          author_email=$(git log -1 --format='%ae' "$SHA")
-          if [ "$author_email" = "$AGENT_COMMIT_EMAIL" ]; then
-            echo "gather: ${SHA} was authored by the fixer; not inheriting — a fix is reviewed by its own cycle"
             {
               echo "inherit=false"
               echo "inherited_verdict="
@@ -340,9 +321,9 @@ jobs:
   #
   # Deferring the write means a run that reviewed nothing costs nothing: the next push
   # starts from the same cycle number. That is fail-open on the counter, and safe, because
-  # `fix` needs this job — the only stage that can push, and therefore the only way to
-  # advance the review → fix → push → review loop this cap exists to bound, cannot run on
-  # a cycle that was never recorded.
+  # `fix` needs this job — the only stage that can push, and therefore the only stage that
+  # could ever advance the cap this counter bounds (see MAX_CYCLES above), cannot run on a
+  # cycle that was never recorded.
   record-cycle:
     name: Record cycle
     needs: [gather, review-invariant, review-docs, review-security, review-test]
@@ -375,17 +356,26 @@ jobs:
 
   # ── Fixer ────────────────────────────────────────────────────────────────────
   # The only stage that may write to the branch. It runs between the reviewers and the
-  # judge on purpose: the judge then grades the SHA the reviewers actually read, and the
-  # fixed SHA earns its own cycle with its own reviewers. Judging the post-fix tree
-  # would let the fixer clear its own work without anyone reading it.
+  # judge on purpose: the judge grades the SHA the reviewers actually read, not whatever
+  # the fixer produced from it. Judging the post-fix tree would let the fixer clear its
+  # own work unread.
   #
-  # Skipped on the final permitted cycle. A fix pushed there would never be reviewed —
-  # the next cycle is capped — so it would land unexamined code on the branch and call
-  # it progress.
+  # The fixed SHA is not reviewed again in the normal case — the fixer claims its own
+  # post-push SHA (review-fixer.yml's Push step) specifically so the next pipeline never
+  # starts. The owner's intent is that this ONE panel run, plus the fixer's own gates
+  # (schema, lint, marker gate, remote-head check), is the whole review. See
+  # docs/decisions.md D28.
   #
-  # `record-cycle` must succeed first, not merely finish: the fixer's push starts the next
-  # pipeline run, whose `gather` reads this SHA's cycle back. Pushing before the counter
-  # is durable would let the fix be reviewed as cycle 1 again and fixed a second time.
+  # Skipped on the final permitted cycle. A fix pushed there would land on a SHA that a
+  # claim race (see MAX_CYCLES above) could still route to a fresh review this run's own
+  # cap forbids continuing — worse than returning the blockers to a human intact.
+  #
+  # `record-cycle` must succeed first, not merely finish. Normally the fixer's claim, not
+  # this ordering, is what prevents a next pipeline run — but if that claim loses its race
+  # against GitHub scheduling the synchronize event, the accidental run's `gather` reads
+  # this SHA's cycle back by walking the commit chain. Pushing before the counter is
+  # durable would let that race-window run see no recorded cycle, believe itself to be
+  # cycle 1, and fix the same commit again.
   fix:
     name: Fix
     needs: [gather, review-invariant, review-docs, review-security, review-test, record-cycle]
@@ -427,12 +417,18 @@ jobs:
 
   finalize:
     name: Finalize
-    needs: [gather, judge]
+    needs: [gather, fix, judge]
     if: always() && needs.judge.result == 'success'
     uses: ./.github/workflows/review-finalize.yml
     with:
       pr_number: ${{ inputs.pr_number }}
       reviewed_sha: ${{ inputs.reviewed_sha }}
+      # `fix` is skipped outright (not merely a no-op) whenever fix_allowed was false —
+      # e.g. the last permitted cycle — so its outputs.new_sha can be empty even on this
+      # success path. Fall back to reviewed_sha in that case, same as a no-op push.
+      post_fix_sha: >-
+        ${{ needs.fix.result == 'success' && needs.fix.outputs.new_sha != '' &&
+        needs.fix.outputs.new_sha || inputs.reviewed_sha }}
       cycle: ${{ needs.gather.outputs.cycle }}
       verdict: ${{ needs.judge.outputs.verdict }}
       category: ${{ needs.judge.outputs.category }}
@@ -448,6 +444,9 @@ jobs:
     with:
       pr_number: ${{ inputs.pr_number }}
       reviewed_sha: ${{ inputs.reviewed_sha }}
+      # No fixer ran on this path (capped before `fix`'s `if` could even evaluate), so
+      # the reviewed and post-fix SHAs are the same commit.
+      post_fix_sha: ${{ inputs.reviewed_sha }}
       cycle: ${{ needs.gather.outputs.cycle }}
       verdict: 'NO-GO'
       category: cycle_capped
@@ -466,6 +465,9 @@ jobs:
     with:
       pr_number: ${{ inputs.pr_number }}
       reviewed_sha: ${{ inputs.reviewed_sha }}
+      # No fixer ran on this path either — inherit short-circuits before `fix` — so
+      # again the reviewed and post-fix SHAs are the same commit.
+      post_fix_sha: ${{ inputs.reviewed_sha }}
       cycle: ${{ needs.gather.outputs.cycle }}
       verdict: ${{ needs.gather.outputs.inherited_verdict }}
       category: inherited
@@ -495,4 +497,27 @@ jobs:
           context: review/pipeline
           state: success
           description: 'pipeline run complete'
+          github_token: ${{ secrets.WORKFLOW_PAT }}
+
+      - name: Advance the claim on the post-fix SHA
+        # The fixer's Push step claims review/pipeline on its own new SHA (post-push,
+        # pre-synchronize-event) specifically so that event finds the SHA taken and does
+        # not open a second pipeline to re-review the fix. That claim never gets
+        # advanced by anything else — no run is ever dispatched for that SHA — so if this
+        # step didn't exist it would sit `pending` forever and refuse every future event
+        # for it, including a human's `/review`.
+        #
+        # Skipped when fix was a no-op or didn't run (post-fix SHA equals reviewed SHA):
+        # that SHA's claim is already being advanced by the step above.
+        if: |
+          needs.fix.result == 'success' &&
+          needs.fix.outputs.new_sha != '' &&
+          needs.fix.outputs.new_sha != inputs.reviewed_sha
+        uses: ./.github/actions/review-state
+        with:
+          op: write-status
+          sha: ${{ needs.fix.outputs.new_sha }}
+          context: review/pipeline
+          state: success
+          description: 'pipeline run complete (post-fix)'
           github_token: ${{ secrets.WORKFLOW_PAT }}

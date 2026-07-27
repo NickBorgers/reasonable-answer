@@ -762,7 +762,7 @@ def test_the_sweeper_is_disabled_when_the_interval_is_not_positive(config):
 
 def test_url_seeds_are_refused_by_default(client):
     """The gate itself: `seed.allow_url` defaults to off, because a URL seed turns the
-    web UI into a read proxy for whatever the host can reach. D31 narrows *who* can ask
+    web UI into a read proxy for whatever the host can reach. D32 narrows *who* can ask
     for that fetch, not what the host reaches, so a deployment still enables it only
     behind a network-layer egress boundary."""
     response = client.post(
@@ -1018,7 +1018,7 @@ def test_a_submitted_run_is_owned_by_its_submitter(config):
 
 def test_the_access_email_is_lowercased(owned, config):
     """An identity that varies by case would split one person's runs across two owners
-    (D31): `Viewer@Example.com` submitting a run and `viewer@example.com` returning for
+    (D32): `Viewer@Example.com` submitting a run and `viewer@example.com` returning for
     it must be the same person. `resolve_identity` lower-cases the Access email, so the
     run is filed under — and the owner-scoped index queried by — the lower-cased form
     whatever casing the header arrives in. Drop the `.lower()` and this run would be
@@ -1182,7 +1182,7 @@ def test_the_tailscale_display_name_is_not_an_identity(config):
 
 def test_the_app_shell_is_behind_the_same_gate_as_everything_else(owned):
     """The manifest, the worker and the icons are routes like any other: no identity, no
-    asset (D31). Nothing about them is secret, but an exemption list is a thing that
+    asset (D32). Nothing about them is secret, but an exemption list is a thing that
     grows, and `/healthz` stays the only entry on it.
 
     The cost of that is paid in the `<head>`, not here: a manifest is fetched with
@@ -1404,7 +1404,7 @@ def _prefixed_client(config, fake_client, base_path=BASE):
     worker = RunWorker(config, max_concurrent=1, runner=runner)
     try:
         app = create_app(config, worker=worker)
-        # Signed in as the default viewer: the auth middleware (D31) refuses every
+        # Signed in as the default viewer: the auth middleware (D32) refuses every
         # route but /healthz, and these tests assert URL-prefixing behaviour that is
         # only reachable past that gate.
         with web_client(app) as c:

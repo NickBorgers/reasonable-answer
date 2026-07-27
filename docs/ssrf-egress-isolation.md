@@ -18,7 +18,7 @@ the same contract. The requirement `fetch.py` places on *any* of them is the sam
 
 ## Why the app needs this
 
-The service identifies its callers but does not constrain them (D31), and its evidence
+The service identifies its callers but does not constrain them (D32), and its evidence
 critic fetches web content **influenced by the user's question**. Authentication narrows
 *who* can pose a question; it does nothing about what the host can reach, and the people
 invited in are not the threat model. If that process can open arbitrary

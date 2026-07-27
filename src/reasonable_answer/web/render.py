@@ -150,7 +150,7 @@ def render_layout(
 <link rel="apple-touch-icon" href="{base_path}/static/icons/apple-touch-icon.png">
 <!-- `crossorigin="use-credentials"` because a manifest is the one subresource a browser
      fetches with credentials *omitted* by default, even same-origin. Every route but
-     `/healthz` now needs an identity (D31), and through Cloudflare Access the fetch has
+     `/healthz` now needs an identity (D32), and through Cloudflare Access the fetch has
      to carry the `CF_Authorization` cookie to get past the edge at all — without this
      attribute the manifest request is refused, the browser has no manifest, and the app
      silently stops being installable (D27). Same-origin, so this asks for credentials

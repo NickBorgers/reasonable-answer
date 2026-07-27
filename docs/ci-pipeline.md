@@ -12,7 +12,7 @@ than reproducing that archaeology.
 
 | workflow | trigger | runner | what it does |
 |---|---|---|---|
-| `pr-validation.yml` | every PR | `ubuntu-latest` | ruff, offline pytest on 3.11 + 3.12, lockfile check, actionlint, judge unit tests, docker build + smoke test |
+| `pr-validation.yml` | every PR | `ubuntu-latest` | ruff, offline pytest on 3.11 + 3.12, lockfile check, actionlint, judge unit tests, decision-number collision check, docker build + smoke test |
 | `docker-release.yml` | push to `main`, `v*` tags | `ubuntu-latest` | multi-arch build and push to GHCR, then pull back **by digest** and smoke test |
 | `ci-image.yml` | changes to `.github/ci/**`, manual | `ubuntu-latest` | builds the agent image and verifies every tool inside it runs |
 | `resolve-issue.yml` | issue opened/reopened/unlabeled, `/autoresolve` comment | `[self-hosted, homelab]` | an agent implements the issue and opens a PR |
@@ -27,6 +27,19 @@ GitHub-hosted runners with read-only permissions and no secrets: nothing in that
 
 Preserving that property is a reviewer's explicit job. A test that needs the real proxy
 must carry the `live` marker, and CI always passes `-m "not live"`.
+
+## Decision numbers are checked at the gate, not allocated at merge
+
+Each `## D<n>` section in [decisions.md](./decisions.md) is allocated by whoever writes the
+PR, and the number is echoed across `config/`, `src/`, `tests/` and docs — so a collision
+costs a repo-wide rename. Two PRs open at once each pick the same next-free number against
+main and collide when both merge (D31, issue #71). `scripts/validate-decision-numbers.sh`
+refuses a `decisions.md` in which any number is defined twice; on a `pull_request` event the
+checked-out file is the merge result, so a duplicate there is a collision that would
+otherwise land on main. It is pure and offline — one file, no git, no network — so it fits
+the secret-free gate and is unit-tested by `tests/test_decision_numbers.py`. The `tests`
+job skips docs-only PRs, so the collision check runs as its own path-filtered job to cover
+a PR that touches nothing but `decisions.md`.
 
 ## The review graph
 
@@ -94,9 +107,12 @@ from an idle one.
 
 What the verdict covers is worth being precise about. The reviewers read the **pre-fix**
 tree and so does the verdict; `addressed[]` only records which of their blockers the fixer
-claims to have closed. Nothing in the judge inspects the fixer's diff. That is what stops
-the fixer clearing its own work — the fixed SHA is graded by its own cycle, by reviewers
-that actually read it.
+claims to have closed. Nothing in the judge inspects the fixer's diff — so the fixer cannot
+clear its own work on the strength of this file, but it does not need to: by design (D28),
+the fixed SHA is not reviewed again. The fixer claims its own post-push SHA before a second
+pipeline can start, and the merge gate is written on that SHA from this verdict plus the
+fixer's own gates (schema, lint, marker gate, remote-head check), not from a fresh reading
+of the post-fix tree.
 
 `addressed[]` is credited **only when the fix was actually pushed** — `new_sha` differs
 from `input_sha`, which the host sets only after a successful push. The fixer uploads its
@@ -152,31 +168,35 @@ it holds `contents: read`, so it could not push if it tried.
   into the cap without a single substantive change. It re-stamps that verdict without
   reading anything, which is why `/review` overrides it: inheriting a NO-GO is the right
   answer to an automatic resync and the wrong answer to a person asking to be re-reviewed.
-- **A fixer-authored commit is never inherited**, however textbook a merge-from-base it
-  looks. This is what keeps "the fixed SHA earns its own cycle" true. It used to be free:
-  fixer commits had one parent, so they could not match the inherit test at all. Once the
-  fixer learned to sync (D28) its commits became merge commits, and on PR #49 that
-  inverted the property — the cycle-1 judge issued a GO for the **pre-fix** tree, the
-  fixer pushed a merge carrying four conflict resolutions and two blocker fixes, gather
-  skipped every reviewer, and re-stamped that GO onto a tree nobody had read. Auto-merge
-  fired three seconds later.
+- **A fixer-authored commit is inherited exactly like any other merge-from-base**, with no
+  per-author exemption. A prior version of this rule (PR #65, responding to PR #49) refused
+  to inherit onto a commit authored as `ci@reasonable-answer.local`, on the theory that "the
+  fixed SHA earns its own cycle" was a property worth enforcing here. That was an agent's
+  invention, not the owner's intent: the owner has since confirmed fixer output is meant to
+  reach main without a further review cycle, matching the design this repository borrows
+  from, and the per-author check has been removed. See D28's residual: a fixer-authored
+  merge whose conflict resolutions are wrong-but-clean can still reach main unread, in the
+  same way any other wrong-but-clean fixer output can (below).
 - **A run that reviewed nothing does not consume a cycle.** `review/cycle` is written by
   `record-cycle`, after the panel has read the code, and only when at least one reviewer's
   guard cleared. Every guard refusing — PR Validation red on the reviewed SHA, the branch
   moved on mid-run, an untrusted author — means no code was read, and the next push starts
   from the same cycle number. This is fail-open on the counter and safe because `fix`
-  needs `record-cycle`: the only stage that can push cannot run on an unrecorded cycle, so
-  the review → fix → push → review loop the cap bounds cannot advance without being
-  counted. PR #49 is the case that forced this: its first run recorded cycle 1 while all
-  four guards refused, and the push that repaired validation arrived as cycle 2, where
-  `fix_allowed` is already false — spending the PR's one automated fix attempt on a run
-  that read nothing.
-- **`MAX_CYCLES: 2`** is a real loop breaker now that the fixer exists. The loop it bounds
-  is review → fix → push → review. At 2: cycle 1 reviews and may fix; cycle 2 reviews that
-  fix and may not fix again; a third cycle is capped and finalizes NO-GO. So a PR gets at
-  most one automated fix attempt, and that attempt is always reviewed by a fresh panel
-  before it can merge. GO-is-terminal is what keeps the bound safe — a converged PR never
-  re-enters the loop.
+  needs `record-cycle`: the only stage that can push, and therefore the only stage that
+  could ever advance the cap, cannot run on an unrecorded cycle. PR #49 is the case that
+  forced this: its first run recorded cycle 1 while all four guards refused, and the push
+  that repaired validation arrived as cycle 2, where `fix_allowed` is already false —
+  spending the PR's one automated fix attempt on a run that read nothing.
+- **`MAX_CYCLES: 2`** is now mostly a race-window backstop, not the review → fix → push →
+  review loop breaker it once was. The fixer claims its own post-push SHA (see "The fixer
+  claims its own SHA" below), so the `synchronize` event that push fires is normally
+  suppressed and no second pipeline reviews the fix at all — the owner's intent is that
+  the fix reaches main on the strength of the pre-fix panel plus the fixer's own gates,
+  without a fresh cycle (D28). A genuine cycle 2 now only happens if that claim loses its
+  race against GitHub scheduling the event; `fix_allowed` is false by cycle 2, so that
+  accidental re-review cannot also re-fix, and a third cycle is capped and finalizes
+  NO-GO. Day to day, this cap bounds repeated NO-GO iterations on a PR a human keeps
+  pushing to, since every human commit resets the counter (above).
 
 ### Issue resolution, and the retry gesture
 
@@ -203,9 +223,12 @@ choice in an `/autoresolve` comment outranks it.
 ### The fixer
 
 `review-fixer.yml` is the only stage that may write to the PR branch. It runs **after the
-reviewers and before the judge**, which is load-bearing: the judge then grades the SHA the
-reviewers actually read, and the fixed SHA earns its own cycle with its own reviewers.
-Judging the post-fix tree would let the fixer clear its own work unread.
+reviewers and before the judge**, which is load-bearing: the judge grades the SHA the
+reviewers actually read — the pre-fix tree — so the fixer cannot clear its own work unread.
+The fixed SHA itself is **not** reviewed again in the normal case: the fixer claims its own
+post-push SHA so no second panel runs, and the fix reaches main on the strength of that
+pre-fix verdict plus the fixer's own gates (see "The fixer claims its own SHA" below, and
+D28 in `docs/decisions.md`).
 
 It does two jobs: it syncs the branch with the base, and it addresses reviewer blockers.
 Either one alone is enough to make it run.
@@ -365,11 +388,36 @@ jobs later. Both fixer prompts forbid touching `.git`; the host-side commit is t
 half of that contract. The commit is authored as `ci@reasonable-answer.local`, which is what
 cycle control uses to tell machine pushes from human ones.
 
-Unlike the design this borrows from, the fixer does **not** claim `review/pipeline` on the
-SHA it just pushed. That claim would suppress the `synchronize` event — but in this graph
-that event *is* cycle 2, the one that reviews the fix. The contention it guards against does
-not exist here: `fix` needs all four reviewers, so when it pushes, only `ubuntu-latest` jobs
-remain and no self-hosted runner is held.
+#### The fixer claims its own SHA
+
+Like the design this borrows from, the fixer claims `review/pipeline` on the SHA it just
+pushed — **after** pushing, not before. The commit-status API 422s on a SHA it has not
+seen, and the new SHA does not exist on the remote until the push completes, so a
+pre-push claim is structurally impossible; push then claim is the only ordering that
+works. See the "Push new SHA, then claim it" step in `review-fixer.yml`.
+
+That claim exists so the `synchronize` event the push fires finds the SHA already taken
+and `review-dedup` refuses to start a second pipeline for it. The owner's intent is that
+fixer output — a fix, a conflict resolution, or both — reaches main on the strength of
+the pre-fix panel plus the fixer's own gates (schema validation, `ruff`, the marker gate,
+the remote-head check), without a further cycle reading the post-fix tree. This repo
+previously suppressed the claim on the theory that the fix itself needed its own review
+cycle; that was an agent's invention, not a decision the owner had made, and it has been
+reverted (see D28 in `docs/decisions.md`).
+
+Because the event is suppressed, nothing else will ever publish `review/cycle`,
+`review/verdict`, or the merge gate for that SHA — `review-finalize.yml` does it in the
+same run, taking `post_fix_sha` as an explicit input rather than defaulting to the pre-fix
+`reviewed_sha`. Writing the merge gate on the wrong SHA would leave the PR's actual head
+permanently ungated, which is exactly the failure this stamping exists to prevent.
+`cleanup-claim` (bottom of `review-pipeline.yml`) advances `review/pipeline` to a terminal
+state on both the reviewed SHA and the post-fix SHA for the same reason: a claim this run
+makes and never revisits would otherwise leak `pending` forever and block every future
+event for that SHA, including a human's `/review`.
+
+The race the post-push claim leaves open — GitHub takes a few seconds to schedule the
+`synchronize` event — is bounded by the cycle cap (`MAX_CYCLES`, above), not eliminated:
+worst case is one wasted extra cycle, not a loop.
 
 ### Role selection
 
@@ -415,6 +463,11 @@ Branch protection only honours required-status contexts published by the GitHub 
 app (integration_id 15368). A status posted by a personal access token is recorded and
 displayed identically but does not satisfy the protection rule — so using the PAT here
 leaves the gate permanently un-green with nothing anywhere to explain why.
+
+It is also written on `post_fix_sha`, not `reviewed_sha` — see "The fixer claims its own
+SHA" above. When the fixer pushed, the PR's actual head is the post-fix commit, and that
+commit's own `synchronize` event was deliberately suppressed, so this is the only run that
+will ever gate it.
 
 ## Container topology
 

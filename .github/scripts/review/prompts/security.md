@@ -14,11 +14,11 @@ concerns the PR did not touch.
 
 The threat model you are defending is unusual, so internalize it before flagging anything:
 
-**The web interface authenticates on a trusted header, not a verified one (D31).** Identity comes
+**The web interface authenticates on a trusted header, not a verified one (D32).** Identity comes
 from `Cf-Access-Authenticated-User-Email` or the `Tailscale-User-*` headers, resolved in
 `web/identity.py`; every route but `/healthz` refuses a request that carries none, and runs belong
 to their submitter. The header being trusted rather than JWT-verified — so any peer that can reach
-the port directly can claim to be anyone — is a **documented accepted risk** in D31 and
+the port directly can claim to be anyone — is a **documented accepted risk** in D32 and
 `docs/authentication.md`, with JWKS verification listed as the named follow-up. "Verify the Access
 JWT" and "the header is forgeable" are therefore **not** findings. Underneath it the posture is
 still tailnet-only: `ra serve` defaults to binding `127.0.0.1` and warns when given anything else
@@ -92,7 +92,7 @@ documented posture, secret leak). `high` = significant impact under specific con
 
 ## Exclusion list — do NOT report
 
-- "The identity header is trusted, not verified." Documented accepted risk (see Role, D31). Only
+- "The identity header is trusted, not verified." Documented accepted risk (see Role, D32). Only
   *widening* — or weakening the gate that does exist — is a finding.
 - The UI showing reports and critiques to a human. Blindness is about what enters a **model's**
   context, not a human's — `README.md` states this explicitly. It is not an isolation break.

@@ -113,7 +113,7 @@ def test_refine_oversized_question_is_rejected(config):
 def test_refine_rate_limit_exceeded_degrades_to_an_empty_200(config):
     limiter = RateLimiter(1, 60.0, clock=lambda: 0.0)
     # Consume the one slot under the signed-in identity before the request arrives -- the
-    # limiter key is the authenticated viewer now (D31), not a shared "global" bucket.
+    # limiter key is the authenticated viewer now (D32), not a shared "global" bucket.
     limiter.check_and_record(WEB_IDENTITY)
     refiner = StubRefiner(enabled=True, limiter=limiter)
     app, worker = _make_app(config, refiner)

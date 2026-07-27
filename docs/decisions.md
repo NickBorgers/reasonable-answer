@@ -324,9 +324,9 @@ work); the context record still cannot widen scope and is still untrusted text; 
 fixer still cannot claim `body_clarification` (schema-enforced — recorded intent is not the
 author's own); the docs-coupling rule for invariant-touching fixes still applies; and the
 verification run before exit matters *more* under a wider reach, not less. The safety story
-moves from "the fixer cannot do much" to "the fixed SHA earns its own review cycle with its
-own reviewers" — which was always the real backstop, since the judge grades the reviewed
-SHA, not the fixer's output.
+is not "the fixer cannot do much" but that the judge grades the pre-fix reviewed SHA, not the
+fixer's output: the fixed SHA is not reviewed again (D28), so the pre-fix panel, the fixer's own
+gates, and this verification run are the backstop.
 
 ## D24 — social-bias categories on existing lenses, governed by docs/bias.md
 
@@ -680,23 +680,38 @@ labels the PR `needs-human-review`, and comments the unresolved paths. So the ho
 cheap and visible, which is what makes "do not guess" a real instruction rather than a wish.
 
 **What is not defended.** A resolution that is syntactically clean and semantically wrong passes
-every gate here — `ruff` sees Python, and nothing reads the merge for meaning. What *does* read it
-is the next cycle's panel, on the fixed SHA, which is the same protection every other fixer output
-gets.
+every gate here — `ruff` sees Python, and nothing reads the merge for meaning. The owner's
+confirmed intent (see the correction below) is that fixer output — a conflict resolution included
+— reaches main without a further review cycle. The protection is the pre-fix panel plus the
+fixer's own gates: schema validation against `fix-result-v1.json`, `ruff` at the version pinned in
+main's lockfile, the marker gate (no unmerged index entry, no conflict marker in the staged
+content), and the remote-head-equality check. None of those reads a merge for meaning, so the
+residual is real and it is accepted, not defended against: a wrong-but-clean conflict resolution,
+or any other wrong-but-clean fixer output, can reach main unread.
 
-**Correction, from PR #49.** The paragraph above originally said the merge commit "arrives on the
-inherit path", and treated that as an accepted cost. It was not a cost, it was a hole, and it was
-larger than described. Inherit re-stamps the *previous* verdict, and the previous verdict is the
-cycle-1 judge's reading of the **pre-fix** tree. So on #49: reviewers cleared the pre-fix tree, the
-judge issued a GO, the fixer pushed a merge carrying four conflict resolutions and two blocker
-fixes, gather saw merge-from-base and skipped all four reviewers, and that GO was re-stamped onto a
-tree nobody had read. Auto-merge fired three seconds later; 2105 lines landed on main unreviewed.
+**Correction, from PR #49, and a second correction on top of it.** The paragraph above originally
+said the merge commit "arrives on the inherit path", and treated that as an accepted cost. On PR
+#49 it was worse than described: reviewers cleared the pre-fix tree, the judge issued a GO, the
+fixer pushed a merge carrying four conflict resolutions and two blocker fixes, gather saw
+merge-from-base and skipped all four reviewers, and that GO was re-stamped onto a tree nobody had
+read. Auto-merge fired three seconds later; 2105 lines landed on main unreviewed.
 
-The property "the fixed SHA earns its own cycle with its own reviewers" was never a consequence of
-the inherit rule being careful — it held by accident, because fixer commits used to have one parent
-and so could not match the inherit test. Teaching the fixer to merge silently removed that
-accident. Gather now refuses to inherit any commit authored as `AGENT_COMMIT_EMAIL`, which restores
-the property by stating it rather than relying on commit shape.
+PR #65's response (`docs/ci-pipeline.md`, `review-pipeline.yml`'s inherit check) was to have gather
+refuse to inherit any commit authored as `AGENT_COMMIT_EMAIL`, on the theory that "the fixed SHA
+earns its own cycle with its own reviewers" was a property worth restoring by rule rather than
+letting it hold by the accident of fixer commits having one parent. That was an agent's invention,
+not a design decision the repo owner had made, and it inverted the intent this design was ported
+from: the owner has since confirmed that fixer output — including a fixer-authored merge — was
+always meant to reach main on the strength of the pre-fix panel and the fixer's own gates, without
+a second cycle reading it. The per-author inherit check has been removed accordingly (see the
+fixer's claim on its own post-push SHA in `review-fixer.yml`'s Push step, which is what actually
+stops a second panel from running).
+
+What PR #49 got wrong that is still worth fixing on its own merits: the merge-gate status must land
+on the SHA the fixer actually produced (`post_fix_sha`), never the pre-fix `reviewed_sha` — a gate
+written on a SHA that is no longer the PR's head protects nothing. `review-finalize.yml` now takes
+`post_fix_sha` as an explicit input and writes `review/cycle`, `review/verdict`, and the merge gate
+on it.
 
 ## D29 — servable under a URL base path, without relaxing the same-origin posture
 
@@ -835,7 +850,47 @@ the run page already showed, but it now leaves the host. A `purge --content-only
 `final.md`, so exporting is the thing that outlives retention; the CLI says so rather than
 reporting a corrupt run.
 
-## D31 — the interface has users: a trusted identity header, and runs that belong to someone
+## D31 — decision numbers are checked for collision at the gate, not renamed after merge
+
+**The problem.** A decision number (`## D<n>`) is allocated by whoever writes the PR, against
+the highest number on main at authoring time. The number is not just prose: it appears in
+`config/`, `src/`, `tests/` and several docs, so it is effectively a shared identifier
+allocated without a lock. Two PRs open at once each pick the same next-free number and collide
+when both merge; worse, when a subagent notices the clash and *independently* renumbers, both
+land on the same replacement. This happened three times, most visibly with #54 and #56 both
+claiming D30 (issue #71). Every collision costs a repo-wide rename.
+
+**The decision.** Keep authoring-time allocation — it is simple, and the number wants to be
+chosen while the decision is being written, not minted by machinery at merge — but refuse the
+collision at the gate. `scripts/validate-decision-numbers.sh` fails when any `## D<n>` is
+defined twice in `decisions.md`, and runs as a required `Decision Numbers` job in
+`pr-validation.yml`. The alternative fix idea — allocate the number at merge time — was
+rejected: it would have to rewrite the number across `config/`, `src/`, `tests/` and docs in a
+merge-time job with write access, which is exactly the kind of branch-writing, credentialed
+step the PR gate is built to avoid.
+
+**Why a duplicate on the PR is a collision on main.** On a `pull_request` event GitHub checks
+out the *merge ref* — the PR already merged into its base branch — so the file the check reads
+is the file that will exist on main once the PR lands. A duplicate there is a collision that
+would otherwise reach main, caught before it does. Two simultaneously-open PRs that both add
+`D<n>` do not collide against each other's unmerged branches; the first to merge advances main,
+and the second's merge ref then carries two `D<n>` and fails. That is why the reviewer should
+keep branch protection's "require branches to be up to date before merging" on — it forces the
+second PR's check to re-run against the advanced main before it can merge.
+
+**Why its own job, and why it stays pure.** The `tests` job is path-filtered to Python, so a
+docs-only PR that adds a colliding section would skip it entirely; the collision check is a
+separate path-filtered job (`docs/decisions.md` or the script itself) so that case is covered.
+The script reads one file and touches nothing else — no git, no network, no token — so it fits
+the secret-free posture of the PR gate and is exercised offline by
+`tests/test_decision_numbers.py`, which also asserts the shipped log is collision-free.
+
+**Invariants.** None of the pipeline invariants are in reach: author exclusion, the blind
+`OrchestratorView`, fail-closed lenses, severity floors and controller termination are all
+untouched. This is repository governance in CI — it constrains how a *document* is numbered,
+not what enters any model's context.
+
+## D32 — the interface has users: a trusted identity header, and runs that belong to someone
 
 Every prior version of this document says there is no authentication and that Tailscale ACLs are
 the access control. That was true and deliberate for a single operator. Opening the interface to

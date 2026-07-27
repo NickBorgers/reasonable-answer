@@ -19,6 +19,15 @@ on:
       reviewed_sha:
         required: true
         type: string
+      post_fix_sha:
+        description: >
+          SHA the merge gate and the review/cycle + review/verdict statuses land on.
+          Equals reviewed_sha except when the fixer pushed a new commit, in which case
+          it is that commit's SHA (see review-pipeline.yml's `finalize` job). Required,
+          not defaulted to reviewed_sha here, so a caller cannot forget to wire it and
+          silently stamp the pre-fix SHA (see docs/decisions.md D28).
+        required: true
+        type: string
       cycle:
         required: true
         type: string
@@ -52,6 +61,33 @@ jobs:
         uses: actions/checkout@v4
         with:
           ref: main
+
+      # The fixer claims review/pipeline on post_fix_sha itself (review-fixer.yml's
+      # Push step) so the synchronize event it fires is suppressed and no second panel
+      # reviews the fix. With that event suppressed, this run is the ONLY place that
+      # will ever write review/cycle and review/verdict for post_fix_sha — nothing else
+      # runs on it. Stamping both here, not just the merge gate below, keeps the SHA's
+      # own commit statuses self-describing for anyone (or any future gather run)
+      # inspecting it directly, instead of relying on a one-hop walk to its parent.
+      - name: Stamp review/cycle on post-fix SHA
+        uses: ./.github/actions/review-state
+        with:
+          op: write-status
+          sha: ${{ inputs.post_fix_sha }}
+          context: review/cycle
+          state: success
+          description: ${{ inputs.cycle }}
+          github_token: ${{ secrets.WORKFLOW_PAT }}
+
+      - name: Stamp review/verdict on post-fix SHA
+        uses: ./.github/actions/review-state
+        with:
+          op: write-status
+          sha: ${{ inputs.post_fix_sha }}
+          context: review/verdict
+          state: ${{ inputs.verdict == 'GO' && 'success' || 'failure' }}
+          description: ${{ inputs.verdict }}
+          github_token: ${{ secrets.WORKFLOW_PAT }}
 
       - name: Download the verdict artifact
         if: '!inputs.skip_verdict_artifact'
@@ -116,6 +152,13 @@ jobs:
       # anywhere to explain why.
       #
       # Every other write in this pipeline uses WORKFLOW_PAT. This is the exception.
+      #
+      # It is written on post_fix_sha, not reviewed_sha. Branch protection evaluates
+      # required checks against the PR's current head, and when the fixer pushed, that
+      # head IS post_fix_sha — the fixer's own claim (review-fixer.yml's Push step)
+      # suppresses the synchronize event that would otherwise start a second pipeline
+      # to write this gate for that SHA. Writing it here on the pre-fix reviewed_sha
+      # would leave the actual head permanently ungated.
       # ─────────────────────────────────────────────────────────────────────────
       - name: Publish "All Required Agent Reviews"
         uses: actions/github-script@v7
@@ -137,7 +180,7 @@ jobs:
             await github.rest.repos.createCommitStatus({
               owner: context.repo.owner,
               repo: context.repo.repo,
-              sha: process.env.REVIEWED_SHA,
+              sha: process.env.POST_FIX_SHA,
               state: verdict === 'GO' ? 'success' : 'failure',
               context: 'All Required Agent Reviews',
               description: (descriptions[category] ?? `${verdict} (cycle ${cycle})`).slice(0, 140),
@@ -147,5 +190,5 @@ jobs:
           VERDICT: ${{ inputs.verdict }}
           CATEGORY: ${{ inputs.category }}
           CYCLE: ${{ inputs.cycle }}
-          REVIEWED_SHA: ${{ inputs.reviewed_sha }}
+          POST_FIX_SHA: ${{ inputs.post_fix_sha }}
           RUN_URL: ${{ github.server_url }}/${{ github.repository }}/actions/runs/${{ github.run_id }}
