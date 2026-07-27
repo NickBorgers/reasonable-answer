@@ -307,6 +307,16 @@ verdict, no way to earn one, and therefore no way through the merge gate — the
 deadlock moved one commit forward. So `sync_only` suppresses the claim, and the merged SHA
 gets the panel the pass itself could not run.
 
+**And it is not passed to finalize as `post_fix_sha`.** That input is where `review/cycle`,
+`review/verdict`, and the merge gate land, and stamping them on the pushed SHA is only safe
+because the fixer's claim means no other run will ever write them there. Suppressing the claim
+removes that guarantee, so a sync-only successor would reach its own panel pre-stamped with a
+cycle it never spent — and at cycle 2 would arrive already capped, before the panel it was
+synced to receive. So the sync-only path passes the *pre-sync* SHA instead: the statuses stay
+where the review actually happened, and the successor stays clean for the run that will read
+it. Claim, stamp, and cycle have to move together; fixing any one alone puts the deadlock back
+somewhere else.
+
 One residual is worth naming rather than papering over: the successor is a merge-from-base,
 so if a prior verdict exists anywhere in its chain the inherit short-circuit above may
 re-stamp it instead of opening a panel. That is the fail-closed direction — a stale NO-GO,

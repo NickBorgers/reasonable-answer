@@ -69,6 +69,12 @@ jobs:
       # runs on it. Stamping both here, not just the merge gate below, keeps the SHA's
       # own commit statuses self-describing for anyone (or any future gather run)
       # inspecting it directly, instead of relying on a one-hop walk to its parent.
+      #
+      # That reasoning is load-bearing, so note where it does not apply: the sync-only
+      # path (D34) suppresses the fixer's claim so its successor CAN earn a panel, and
+      # a SHA another run will review must not arrive pre-stamped with this run's cycle
+      # and verdict. review-pipeline.yml keeps it out by passing the pre-sync SHA as
+      # post_fix_sha there, so nothing below ever sees a sync-only successor.
       - name: Stamp review/cycle on post-fix SHA
         uses: ./.github/actions/review-state
         with:

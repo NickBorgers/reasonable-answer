@@ -486,7 +486,7 @@ jobs:
 
   finalize:
     name: Finalize
-    needs: [gather, fix, judge]
+    needs: [gather, record-cycle, fix, judge]
     if: always() && needs.judge.result == 'success'
     uses: ./.github/workflows/review-finalize.yml
     with:
@@ -495,9 +495,17 @@ jobs:
       # `fix` is skipped outright (not merely a no-op) whenever fix_allowed was false —
       # e.g. the last permitted cycle — so its outputs.new_sha can be empty even on this
       # success path. Fall back to reviewed_sha in that case, same as a no-op push.
+      #
+      # A sync-only push (D34) is deliberately NOT a post-fix SHA either, which is why
+      # `record-cycle` is tested here. Everywhere else, finalize stamps review/cycle and
+      # review/verdict on the pushed SHA because the fixer's claim guarantees no other run
+      # ever will. The sync-only path suppresses that claim precisely so the successor gets
+      # its own panel, so stamping it here would contradict "a sync-only pass consumes no
+      # cycle" and — at cycle 2 — leave the successor already capped before that panel could
+      # run. The statuses stay on the pre-sync SHA, which the mergeable successor supersedes.
       post_fix_sha: >-
-        ${{ needs.fix.result == 'success' && needs.fix.outputs.new_sha != '' &&
-        needs.fix.outputs.new_sha || inputs.reviewed_sha }}
+        ${{ needs.record-cycle.result != 'skipped' && needs.fix.result == 'success' &&
+        needs.fix.outputs.new_sha != '' && needs.fix.outputs.new_sha || inputs.reviewed_sha }}
       cycle: ${{ needs.gather.outputs.cycle }}
       verdict: ${{ needs.judge.outputs.verdict }}
       category: ${{ needs.judge.outputs.category }}

@@ -1171,6 +1171,17 @@ movement, which is external and legitimate. The "a fixer-authored commit is neve
 (D28, corrected on #49) still holds, so the merged SHA earns its own panel rather than re-stamping a
 stale verdict.
 
+That property is not free, and review caught it going unbacked. `review-finalize.yml` stamps
+`review/cycle` and `review/verdict` on `post_fix_sha` — sound everywhere else, because the fixer's
+claim guarantees no other run will ever write them for that SHA. Suppressing the claim breaks that
+guarantee, so a sync-only successor would have arrived at its own panel already stamped with this
+run's cycle, consuming the cycle this decision says it does not and — at cycle 2 — reaching that
+panel already capped. So a sync-only push is not passed as `post_fix_sha` at all: the statuses stay
+on the pre-sync SHA, which the mergeable successor supersedes, and the successor is left clean for
+the run that will actually read it. The three pieces only work together — suppress the claim, skip
+the stamp, leave the cycle unwritten — and each one alone would have reintroduced the deadlock in a
+different place.
+
 **Invariants.** No blocker-fixing code lands unreviewed: the sync-only path pushes a clean merge and
 nothing else, and that merge is read by the next cycle's reviewers like any D28 sync. Author
 exclusion, the blind orchestrator, fail-closed lenses, severity floors, controller termination, and
