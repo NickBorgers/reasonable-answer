@@ -118,8 +118,9 @@ file has to be, and `scripts/make-icons.py` if you want to regenerate the placeh
 
 ## Sharing a result
 
-Reaching the interface means being on the tailnet or through Access, so sharing a result with
-anyone else means handing over a **file**, not a link. Every export carries
+Anyone signed in through the tailnet or Access who holds a run id can open that run, so sharing
+inside that audience is just handing over a **link**. Sharing with anyone *outside* it means
+handing over a **file** instead, not a link. Every export carries
 the report *and* its review record — status, sourcing label, which round shipped, the reviewers
 whose clean records key to that exact artifact, and any outstanding defects. As prose, an
 `accepted` report and a `needs_human_review` one look identical; that difference is the whole
