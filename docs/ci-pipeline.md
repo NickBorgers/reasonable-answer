@@ -14,7 +14,7 @@ than reproducing that archaeology.
 |---|---|---|---|
 | `pr-validation.yml` | every PR | `ubuntu-latest` | ruff, offline pytest on 3.11 + 3.12, lockfile check, strict docs build, actionlint, judge unit tests, decision-number collision check, docker build + smoke test |
 | `docker-release.yml` | push to `main`, `v*` tags | `ubuntu-latest` | multi-arch build and push to GHCR, then pull back **by digest** and smoke test |
-| `pages.yml` | push to `main` touching `docs/**`, manual | `ubuntu-latest` | strict MkDocs build, then deploy `docs/` to GitHub Pages |
+| `pages.yml` | push to `main` touching `docs/**`, `mkdocs.yml`, `pyproject.toml`, `uv.lock`, or `pages.yml`; manual | `ubuntu-latest` | strict MkDocs build, then deploy `docs/` to GitHub Pages |
 | `ci-image.yml` | changes to `.github/ci/**`, manual | `ubuntu-latest` | builds the agent image and verifies every tool inside it runs |
 | `resolve-issue.yml` | issue opened/reopened/unlabeled, `/autoresolve` comment | `[self-hosted, homelab]` | an agent implements the issue and opens a PR |
 | `review-entry.yml` → `review-pipeline.yml` | PR events, `/review` | mixed | authorize → gather → reviewers → judge → finalize |
