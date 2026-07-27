@@ -50,6 +50,7 @@ jobs:
       workflows: ${{ steps.filter.outputs.workflows }}
       docker: ${{ steps.filter.outputs.docker }}
       review_scripts: ${{ steps.filter.outputs.review_scripts }}
+      decisions: ${{ steps.filter.outputs.decisions }}
     steps:
       - uses: actions/checkout@v4
 
@@ -79,6 +80,9 @@ jobs:
               - 'config/**'
             review_scripts:
               - '.github/scripts/review/**'
+            decisions:
+              - 'docs/decisions.md'
+              - 'scripts/validate-decision-numbers.sh'
 
   lint:
     name: Ruff
@@ -191,6 +195,21 @@ jobs:
       # `node --test` resolves it as a module and fails on newer Node.
       - run: node --test .github/scripts/review/*.test.mjs
 
+  decisions:
+    name: Decision Numbers
+    needs: changes
+    if: needs.changes.outputs.decisions == 'true'
+    runs-on: ubuntu-latest
+    timeout-minutes: 30
+    steps:
+      # Default checkout on a pull_request is the merge ref — the PR merged into its base
+      # branch — so docs/decisions.md here is the file that will exist on main once this PR
+      # lands. A decision number defined twice in it is a collision that would otherwise
+      # reach main (issue #71).
+      - uses: actions/checkout@v4
+
+      - run: ./scripts/validate-decision-numbers.sh
+
   docker-build:
     name: Docker Build
     needs: changes
@@ -220,7 +239,7 @@ jobs:
     name: PR Validation Required
     runs-on: ubuntu-latest
     timeout-minutes: 30
-    needs: [changes, lint, tests, lockfile, workflows, review-scripts, docker-build]
+    needs: [changes, lint, tests, lockfile, workflows, review-scripts, decisions, docker-build]
     # `always()` bypasses needs-based skipping, so the fork check is repeated here.
     if: always() && (github.event_name != 'pull_request' || github.event.pull_request.head.repo.full_name == github.repository)
     steps:
@@ -242,6 +261,7 @@ jobs:
           check "Lockfile"            "${{ needs.lockfile.result }}"      || failed=true
           check "Workflow Validation" "${{ needs.workflows.result }}"     || failed=true
           check "Review Scripts"      "${{ needs.review-scripts.result }}" || failed=true
+          check "Decision Numbers"    "${{ needs.decisions.result }}"     || failed=true
           check "Docker Build"        "${{ needs.docker-build.result }}"  || failed=true
 
           if [ "$failed" = true ]; then
