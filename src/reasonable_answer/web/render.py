@@ -148,7 +148,14 @@ def render_layout(
 <link rel="icon" href="{base_path}/static/icons/icon-192.png" sizes="192x192" type="image/png">
 <!-- iOS ignores the manifest's icons for the home screen and reads this one. -->
 <link rel="apple-touch-icon" href="{base_path}/static/icons/apple-touch-icon.png">
-<link rel="manifest" href="{base_path}/manifest.webmanifest">
+<!-- `crossorigin="use-credentials"` because a manifest is the one subresource a browser
+     fetches with credentials *omitted* by default, even same-origin. Every route but
+     `/healthz` now needs an identity (D31), and through Cloudflare Access the fetch has
+     to carry the `CF_Authorization` cookie to get past the edge at all — without this
+     attribute the manifest request is refused, the browser has no manifest, and the app
+     silently stops being installable (D27). Same-origin, so this asks for credentials
+     without opting into CORS. -->
+<link rel="manifest" href="{base_path}/manifest.webmanifest" crossorigin="use-credentials">
 <style>{CSS}{extra_css}</style>
 </head>
 <body>

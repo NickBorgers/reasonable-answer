@@ -78,16 +78,33 @@ for i in $(seq 1 60); do
   sleep 1
 done
 
+# Every route but /healthz needs an identity (D31), and this container is unfronted: the
+# image ships no `auth.dev_identity`, so nothing here is reachable without a header. That
+# is worth asserting on the image itself and not only in pytest — a Dockerfile that baked
+# in a dev identity would open the whole app, and would look like a working image.
+echo "==> Requests with no identity are refused"
+# No -f: a 403 is the expected answer here, so the status code is the assertion.
+code="$(curl -sS -o /dev/null -w '%{http_code}' "http://127.0.0.1:${PORT}/")"
+if [ "$code" != "403" ]; then
+  echo "Expected 403 for an unauthenticated request to /, got ${code}." >&2
+  exit 1
+fi
+echo "    ok"
+
 # The icons, the manifest and the service worker are the only non-Python files the app
 # serves, so they are the only thing here that can be lost by a packaging change. pytest
-# runs from a checkout and would never notice; this is the check that would.
+# runs from a checkout and would never notice; this is the check that would. Fetched with
+# an identity header, which is what the tunnel or `tailscale serve` supplies in a real
+# deployment — the check above is the one that proves the gate is still there.
 echo "==> Installable-app assets shipped in the image"
-if ! curl -fsS "http://127.0.0.1:${PORT}/manifest.webmanifest" | grep -q '"standalone"'; then
+AS_SMOKE=(-H "Tailscale-User-Login: smoke@example.invalid")
+if ! curl -fsS "${AS_SMOKE[@]}" "http://127.0.0.1:${PORT}/manifest.webmanifest" |
+  grep -q '"standalone"'; then
   echo "Manifest missing or not a standalone app manifest." >&2
   exit 1
 fi
 for path in /sw.js /offline.html /static/icons/icon-512.png /static/icons/apple-touch-icon.png; do
-  if ! curl -fsS -o /dev/null "http://127.0.0.1:${PORT}${path}"; then
+  if ! curl -fsS -o /dev/null "${AS_SMOKE[@]}" "http://127.0.0.1:${PORT}${path}"; then
     echo "Asset $path did not make it into the image." >&2
     exit 1
   fi

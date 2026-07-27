@@ -18,6 +18,15 @@ of it to attach a header. `Tailscale-User-Name` sits beside the login header and
 deliberately **not** read: it carries a display name, which is a different namespace from
 the address Access reports.
 
+**Installing the app needs the manifest fetch to carry your session.** The app shell —
+`manifest.webmanifest`, `sw.js`, `offline.html`, the icons — is gated like every other
+route, and a browser fetches a *manifest* with credentials omitted by default even
+same-origin. So the `<link rel="manifest">` this app emits carries
+`crossorigin="use-credentials"`; without it the fetch arrives at Access with no
+`CF_Authorization` cookie, gets bounced at the edge, and the only symptom is that the
+install prompt quietly never appears. If you front this with something other than Access
+and installation stops working, that link attribute is the first thing to check.
+
 **The two doors are one identity only if they report the same address.** Every source is
 lower-cased and compared for equality, so case never splits you — but if your tailnet's
 identity provider reports something other than the address your Access policy lists, the

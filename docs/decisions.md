@@ -875,6 +875,17 @@ the top of each mutating handler, and that idiom is right for CSRF — it is a p
 specific routes. Authentication is a property of the app, and the failure mode of an opt-in
 check is a future route that forgets it. The middleware is the only fail-closed shape.
 
+**`/healthz` stays the only exemption, including for D27's app shell.** The manifest, service
+worker, offline page and icons are static files that hold nothing private, so exempting them
+would have been defensible — and it is still declined, because an exemption list is a thing that
+grows and every future entry is argued against a precedent rather than against this decision. The
+price is paid in the `<head>` instead: a manifest is the one subresource a browser fetches with
+credentials *omitted* by default, even same-origin, so the link carries
+`crossorigin="use-credentials"`. Without it the fetch reaches Access with no `CF_Authorization`
+cookie and is bounced at the edge — where an app-level exemption could not have helped anyway —
+and the only symptom is that the app quietly stops being installable. The container smoke test
+asserts both halves: `/` with no header is a 403, and the shell is there once a header is set.
+
 **`auth.dev_identity` is the single knob, and its unset state is the safe one.** Set (via the
 roster or `$RA_DEV_IDENTITY`), it supplies an identity to requests with no header, which is what
 local development needs; unset, such a request is refused. A boolean `require_auth` alongside it

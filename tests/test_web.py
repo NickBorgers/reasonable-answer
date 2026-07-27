@@ -1180,6 +1180,24 @@ def test_the_tailscale_display_name_is_not_an_identity(config):
 # ------------------------------------------------------- installable-app assets
 
 
+def test_the_app_shell_is_behind_the_same_gate_as_everything_else(owned):
+    """The manifest, the worker and the icons are routes like any other: no identity, no
+    asset (D31). Nothing about them is secret, but an exemption list is a thing that
+    grows, and `/healthz` stays the only entry on it.
+
+    The cost of that is paid in the `<head>`, not here: a manifest is fetched with
+    credentials *omitted* by default, so `crossorigin="use-credentials"` on the link is
+    what keeps the app installable (D27) once its manifest needs an identity."""
+    app, _ = owned
+    with web_client(app, identity=None) as c:
+        for path in ("/manifest.webmanifest", "/sw.js", "/offline.html"):
+            assert c.get(path).status_code == 403, path
+        assert c.get("/static/icons/icon-512.png").status_code == 403
+        # The one exemption, and the reason it exists: the container's own healthcheck
+        # runs inside the container with no header to attach.
+        assert c.get("/healthz").status_code == 200
+
+
 def test_the_manifest_names_only_icons_that_are_actually_served(client):
     """The swap-in-your-own-artwork path is only safe if this holds: rename or delete an
     icon and the manifest still promises it, and the install silently degrades."""
@@ -1292,7 +1310,9 @@ def test_a_run_page_is_never_cacheable(client, config):
 
 def test_the_head_advertises_the_installable_app(client):
     page = client.get("/").text
-    assert '<link rel="manifest" href="/manifest.webmanifest">' in page
+    assert (
+        '<link rel="manifest" href="/manifest.webmanifest" crossorigin="use-credentials">' in page
+    )
     assert '<link rel="apple-touch-icon" href="/static/icons/apple-touch-icon.png">' in page
     # iOS reads this and ignores the manifest's icons entirely.
     assert '<meta name="apple-mobile-web-app-capable" content="yes">' in page
@@ -1422,7 +1442,10 @@ def test_an_unset_prefix_leaves_every_url_at_the_root(client):
     byte-identical to before this feature existed."""
     for url in _absolute_urls(client.get("/").text):
         assert not url.startswith(f"{BASE}/"), url
-    assert '<link rel="manifest" href="/manifest.webmanifest">' in client.get("/").text
+    assert (
+        '<link rel="manifest" href="/manifest.webmanifest" crossorigin="use-credentials">'
+        in client.get("/").text
+    )
 
 
 def test_the_index_stays_entirely_under_the_prefix(config, fake_client):
