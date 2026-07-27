@@ -1191,7 +1191,10 @@ the stamp, leave the cycle unwritten — and each one alone would have reintrodu
 different place.
 
 **Invariants.** No blocker-fixing code lands unreviewed: the sync-only path pushes a clean merge and
-nothing else, and that merge is read by the next cycle's reviewers like any D28 sync. Author
+nothing else — no blocker fix rides it, so there is no unreviewed *fix* to land. The merge itself is
+reviewable, on the same "reachable, not guaranteed" terms as any D28 sync (above); what makes it safe
+is that its content is the base branch, already reviewed on its way to main, plus a PR-side delta of
+zero. Author
 exclusion, the blind orchestrator, fail-closed lenses, severity floors, controller termination, and
 the untrusted-text boundary all live in the Python review core and the convergence controller, none
 of which this touches — this is CI gating in `review-pipeline.yml` and `review-fixer.yml`. The

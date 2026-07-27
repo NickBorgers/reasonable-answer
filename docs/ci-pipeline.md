@@ -295,8 +295,8 @@ conflicts with its base. Such a PR has no computable merge ref, so GitHub fires 
 it reaches then hits conflicts and blocks. Clearing a true conflict still takes a human
 merging the base in by hand (as #54 and #56 did). What D34 fixes is the strictly larger,
 non-conflicting case: a behind-the-base PR whose panel was guarded off for any reason gets
-its sync, becomes mergeable, earns its `pull_request` event, gets validated, and is reviewed
-by its own cycle.
+its sync, becomes mergeable, earns its `pull_request` event, gets validated, and becomes
+reachable by a panel — see the residual below for why that is "reachable" and not "reviewed".
 
 **And the sync-only successor is the one SHA the fixer does not claim.** Normally the fixer
 claims `review/pipeline` on the SHA it pushes, so dedup suppresses the `synchronize` event and

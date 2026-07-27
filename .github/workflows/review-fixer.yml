@@ -1091,7 +1091,9 @@ jobs:
           # short-circuits its `pull_request` event, and so can never satisfy the merge
           # gate — trading the deadlock this path exists to break for a new one a SHA
           # further along. Not claiming lets the merged SHA do what it was synced to do:
-          # earn its event, get validated, and be read by its own panel.
+          # earn its event, get validated, and become reachable by a panel. Reachable,
+          # not guaranteed — a merge-from-base successor can still take gather's inherit
+          # short-circuit, and `/review` is the override for that. See D34.
           if [ "${SYNC_ONLY}" = "true" ]; then
             echo "sync-only: not claiming ${NEW_SHA}; it needs the panel this pass could not run."
           else
