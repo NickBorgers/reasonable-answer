@@ -343,13 +343,58 @@ def test_fetched_pages_are_fenced_as_untrusted():
 
 def test_a_failed_fetch_is_not_presented_as_evidence_of_fabrication():
     block = prompts.fetched_sources_block(
-        [FetchedSource(url="https://example.org/a", error="HTTP 403")]
+        [FetchedSource(url="https://example.org/a", status=403, error="HTTP 403")]
     )
-    assert "COULD NOT FETCH: HTTP 403" in block
+    assert "BLOCKED" in block and "HTTP 403" in block
     # Sites block automated clients, paywall, and go down. Treating that as "the source
     # does not exist" would manufacture BLOCKING defects from transient conditions.
     assert "NOT that the source is fake" in block
-    assert "Never raise a defect on the basis of a failed fetch" in block
+    assert "says nothing at all about whether the source exists" in block
+
+
+def test_a_blocked_source_does_not_sharpen_fabricated_citation():
+    """403 is the shape most real paywalls take, and it is not evidence of anything.
+
+    The sharpened `fabricated_citation` reading is a checkable standard. Applying it to
+    a source nobody could check is how verification manufactures defects.
+    """
+    blocked = FetchedSource(url="https://example.org/a", status=403, error="HTTP 403")
+    prompt = prompts.critic_user(Lens.EVIDENCE, "q?", "report", [blocked])
+
+    assert "the server answered for the cited URL" not in prompt
+    assert "cannot be what it claims on its face" in prompt, "the on-its-face bar stands"
+
+
+def test_only_not_found_licenses_the_sharper_fabrication_standard():
+    missing = FetchedSource(url="https://example.org/a", status=404, error="HTTP 404")
+    prompt = prompts.critic_user(Lens.EVIDENCE, "q?", "report", [missing])
+
+    assert "the server answered for the cited URL" in prompt
+    assert "refused, blocked or paywalled does not meet this bar" in prompt
+    assert "NOT FOUND" in prompt
+
+
+def test_a_body_less_outcome_cannot_be_constructed_as_if_it_had_one():
+    """`ok` is what `dispute.adjudicate_mechanical` gates on, so it has to stay true
+    that a non-`FULL_TEXT` outcome never carries quotable text."""
+    from reasonable_answer.fetch import SourceOutcome
+
+    with pytest.raises(ValueError, match="cannot carry readable body text"):
+        FetchedSource(url="u", text="t", outcome=SourceOutcome.METADATA_ONLY)
+
+
+def test_an_error_without_a_named_outcome_never_claims_full_text():
+    from reasonable_answer.fetch import SourceOutcome
+
+    assert FetchedSource(url="u", error="boom").outcome is SourceOutcome.ERROR
+    assert (
+        FetchedSource(url="u", status=404, error="HTTP 404").outcome
+        is SourceOutcome.NOT_FOUND
+    )
+    assert (
+        FetchedSource(url="u", status=429, error="HTTP 429").outcome
+        is SourceOutcome.BLOCKED
+    )
 
 
 def test_truncation_is_disclosed_so_absence_is_not_read_as_contradiction():
@@ -470,12 +515,14 @@ def test_the_audit_trail_records_what_was_fetched(tmp_path, identities, config):
 
 
 def test_fetch_failure_reasons_are_redacted_to_their_class(tmp_path, identities, config):
-    """RA-016: a fetch failure enters the `fetch_sources` audit event as its reason
-    *class* only — a status code or an exception type — never the URL or page detail
-    that trails it. An untested redaction is an untested guarantee: a regression in the
-    `split(':')`/`split('(')` logic that leaked the tail would otherwise pass CI silently."""
+    """RA-016: a fetch failure enters the `fetch_sources` audit event as a member of the
+    closed `SourceOutcome` vocabulary, optionally suffixed with an HTTP status — never
+    the URL or page detail that trails `error`. The redaction is now structural rather
+    than a `split(':')` that could regress, but an untested guarantee is still an
+    untested guarantee."""
     import json
 
+    from reasonable_answer.fetch import SourceOutcome
     from reasonable_answer.graph import _critique_one, _failure_reasons
 
     secret = "https://secret.example/leaked/path"
@@ -484,13 +531,22 @@ def test_fetch_failure_reasons_are_redacted_to_their_class(tmp_path, identities,
         def fetch_all(self, urls):
             return [
                 FetchedSource(url=secret, error=f"ConnectionResetError: {secret}"),
-                FetchedSource(url=secret, error="unreadable content type (application/pdf)"),
-                FetchedSource(url=secret, status=503, error="HTTP 503"),
+                FetchedSource(
+                    url=secret,
+                    error="unreadable content type (application/pdf)",
+                    outcome=SourceOutcome.UNREADABLE,
+                ),
+                FetchedSource(url=secret, status=403, error="HTTP 403"),
             ]
 
-    # The helper itself collapses each error to its class, dropping the tail.
-    expected = {"ConnectionResetError": 1, "unreadable content type": 1, "HTTP 503": 1}
-    assert _failure_reasons(_LeakyFailures().fetch_all(["u"])) == expected
+    # Every key is an enum member, so no free text can reach the event at all. The
+    # status rides along only where it changes what an operator would do.
+    expected = {"error": 1, "unreadable": 1, "blocked:403": 1}
+    reasons = _failure_reasons(_LeakyFailures().fetch_all(["u"]))
+    assert reasons == expected
+    assert all(
+        key.split(":")[0] in {o.value for o in SourceOutcome} for key in reasons
+    ), "every audit key must be a member of the closed vocabulary"
 
     rt, _ = _runtime(tmp_path, identities, config, fetcher=_LeakyFailures())
     _critique_one(

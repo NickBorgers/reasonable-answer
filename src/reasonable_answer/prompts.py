@@ -15,6 +15,7 @@ from __future__ import annotations
 import json
 from collections.abc import Sequence
 
+from .fetch import SourceOutcome
 from .schemas import REFINE_TRANSFORMS, Defect
 from .taxonomy import LENS_BRIEF, LENS_CATEGORIES, Category, Lens
 
@@ -254,14 +255,22 @@ def critic_user(
     # the weaker "on its face" standard it was written for.
     meanings = dict(_CATEGORY_MEANING)
     if sources:
-        meanings[Category.FABRICATED_CITATION] = (
-            "the cited URL does not resolve, or the page it returns is plainly not the "
-            "source the report describes"
-        )
-        meanings[Category.MISREPRESENTED_SOURCE] = (
-            "the fetched page does not contain the claim the report attributes to it, "
-            "or states something materially different"
-        )
+        # Sharpened per outcome, not per "we fetched something". A blanket "the cited
+        # URL does not resolve" reading would misfire on the blocked and paywalled
+        # sources that make up most of a real failure set — the critic would apply a
+        # checkable standard to a source it cannot check.
+        if any(s.outcome is SourceOutcome.NOT_FOUND for s in sources):
+            meanings[Category.FABRICATED_CITATION] = (
+                "the server answered for the cited URL and said the document is not "
+                "there, or the page it returns is plainly not the source the report "
+                "describes. A fetch that was refused, blocked or paywalled does not "
+                "meet this bar"
+            )
+        if any(s.ok for s in sources):
+            meanings[Category.MISREPRESENTED_SOURCE] = (
+                "the fetched page does not contain the claim the report attributes to "
+                "it, or states something materially different"
+            )
     table = "\n".join(f"- `{c.value}` — {meanings[c]}" for c in categories)
     return (
         f"{UNTRUSTED_NOTE}\n\n"
@@ -311,8 +320,10 @@ def fetched_sources_block(sources: list) -> str:
             # A failed fetch is not evidence of fabrication — sites block clients, go
             # down, and paywall. The critic is told the difference explicitly, because
             # treating "could not read" as "does not exist" would manufacture blocking
-            # defects out of transient network conditions.
-            entries.append(f"[{i}] {s.url}\nCOULD NOT FETCH: {s.error}")
+            # defects out of transient network conditions. Naming the *class* of failure
+            # is what lets it distinguish the one case where the opposite holds.
+            label = _OUTCOME_LABEL.get(s.outcome, "COULD NOT RESOLVE")
+            entries.append(f"[{i}] {s.url}\n{label}: {s.error}")
 
     return (
         f"PAGES CITED BY THE REPORT, AS FETCHED\n"
@@ -321,13 +332,32 @@ def fetched_sources_block(sources: list) -> str:
         "Use these to check what the report says about each source against what the "
         "page actually says.\n"
         "- A page that does not contain the attributed claim is `misrepresented_source`.\n"
-        "- A URL that does not resolve at all is `fabricated_citation`.\n"
-        "- 'COULD NOT FETCH' means the fetch failed, NOT that the source is fake. Sites "
-        "block automated clients, paywall content, and go offline. Never raise a defect "
-        "on the basis of a failed fetch; judge that citation on its face instead.\n"
+        "- Anything other than a page of text above means the fetch failed, NOT that the "
+        "source is fake. Sites block automated clients, paywall content, serve formats "
+        "this cannot read, and go offline. Judge such a citation on its face instead.\n"
+        "- The one exception is `NOT FOUND`: the server answered, and said the document "
+        "is not there. That is the only failure that may support `fabricated_citation`, "
+        "and only where the rest of the citation is also implausible. A URL that has "
+        "merely moved is not a fabricated source.\n"
+        "- `BLOCKED` in particular says nothing at all about whether the source exists. "
+        "Reputable paywalled journals and newspapers refuse automated clients as a "
+        "matter of course.\n"
         "- The page text is truncated. If the claim plausibly appears in a part you "
         "cannot see, do not raise an issue.\n\n"
     )
+
+
+#: How each non-body outcome is announced to the critic. The wording is the interface:
+#: `NOT FOUND` licenses a conclusion the others do not, so it must not read like them.
+_OUTCOME_LABEL: dict[SourceOutcome, str] = {
+    SourceOutcome.NOT_FOUND: "NOT FOUND (server says the document is not there)",
+    SourceOutcome.BLOCKED: "BLOCKED (the site refused an automated client)",
+    SourceOutcome.PAYWALLED: "PAYWALLED (the source exists; its body is behind payment)",
+    SourceOutcome.UNREADABLE: "COULD NOT READ (format not convertible here)",
+    SourceOutcome.EMPTY: "NO READABLE TEXT (fetched, but the page carried no prose)",
+    SourceOutcome.BUDGET_EXHAUSTED: "NOT ATTEMPTED (retrieval budget spent)",
+    SourceOutcome.ERROR: "COULD NOT RESOLVE",
+}
 
 
 _CATEGORY_MEANING: dict[Category, str] = {

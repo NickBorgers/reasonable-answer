@@ -10,6 +10,13 @@ actually falsify:
 * ``misrepresented_source`` — a page that does not say what the report claims. Only
   answerable with the page text in hand.
 
+Which of those a given result can speak to depends on *how* the fetch went, so results
+carry a :class:`SourceOutcome` rather than a bare success flag. A 404 on a URL nobody
+ever published and a 403 from a paywalled newspaper produce the same `error` string and
+are entirely different facts; only the first is evidence of anything. Collapsing them is
+what obliged :mod:`.prompts` to tell the evidence critic to disregard every failed
+fetch — throwing away the one case verification exists to catch.
+
 **Not an SSRF boundary** (D18). This fetches URLs a model chose, which is exposure by
 construction; the deployment is expected to constrain egress at the network layer. The
 bounds here — timeout, byte cap, redirect cap, http(s) only — exist so one slow or
@@ -29,6 +36,7 @@ import urllib.error
 import urllib.request
 from collections.abc import Callable
 from dataclasses import dataclass
+from enum import Enum
 from html.parser import HTMLParser
 
 log = logging.getLogger(__name__)
@@ -66,15 +74,79 @@ class RawResponse:
     truncated: bool
 
 
+class SourceOutcome(str, Enum):
+    """Why a citation ended up the way it did — a closed vocabulary, not a message.
+
+    The point of the distinction is that `error` alone cannot carry it. A 404 on a URL
+    nobody ever published and a 403 from a paywalled newspaper are the same string
+    shape and utterly different facts, and collapsing them is what forced
+    :mod:`.prompts` to tell the evidence critic to disregard *every* failed fetch —
+    discarding the one case where verification could actually catch a fabricated
+    citation (D18, docs/decisions.md).
+
+    `error` keeps the human-readable tail; this carries the machine decision. Two
+    fields, two jobs.
+    """
+
+    FULL_TEXT = "full_text"
+    #: Existence confirmed by a bibliographic registry; the body was not readable.
+    METADATA_ONLY = "metadata_only"
+    #: Body withheld behind payment, existence corroborated. Deliberately not emitted
+    #: yet: HTTP 402 is rare and a real paywall usually returns 200 with a teaser, so
+    #: nothing here can honestly distinguish one until a registry can corroborate it.
+    PAYWALLED = "paywalled"
+    #: The client was refused (403/429/451/999, bot wall). Existence unconfirmed —
+    #: which is not the same as absent, and must never be read as fabrication.
+    BLOCKED = "blocked"
+    #: 404/410. The strongest signal available, and still not proof of fabrication.
+    NOT_FOUND = "not_found"
+    UNREADABLE = "unreadable"
+    EMPTY = "empty"
+    ERROR = "error"
+    #: A tier that could have resolved this was out of per-run calls. Without this,
+    #: an operator reads a column of `blocked` and blames the sites.
+    BUDGET_EXHAUSTED = "budget_exhausted"
+
+
+#: Statuses that mean "refused", as distinct from "not there". 999 is LinkedIn's
+#: non-standard bot-wall code and shows up in real citation lists.
+_BLOCKED_STATUSES = frozenset({401, 402, 403, 405, 406, 423, 429, 451, 999})
+_NOT_FOUND_STATUSES = frozenset({404, 410})
+
+
 @dataclass(frozen=True)
 class FetchedSource:
-    """One resolved citation. `error` set means the fetch failed; `text` is then empty."""
+    """One resolved citation. `error` set means the fetch failed; `text` is then empty.
+
+    Three invariants that callers depend on, and that must survive any change here:
+
+    1. `error is None` **iff** `text` is non-empty **iff** `outcome is FULL_TEXT`.
+       `ok` is all three. `dispute.adjudicate_mechanical` gates on `ok and text`, so
+       this equivalence is what stops a future non-body outcome (an abstract, say)
+       from being quotable evidence in a dispute.
+    2. `text` is exactly what the critic was shown. Never populate it with something
+       :mod:`.prompts` does not render.
+    3. `outcome` is a closed vocabulary safe to put in the audit trail; `error` is free
+       text that may embed a URL and is not (RA-016).
+    """
 
     url: str
     title: str = ""
     text: str = ""
     status: int | None = None
     error: str | None = None
+    outcome: SourceOutcome = SourceOutcome.FULL_TEXT
+
+    def __post_init__(self) -> None:
+        # Invariant 1 enforced, not merely documented. A caller that sets `error`
+        # without naming an outcome gets an honest generic one rather than a silent
+        # claim that the body was read — and an outcome that carries no body can never
+        # be constructed as if it did, which is what keeps `ok` trustworthy for
+        # `dispute.adjudicate_mechanical`.
+        if self.error is not None and self.outcome is SourceOutcome.FULL_TEXT:
+            object.__setattr__(self, "outcome", classify_status(self.status))
+        elif self.error is None and self.outcome is not SourceOutcome.FULL_TEXT:
+            raise ValueError(f"{self.outcome.value} cannot carry readable body text")
 
     @property
     def ok(self) -> bool:
@@ -90,6 +162,20 @@ class FetchedSource:
         read", which is never evidence of fabrication (D38, docs/convergence.md).
         """
         return not self.ok and self.status in NOT_FOUND_STATUSES
+
+
+def classify_status(status: int | None) -> SourceOutcome:
+    """What an HTTP status means for a citation, as opposed to for a request.
+
+    `BLOCKED` and `NOT_FOUND` are the distinction that earns this function: the first
+    says nothing about whether the source exists, the second is the only evidence this
+    system can offer that it does not.
+    """
+    if status in _NOT_FOUND_STATUSES:
+        return SourceOutcome.NOT_FOUND
+    if status in _BLOCKED_STATUSES:
+        return SourceOutcome.BLOCKED
+    return SourceOutcome.ERROR
 
 
 def extract_source_urls(report: str, limit: int = 20) -> list[str]:
@@ -197,7 +283,9 @@ class SourceFetcher:
 
     def _fetch_uncached(self, url: str) -> FetchedSource:
         if not url.lower().startswith(("http://", "https://")):
-            return FetchedSource(url=url, error="not an http(s) URL")
+            return FetchedSource(
+                url=url, error="not an http(s) URL", outcome=SourceOutcome.ERROR
+            )
 
         try:
             resp = http_get(
@@ -210,9 +298,18 @@ class SourceFetcher:
                 want_body=lambda ct: "html" in ct or "text" in ct,
             )
         except urllib.error.HTTPError as exc:
-            return FetchedSource(url=url, status=exc.code, error=f"HTTP {exc.code}")
+            return FetchedSource(
+                url=url,
+                status=exc.code,
+                error=f"HTTP {exc.code}",
+                outcome=classify_status(exc.code),
+            )
         except Exception as exc:
-            return FetchedSource(url=url, error=f"{type(exc).__name__}: {exc}"[:200])
+            return FetchedSource(
+                url=url,
+                error=f"{type(exc).__name__}: {exc}"[:200],
+                outcome=SourceOutcome.ERROR,
+            )
 
         status = resp.status
         if "html" not in resp.content_type and "text" not in resp.content_type:
@@ -222,12 +319,18 @@ class SourceFetcher:
                 url=url,
                 status=status,
                 error=f"unreadable content type ({resp.content_type or 'unknown'})",
+                outcome=SourceOutcome.UNREADABLE,
             )
 
         try:
             body = resp.body.decode("utf-8", errors="replace")
         except Exception as exc:  # pragma: no cover - decode with errors= never raises
-            return FetchedSource(url=url, status=status, error=f"decode failed: {exc}")
+            return FetchedSource(
+                url=url,
+                status=status,
+                error=f"decode failed: {exc}",
+                outcome=SourceOutcome.ERROR,
+            )
 
         parser = _TextExtractor()
         try:
@@ -237,9 +340,19 @@ class SourceFetcher:
         text = parser.text[: self._max_chars]
         if not text.strip():
             return FetchedSource(
-                url=url, status=status, title=parser.title, error="no readable text"
+                url=url,
+                status=status,
+                title=parser.title,
+                error="no readable text",
+                outcome=SourceOutcome.EMPTY,
             )
-        return FetchedSource(url=url, title=parser.title, text=text, status=status)
+        return FetchedSource(
+            url=url,
+            title=parser.title,
+            text=text,
+            status=status,
+            outcome=SourceOutcome.FULL_TEXT,
+        )
 
 
 def http_get(
