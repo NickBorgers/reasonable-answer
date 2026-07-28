@@ -173,7 +173,12 @@ Mitigations, by boundary:
 - **Triage validates** every field against the schema before it becomes a defect-task or a
   count; an unknown category or invalid/over-length field **fails the entire lens** (fail-closed,
   RB-007) — nothing is silently dropped, so an adversarial critique can't collapse into a
-  fake-clean empty result.
+  fake-clean empty result. Validation runs *inside* the model call, on the same bounded
+  repair loop as a schema violation (`budgets.critic_repair_retries`): a rejection is
+  returned to the critic with the text it should have quoted, and only a critic that
+  cannot correct itself within that budget fails the lens. Repair does not loosen the
+  check — the same violation still fails closed once the budget is gone — it stops a
+  recoverable quoting slip from costing one of the run's `critique_attempts`.
 - **Loci are bounded structural references** (section/paragraph indices), not free text; quoted
   spans are length-limited untrusted data — closing the critic→generator free-text channel.
 - **The orchestrator can't be injected** — it never sees free text, only integer counts.

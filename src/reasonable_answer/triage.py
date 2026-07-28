@@ -35,9 +35,43 @@ from .taxonomy import (
     is_material,
 )
 
+#: How much of the source text a repair hint may quote back. A paragraph is normally
+#: well under this; the cap exists so a pathological block cannot crowd out the rest
+#: of the repair prompt.
+REPAIR_HINT_MAX_CHARS = 1200
+
 
 class LensValidationError(ValueError):
-    """An issue violated the closed schema for its lens. Fails the whole lens."""
+    """An issue violated the closed schema for its lens. Fails the whole lens.
+
+    Carries the text the offending field *should* have been drawn from, because the
+    message alone ("claim_span at S2.P1 is not a verbatim quote") names the problem
+    without naming the fix: a critic told only that its quote was wrong has no more
+    information than it had the first time, and re-rolls the same failure. Whoever is
+    retrying the call reads `repair_hint()` and hands the source text back, which is
+    what turns a retry into a repair.
+    """
+
+    def __init__(self, message: str, *, hint: str = "") -> None:
+        super().__init__(message)
+        self._hint = hint
+
+    def repair_hint(self) -> str:
+        """The correction guidance, or "" when this violation has nothing concrete to
+        offer (a category out of scope for the lens is a reading failure, not a
+        recoverable slip)."""
+        return self._hint
+
+
+def _quote_hint(field: str, scope: str, source_text: str) -> str:
+    """Guidance for a span that did not appear in its source: hand the source back."""
+    excerpt = source_text[:REPAIR_HINT_MAX_CHARS]
+    truncated = " (truncated)" if len(source_text) > REPAIR_HINT_MAX_CHARS else ""
+    return (
+        f"`{field}` must be copied character-for-character from the {scope} below"
+        f"{truncated}. Choose a span that appears in it verbatim, or drop the issue.\n"
+        f"---\n{excerpt}\n---"
+    )
 
 
 #: Categories whose `related_span` must itself be text from the artifact.
@@ -46,10 +80,45 @@ IN_ARTIFACT_RELATED = frozenset(
 )
 
 
+#: Typographic characters a report carries but a model retyping a quote emits in their
+#: ASCII form. Folding them is not a loosening of the check: it removes a difference
+#: that is invisible to the reader and therefore cannot distinguish an honest quote
+#: from an invented one. Citation markers like `[41]` are deliberately NOT stripped —
+#: dropping them would let a span match text it does not actually appear in.
+_PUNCTUATION_FOLD = str.maketrans(
+    {
+        "‘": "'",  # left single quote
+        "’": "'",  # right single quote / apostrophe
+        "‚": "'",
+        "‛": "'",
+        "“": '"',  # left double quote
+        "”": '"',  # right double quote
+        "„": '"',
+        "′": "'",  # prime
+        "″": '"',  # double prime
+        "‐": "-",  # hyphen
+        "‑": "-",  # non-breaking hyphen
+        "‒": "-",  # figure dash
+        "–": "-",  # en dash
+        "—": "-",  # em dash
+        "―": "-",  # horizontal bar
+        "−": "-",  # minus sign
+        " ": " ",  # non-breaking space
+        " ": " ",  # figure space
+        " ": " ",  # narrow no-break space
+        "​": "",  # zero-width space
+        "﻿": "",  # zero-width no-break space
+        "…": "...",  # ellipsis
+    }
+)
+
+
 def _normalize(text: str) -> str:
-    """Whitespace- and case-insensitive, with markdown emphasis stripped, so an
-    honest quote survives reformatting while an invented one does not."""
-    stripped = re.sub(r"[*_`]+", "", text)
+    """Whitespace- and case-insensitive, with markdown emphasis stripped and
+    typographic punctuation folded to ASCII, so an honest quote survives reformatting
+    while an invented one does not."""
+    folded = text.translate(_PUNCTUATION_FOLD)
+    stripped = re.sub(r"[*_`]+", "", folded)
     return re.sub(r"\s+", " ", stripped).strip().casefold()
 
 
@@ -63,16 +132,21 @@ def validate_issue(
         )
     if not structure.contains(issue.locus):
         raise LensValidationError(
-            f"locus {issue.locus} does not exist in the artifact under review"
+            f"locus {issue.locus} does not exist in the artifact under review",
+            # The markers are already in the prompt, but a critic that invented one has
+            # demonstrably not read them off the artifact; listing the real ones is the
+            # difference between a re-roll and a correction.
+            hint=(
+                "`locus` must name an existing [S<section>.P<paragraph>] marker. "
+                f"The artifact has exactly these: {_loci_list(structure)}."
+            ),
         )
     if require_verbatim_spans:
         # The quote fields cross to the writer carrying apparent authority ("here is
         # the offending text"). Anchoring them to the artifact means a critic can
         # only forward words the report already contains.
         paragraph = structure.text_at(issue.locus) or ""
-        _require_quote(
-            issue.claim_span, _normalize(paragraph), "claim_span", issue.locus, "cited paragraph"
-        )
+        _require_quote(issue.claim_span, paragraph, "claim_span", issue.locus, "cited paragraph")
         if issue.related_span is not None and issue.category in IN_ARTIFACT_RELATED:
             # For a contradiction or a bad inference, both halves are in the report,
             # so the second quote is checked against the whole artifact. For the
@@ -81,22 +155,30 @@ def validate_issue(
             # would fail every honest citation finding.
             _require_quote(
                 issue.related_span,
-                _normalize(structure.full_text),
+                structure.full_text,
                 "related_span",
                 issue.locus,
                 "artifact",
             )
 
 
-def _require_quote(span: str, haystack: str, field: str, locus, scope: str) -> None:
+def _loci_list(structure: Structure) -> str:
+    return ", ".join(f"S{p.section}.P{p.paragraph}" for p in structure.paragraphs) or "(none)"
+
+
+def _require_quote(span: str, source_text: str, field: str, locus, scope: str) -> None:
     needle = _normalize(span)
     if not needle:
         # "*" or "``" satisfy the schema's min_length but normalize away, and the
         # empty string is a substring of everything — an issue anchored to nothing.
-        raise LensValidationError(f"{field} at {locus} contains no quotable text")
-    if needle not in haystack:
         raise LensValidationError(
-            f"{field} at {locus} is not a verbatim quote from the {scope}"
+            f"{field} at {locus} contains no quotable text",
+            hint=_quote_hint(field, scope, source_text),
+        )
+    if needle not in _normalize(source_text):
+        raise LensValidationError(
+            f"{field} at {locus} is not a verbatim quote from the {scope}",
+            hint=_quote_hint(field, scope, source_text),
         )
 
 

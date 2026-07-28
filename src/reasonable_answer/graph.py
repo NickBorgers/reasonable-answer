@@ -77,6 +77,12 @@ class State(TypedDict, total=False):
     pending_lenses: list[str]
     lens_results: dict[str, Any]
     used_critics: dict[str, list[str]]
+    #: Per-lens count of critique attempts made on THIS artifact. `used_critics` is a
+    #: set of distinct identities and so stops growing once the eligible pool is
+    #: exhausted; this counter keeps climbing, so `pick_critic`'s rotation advances on
+    #: every rule-2 retry instead of freezing on one fallback model (mirrors the
+    #: `writer_rotation` idiom).
+    critique_rounds: dict[str, int]
     clean_records: list[dict]
     defects: list[dict]
 
@@ -252,6 +258,7 @@ def _intake(state: State, rt: Runtime) -> dict:
         "writer_rotation": 0,
         "lens_results": {},
         "used_critics": {},
+        "critique_rounds": {},
         "clean_records": [],
         "defects": [],
         "polish_used": 0,
@@ -428,6 +435,7 @@ def _generate(state: State, rt: Runtime) -> dict:
         "clean_records": [],
         "lens_results": {},
         "used_critics": {},
+        "critique_rounds": {},
         "defects": [],
         "polish_next": False,
         "pending_lenses": [lens.value for lens in LENSES],
@@ -593,6 +601,25 @@ def _adjudicate(state: State, rt: Runtime) -> dict:
 # ------------------------------------------------------------------- critique
 
 
+def _failure_reasons(failed: list) -> dict[str, int]:
+    """Tally why fetches failed, keeping the reason class only.
+
+    A `FetchedSource.error` can be `"ConnectionResetError: <detail>"` or
+    `"unreadable content type (application/pdf)"` — the tail of either may carry the
+    URL or page detail, which does not belong in the audit trail. The status code or
+    the exception type is what a diagnosis actually needs.
+    """
+    counts: dict[str, int] = {}
+    for source in failed:
+        if source.status:
+            reason = f"HTTP {source.status}"
+        else:
+            error = source.error or "unknown"
+            reason = error.split(":", 1)[0].split("(", 1)[0].strip() or "unknown"
+        counts[reason] = counts.get(reason, 0) + 1
+    return counts
+
+
 def _critique_one(
     rt: Runtime,
     lens: Lens,
@@ -607,7 +634,16 @@ def _critique_one(
     """One lens, one fresh context. Failure is recorded as a *failed lens*, never as
     'no issues found' — a failed review can never manufacture a clean record."""
     try:
-        alias = roles.pick_critic(rt.config.roster, rt.identities, lens, author_identity, used)
+        alias = roles.pick_critic(
+            rt.config.roster,
+            rt.identities,
+            lens,
+            author_identity,
+            used,
+            # `attempt` counts this lens's tries on this artifact, so once the pool is
+            # exhausted each further attempt lands on a different model.
+            rotation=attempt - 1,
+        )
         identity = rt.identities[alias]
         roles.assert_author_exclusion(identity, author_identity, lens)
     except roles.RosterExhausted as exc:
@@ -633,12 +669,27 @@ def _critique_one(
         urls = fetch.extract_source_urls(report_text, limit=rt.config.search.max_sources)
         sources = rt.fetcher.fetch_all(urls) if urls else None
         if sources:
+            failed = [s for s in sources if not s.ok]
+            # Counts alone said "10 of 12 failed" for a whole production run without
+            # saying why, and a failure is cached for the run's lifetime, so the evidence
+            # lens works from whatever survived. `_failure_reasons` keeps only the reason
+            # *class* — a status code or an exception type — never a URL or page text
+            # (RA-016).
+            reasons = _failure_reasons(failed)
             rt.store.event(
                 "fetch_sources",
                 artifact_hash=artifact_hash,
                 fetched=len(sources),
-                failed=sum(1 for s in sources if not s.ok),
+                failed=len(failed),
+                failure_reasons=reasons,
             )
+            if failed:
+                log.warning(
+                    "source fetch: %d of %d failed (%s)",
+                    len(failed),
+                    len(sources),
+                    ", ".join(f"{reason}x{count}" for reason, count in sorted(reasons.items())),
+                )
 
     return critique_mod.critique_once(
         rt.client,
@@ -665,12 +716,16 @@ def _critique(state: State, rt: Runtime) -> dict:
 
     used_raw: dict[str, list[str]] = dict(state.get("used_critics", {}))
     used = {k: set(v) for k, v in used_raw.items()}
+    # Count of tries per lens on this artifact. Unlike `used`, this keeps climbing after
+    # the eligible pool is exhausted, so rule-2 retries keep rotating (docs/convergence.md)
+    # rather than freezing `attempt` — and so the rotation index passed to `pick_critic`.
+    rounds: dict[str, int] = dict(state.get("critique_rounds", {}))
     results = dict(state.get("lens_results", {}))
 
     run_date = state.get("run_date")
 
     def work(lens: Lens) -> LensResult:
-        attempt = 1 + len(used.get(lens.value, set()))
+        attempt = rounds.get(lens.value, 0) + 1
         return _critique_one(
             rt,
             lens,
@@ -687,6 +742,7 @@ def _critique(state: State, rt: Runtime) -> dict:
         for result in pool.map(work, pending):
             results[result.lens.value] = result.model_dump(mode="json")
             used.setdefault(result.lens.value, set()).add(result.critic_identity)
+            rounds[result.lens.value] = rounds.get(result.lens.value, 0) + 1
             rt.store.critique(artifact_hash, result.lens.value, result.attempt, result)
             rt.store.event(
                 "critique",
@@ -701,6 +757,7 @@ def _critique(state: State, rt: Runtime) -> dict:
     return {
         "lens_results": results,
         "used_critics": {k: sorted(v) for k, v in used.items()},
+        "critique_rounds": rounds,
     }
 
 
@@ -926,6 +983,28 @@ def _control(state: State, rt: Runtime) -> dict:
         terminal=decision.terminal_status,
         note=decision.note,
     )
+    # The audit trail is per-run and stays on disk; these lines are the only account of
+    # a run's shape that reaches container stdout, and therefore log aggregation. A run
+    # that aborts after exhausting its critique budget used to be indistinguishable, from
+    # outside, from one that shipped an answer.
+    if decision.action == "terminal" and decision.terminal_status != "accepted":
+        log.warning(
+            "run %s terminal=%s at round %d (rule %d): %s",
+            rt.store.run_id,
+            decision.terminal_status,
+            view.round,
+            decision.rule,
+            decision.note,
+        )
+    else:
+        log.info(
+            "run %s round %d: rule %d -> %s (%s)",
+            rt.store.run_id,
+            view.round,
+            decision.rule,
+            decision.action,
+            decision.note,
+        )
 
     out: dict = {"decision": decision.model_dump(mode="json")}
     if decision.action == "recritique":
