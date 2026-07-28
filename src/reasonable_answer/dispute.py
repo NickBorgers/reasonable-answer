@@ -67,8 +67,8 @@ def adjudicate_mechanical(
 
     Upheld requires all of: a mechanical category, an `evidence_url` the report
     already cites (a writer cannot point at an arbitrary corroborating page — the
-    critic saw, or could have seen, this same source), a successful fetch, and
-    the evidence quote present verbatim in the fetched text."""
+    critic saw, or could have seen, this same source), a successful fetch of that
+    URL's **own** body, and the evidence quote present verbatim in the fetched text."""
     if fetcher is None or defect.category not in MECHANICAL_CATEGORIES:
         return None
     if not dispute.evidence_url or not dispute.evidence_quote:
@@ -77,7 +77,16 @@ def adjudicate_mechanical(
     if dispute.evidence_url not in cited:
         return None
     page = fetcher.fetch(dispute.evidence_url)
+    # `ok` already excludes a metadata-only or paywalled result, because a non-FULL_TEXT
+    # outcome can carry no text (fetch.FetchedSource's first invariant) — an abstract is
+    # never quotable evidence here, for free.
     if not page.ok or not page.text:
+        return None
+    if page.body_source_url is not None:
+        # The body came from an open-access mirror, not from the URL the report cites
+        # (D39). A preprint routinely differs from the version of record, so a quote
+        # present in arXiv v1 and absent from the published paper would uphold a dispute
+        # about a page nobody read. Inconclusive, which leaves the finding standing.
         return None
     quote = _normalize(dispute.evidence_quote)
     if quote and quote in _normalize(page.text):

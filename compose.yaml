@@ -64,6 +64,12 @@ services:
       # Required while the mounted roster has search.enabled: true — startup fails
       # closed without it. brave.token does not exist inside the container.
       BRAVE_SEARCH_API_KEY: ${BRAVE_SEARCH_API_KEY}
+      # Crossref/Unpaywall's polite pool (D39). Passed explicitly like the key above,
+      # because a variable the operator exports outside the container does not reach the
+      # process inside it — and the failure would be silent: every registry request would
+      # quietly fall back to the anonymous, harder-throttled pool while the roster claims
+      # otherwise. Startup warns when it is unset, which is what makes that visible.
+      RA_CONTACT_EMAIL: ${RA_CONTACT_EMAIL:-}
     healthcheck:
       test: ["CMD", "python", "-c", "import urllib.request;urllib.request.urlopen('http://127.0.0.1:8080/healthz',timeout=2)"]
       interval: 30s

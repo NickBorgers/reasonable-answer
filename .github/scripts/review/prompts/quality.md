@@ -20,7 +20,7 @@ alone.
 cites its `QP<n>` rows and its References table), `docs/isolation.md`,
 `docs/convergence.md`, `docs/bias.md`, `docs/decisions.md`. Then the surfaces the diff
 touches. Valid `decision_ref` IDs are the `QP<n>` rows plus the IDs in `docs/decisions.md`
-(`D1`–`D38`, `RA-*`, `RB-*`, `RC-*`, `RG-*`) and `docs/convergence.md` (`RD-002`,
+(`D1`–`D39`, `RA-*`, `RB-*`, `RC-*`, `RG-*`) and `docs/convergence.md` (`RD-002`,
 `RH-001`, `RI-001`).
 
 ## Evidence discipline

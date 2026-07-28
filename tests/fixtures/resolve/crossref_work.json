@@ -1,0 +1,45 @@
+{
+  "status": "ok",
+  "message-type": "work",
+  "message-version": "1.0.0",
+  "message": {
+    "DOI": "10.1038/s41586-021-03819-2",
+    "type": "journal-article",
+    "publisher": "Springer Science and Business Media LLC",
+    "title": [
+      "Highly accurate protein structure prediction with AlphaFold"
+    ],
+    "container-title": [
+      "Nature"
+    ],
+    "issued": {
+      "date-parts": [
+        [
+          2021,
+          7,
+          15
+        ]
+      ]
+    },
+    "author": [
+      {
+        "given": "John",
+        "family": "Jumper",
+        "sequence": "first"
+      },
+      {
+        "given": "Richard",
+        "family": "Evans",
+        "sequence": "additional"
+      },
+      {
+        "name": "AlphaFold Team",
+        "sequence": "additional"
+      }
+    ],
+    "abstract": "<jats:title>Abstract</jats:title><jats:p>Proteins are essential to life, and understanding their structure can facilitate a mechanistic understanding of their function.</jats:p>",
+    "volume": "596",
+    "page": "583-589",
+    "URL": "http://dx.doi.org/10.1038/s41586-021-03819-2"
+  }
+}

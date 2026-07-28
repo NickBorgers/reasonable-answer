@@ -840,12 +840,38 @@ def _runtime(tmp_path, identities, config, fetcher=None):
 
 
 class _Fetcher:
+    """One readable page and one source proven real by a registry but never read.
+
+    Both are third-party text in a critic's context, and registry metadata is a class of
+    it that did not exist before D39 — a different vendor, a different shape, and the
+    same isolation rule.
+    """
+
     def fetch_all(self, urls):
-        return [FetchedSource(url=u, title="T", text="PAGE BODY MARKER") for u in urls]
+        from reasonable_answer.fetch import SourceMetadata, SourceOutcome
+
+        return [
+            FetchedSource(url=urls[0], title="T", text="PAGE BODY MARKER"),
+            FetchedSource(
+                url=urls[1],
+                error="HTTP 403; crossref confirms the source exists",
+                outcome=SourceOutcome.METADATA_ONLY,
+                metadata=SourceMetadata(
+                    title="REGISTRY TITLE MARKER",
+                    abstract="ABSTRACT MARKER",
+                    registry="crossref",
+                ),
+            ),
+        ]
+
+
+#: Every kind of third-party text a fetched source can carry into a prompt.
+_SOURCE_MARKERS = ("PAGE BODY MARKER", "REGISTRY TITLE MARKER", "ABSTRACT MARKER")
 
 
 @pytest.mark.parametrize("lens", [Lens.LOGIC, Lens.COMPLETENESS])
-def test_other_lenses_never_see_the_fetched_pages(lens, tmp_path, identities, config):
+@pytest.mark.parametrize("marker", _SOURCE_MARKERS)
+def test_other_lenses_never_see_the_fetched_pages(lens, marker, tmp_path, identities, config):
     """Isolation, not an optimization.
 
     Logic and completeness cannot raise a citation category, so page text would widen
@@ -857,7 +883,7 @@ def test_other_lenses_never_see_the_fetched_pages(lens, tmp_path, identities, co
     rt, client = _runtime(tmp_path, identities, config, fetcher=_Fetcher())
     _critique_one(rt, lens, "q?", REPORT, "h" * 64, "vendor-a/model-a", set(), attempt=1)
 
-    assert "PAGE BODY MARKER" not in client.calls[-1].user
+    assert marker not in client.calls[-1].user
 
 
 def test_evidence_lens_sees_the_fetched_pages(tmp_path, identities, config):
@@ -868,7 +894,8 @@ def test_evidence_lens_sees_the_fetched_pages(tmp_path, identities, config):
         rt, Lens.EVIDENCE, "q?", REPORT, "h" * 64, "vendor-a/model-a", set(), attempt=1
     )
 
-    assert "PAGE BODY MARKER" in client.calls[-1].user
+    for marker in _SOURCE_MARKERS:
+        assert marker in client.calls[-1].user
     assert "https://example.org/a" in client.calls[-1].user
 
 
@@ -911,6 +938,46 @@ def test_the_audit_trail_records_what_was_fetched(tmp_path, identities, config):
     ]
     fetched = [e for e in events if e["kind"] == "fetch_sources"]
     assert fetched and fetched[-1]["fetched"] == 2 and fetched[-1]["failed"] == 1
+
+
+def test_the_audit_trail_tallies_which_tier_produced_each_source(
+    tmp_path, identities, config
+):
+    """Across ALL sources, not just the failures (D39). A source the open-access tier
+    rescued is a success and leaves no trace in the failure tally, so without this an
+    operator cannot tell whether a tier is earning the calls it spends."""
+    import json
+
+    from reasonable_answer.fetch import ResolutionTier, SourceMetadata, SourceOutcome
+    from reasonable_answer.graph import _critique_one
+
+    class _Mixed:
+        def fetch_all(self, urls):
+            return [
+                FetchedSource(url=urls[0], text="direct body"),
+                FetchedSource(
+                    url=urls[1],
+                    error="HTTP 403; crossref confirms the source exists",
+                    outcome=SourceOutcome.METADATA_ONLY,
+                    metadata=SourceMetadata(title="T", registry="crossref"),
+                    tier=ResolutionTier.IDENTIFIER,
+                ),
+            ]
+
+    rt, _ = _runtime(tmp_path, identities, config, fetcher=_Mixed())
+    _critique_one(
+        rt, Lens.EVIDENCE, "q?", REPORT, "h" * 64, "vendor-a/model-a", set(), attempt=1
+    )
+
+    events = [
+        json.loads(line)
+        for line in (rt.store.dir / "events.jsonl").read_text().splitlines()
+    ]
+    event = [e for e in events if e["kind"] == "fetch_sources"][-1]
+    assert event["tiers"] == {"direct": 1, "identifier": 1}
+    assert all(
+        key in {t.value for t in ResolutionTier} for key in event["tiers"]
+    ), "every audit key must be a member of the closed vocabulary"
 
 
 def test_fetch_failure_reasons_are_redacted_to_their_class(tmp_path, identities, config):

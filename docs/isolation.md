@@ -223,6 +223,12 @@ page has far more room to address its reader than a search snippet does. Three t
   a source rather than quoting the report. That channel is pre-existing and is not widened here.)
 - **Same fence, restated.** The untrusted-data note is repeated inside the fetched-pages block
   rather than relied on from the top of the prompt, given how much text sits between them.
+- **Registry metadata is the same class of text (D39).** A title, author list and abstract from
+  Crossref or OpenAlex are third-party content from a vendor the run did not choose, and they enter
+  the evidence lens through the same block, inside the same fence, under the same restriction to
+  that one lens — the isolation test is parametrized over the metadata markers as well as the page
+  body. Per-field caps bound them the way `search.py` bounds a result snippet, so one pathological
+  abstract cannot dominate what the lens reads about twelve sources.
 
 The residual risk is a page that argues the report is wrong where it is right — a critic can be
 *misled* by a hostile page into raising a spurious defect. That costs a revision round; it cannot

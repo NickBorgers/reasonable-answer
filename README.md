@@ -330,13 +330,27 @@ opt-in tier (`sources.enabled` and `sources.pdf.enabled`, both off by default an
 chose, which is SSRF exposure by construction; it is expected to be constrained at the network layer,
 not here.
 
+**Registry tiers (optional, off by default).** A direct fetch can fail for reasons that say nothing
+about whether the source is real: a paywalled journal or a newspaper refusing an automated client
+returns `blocked`, not proof of fabrication. Set `sources.enabled: true` together with
+`sources.identifiers.enabled: true`, and a citation carrying a DOI or PMID is looked up at
+Crossref/OpenAlex, which answers the question that actually matters for fabrication — does this
+source exist — without needing the paywalled body, and stops a real paywalled paper looking like an
+invented one. (arXiv ids and PMCIDs are covered when arXiv and Europe PMC are added to
+`sources.identifiers.providers`, or through the open-access tier below.) Set
+`sources.open_access.enabled: true` as well and a free copy is read where one exists, labelled as a
+mirror rather than the version of record. Neither tier sharpens `misrepresented_source`: an
+abstract is not the source's text. See D39.
+
 **Known limitations.** Output is labelled *consensus-reviewed with in-artifact sourcing* by default,
 *…with retrieved sourcing* when `search.enabled: true`, and *…with verified sourcing* when
 `verify_sources` is also on. **None of the three is fact-checked.** Verification establishes that a
-cited page exists and says something compatible with the claim — not that the page is correct, and
-not that the roster chose good sources. With verification off, whether a source supports the claim
-attached to it is unverified entirely. (See D5/D17/D18 in [decisions.md](docs/decisions.md) and the
-evidence section of [convergence.md](docs/convergence.md).)
+cited source exists and, when a body can be read, that the page says something compatible with the
+claim — not that the page is correct, and not that the roster chose good sources. A
+registry-confirmed source whose body cannot be read proves existence only, and an open-access
+mirror is disclosed as a different document from the cited page. With verification off, whether a
+source supports the claim attached to it is unverified entirely. (See D5/D17/D18/D39 in
+[decisions.md](docs/decisions.md) and the evidence section of [convergence.md](docs/convergence.md).)
 
 **Writer disputes (optional, off by default).** Set `disputes.enabled: true` and a writer that
 believes a fix-task is factually wrong can dispute it with evidence instead of falsifying the
