@@ -192,6 +192,9 @@ and the docs reviewer blocks on the first.
   provenance/retention mechanism.
 - **[bias.md](./bias.md)** — the observable-text social-bias rulebook (D24): the three
   categories, what a bias finding may not be, and the residual the rules do not catch.
+- **[quality-principles.md](./quality-principles.md)** — the evidence register (D35): the
+  twelve principles the `quality` CI reviewer audits PRs against, the literature each one
+  rests on, and the procedures for refreshing the evidence base or retiring a principle.
 - **[ssrf-egress-isolation.md](./ssrf-egress-isolation.md)** — the infrastructure half of the
   fetch boundary: the internal network and filtering proxy that enforce what the application
   cannot.

@@ -123,6 +123,7 @@ nav:
       - Convergence and stopping: convergence.md
       - Question refinement: question-refinement.md
       - Social bias rules: bias.md
+      - Quality principles: quality-principles.md
   - Operating it:
       - Authentication: authentication.md
       - SSRF egress isolation: ssrf-egress-isolation.md

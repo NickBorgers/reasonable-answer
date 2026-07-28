@@ -3,7 +3,7 @@ name: Review pipeline — orchestrator
 
 # Called only by review-entry.yml, which owns authorization and the dedup claim.
 #
-# Graph:  gather → {invariant, docs, security, test} → judge → finalize
+# Graph:  gather → {invariant, docs, security, test, quality} → judge → finalize
 #
 # The reviewer jobs are static callers rather than a matrix, because
 # `strategy.matrix` cannot be used on a job that `uses:` a reusable workflow, and
@@ -344,6 +344,27 @@ jobs:
     secrets:
       WORKFLOW_PAT: ${{ secrets.WORKFLOW_PAT }}
 
+  review-quality:
+    name: 'Review: quality'
+    needs: gather
+    if: |
+      needs.gather.outputs.cap_exhausted != 'true' &&
+      needs.gather.outputs.inherit != 'true' &&
+      contains(fromJSON(needs.gather.outputs.roles), 'quality')
+    uses: ./.github/workflows/review-reviewer.yml
+    with:
+      role: quality
+      # Codex on purpose: this role deconflicts most heavily with `invariant`
+      # (Claude), and the guard on the spec's direction should not share a model
+      # family with the guard on the spec's conformance (QP3, D35).
+      agent: codex
+      pr_number: ${{ inputs.pr_number }}
+      reviewed_sha: ${{ inputs.reviewed_sha }}
+      base_ref: ${{ inputs.base_ref }}
+      cycle: ${{ needs.gather.outputs.cycle }}
+    secrets:
+      WORKFLOW_PAT: ${{ secrets.WORKFLOW_PAT }}
+
   # ── Cycle accounting ─────────────────────────────────────────────────────────
   # The cycle counter records reviews performed, not pipeline runs started — so this is
   # written here, after the panel has actually read the code, rather than in `gather`.
@@ -362,7 +383,7 @@ jobs:
   # cycle that was never recorded.
   record-cycle:
     name: Record cycle
-    needs: [gather, review-invariant, review-docs, review-security, review-test]
+    needs: [gather, review-invariant, review-docs, review-security, review-test, review-quality]
     # A guard that errored outright reports an empty `reviewed`, which reads as false.
     if: |
       always() &&
@@ -372,7 +393,8 @@ jobs:
       (needs.review-invariant.outputs.reviewed == 'true' ||
        needs.review-docs.outputs.reviewed == 'true' ||
        needs.review-security.outputs.reviewed == 'true' ||
-       needs.review-test.outputs.reviewed == 'true')
+       needs.review-test.outputs.reviewed == 'true' ||
+       needs.review-quality.outputs.reviewed == 'true')
     runs-on: ubuntu-latest
     timeout-minutes: 20
     steps:
@@ -439,7 +461,7 @@ jobs:
   #       endless resync.
   fix:
     name: Fix
-    needs: [gather, review-invariant, review-docs, review-security, review-test, record-cycle]
+    needs: [gather, review-invariant, review-docs, review-security, review-test, review-quality, record-cycle]
     if: |
       always() &&
       needs.gather.result == 'success' &&
@@ -467,7 +489,7 @@ jobs:
 
   judge:
     name: Judge
-    needs: [gather, review-invariant, review-docs, review-security, review-test, fix]
+    needs: [gather, review-invariant, review-docs, review-security, review-test, review-quality, fix]
     if: |
       always() &&
       needs.gather.result == 'success' &&

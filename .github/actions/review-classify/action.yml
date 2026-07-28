@@ -70,7 +70,7 @@ runs:
         # A new prompt-bearing or spec-bearing document must be added here.
         is_spec_critical() {
           case "$1" in
-            docs/DESIGN.md|docs/isolation.md|docs/convergence.md|docs/architecture.md|docs/decisions.md|docs/bias.md) return 0 ;;
+            docs/DESIGN.md|docs/isolation.md|docs/convergence.md|docs/architecture.md|docs/decisions.md|docs/bias.md|docs/quality-principles.md) return 0 ;;
             docs/ci-pipeline.md|docs/ci-setup.md) return 0 ;;
             docs/authentication.md) return 0 ;;
             .github/scripts/review/prompts/*.md|.github/ci/prompts/*.md) return 0 ;;
@@ -82,6 +82,7 @@ runs:
         docs_only=true
         want_security=false
         want_test=false
+        want_quality=false
 
         while IFS= read -r f; do
           [ -n "$f" ] || continue
@@ -90,6 +91,7 @@ runs:
             docs_only=false
             want_security=true
             want_test=true
+            want_quality=true
             continue
           fi
 
@@ -115,6 +117,15 @@ runs:
               want_test=true
               ;;
           esac
+
+          case "$f" in
+            # The surfaces whose drift the quality reviewer guards: the runtime core
+            # and roster, every doc (empirical claims live there), and the review
+            # pipeline itself, whose topology embodies the same principles.
+            src/*|config/*|docs/*.md|.github/workflows/review-*|.github/scripts/review/*|.github/actions/review-*)
+              want_quality=true
+              ;;
+          esac
         done <<< "$FILES"
 
         # invariant always runs; docs runs on every non-empty diff (drift can start on
@@ -125,6 +136,9 @@ runs:
         fi
         if [ "$want_test" = true ]; then
           roles="${roles},\"test\""
+        fi
+        if [ "$want_quality" = true ]; then
+          roles="${roles},\"quality\""
         fi
 
         echo "roles=[${roles}]" >> "$GITHUB_OUTPUT"

@@ -21,6 +21,7 @@ DECISIONS = REPO_ROOT / "docs" / "decisions.md"
 PROMPTS = [
     REPO_ROOT / ".github" / "scripts" / "review" / "prompts" / "invariant.md",
     REPO_ROOT / ".github" / "scripts" / "review" / "prompts" / "docs.md",
+    REPO_ROOT / ".github" / "scripts" / "review" / "prompts" / "quality.md",
 ]
 
 # Prefixes tabulated in decisions.md. RD-/RH-/RI- live only in convergence.md and are

@@ -383,9 +383,9 @@ Lint with `uv run ruff check src/ tests/`.
 
 Every PR gets a secret-free validation run (ruff, the offline suite on 3.11 and 3.12, a lockfile
 check, `actionlint`, and a container build with a health-check smoke test), plus an agent review by
-three roles: **invariant**, **security**, and **test**. A deterministic judge aggregates their
-structured verdicts and writes the merge gate; it runs from `main` with read-only permissions, so a
-PR cannot modify the code that judges it. Nothing in the pipeline can push.
+five roles: **invariant**, **docs**, **security**, **test**, and **quality**. A deterministic judge
+aggregates their structured verdicts and writes the merge gate; it runs from `main` with read-only
+permissions, so a PR cannot modify the code that judges it. Nothing in the pipeline can push.
 
 File an issue and an agent opens a PR for it; `/review` forces a fresh review
 cycle on a PR.
