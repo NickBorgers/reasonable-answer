@@ -960,6 +960,11 @@ cookie and is bounced at the edge — where an app-level exemption could not hav
 and the only symptom is that the app quietly stops being installable. The container smoke test
 asserts both halves: `/` with no header is a 403, and the shell is there once a header is set.
 
+> Superseded in part by **D35**, which serves every `GET` under `/runs/` without an identity. The
+> reasoning above is why that is a method-scoped rule with a route-table test rather than a second
+> entry in `_UNAUTHENTICATED_PATHS` — which still holds `/healthz` alone. The app shell stays gated
+> exactly as argued here.
+
 **`auth.dev_identity` is the single knob, and its unset state is the safe one.** Set (via the
 roster or `$RA_DEV_IDENTITY`), it supplies an identity to requests with no header, which is what
 local development needs; unset, such a request is refused. A boolean `require_auth` alongside it
@@ -970,6 +975,10 @@ signed in who holds a run id can read that run — sharing a link is the intende
 someone a report, with export/publish to follow. Resume is the one exception: reading costs
 nothing, but resuming spends the owner's tokens for another 10–25 minutes, so it stays with the
 person who started it.
+
+> **D35** kept this and dropped the "signed in": holding the id is the whole credential. Resume
+> stays owner-only but loses its button, since a page served without an identity cannot tell an
+> owner from a stranger.
 
 **A run with no owner is served to nobody.** Runs written before this decision, and CLI runs
 started without `ra run --owner`, have no identity to attribute and none can be invented for

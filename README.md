@@ -82,8 +82,10 @@ round 2   writer deepseek-v4-flash
 **Callers are identified by a header, and it is trusted rather than verified.** It comes from
 whatever fronts the app — `Cf-Access-Authenticated-User-Email` from Cloudflare Access, or the
 `Tailscale-User-*` headers from `tailscale serve` — and a request carrying neither is refused on
-every route but `/healthz`. Runs belong to whoever submitted them: your index shows only your own
-runs, anyone signed in who has a run id can read that run, and only its owner can resume it.
+every route but `/healthz` and the `GET`s under `/runs/`, which are public: holding a run id is
+the credential for reading that run, so a finished report can be shared with anyone (D35). Every
+write still needs an identity. Runs belong to whoever submitted them: your index shows only your
+own runs, and only its owner can resume a run.
 
 Because the header is not verified, anyone who can reach the port directly can claim to be any
 user. `ra serve` binds `127.0.0.1` by default and `compose.yaml` publishes only to loopback for
