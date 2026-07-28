@@ -14,6 +14,7 @@ import pytest
 from conftest import WEB_IDENTITY, access_headers, web_client
 from fakes import FakeClient
 
+from reasonable_answer.export import STATUS_MEANING
 from reasonable_answer.graph import run as run_graph
 from reasonable_answer.schemas import CritiqueOutput
 from reasonable_answer.store import RunStore, sweep_expired
@@ -255,12 +256,11 @@ def test_the_report_is_rendered_not_shown_as_raw_markdown(client, config):
     run_id = response.headers["location"].rsplit("/", 1)[-1]
     _wait_for_final(config, run_id)
 
-    for url in (f"/runs/{run_id}", f"/runs/{run_id}/report"):
-        page = client.get(url)
-        assert page.status_code == 200
-        assert "<h1>Answer</h1>" in page.text
-        visible = re.sub(r"<textarea[^>]*>.*?</textarea>", "", page.text, flags=re.S)
-        assert "# Answer" not in visible
+    page = client.get(f"/runs/{run_id}/report")
+    assert page.status_code == 200
+    assert "<h1>Answer</h1>" in page.text
+    visible = re.sub(r"<textarea[^>]*>.*?</textarea>", "", page.text, flags=re.S)
+    assert "# Answer" not in visible
 
 
 def test_the_report_page_404s_before_there_is_a_report_and_for_unknown_runs(config, identities):
@@ -314,15 +314,74 @@ def test_the_runs_table_carries_the_labels_the_card_layout_needs(client, config)
         assert f'data-label="{label}"' in page
 
 
-def test_a_finished_report_outranks_the_progress_trail(client, config):
-    """Once there is an answer, the answer is the page; the rounds fold up below it."""
+def test_a_finished_run_points_at_the_report_instead_of_repeating_it(client, config):
+    """The report is rendered in exactly one place, so the URL someone copies while
+    reading it shows a recipient the same thing. The run page links there, states the
+    verdict, and is otherwise the pipeline trail — which no longer folds away, because
+    there is no report above it to outrank it."""
     response = client.post("/runs", data={"question": "Which comes first?"}, follow_redirects=False)
     run_id = response.headers["location"].rsplit("/", 1)[-1]
     _wait_for_final(config, run_id)
 
     page = client.get(f"/runs/{run_id}").text
-    assert page.index("<h1>Answer</h1>") < page.index('id="progress"')
-    assert "<details class=\"fold\">" in page
+    assert f'href="/runs/{run_id}/report">Read the report</a>' in page
+    assert "<h1>Answer</h1>" not in page  # the body lives on /report, only there
+    assert '<details class="fold">' not in page
+    assert 'id="progress"' in page
+    assert "Review record" in page  # the verdict still travels with the run page
+
+
+def test_the_run_page_offers_no_downloads(client, config):
+    """Taking the report away is offered where the report is. Six buttons on the run
+    page was the duplication this removed."""
+    response = client.post("/runs", data={"question": "Anything to download?"}, follow_redirects=False)
+    run_id = response.headers["location"].rsplit("/", 1)[-1]
+    _wait_for_final(config, run_id)
+
+    page = client.get(f"/runs/{run_id}").text
+    for path in ("export.md", "export.html", "report.md"):
+        assert f"/runs/{run_id}/{path}" not in page
+
+
+def test_the_report_page_carries_the_audit_trail_link(client, config):
+    """`/report` is the page that gets shared, and a verdict a recipient cannot check is
+    not much of a claim — so the audit trail is reachable from it, not only from the run."""
+    response = client.post("/runs", data={"question": "Checkable?"}, follow_redirects=False)
+    run_id = response.headers["location"].rsplit("/", 1)[-1]
+    _wait_for_final(config, run_id)
+
+    page = client.get(f"/runs/{run_id}/report").text
+    assert f'href="/runs/{run_id}/audit.json"' in page
+    assert f'href="/runs/{run_id}/export.md"' in page
+    assert f'href="/runs/{run_id}/export.html"' in page
+
+
+def test_report_md_stays_reachable_but_unlinked(client, config):
+    """The raw shipped artifact keeps its route — anything that hashes or diffs a report
+    wants it — but as a button beside `Download .md` it offered what looked like the same
+    file minus the review record, which is the thing that must stay attached (D30)."""
+    response = client.post("/runs", data={"question": "Still there?"}, follow_redirects=False)
+    run_id = response.headers["location"].rsplit("/", 1)[-1]
+    _wait_for_final(config, run_id)
+
+    assert client.get(f"/runs/{run_id}/report.md").status_code == 200
+    for url in (f"/runs/{run_id}", f"/runs/{run_id}/report"):
+        assert f'href="/runs/{run_id}/report.md"' not in client.get(url).text
+
+
+def test_run_status_is_labelled_for_a_stranger(client, config):
+    """A shared report reaches someone who has never seen this vocabulary. `accepted` on
+    its own is a marker; it needs to say what it is describing and what it means."""
+    response = client.post("/runs", data={"question": "What does that mean?"}, follow_redirects=False)
+    run_id = response.headers["location"].rsplit("/", 1)[-1]
+    final = _wait_for_final(config, run_id)
+    meaning = STATUS_MEANING[final["terminal_status"]]
+
+    for url in (f"/runs/{run_id}", f"/runs/{run_id}/report"):
+        page = client.get(url).text
+        assert "Run status" in page
+        assert final["terminal_status"].replace("_", " ") in page
+        assert meaning in page
 
 
 def test_a_report_that_contains_html_is_rendered_as_text_not_markup(config, identities):
@@ -342,16 +401,17 @@ def test_a_report_that_contains_html_is_rendered_as_text_not_markup(config, iden
     app = create_app(config, worker=worker)
     try:
         with web_client(app) as c:
-            for url in ("/runs/run-mdxss", "/runs/run-mdxss/report"):
-                page = c.get(url).text
-                assert "<script>alert" not in page
-                assert "&lt;script&gt;" in page
-                # markdown-it refuses the scheme, so the link stays inert literal text
-                assert 'href="javascript:' not in page
-                # An <img> would be an automatic outbound GET from the reader's browser
-                # the moment the page loads, so image syntax stays literal text too.
-                assert "<img" not in page
-                assert "127.0.0.1:9/pixel.png" in page  # rendered, but as text
+            # `/report` is the only page that renders the body, so it is the only place
+            # this can go wrong — and the only place worth pinning.
+            page = c.get("/runs/run-mdxss/report").text
+            assert "<script>alert" not in page
+            assert "&lt;script&gt;" in page
+            # markdown-it refuses the scheme, so the link stays inert literal text
+            assert 'href="javascript:' not in page
+            # An <img> would be an automatic outbound GET from the reader's browser
+            # the moment the page loads, so image syntax stays literal text too.
+            assert "<img" not in page
+            assert "127.0.0.1:9/pixel.png" in page  # rendered, but as text
     finally:
         worker.shutdown()
 

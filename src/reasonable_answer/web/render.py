@@ -314,6 +314,26 @@ def _badge(status: str) -> str:
     return f'<span class="badge {tone}" title="{esc(STATUS_MEANING.get(status, ""))}">{esc(label)}{pulse}</span>'
 
 
+def _status_block(status: str, terminal_note: str = "") -> str:
+    """The badge, said out loud.
+
+    On the index a bare badge is enough: it sits in a column of them, under a page that
+    explains itself. On a run — and especially on a report someone was *handed* — it is
+    the first thing a stranger reads, and `exhausted unresolved` on its own is a marker
+    in a vocabulary they have never seen. So it gets a label naming what the word is
+    describing, and the `STATUS_MEANING` sentence that says what it means. Same words as
+    the exported file, from the same table (D30), so a reader on screen and a recipient
+    holding the download are told the same thing.
+    """
+    meaning = esc(STATUS_MEANING.get(status, ""))
+    note = f" — {esc(terminal_note)}" if terminal_note else ""
+    return f"""<div class="status">
+    <span class="status-label">Run status</span>
+    {_badge(status)}
+  </div>
+  <p class="lede">{meaning}{note}</p>"""
+
+
 # ------------------------------------------------------------------ run page
 
 
@@ -321,12 +341,18 @@ def render_run(
     summary: RunSummary,
     timeline: list[RoundSnapshot],
     report: str | None,
-    final: dict[str, Any] | None,
     lens_names: list[str],
     record: str = "",
     base_path: str = "",
     public_base: str | None = None,
 ) -> str:
+    # This is the pipeline view, not the report. The report is rendered in exactly one
+    # place — `/runs/<id>/report` — so that the URL someone copies out of the address bar
+    # while reading it is the URL that shows a recipient the same thing. This page used
+    # to render it too, which made the two pages near-duplicates and put six buttons on
+    # this one; now it says how the run went, states the verdict, and points at the
+    # report. `report` survives as a flag: whether there is anything to point at.
+    #
     # This page is public (D35): it is served without an identity, so it takes no viewer
     # and shows nothing owner-scoped. That is what makes the URL in the address bar the
     # URL you can send to someone. Two things went with it:
@@ -356,45 +382,39 @@ def render_run(
         else ""
     )
 
-    downloads = (
-        f"""<a class="button" href="{public_base}/runs/{esc(summary.run_id)}/report">Read the report</a>
-        {_share_links(summary.run_id, public_base)}
-        <a class="secondary button" href="{public_base}/runs/{esc(summary.run_id)}/audit.json">audit.json</a>"""
+    # Reading is one click away rather than in place, and every way of *taking* the
+    # report away — copy, .md, .html — lives with the report on the page that renders
+    # it, where a reader who has decided they want it is standing. What stays here is
+    # what belongs to the run rather than to the report: the audit trail, and asking again.
+    read = (
+        f'<a class="button" href="{public_base}/runs/{esc(summary.run_id)}/report">Read the report</a>'
         if report
-        else f'<a class="secondary button" href="{public_base}/runs/{esc(summary.run_id)}/audit.json">audit.json</a>'
+        else ""
+    )
+    actions = (
+        f'{read}<a class="secondary button" '
+        f'href="{public_base}/runs/{esc(summary.run_id)}/audit.json">audit.json</a>'
     )
 
-    # Once there is a report to read, the report is the page and the round-by-round
-    # trail is supporting evidence — so it moves below and folds away. While the run is
-    # live it is the only thing there is to look at, so it stays open.
+    # Always open: the trail is what this page is for now that the report has its own.
     progress = f"""<section class="panel" id="progress"
    data-stream="{public_base}/runs/{esc(summary.run_id)}/stream"
    data-live="{'1' if summary.is_live else '0'}">
 {render_run_progress(summary, timeline, lens_names)}
 </section>"""
-    if report:
-        progress = f"""<details class="fold">
-  <summary>How it got here — {summary.rounds or "no"} round{"" if summary.rounds == 1 else "s"} of
-  write and critique</summary>
-  {progress}
-</details>"""
 
     body = f"""
 <section class="panel run-head">
   <div class="run-title">
     <h1>{esc(summary.question)}</h1>
+    {_status_block(summary.status, summary.terminal_note)}
     <div class="run-meta">
-      {_badge(summary.status)}
       <span class="dim mono">{esc(summary.run_id)}</span>
       <span class="dim">started {_ago(summary.started_at)}</span>
     </div>
-    <p class="lede">{esc(STATUS_MEANING.get(summary.status, ""))}
-    {(" — " + esc(summary.terminal_note)) if summary.terminal_note else ""}</p>
   </div>
-  <div class="run-actions">{downloads}{again}</div>
+  <div class="run-actions">{actions}{again}</div>
 </section>
-
-{_report_section(report, final)}
 
 {record}
 
@@ -468,38 +488,26 @@ def _lens_row(r: RoundSnapshot, lens: str) -> str:
     )
 
 
-def _report_section(report: str | None, final: dict[str, Any] | None) -> str:
-    """The report body. Outstanding defects and warnings are *not* repeated here —
-    they live in the review record below, which is the block that also travels with
-    every export, so a reader on screen and a reader holding the file see one list."""
-    if not report:
-        return ""
-    chosen = (final or {}).get("chosen_round")
-    provenance = (
-        f'<p class="lede">Shipped the best-scoring draft (round {esc(chosen)}), '
-        f"not necessarily the last one written.</p>"
-        if chosen
-        else ""
-    )
-
-    return f"""
-<section class="panel">
-  <h2>Report</h2>
-  {provenance}
-  <article class="report">{to_html(report)}</article>
-</section>"""
-
-
 def _share_links(run_id: str, public_base: str = "") -> str:
-    """Every one of these is a public GET (D35), so they take the public base — a reader
-    who followed a shared link must be able to follow them too."""
+    """The report page's take-it-with-you row.
+
+    Every one of these is a public GET (D35), so they take the public base — a reader
+    who followed a shared link must be able to follow them too. `audit.json` is here as
+    well as on the run page: this is the page that gets shared, and a verdict a
+    recipient cannot check is not much of a claim.
+
+    `report.md` is deliberately *not* linked. It is the raw shipped artifact and it
+    stays a route (anything that hashes or diffs a report wants it), but as a button it
+    sat next to `Download .md` offering what reads like the same file, and the
+    difference — the review record — is the one this project exists to keep attached.
+    """
     return (
         f'<a class="secondary button" href="{public_base}/runs/{esc(run_id)}/export.md" '
         f'title="the report with its review record, as markdown">Download .md</a>'
         f'<a class="secondary button" href="{public_base}/runs/{esc(run_id)}/export.html" '
         f'title="one self-contained file that opens anywhere">Download .html</a>'
-        f'<a class="secondary button" href="{public_base}/runs/{esc(run_id)}/report.md" '
-        f'title="the shipped artifact, exactly as stored">report.md</a>'
+        f'<a class="secondary button" href="{public_base}/runs/{esc(run_id)}/audit.json" '
+        f'title="the whole audit trail: verdict, rounds, every event">audit.json</a>'
     )
 
 
@@ -531,7 +539,9 @@ def render_report(
     public_base: str | None = None,
 ) -> str:
     """The report on its own page — the thing to hand to someone who wants to *read* it,
-    rather than watch the pipeline that produced it.
+    rather than watch the pipeline that produced it. The *only* page that renders it:
+    the run page links here rather than repeating it, so there is one URL to share and
+    one place the take-it-with-you controls have to live.
 
     Also the thing that gets printed: this page and the exported file share one
     stylesheet and one review record, so `Save as PDF` from a phone produces the same
@@ -546,12 +556,14 @@ def render_report(
     body = f"""
 {print_header}
 <section class="panel reading">
+  <p class="question screen-only">{esc(summary.question)}</p>
+  <div class="screen-only">
+    {_status_block(summary.status, summary.terminal_note)}
+  </div>
   <div class="run-meta screen-only">
-    {_badge(summary.status)}
     <a class="dim" href="{public_base}/runs/{esc(summary.run_id)}">back to the run</a>
     <span class="dim mono">{esc(summary.run_id)}{provenance}</span>
   </div>
-  <p class="question screen-only">{esc(summary.question)}</p>
   <div class="share screen-only">{_copy_control(copy_markdown or report)}{_share_links(summary.run_id, public_base)}</div>
   <article class="report">{to_html(report)}</article>
 </section>
@@ -978,6 +990,11 @@ table.runs { width: 100%; border-collapse: collapse; }
 }
 @keyframes pulse { 0%, 100% { opacity: .25; } 50% { opacity: 1; } }
 @media (prefers-reduced-motion: reduce) { .pulse { animation: none; } }
+.status { display: flex; gap: .5rem; align-items: center; flex-wrap: wrap; margin: .1rem 0 .4rem; }
+.status-label {
+  font-size: .72rem; text-transform: uppercase; letter-spacing: .07em;
+  color: var(--dim); font-weight: 600;
+}
 .run-head { display: flex; gap: 1.25rem; justify-content: space-between; flex-wrap: wrap; }
 .run-title { flex: 1 1 24rem; }
 .run-meta { display: flex; gap: .7rem; align-items: center; flex-wrap: wrap; margin-bottom: .5rem; }
@@ -1093,7 +1110,7 @@ table.runs { width: 100%; border-collapse: collapse; }
    area is wider than 48rem. */
 .reading { max-width: 48rem; width: 100%; margin: 0 auto; }
 .reading .run-meta { margin-bottom: .8rem; }
-.reading .question { font-size: 1.05rem; font-weight: 600; margin: 0 0 1rem; }
+.reading .question { font-size: 1.05rem; font-weight: 600; margin: 0 0 .5rem; }
 .roster-grid { display: grid; grid-template-columns: repeat(auto-fit, minmax(11rem, 1fr)); gap: 1rem; }
 .roster-grid ul { list-style: none; margin: 0; padding: 0; }
 .roster-grid li {
@@ -1232,7 +1249,7 @@ main {
     font: 11pt/1.5 ui-serif, Georgia, "Iowan Old Style", "Times New Roman", serif;
   }
   header, footer, form, .run-actions, .share, .copy-src, .fold, #progress,
-  .screen-only, .queued-note, .badge { display: none !important; }
+  .screen-only, .queued-note, .badge, .status-label { display: none !important; }
   .print-only { display: block !important; }
   /* `.exported main` is listed explicitly: it is more specific than a bare `main`,
      so its screen padding would otherwise survive onto the first printed page. */

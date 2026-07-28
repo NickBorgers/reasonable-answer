@@ -134,20 +134,26 @@ whose clean records key to that exact artifact, and any outstanding defects. As 
 `accepted` report and a `needs_human_review` one look identical; that difference is the whole
 product, so it travels with the text (D30).
 
+The report is rendered on exactly one page — `/runs/<id>/report` — and that is where all of this
+lives. `/runs/<id>` is the run itself: the verdict, the round-by-round trail, `audit.json`, `Ask
+this again`, and a link to the report.
+
 | from the report page | what you get |
 |---|---|
 | **Copy markdown** | report + record on the clipboard, for a message or a doc |
 | **Download .md** | the same thing as a file |
 | **Download .html** | one self-contained page — no font, script, stylesheet or image is fetched when it is opened |
+| **audit.json** | the whole trail behind the verdict: rounds, reviewers, every event |
 | **Print → Save as PDF** | the same page with a print stylesheet: no nav, no buttons, serif body, forced light colours, the record as a final page |
 
 PDF is the browser's own print path rather than a server-side renderer — no extra dependency, and
 the printed page cannot drift from the page you printed it from, because it is one stylesheet.
 Dark mode is explicitly reset for print, so a phone in dark mode does not produce black pages.
 
-`report.md` is untouched and remains the raw shipped artifact, for anything that hashes or diffs
-a report. Note that `purge --content-only` deletes `final.md`, so an export is what outlives the
-retention sweep.
+`GET /runs/<id>/report.md` is untouched and remains the raw shipped artifact, for anything that
+hashes or diffs a report — a route rather than a button, since beside **Download .md** it offered
+the same text minus the review record. Note that `purge --content-only` deletes `final.md`, so an
+export is what outlives the retention sweep.
 
 ## Docker
 

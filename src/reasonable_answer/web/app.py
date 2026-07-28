@@ -386,14 +386,15 @@ def create_app(
         # the same rule stated at the layer below it.
         response.headers["Cache-Control"] = "no-store"
         summary = _require(registry, worker, run_id)
+        # The body is not rendered here — only whether there is one, which decides the
+        # link to the report and whether there is a verdict to state.
         report = registry.report(run_id)
-        final, prov = _provenance(registry, summary, run_id)
+        _, prov = _provenance(registry, summary, run_id)
         record = export.provenance_html(prov) if report else ""
         return render_run(
             summary=summary,
             timeline=registry.timeline(run_id),
             report=report,
-            final=final,
             lens_names=registry.lens_names(),
             record=record,
             base_path=base_path,
