@@ -48,18 +48,21 @@ theme:
   favicon: assets/favicon.png
   icon:
     repo: fontawesome/brands/github
+  # `blue` on both, not just one palette variant: the logo's plate and speech-bubble are
+  # the same hue at different depths, so both light and dark chrome read as one brand
+  # rather than switching families with the OS theme.
   palette:
     - media: '(prefers-color-scheme: light)'
       scheme: default
-      primary: teal
-      accent: teal
+      primary: blue
+      accent: blue
       toggle:
         icon: material/weather-night
         name: Switch to dark mode
     - media: '(prefers-color-scheme: dark)'
       scheme: slate
-      primary: teal
-      accent: teal
+      primary: blue
+      accent: blue
       toggle:
         icon: material/weather-sunny
         name: Switch to light mode

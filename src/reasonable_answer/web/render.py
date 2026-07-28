@@ -871,8 +871,8 @@ def _refine_js(base_path: str = "") -> str:
 CSS = """
 :root {
   --bg: #fbfaf8; --panel: #ffffff; --ink: #1a1a1a; --dim: #6b6b6b;
-  --line: #e4e1dc; --accent: #2f5d50; --good: #2f6f4f; --warn: #8a6d1f;
-  --bad: #97331f; --live: #2f5d50; --chip: #f0eeea;
+  --line: #e4e1dc; --accent: #183c74; --good: #2f6f4f; --warn: #8a6d1f;
+  --bad: #97331f; --live: #183c74; --chip: #f0eeea;
   color-scheme: light dark;
   /* The two horizontal paddings that stack on a phone: `main`'s gutter and the panel's
      side padding. Variables rather than literals so the narrow breakpoint can shrink both
@@ -884,20 +884,20 @@ CSS = """
 @media (prefers-color-scheme: dark) {
   :root {
     --bg: #16181a; --panel: #1e2124; --ink: #e8e6e3; --dim: #9a9691;
-    --line: #2e3236; --accent: #7fbfa8; --good: #7fbfa8; --warn: #d4b062;
-    --bad: #e08b76; --live: #7fbfa8; --chip: #2a2e32;
+    --line: #2e3236; --accent: #6091de; --good: #7fbfa8; --warn: #d4b062;
+    --bad: #e08b76; --live: #6091de; --chip: #2a2e32;
   }
 }
 :root[data-theme="dark"] {
   --bg: #16181a; --panel: #1e2124; --ink: #e8e6e3; --dim: #9a9691;
-  --line: #2e3236; --accent: #7fbfa8; --good: #7fbfa8; --warn: #d4b062;
-  --bad: #e08b76; --live: #7fbfa8; --chip: #2a2e32;
+  --line: #2e3236; --accent: #6091de; --good: #7fbfa8; --warn: #d4b062;
+  --bad: #e08b76; --live: #6091de; --chip: #2a2e32;
   color-scheme: dark;
 }
 :root[data-theme="light"] {
   --bg: #fbfaf8; --panel: #ffffff; --ink: #1a1a1a; --dim: #6b6b6b;
-  --line: #e4e1dc; --accent: #2f5d50; --good: #2f6f4f; --warn: #8a6d1f;
-  --bad: #97331f; --live: #2f5d50; --chip: #f0eeea;
+  --line: #e4e1dc; --accent: #183c74; --good: #2f6f4f; --warn: #8a6d1f;
+  --bad: #97331f; --live: #183c74; --chip: #f0eeea;
   color-scheme: light;
 }
 * { box-sizing: border-box; }

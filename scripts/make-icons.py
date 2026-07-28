@@ -31,7 +31,7 @@ ICONS = Path(__file__).resolve().parent.parent / "src" / "reasonable_answer" / "
 
 #: `--accent` and `--bg` from the light palette in `web/render.py`. The icon is the one
 #: surface that cannot follow `prefers-color-scheme`, so it commits to the light pairing.
-ACCENT = (0x2F, 0x5D, 0x50)
+ACCENT = (0x18, 0x3C, 0x74)
 INK = (0xFB, 0xFA, 0xF8)
 
 

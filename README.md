@@ -121,7 +121,8 @@ The icons are the project logo. To use your own, replace the PNGs in
 `src/reasonable_answer/web/static/icons/` keeping the same filenames and pixel sizes, and restart
 — no Python to touch, and nothing to clear on already-installed devices. See
 [the README in that directory](src/reasonable_answer/web/static/icons/README.md) for what each
-file has to be, and `scripts/make-icons.py` if you want the old flat-green placeholder set back.
+file has to be, and `scripts/make-icons.py` if you want its generated placeholder set — a plain
+check on the accent-blue plate — instead.
 
 ## Sharing a result
 
