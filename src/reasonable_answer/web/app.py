@@ -25,6 +25,7 @@ import asyncio
 import logging
 import math
 import os
+import re
 from contextlib import asynccontextmanager
 from pathlib import Path
 from typing import Any
@@ -62,6 +63,15 @@ from .worker import QueueFull, RateLimited, RunWorker
 #: It reports liveness only, and nothing about any run.
 _UNAUTHENTICATED_PATHS = frozenset({"/healthz"})
 
+#: The single per-run route served without an identity, so a finished report can be
+#: shared by URL to anyone (D35). It is a pure disk read of a self-contained artifact —
+#: no worker, no graph, no token cost — and it is deliberately GET-only and pinned to the
+#: exact `export.html` path, so no token-spending route or interactive page rides through.
+#: Matched against the same `request.url.path` the proxy has already stripped `RA_ROOT_PATH`
+#: from, exactly as `_UNAUTHENTICATED_PATHS` is (D29). An owner-less run still 404s via
+#: `_require`, so making this route anonymous shares nothing that was not already readable.
+_PUBLIC_GET = re.compile(r"^/runs/[^/]+/export\.html$")
+
 log = logging.getLogger(__name__)
 
 
@@ -80,6 +90,12 @@ def create_app(
     # URLs the app *emits* — the proxy strips it from the path before the request lands, so
     # the routes below stay unprefixed. See D29.
     base_path = normalize_base_path(os.environ.get("RA_ROOT_PATH"))
+    # The public base for a shareable report link. The app emits only its own root prefix
+    # (`base_path`), which points at the identity-gated `/app`; the anonymous export lives
+    # at the deployment's edge root instead, so its base is a separate, optional setting.
+    # Unset (dev, tailnet) → no "Copy public link" button is rendered at all. Trailing
+    # slashes are trimmed so the link is built as `f"{base}/{run_id}"` without doubling.
+    public_share_base = (os.environ.get("RA_PUBLIC_SHARE_BASE") or "").rstrip("/") or None
     concurrent = max_concurrent or int(os.environ.get("RA_MAX_CONCURRENT_RUNS", "1"))
     if (cap := os.environ.get("RA_MAX_RESUME_ATTEMPTS")):
         config = config.model_copy(update={"max_resume_attempts": int(cap)})
@@ -149,6 +165,7 @@ def create_app(
     app.state.registry = registry
     app.state.refiner = refiner
     app.state.base_path = base_path
+    app.state.public_share_base = public_share_base
     # Read once here rather than per request: these files do not change while the process
     # runs, and resolving them at startup means a missing one is a 404 rather than a 500.
     # The base path shapes the URLs the manifest names and the worker precaches, so it is
@@ -172,10 +189,17 @@ def create_app(
         attacker-controlled, and a rejected request has no identity to attribute.
         """
         if request.url.path not in _UNAUTHENTICATED_PATHS:
-            viewer = resolve_identity(request, config.auth)
-            if viewer is None:
-                return PlainTextResponse("authentication required", status_code=403)
-            request.state.viewer = viewer
+            if request.method == "GET" and _PUBLIC_GET.match(request.url.path):
+                # The report export is the one public artifact (D35): a self-contained
+                # file, a pure disk read, no token cost. It is served to an anonymous
+                # caller with no viewer — the handler takes none, and `_reject_cross_site`
+                # guards POSTs only — so nothing owner-scoped becomes reachable here.
+                request.state.viewer = None
+            else:
+                viewer = resolve_identity(request, config.auth)
+                if viewer is None:
+                    return PlainTextResponse("authentication required", status_code=403)
+                request.state.viewer = viewer
         return await call_next(request)
 
     # ------------------------------------------------------------------ pages
@@ -302,6 +326,7 @@ def create_app(
             record=record,
             base_path=base_path,
             viewer=request.state.viewer,
+            public_share_base=public_share_base,
         )
 
     @app.post("/runs/{run_id}/resume")

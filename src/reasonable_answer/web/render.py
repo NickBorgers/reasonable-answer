@@ -321,6 +321,7 @@ def render_run(
     record: str = "",
     base_path: str = "",
     viewer: str | None = None,
+    public_share_base: str | None = None,
 ) -> str:
     mine = viewer is not None and summary.owner == viewer
     # Anyone signed in can open a run they hold the id for, but only its owner can
@@ -341,9 +342,18 @@ def render_run(
         else ""
     )
 
+    # A public link only exists once there is a report to export, and only when the
+    # deployment has told us its public edge base (D35). Off by default, so tailnet and
+    # dev output — which have no anonymous edge — stay clean.
+    share = (
+        _public_share_control(summary.run_id, public_share_base)
+        if report and public_share_base
+        else ""
+    )
+
     downloads = (
         f"""<a class="button" href="{base_path}/runs/{esc(summary.run_id)}/report">Read the report</a>
-        {_share_links(summary.run_id, base_path)}
+        {_share_links(summary.run_id, base_path)}{share}
         <a class="secondary button" href="{base_path}/runs/{esc(summary.run_id)}/audit.json">audit.json</a>"""
         if report
         else f'<a class="secondary button" href="{base_path}/runs/{esc(summary.run_id)}/audit.json">audit.json</a>'
@@ -391,6 +401,7 @@ def render_run(
         body,
         live=summary.is_live,
         base_path=base_path,
+        extra_script=SHARE_COPY_JS if share else "",
     )
 
 
@@ -484,6 +495,31 @@ def _share_links(run_id: str, base_path: str = "") -> str:
         f'title="one self-contained file that opens anywhere">Download .html</a>'
         f'<a class="secondary button" href="{base_path}/runs/{esc(run_id)}/report.md" '
         f'title="the shipped artifact, exactly as stored">report.md</a>'
+    )
+
+
+def _public_share_control(run_id: str, public_share_base: str) -> str:
+    """A copy button for the anonymous, shareable link to the report export (D35).
+
+    The link points at the deployment's public edge base (`RA_PUBLIC_SHARE_BASE`), which
+    the edge maps to this app's `GET /runs/<id>/export.html` — the one route served
+    without an identity. Rendered only when that base is configured, so a tailnet or dev
+    deployment, which has no public edge, shows nothing. The URL rides in an off-screen
+    textarea for the same reason the markdown copy does (`_copy_control`): on the plain-
+    http tailnet `navigator.clipboard` does not exist, so `execCommand('copy')` — which
+    copies a selection from a rendered element — is the path that actually works.
+
+    `public_share_base` is operator-supplied (an env var), not request data; `esc` on the
+    whole URL is defence in depth, correct for both the attribute-free textarea body and
+    for any `&` a query string might carry, since the textarea's `.value` decodes it back.
+    """
+    url = esc(f"{public_share_base}/{run_id}")
+    return (
+        f'<button type="button" id="copy-share" class="secondary" '
+        f'title="a link anyone can open, no sign-in — the self-contained report">'
+        f'Copy public link</button>'
+        f'<textarea id="copy-share-src" class="copy-src" readonly aria-hidden="true" '
+        f'tabindex="-1">{url}</textarea>'
     )
 
 
@@ -628,6 +664,49 @@ COPY_JS = """
     } finally {
       src.contentEditable = 'false';
       src.readOnly = true;
+      if (window.getSelection) window.getSelection().removeAllRanges();
+    }
+
+    if (ok) { flash('Copied'); return; }
+    if (navigator.clipboard) {
+      navigator.clipboard.writeText(src.value).then(
+        function () { flash('Copied'); },
+        function () { flash('Copy failed'); }
+      );
+      return;
+    }
+    flash('Copy failed');
+  });
+})();
+"""
+
+# The "Copy public link" button on the run page (D35). Kept separate from COPY_JS rather
+# than folded into it: that script is the report page's markdown copy, and this one rides
+# in through `extra_script` only when a public base is configured, so the run page carries
+# no copy code at all in the default (tailnet/dev) build. The clipboard dance mirrors
+# COPY_JS — execCommand first because the tailnet is plain http and not a secure context,
+# the async API only as the fallback — kept compact because the payload is one short URL.
+SHARE_COPY_JS = """
+(function () {
+  var btn = document.getElementById('copy-share');
+  var src = document.getElementById('copy-share-src');
+  if (!btn || !src) return;
+  var idle = btn.textContent;
+
+  function flash(text) {
+    btn.textContent = text;
+    setTimeout(function () { btn.textContent = idle; }, 1800);
+  }
+
+  btn.addEventListener('click', function () {
+    var ok = false;
+    try {
+      src.select();
+      src.setSelectionRange(0, src.value.length);
+      ok = document.execCommand('copy');
+    } catch (e) {
+      ok = false;
+    } finally {
       if (window.getSelection) window.getSelection().removeAllRanges();
     }
 

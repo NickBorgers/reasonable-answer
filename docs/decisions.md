@@ -1210,6 +1210,77 @@ contents to a generator no longer exists. The judge still fails closed on the sy
 empty reviewer set (pre-existing behaviour when guards refuse), publishing a NO-GO on the pre-sync
 SHA that the mergeable successor supersedes.
 
+## D35 — the report export is a public route, so a finished report can be shared by URL
+
+D32 made every route but `/healthz` refuse a caller with no identity, which is the right
+default: the failure mode of an opt-in check is a new route that forgets it, and seed material,
+questions and audit trails are exactly what must not leak. But it also closed the one thing the
+interface most wants to do — hand a finished report to someone who is not invited. Sharing a run
+link works only *between signed-in callers* (D32: reads are share-by-id, not owner-scoped); a link
+sent to anyone outside the Access policy 403s at the app before it ever reaches the edge.
+
+**Decision.** `GET /runs/<id>/export.html` is served without an identity; every other route stays
+gated exactly as D32 left it. The middleware gains one branch: a `GET` whose path matches
+`^/runs/[^/]+/export\.html$` proceeds with `request.state.viewer = None` instead of resolving an
+identity. The deployment (`host-config-as-code`) exposes that one route publicly at the edge,
+mapping `https://reasonable-answer.nickborgers.net/runs/<id>` to it off the Access-gated `/app`
+prefix; the app-side half is only to stop 403ing it.
+
+**Why the export is the artifact that may go public, and no other route.** It is the ideal public
+object three ways over. It is *self-contained* — one file, inline CSS, `default-src 'none'` CSP,
+"no stylesheet, font, script or image is fetched" (D27/D30, `export.py`) — so serving it to an
+anonymous browser exposes no second request and no app-shell surface. It is *free* — the handler
+is a pure disk read of `final.md` through the registry (`_exportable` → `_require`), with no worker,
+no graph, no LLM, no token spent — so an anonymous flood costs reads, not the owner's budget, and
+the D21 rate limiter it bypasses only ever guarded the queue, which this never touches. And it is
+*already share-by-id* — D32 made reads readable to anyone holding the id; this widens the audience
+for that one read from "anyone signed in" to "anyone", and for nothing else.
+
+**Everything token-spending or broader stays gated, and the exemption is written to make that hard
+to erode.** It is `GET`-only, so `POST /runs`, `/runs/<id>/resume` and `/refine` still hit
+`resolve_identity` and 403 without a header — a `POST` to the export path itself is refused before
+routing. It is a single fully-anchored regex, not a prefix or a list: `/`, the interactive
+`run_detail` page, `audit.json`, the `.md`/`.txt` exports and every app-shell asset all fall
+through to the identity check unchanged. This is deliberately *not* modelled as a second entry in
+`_UNAUTHENTICATED_PATHS`: D32 declined to grow that set even for the harmless app shell, on the
+grounds that an exemption *list* invites the next entry to argue from precedent. A method-scoped,
+path-anchored predicate for one route is argued from this decision instead, and adding a second
+public route means writing a second predicate and a second decision — not appending a string.
+
+**An owner-less run stays a 404, anonymously as much as before.** `_require` 404s a run with no
+owner (D32), and the export handler runs through it before it reads anything, so making the route
+anonymous shares nothing that was unshareable: legacy and `ra run`-without-`--owner` runs remain
+served to nobody. `viewer=None` is safe because no code on this path consumes a viewer —
+`export_html`, `_exportable` and `_require` all take none, and `_reject_cross_site` guards the
+mutating `POST`s only, which a `GET` never reaches.
+
+**Optional UX, off by default.** A **Copy public link** button on the run page emits
+`<RA_PUBLIC_SHARE_BASE>/<run-id>`, rendered only when that env var is set. The app emits just its
+own (gated) root prefix, which points at `/app`; the public link lives at the edge root, a
+different base, so it is a separate optional setting rather than derived from `RA_ROOT_PATH`. Unset
+— the tailnet and dev case, which has no public edge — the button is absent, so that output stays
+clean. Core sharing does not depend on it: the middleware change is what makes the link resolve;
+the button only saves a copy-paste, and its clipboard path mirrors the markdown copy's
+execCommand-first dance because the tailnet is plain http and not a secure context.
+
+**The forgery caveat is the same one D32 already carries, no wider.** The tailnet path lets any
+peer set the identity header and read or submit as anyone; that is the accepted risk whose fix is
+the deferred JWT check below. This decision does not touch it — it removes the identity *requirement*
+for one read that was already readable by every signed-in caller, so the set of things an anonymous
+tailnet peer can reach does not grow by anything they could not reach by claiming an identity.
+
+**Isolation is untouched.** This is entirely in the web layer, upstream of nothing that enters a
+model's context and downstream of every run. Author exclusion, the blind orchestrator
+(`OrchestratorView`), fail-closed lenses, severity-floor clamping, controller termination and the
+untrusted-text boundary all live in the Python review core and the convergence controller, none of
+which this changes. Showing a report to an anonymous human is the same act D32 already sanctioned
+for a signed-in one; blindness is about what a *model* may read, and this moves no data toward any
+model. Tests pin the matrix: `export.html` anonymous → 200, `/` and `POST /runs` and `audit.json`
+and the interactive page anonymous → 403, an owner-less export anonymous → 404, and the share button
+present only when the base is set.
+
+Deployment and the route table are documented in [authentication.md](./authentication.md).
+
 ## Open items for a future round
 
 - Whether `misrepresented_source` can be meaningfully checked without fetching the source

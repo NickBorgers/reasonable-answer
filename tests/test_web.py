@@ -11,7 +11,7 @@ import urllib.request
 from contextlib import contextmanager
 
 import pytest
-from conftest import WEB_IDENTITY, web_client
+from conftest import WEB_IDENTITY, access_headers, web_client
 from fakes import FakeClient
 
 from reasonable_answer.graph import run as run_graph
@@ -368,6 +368,90 @@ def test_audit_json_exposes_the_whole_event_stream(client, config):
 
 def test_healthz(client):
     assert client.get("/healthz").text == "ok"
+
+
+# ----------------------------------------------------- public report sharing
+
+
+@contextmanager
+def _running_app(config, fake_client):
+    """An app whose worker runs real graphs behind the fake proxy, cleaned up after.
+
+    Yields the app itself, not a client, so a test can drive it from both a signed-in
+    and an anonymous `TestClient` without a second lifespan.
+    """
+
+    def runner(cfg, *, question, seed, run_id, stop=None, **prov):
+        return run_graph(
+            cfg, question=question, seed=seed, run_id=run_id, client=fake_client, **prov
+        )
+
+    worker = RunWorker(config, max_concurrent=1, runner=runner)
+    try:
+        yield create_app(config, worker=worker)
+    finally:
+        worker.shutdown()
+
+
+def test_export_html_is_public_while_every_other_route_stays_gated(config, fake_client):
+    """The finished report's `export.html` answers an anonymous caller; every
+    token-spending route and every other read stays behind the identity gate (#80, D35)."""
+    with _running_app(config, fake_client) as app, web_client(app, identity=None) as c:
+        # An owned, finished run: submitted *with* an identity so it has an owner and
+        # therefore is not a 404 via `_require`.
+        resp = c.post(
+            "/runs",
+            data={"question": "Share this?"},
+            headers=access_headers(),
+            follow_redirects=False,
+        )
+        run_id = resp.headers["location"].rsplit("/", 1)[-1]
+        _wait_for_final(config, run_id)
+
+        # The one route an anonymous caller may read (was 403 before #80).
+        assert c.get(f"/runs/{run_id}/export.html").status_code == 200
+
+        # Every token-spending route and every other read is unchanged: still 403.
+        assert c.get("/").status_code == 403
+        assert c.post("/runs", data={"question": "spend tokens?"}).status_code == 403
+        assert c.get(f"/runs/{run_id}").status_code == 403
+        assert c.get(f"/runs/{run_id}/audit.json").status_code == 403
+        # A sibling export on the same run is not the public route.
+        assert c.get(f"/runs/{run_id}/export.md").status_code == 403
+        assert c.get(f"/runs/{run_id}/report.md").status_code == 403
+        # The exemption is GET-only: a POST to the same path is refused before routing.
+        assert c.post(f"/runs/{run_id}/export.html").status_code == 403
+
+
+def test_an_owner_less_run_export_is_a_404_even_anonymously(config, fake_client):
+    """Making the export public does not make an owner-less run shareable: it stays a 404
+    via `_require`, so nothing that was unreadable becomes readable (#80)."""
+    run_graph(config, question="No owner?", seed=REPORT, run_id="run-ownerless", client=fake_client)
+    with _running_app(config, fake_client) as app, web_client(app, identity=None) as c:
+        assert c.get("/runs/run-ownerless/export.html").status_code == 404
+
+
+def test_the_public_share_button_appears_only_when_the_base_is_set(
+    config, fake_client, monkeypatch
+):
+    """The 'Copy public link' affordance renders only when `RA_PUBLIC_SHARE_BASE` is set,
+    and it emits `<base>/<run-id>` with the trailing slash trimmed (#80 optional UX)."""
+    with _running_app(config, fake_client) as app, web_client(app) as c:
+        resp = c.post("/runs", data={"question": "Button?"}, follow_redirects=False)
+        run_id = resp.headers["location"].rsplit("/", 1)[-1]
+        _wait_for_final(config, run_id)
+
+    # Unset: no button, keeping tailnet/dev output clean.
+    monkeypatch.delenv("RA_PUBLIC_SHARE_BASE", raising=False)
+    with _running_app(config, fake_client) as app, web_client(app) as c:
+        assert "Copy public link" not in c.get(f"/runs/{run_id}").text
+
+    # Set (with a trailing slash to trim): button plus the exact public URL.
+    monkeypatch.setenv("RA_PUBLIC_SHARE_BASE", "https://share.example/runs/")
+    with _running_app(config, fake_client) as app, web_client(app) as c:
+        page = c.get(f"/runs/{run_id}").text
+        assert "Copy public link" in page
+        assert f"https://share.example/runs/{run_id}" in page
 
 
 # ------------------------------------------------------------------ timeline

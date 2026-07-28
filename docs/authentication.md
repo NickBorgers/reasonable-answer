@@ -12,11 +12,12 @@ Two proxies are supported, checked in this order:
 | `Cf-Access-Authenticated-User-Email` | Cloudflare Access | invited users, over the internet |
 | `Tailscale-User-Login` | `tailscale serve` | the operator, over the tailnet |
 
-A request carrying neither is refused with `403` on every route but `/healthz`, which is
-exempt because the container healthcheck runs inside the container with nothing in front
-of it to attach a header. `Tailscale-User-Name` sits beside the login header and is
-deliberately **not** read: it carries a display name, which is a different namespace from
-the address Access reports.
+A request carrying neither is refused with `403` on every route but two: `/healthz`,
+which is exempt because the container healthcheck runs inside the container with nothing
+in front of it to attach a header; and `GET /runs/<id>/export.html`, the anonymous report
+share (D35, [below](#sharing-a-report-publicly)). `Tailscale-User-Name` sits beside the
+login header and is deliberately **not** read: it carries a display name, which is a
+different namespace from the address Access reports.
 
 **Installing the app needs the manifest fetch to carry your session.** The app shell —
 `manifest.webmanifest`, `sw.js`, `offline.html`, the icons — is gated like every other
@@ -103,6 +104,30 @@ To attribute a CLI run so it shows up in the web interface:
 ```bash
 ra run -q "your question" --owner you@example.com
 ```
+
+## Sharing a report publicly
+
+`GET /runs/<id>/export.html` is the one route served to an **unauthenticated** caller
+(D35), so a finished report can be shared by URL to anyone, no sign-in. It is the ideal
+public artifact: the export is a single self-contained file (inline CSS, `default-src
+'none'`, nothing fetched), and the handler is a pure disk read of `final.md` — no worker,
+no graph, no LLM, no token cost. Every other route — the index, the interactive run page,
+`audit.json`, the `.md` exports, and every token-spending POST — stays gated. The
+exemption is `GET`-only and pinned to that exact path; an owner-less run still 404s, so
+this shares nothing that a signed-in caller could not already read by holding the id.
+
+The app serves this off its own (identity-gated) root prefix like everything else; the
+deployment exposes it publicly at the edge — see the `host-config-as-code` repo, which
+maps `https://reasonable-answer.nickborgers.net/runs/<id>` to it off the Access-gated
+`/app` prefix. To surface a **Copy public link** button on the run page, tell the app that
+public edge base:
+
+```bash
+RA_PUBLIC_SHARE_BASE=https://reasonable-answer.nickborgers.net/runs
+```
+
+Unset (the default, and the whole tailnet/dev case, which has no public edge) the button
+is not rendered — core sharing does not depend on it; the link is just `<base>/<run-id>`.
 
 ## Local development
 
