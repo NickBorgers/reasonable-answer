@@ -51,8 +51,10 @@ well-formed/resolvable in format.
 (D22).** The two postures differ in what a citation *is*:
 
 * **`search.enabled: false` (default)** — no external retrieval, exactly as D5 specifies. A diverse
-  roster can still share a factual blind spot, and a citation is whatever the writer recalled.
-  Output is labeled *consensus-reviewed with in-artifact sourcing*, not fact-checked.
+  roster can still share a factual blind spot — error correlation survives differences in training
+  data, architecture, and provider ([Kim et al. 2025](https://arxiv.org/abs/2506.07962)) — and a
+  citation is whatever the writer recalled. Output is labeled *consensus-reviewed with in-artifact
+  sourcing (no external retrieval)*, not fact-checked.
 * **`search.enabled: true`** — writers hold a `web_search` tool and may cite only URLs a search
   actually returned, so a citation is a real, retrieved page. Output is labeled *consensus-reviewed
   with retrieved sourcing*, still not fact-checked. Startup fails closed if a writer cannot emit
@@ -60,7 +62,12 @@ well-formed/resolvable in format.
   memory — and no downstream check distinguishes that from a retrieved citation.
 
 **Retrieval alone does not make the report fact-checked.** It constrains where citations come from;
-it does not establish that a cited page *supports the specific claim attached to it*.
+it does not establish that a cited page *supports the specific claim attached to it* — the
+attributable-to-identified-sources distinction ([Rashkin et al. 2021](https://arxiv.org/abs/2112.12870)),
+and the gap the labeling here is careful not to paper over. The empirical case for that caution:
+a preregistered study of commercial legal-research tools built on retrieval still measured
+hallucination rates of 17–33%, against vendor claims of being hallucination-free
+([Magesh et al. 2024](https://arxiv.org/abs/2405.20362)).
 
 **Source verification (D18), also opt-in and off by default — including in the shipped roster,
 which enables retrieval only (D22): verification fetches model-chosen URLs, and the egress
@@ -194,6 +201,15 @@ rule generates once `round ≥ hard_cap`** and the hard cap is genuinely hard (R
 |---|-----------|-------------------|
 | 1 | `fatal` (writer pool empty, a lens has no eligible non-author, repeated malformed) | **aborted** |
 | 2 | `lenses_failed > 0` **and** `critique_attempts_remaining > 0` | **re-critique** failed lens(es) (→ Critiquing); `critique_attempts_remaining -= 1`; partial counts never used |
+
+A lens only reaches rule 2 once the critic has already been given
+`budgets.critic_repair_retries` chances to correct itself *within its own call*, shown
+what its rejected field should have quoted (see `docs/isolation.md`). Rule 2 is the
+expensive fallback — it discards every issue in the response and re-asks a different
+model — so it must not be the first response to a fixable quoting slip. When the pool of
+eligible critics is exhausted, successive attempts rotate through it rather than re-asking
+the model that just failed.
+
 | 3 | `lenses_failed > 0` **and** no budget | **aborted** (cannot complete a review) |
 | 4 | `round < min_ticks` | **continue** (generate) — never accept before `min_ticks` |
 | 5 | `round ≥ hard_cap` **and** `blocking > 0` | **needs_human_review** |

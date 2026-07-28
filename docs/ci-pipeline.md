@@ -345,7 +345,7 @@ finding by clarifying the PR body instead of changing code. A cold fixer may **n
 not a claim an agent without that intent can make.
 
 `author-resume` is best-effort, and a resumed session that wedges must fall through to the
-cold fixer rather than fail the PR (D35). That containment lives in `run-in-container.sh`,
+cold fixer rather than fail the PR (D36). That containment lives in `run-in-container.sh`,
 not in a `continue-on-error` on the composite step — which does not reliably stop an inner
 composite-step failure from aborting the job. On a resume the script captures the `timeout`
 exit code (adding `--kill-after` so a CLI that ignores SIGTERM is still killed at the

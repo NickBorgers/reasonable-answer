@@ -14,6 +14,22 @@ The system fights **three different biases**, and they have different isolation 
 | **Correlated blind spots** — a model's systematic failure modes | the model itself; the same model repeats/misses the same error even in a fresh context | **model diversity** (distinct model families) | secondary |
 | **Social / content bias** — loaded framing, one-sided source selection, inherited presuppositions | **shared training-corpus and cultural priors** across every model in the roster, plus the question's own framing | **documented observable-text rules** ([bias.md](./bias.md)) enforced as lens categories, on top of decorrelated critic pools | tertiary |
 
+Each row has a literature behind it. Row 1: sycophancy toward a shown verdict is a general
+behaviour of current assistants ([Sharma et al. 2023](https://arxiv.org/abs/2310.13548)), and
+even without a social signal, position within a long context changes how well a model uses what
+it is looking at ([Liu et al. 2023](https://arxiv.org/abs/2307.03172)). Row 2 is the row the
+evidence *bounds* rather than endorses: across 350+ models, cross-provider diversity did not buy
+independence — when two capable models were both wrong they agreed on the answer about 60% of the
+time on one dataset, and the larger and more accurate the models, the *more* correlated their
+errors ([Kim et al. 2025](https://arxiv.org/abs/2506.07962)). Diversity is worth having — panels
+drawn from disjoint model families show less intra-model bias than a single large judge
+([Verga et al. 2024](https://arxiv.org/abs/2404.18796)) — but it is a variance reduction, not an
+independence guarantee, which is precisely why it is ranked secondary here and why row 3 exists
+at all. Row 3's premise, that the residue is shared rather than idiosyncratic, is the same
+finding read from the other side; the human analogue is old, and it is that correlated inputs
+collapse the diversity a crowd's accuracy depends on
+([Lorenz et al. 2011](https://doi.org/10.1073/pnas.1008636108)).
+
 The dominant threat — the whole reason for the seven principles — is **social drift**, and it is
 caused by *shared context*, not by model identity. So the primary isolation boundary is the
 **context window**: every agent runs in a fresh context containing only the artifact and its task,
@@ -90,6 +106,53 @@ flowchart LR
     P6["#6 fresh, small context per agent"] --> E6["no context rot / lost-in-the-middle"]
     P7["#7 critic(Rn) ≠ writer(Rn), any lens"] --> E7["output never anchors its own review"]
 ```
+
+### Where the seven principles come from
+
+"Research-rooted" above is a claim this page owes support for, so here is the support, one line
+per principle. None of these results were derived for this system; the design is an attempt to
+arrange around them.
+
+- **#1 artifact-first handoffs.** Whether a claim is labelled the model's own prior thought or an
+  external message — with the claim itself held byte-identical — moves the explicit-correction
+  rate by 23 to 93 percentage points across model-domain conditions
+  ([Chen et al. 2026](https://arxiv.org/abs/2606.05976)). Passing a fix-task rather than a verdict
+  is not only politeness; it is the label the evidence says models act on.
+- **#2 social isolation.** Sycophancy toward a visible verdict is general across state-of-the-art
+  assistants ([Sharma et al. 2023](https://arxiv.org/abs/2310.13548)). The human precedent is
+  Lorenz et al.'s crowd experiment: giving participants their peers' estimates pulled the group's
+  answers together and left the crowd less accurate than it had been when isolated
+  ([2011](https://doi.org/10.1073/pnas.1008636108)).
+- **#3 authorship blindness.** Two controlled comparisons in human peer review found single-blind
+  reviewers favour famous authors and prestigious institutions over double-blind ones
+  ([Tomkins et al. 2017](https://doi.org/10.1073/pnas.1707323114);
+  [Okike et al. 2016](https://pubmed.ncbi.nlm.nih.gov/27673310/)). The machine analogue is
+  self-recognition: a model's ability to identify its own output correlates linearly with how much
+  it prefers it ([Panickssery et al. 2024](https://arxiv.org/abs/2404.13076)).
+- **#4 focused, role-scoped prompts.** The critical survey of self-correction reports no prior
+  work demonstrating successful self-correction from a prompted LLM's own feedback outside tasks
+  exceptionally suited to it ([Kamoi et al. 2024](https://arxiv.org/abs/2406.01297)) — a narrow
+  brief being the readiest way to be one of those tasks rather than none of them.
+- **#5 refinement over debate.** Multi-agent debate was reported to improve factuality and
+  reasoning ([Du et al. 2023](https://arxiv.org/abs/2305.14325)), but a systematic comparison
+  found debate does not reliably beat simpler strategies like self-consistency and ensembling,
+  and is markedly harder to tune ([Smit et al. 2024](https://arxiv.org/abs/2311.17371)). This
+  design takes the second result: no model here argues with another.
+- **#6 fresh context per agent.** Retrieval and use of information degrade when it sits in the
+  middle of a long context rather than at either end, including in models built for long contexts
+  ([Liu et al. 2023](https://arxiv.org/abs/2307.03172)). A small context is a correctness
+  property, not a cost optimisation.
+- **#7 production ≠ review.** Intrinsic self-correction degrades reasoning rather than improving
+  it ([Huang et al. 2024](https://arxiv.org/abs/2310.01798)), and moving the review into a
+  separate session with no access to the producing conversation outperforms same-session
+  self-review and repeated self-review alike
+  ([Song 2026](https://arxiv.org/abs/2603.12123)) — the repeated-self-review arm being the one
+  that rules out "it just got another look" as the explanation.
+
+Two caveats worth stating plainly. The evidence for #5 and #7 is comparative and task-bounded, not
+a proof that this arrangement is optimal. And the layer these citations *do not* rescue is model
+diversity: see the bias table above, where [Kim et al. 2025](https://arxiv.org/abs/2506.07962)
+bounds what a diverse roster can be expected to decorrelate.
 
 The one principle the alternating handoff could have threatened is **#1**: the generator needs to
 know what to fix. It is preserved by passing a **structured defect list** — objective
@@ -173,7 +236,12 @@ Mitigations, by boundary:
 - **Triage validates** every field against the schema before it becomes a defect-task or a
   count; an unknown category or invalid/over-length field **fails the entire lens** (fail-closed,
   RB-007) — nothing is silently dropped, so an adversarial critique can't collapse into a
-  fake-clean empty result.
+  fake-clean empty result. Validation runs *inside* the model call, on the same bounded
+  repair loop as a schema violation (`budgets.critic_repair_retries`): a rejection is
+  returned to the critic with the text it should have quoted, and only a critic that
+  cannot correct itself within that budget fails the lens. Repair does not loosen the
+  check — the same violation still fails closed once the budget is gone — it stops a
+  recoverable quoting slip from costing one of the run's `critique_attempts`.
 - **Loci are bounded structural references** (section/paragraph indices), not free text; quoted
   spans are length-limited untrusted data — closing the critic→generator free-text channel.
 - **The orchestrator can't be injected** — it never sees free text, only integer counts.

@@ -123,9 +123,12 @@ flowchart TD
 ## The problem it solves
 
 Ask AIs to critique each other naively and they fail two ways: **sycophancy** (an agent that
-sees a prior verdict drifts toward it) and the **nitpick spiral** (agents surface ever-smaller
-objections and never agree it's finished). The through-line: LLM judgment degrades when social
-dynamics, accumulated context, or prior reasoning pollute an independent judgment.
+sees a prior verdict drifts toward it — [Sharma et al. 2023](https://arxiv.org/abs/2310.13548))
+and the **nitpick spiral** (agents surface ever-smaller objections and never agree it's finished;
+an iterated refine-against-a-judge loop is also where the model starts optimising the judge
+instead of the artifact — [Pan et al. 2024](https://arxiv.org/abs/2402.06627)). The through-line:
+LLM judgment degrades when social dynamics, accumulated context, or prior reasoning pollute an
+independent judgment.
 
 The design's answer: the agents supply judgment; a **blind, guardrailed controller** supplies
 the *stopping rule they lack*. Convergence is decided by the referee, using signals the players
@@ -142,6 +145,10 @@ can't game because none can see the whole board.
 | 5 | Refinement over debate | Each tick improves the report; models never argue with each other. |
 | 6 | Fresh context per agent | Generator sees only {question, latest report, defect list}; critics see only {question, report, lens}. No history accumulation. |
 | 7 | Production ≠ review | Guaranteed by `critic(Rₙ) ≠ generator(Rₙ)`. |
+
+Each principle's empirical grounding — and the two places where the evidence bounds the claim
+rather than supporting it — is set out in
+[isolation.md](./isolation.md#where-the-seven-principles-come-from).
 
 ## Toolchain (chosen, with precedent)
 
