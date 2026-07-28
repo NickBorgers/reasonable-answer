@@ -48,9 +48,10 @@ a PR that touches nothing but `decisions.md`.
 review-entry            authorize · fork-reject · resolve SHA · prior-GO check · dedup claim
   └─ review-pipeline    gather (cycle, inherit, cap, classify)
        ├─ invariant     Claude    ─┐
-       ├─ docs          Codex      ├─ read-only, each emits a JSON artifact
-       ├─ security      Codex      │
-       ├─ test          Claude    ─┘
+       ├─ docs          Codex      │
+       ├─ security      Codex      ├─ read-only, each emits a JSON artifact
+       ├─ test          Claude     │
+       ├─ quality       Codex     ─┘
        ├─ record-cycle  writes review/cycle — only if a reviewer actually ran
        ├─ fix           the ONLY branch-writing stage; syncs with the base branch and
        │                addresses blockers; skipped on the last cycle, but still runs a
@@ -508,7 +509,14 @@ worst case is one wasted extra cycle, not a loop.
 originate on either side of the docs/code boundary, so there is no file class whose change
 provably cannot stale a document. `security` runs unless the change is docs-only, and
 always for anything under `.github/`, `src/`, or the dependency and container files.
-`test` runs for `src/`, `tests/`, `config/`, and `pyproject.toml`.
+`test` runs for `src/`, `tests/`, `config/`, and `pyproject.toml`. `quality` runs for
+`src/`, `config/`, every `docs/*.md` (empirical claims live there), and the review
+pipeline's own files (`.github/workflows/review-*`, `.github/scripts/review/`,
+`.github/actions/review-*`) — the surfaces where the design could drift off its evidence
+base ([quality-principles.md](./quality-principles.md), D37). Unlike `invariant` and
+`docs` it **may abstain**, because it is conditionally selected and those two remain the
+never-abstain backstop; its prompt bounds abstention to diffs where no principle row has
+surface.
 
 **`invariant` and `docs` must never abstain**, and their prompts say so. Selecting it unconditionally
 is what guarantees the judge never sees an empty or wholly-abstaining review set — and
