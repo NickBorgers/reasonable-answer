@@ -1,3 +1,7 @@
+<p align="center">
+  <img src="docs/assets/logo.png" alt="reasonable-answer" width="140">
+</p>
+
 # reasonable-answer
 
 [![PR Validation](https://github.com/NickBorgers/reasonable-answer/actions/workflows/pr-validation.yml/badge.svg)](https://github.com/NickBorgers/reasonable-answer/actions/workflows/pr-validation.yml)
