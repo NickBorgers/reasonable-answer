@@ -344,6 +344,17 @@ finding by clarifying the PR body instead of changing code. A cold fixer may **n
 `body_clarification`; the validator rejects it, because "the reviewer misread my intent" is
 not a claim an agent without that intent can make.
 
+`author-resume` is best-effort, and a resumed session that wedges must fall through to the
+cold fixer rather than fail the PR (D35). That containment lives in `run-in-container.sh`,
+not in a `continue-on-error` on the composite step — which does not reliably stop an inner
+composite-step failure from aborting the job. On a resume the script captures the `timeout`
+exit code (adding `--kill-after` so a CLI that ignores SIGTERM is still killed at the
+deadline): a timeout writes a `fixer-timeout.sentinel` and exits 0, and a crash or a
+clean-but-empty run also exits 0, leaving no `fixer-result.json`. The workflow then reads
+that on-disk signal — sentinel present, or result missing — to fall back, under `always()`
+so an implicit `success()` is not ANDed onto the condition and does not skip the fallback on
+the very hang it exists to catch. In cold mode there is no fallback, so a timeout stays fatal.
+
 #### Context reconstruction
 
 Because cold is the normal path, the fixer rebuilds what it can of the author's intent
