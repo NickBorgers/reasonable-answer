@@ -37,7 +37,7 @@ SCRIPT = (
 # which the helper pins to tmp_path.
 RESULT_REL = ".review-output/fixer-result.json"
 OUTPUT_LOG_REL = ".review-output/fixer-output.log"
-SENTINEL_REL = ".review-output/fixer-timeout.sentinel"
+SENTINEL_REL = ".review-output/fixer-incomplete.sentinel"
 
 
 def _write_fake_claude(bin_dir: Path, body: str) -> None:
@@ -92,6 +92,10 @@ SUCCEEDS = 'mkdir -p "$(dirname "$RESULT_PATH")"; printf \'{"ok":true}\' > "$RES
 CRASHES = "exit 5\n"
 # Returns cleanly but leaves no artifact behind.
 EMPTY_CLEAN = "exit 0\n"
+# Writes the artifact and *then* dies: the case where "no result" cannot detect a crash.
+WRITES_THEN_CRASHES = (
+    'mkdir -p "$(dirname "$RESULT_PATH")"; printf \'{"ok":true}\' > "$RESULT_PATH"; exit 5\n'
+)
 
 
 # ── resume mode: every failure is contained so the cold fallback can run ──────
@@ -103,18 +107,29 @@ def test_resume_timeout_is_contained_and_writes_sentinel(tmp_path: Path) -> None
     assert (tmp_path / SENTINEL_REL).exists(), "a contained resume timeout must leave the sentinel"
 
 
-def test_resume_crash_is_contained_without_a_sentinel(tmp_path: Path) -> None:
+def test_resume_crash_is_contained_and_marked(tmp_path: Path) -> None:
     r = _run(tmp_path, claude_body=CRASHES, resume=True)
     assert r.returncode == 0, r.stderr
-    # A crash is not a deadline, so the timeout sentinel must not appear — the missing
-    # result is what routes the workflow to the cold fixer.
-    assert not (tmp_path / SENTINEL_REL).exists()
+    # Marked, not inferred from a missing result: see the test below for why absence
+    # cannot stand in for a crash.
+    assert (tmp_path / SENTINEL_REL).exists()
+    assert "exited 5" in (tmp_path / SENTINEL_REL).read_text()
+
+
+def test_a_crash_that_left_a_result_behind_is_still_marked(tmp_path: Path) -> None:
+    """The signal cannot be "no result": an agent that writes its artifact and *then*
+    dies leaves one behind, and reading that as a fix would push work the agent never
+    vouched for — the cold fallback exists precisely for this."""
+    r = _run(tmp_path, claude_body=WRITES_THEN_CRASHES, resume=True, timeout="30s")
+    assert r.returncode == 0, r.stderr
+    assert (tmp_path / RESULT_REL).exists(), "the partial result is kept for diagnosis"
+    assert (tmp_path / SENTINEL_REL).exists(), "a crash must be marked even with a result"
 
 
 def test_resume_clean_but_empty_is_contained(tmp_path: Path) -> None:
     r = _run(tmp_path, claude_body=EMPTY_CLEAN, resume=True)
     assert r.returncode == 0, r.stderr
-    assert not (tmp_path / SENTINEL_REL).exists()
+    assert (tmp_path / SENTINEL_REL).exists()
     assert not (tmp_path / RESULT_REL).exists()
 
 

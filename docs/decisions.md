@@ -1356,17 +1356,26 @@ the fallback trigger moves from a step *outcome* to an on-disk *signal*.
   `set +e`, and adds `--kill-after` so a CLI that ignores SIGTERM is still killed at the deadline
   (surfacing as 137, handled alongside 124). A duration override seam (`AGENT_TIMEOUT`) exists purely
   so the offline test can use a 2-second deadline.
-- In **resume mode** the script is best-effort and never fails the job: a timeout writes a
-  `fixer-timeout.sentinel` beside the output log and exits 0; a crash or a clean-but-empty run also
-  exits 0 (no sentinel — the missing `fixer-result.json` is the signal). In **any non-resume mode**
-  (cold fixer, reviewers, resolver, author) there is no fallback, so a timeout or missing result stays
-  fatal, exactly as before — the containment is gated on `AGENT_RESUME=1` and touches nothing else.
+- In **resume mode** the script is best-effort and never fails the job. Every contained outcome —
+  a timeout, a crash, or a clean exit that produced no artifact — writes a `fixer-incomplete.sentinel`
+  beside the output log, naming the reason, and exits 0. The sentinel is *positive* for all three
+  rather than letting a missing `fixer-result.json` stand in for a crash, because an agent can write
+  its result and *then* exit nonzero: the absence-based signal would read that crash as a fix and push
+  work the agent never vouched for. Its stem comes from `OUTPUT_LOG_PATH`, not the role, so it always
+  matches the log and result it sits beside (the composite builds those from `ARTIFACT_BASE`, which is
+  allowed to differ from the role — a divergence would otherwise silently stop the fallback firing).
+  In **any non-resume mode** (cold fixer, reviewers, resolver, author) there is no fallback, so a
+  timeout or missing result stays fatal, exactly as before — the containment is gated on
+  `AGENT_RESUME=1` and touches nothing else.
 - The workflow adds a "Did the author-resume fixer produce a fix?" step that reads the sentinel /
-  result off disk and sets `ok`. The fallback now fires on `always() && … && ok != 'true'`. `always()`
-  is load-bearing: the "second-order trap" is that a condition with no status function has an implicit
-  `success()` ANDed onto it, which — now that a contained timeout reports the step as `success` —
-  would skip the fallback on exactly the hang it must catch. `continue-on-error` is kept only as
-  defense-in-depth for a failure in one of the composite's *other* steps.
+  result off disk and sets `ok`. The fallback fires on `!cancelled() && … && ok != 'true'`. A status
+  function is load-bearing: the "second-order trap" is that a condition with no status function has an
+  implicit `success()` ANDed onto it, which — now that a contained timeout reports the step as
+  `success` — would skip the fallback on exactly the hang it must catch. It is `!cancelled()` and not
+  `always()` because the fallback step is not read-only: it resets the tree to the reviewed SHA and
+  replays the base merge, and `always()` would run all of that while the job is being cancelled.
+  `continue-on-error` is kept only as defense-in-depth for a failure in one of the composite's
+  *other* steps.
 
 **What this does not do.** It does not stop the pipeline re-resuming a session that has already hung
 (defect 3 in #85): `validate` still cannot tell a loadable session from one `--continue` wedges on, and

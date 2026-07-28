@@ -50,8 +50,27 @@ RESUME="${AGENT_RESUME:-0}"
 # signal the calling workflow reads to decide whether to fall back; it sits beside the
 # output log under .review-output, which is bind-mounted back to the host. Clear any
 # stale one from a prior attempt in the same mounted dir before running.
-TIMEOUT_SENTINEL_PATH="$(dirname "$OUTPUT_LOG_PATH")/${REVIEW_ROLE:-agent}-timeout.sentinel"
-rm -f "$TIMEOUT_SENTINEL_PATH"
+#
+# It marks "this resume did not complete" for *every* contained reason — deadline, crash,
+# or a clean exit with no artifact — and names the reason inside. An earlier draft
+# signalled only the deadline and left a crash to be inferred from a missing result, but a
+# resumed agent that writes `fixer-result.json` and *then* exits nonzero leaves a result
+# behind, so the inference read that crash as a success and skipped the fallback the docs
+# promise. A positive signal for every contained path removes the inference.
+#
+# Its stem is taken from OUTPUT_LOG_PATH rather than REVIEW_ROLE so it always matches the
+# log and result it sits beside: the composite builds those from ARTIFACT_BASE
+# (`${RESULT_BASENAME:-$ROLE}`), which is deliberately allowed to differ from the role.
+# Were they to diverge, a role-named sentinel would stop matching the name the workflow
+# looks for and the fallback would silently stop firing — which is this whole bug again.
+INCOMPLETE_SENTINEL_PATH="${OUTPUT_LOG_PATH%-output.log}-incomplete.sentinel"
+rm -f "$INCOMPLETE_SENTINEL_PATH"
+
+# Records why a resume was contained, for the workflow to read and log. Only ever called
+# on the resume path; every other mode keeps its old fatal behaviour.
+mark_incomplete() {
+  printf '%s\n' "$1" > "$INCOMPLETE_SENTINEL_PATH"
+}
 
 echo "run-in-container: ${REVIEW_ROLE:-agent} via ${CI_AGENT}, timeout ${TIMEOUT}, resume=${RESUME}"
 
@@ -152,17 +171,20 @@ esac
 if [ "$rc" -eq 124 ] || [ "$rc" -eq 137 ]; then
   echo "::warning::run-in-container: ${REVIEW_ROLE:-agent} exceeded ${TIMEOUT} (rc=${rc})"
   if [ "$RESUME" = "1" ]; then
-    : > "$TIMEOUT_SENTINEL_PATH"
-    echo "run-in-container: resume timed out; wrote $(basename "$TIMEOUT_SENTINEL_PATH") and exiting 0 so the cold fallback runs"
+    mark_incomplete "timeout after ${TIMEOUT} (rc=${rc})"
+    echo "run-in-container: resume timed out; wrote $(basename "$INCOMPLETE_SENTINEL_PATH") and exiting 0 so the cold fallback runs"
     exit 0
   fi
   exit "$rc"
 elif [ "$rc" -ne 0 ]; then
-  # A crash — any other nonzero. In resume mode it is still best-effort: the missing
-  # result artifact is what the workflow falls back on, so contain it too (no timeout
-  # sentinel — this was not a deadline). Elsewhere it stays fatal.
+  # A crash — any other nonzero. In resume mode it is still best-effort, but it is marked
+  # rather than inferred: an agent that wrote its result and *then* died leaves a result
+  # behind, so "no result" cannot stand in for "crashed". A nonzero exit means the agent
+  # did not vouch for whatever it left on disk, and that must not be pushed as a fix.
+  # Elsewhere it stays fatal.
   echo "::error::run-in-container: ${REVIEW_ROLE:-agent} exited ${rc}"
   if [ "$RESUME" = "1" ]; then
+    mark_incomplete "agent exited ${rc}"
     echo "run-in-container: resume exited ${rc}; exiting 0 so the cold fallback runs"
     exit 0
   fi
@@ -185,6 +207,7 @@ fi
 if [ "${EXPECT_RESULT:-1}" = "1" ]; then
   if [ ! -s "$RESULT_PATH" ]; then
     if [ "$RESUME" = "1" ]; then
+      mark_incomplete "clean exit with no ${RESULT_PATH}"
       echo "::warning::run-in-container: ${REVIEW_ROLE:-agent} resumed cleanly but produced no $RESULT_PATH; the cold fallback will run"
       exit 0
     fi

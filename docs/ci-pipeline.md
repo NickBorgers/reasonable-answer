@@ -349,11 +349,15 @@ cold fixer rather than fail the PR (D36). That containment lives in `run-in-cont
 not in a `continue-on-error` on the composite step — which does not reliably stop an inner
 composite-step failure from aborting the job. On a resume the script captures the `timeout`
 exit code (adding `--kill-after` so a CLI that ignores SIGTERM is still killed at the
-deadline): a timeout writes a `fixer-timeout.sentinel` and exits 0, and a crash or a
-clean-but-empty run also exits 0, leaving no `fixer-result.json`. The workflow then reads
-that on-disk signal — sentinel present, or result missing — to fall back, under `always()`
-so an implicit `success()` is not ANDed onto the condition and does not skip the fallback on
-the very hang it exists to catch. In cold mode there is no fallback, so a timeout stays fatal.
+deadline): every contained outcome — timeout, crash, or a clean exit with no artifact —
+writes a `fixer-incomplete.sentinel` naming the reason, and exits 0. The workflow falls back
+whenever that sentinel is present (or, belt-and-braces, the result is missing). The sentinel
+is written for a crash rather than the crash being inferred from a missing result, because
+an agent can write `fixer-result.json` and *then* exit nonzero: inferring would read that as
+a fix and push work the agent never vouched for. The condition carries `!cancelled()` so an
+implicit `success()` is not ANDed onto it — which would skip the fallback on the very hang it
+exists to catch — while still stopping a cancelled run from entering a step that resets the
+tree and replays the base merge. In cold mode there is no fallback, so a timeout stays fatal.
 
 #### Context reconstruction
 

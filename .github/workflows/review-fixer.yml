@@ -542,26 +542,37 @@ jobs:
       # This exists because containment moved into run-in-container.sh: on a hung resume
       # that step now *succeeds* (exit 0 + sentinel), so `steps.run.outcome` is no longer
       # the signal — it would read `success` on exactly the hang the fallback exists to
-      # catch. The reliable signal is on disk: a real resume leaves a non-empty
-      # `fixer-result.json`; a timeout leaves the `fixer-timeout.sentinel`; a crash or a
-      # clean-but-empty run leaves neither a sentinel nor a result. `always()` is required
-      # so an implicit `success()` is not ANDed onto the condition, and `steps.run.outcome`
-      # is still consulted as a belt-and-suspenders check for a failure in one of the
-      # composite's other steps. Only meaningful in author-resume mode; cold mode skips it.
+      # catch. The reliable signal is on disk. The script writes
+      # `fixer-incomplete.sentinel`, naming the reason, for *every* contained resume —
+      # deadline, crash, or a clean exit with no artifact — so this step never has to infer
+      # a crash from a missing result. It cannot: an agent that writes `fixer-result.json`
+      # and then exits nonzero leaves a result behind, and the inference would read that
+      # crash as a fix and push work the agent did not vouch for.
+      #
+      # `!cancelled()` rather than `always()`: the goal is only to stop an implicit
+      # `success()` being ANDed onto the condition, and `always()` would additionally keep
+      # this chain running through a cancellation — the fallback step below is not
+      # read-only (it resets the tree and replays the base merge), so a cancelled run must
+      # not enter it. `steps.run.outcome` is still consulted as a belt-and-suspenders check
+      # for a failure in one of the composite's other steps. Only meaningful in
+      # author-resume mode; cold mode skips it.
       - name: Did the author-resume fixer produce a fix?
         id: resume_result
-        if: always() && steps.work.outputs.agent == 'true' && steps.session.outputs.mode == 'author-resume'
+        if: >-
+          !cancelled()
+          && steps.work.outputs.agent == 'true'
+          && steps.session.outputs.mode == 'author-resume'
         env:
           RUN_OUTCOME: ${{ steps.run.outcome }}
         run: |
           set -euo pipefail
           OUT_DIR="${GITHUB_WORKSPACE}/${PR_WORKSPACE}/.review-output"
           RESULT="${OUT_DIR}/fixer-result.json"
-          SENTINEL="${OUT_DIR}/fixer-timeout.sentinel"
+          SENTINEL="${OUT_DIR}/fixer-incomplete.sentinel"
 
           ok=false
           if [ -f "$SENTINEL" ]; then
-            echo "Author-resume fixer hit its timeout (sentinel present); falling back."
+            echo "Author-resume fixer did not complete ($(cat "$SENTINEL")); falling back."
           elif [ "$RUN_OUTCOME" != "success" ]; then
             echo "Author-resume fixer step did not succeed (outcome=${RUN_OUTCOME}); falling back."
           elif [ ! -s "$RESULT" ]; then
@@ -582,14 +593,16 @@ jobs:
       # does. The cold path is the more conservative one and always logged.
       #
       # The trigger is the on-disk verdict computed above, not `steps.run.outcome`, which
-      # a contained timeout now reports as `success`. `always()` is load-bearing: without
-      # a status function GitHub ANDs an implicit `success()` on, which would skip this on
-      # the very hang it must catch. In cold mode this whole block is skipped: the primary
-      # run already was the cold agent.
+      # a contained timeout now reports as `success`. The status function is load-bearing:
+      # without one GitHub ANDs an implicit `success()` on, which would skip this on the
+      # very hang it must catch. It is `!cancelled()` and not `always()` because this step
+      # is not read-only — it resets the tree to the reviewed SHA and replays the base
+      # merge — and `always()` would run all of that while the job is being cancelled. In
+      # cold mode this whole block is skipped: the primary run already was the cold agent.
       - name: Fall back to a cold fixer
         id: fallback
         if: >-
-          always()
+          !cancelled()
           && steps.work.outputs.agent == 'true'
           && steps.session.outputs.mode == 'author-resume'
           && steps.resume_result.outputs.ok != 'true'
