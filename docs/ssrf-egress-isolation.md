@@ -120,7 +120,10 @@ visible_hostname egress-proxy
 ## Compose sketch (illustrative)
 
 Networks and the four services, with host-specific values removed. Adapt names, the
-published loopback port, and the tailnet front-end to your host.
+published loopback port, and the tailnet front-end to your host. The app service repeats
+the runtime hardening from `compose.yaml` rather than dropping it: this page is where the
+network boundary is described, and an operator who builds their deployment from it should
+not end up with a weaker container than the default one.
 
 ```yaml
 networks:
@@ -130,6 +133,11 @@ networks:
 services:
   reasonable-answer:
     networks: [internet-only]               # ONLY this network
+    read_only: true                         # same runtime posture as compose.yaml —
+    tmpfs: ["/tmp:rw,noexec,nosuid,size=64m"]   # see the README's Docker section
+    cap_drop: [ALL]
+    security_opt: ["no-new-privileges:true"]
+    volumes: [ra-runs:/data/runs]           # persistent writable storage; /tmp above is tmpfs scratch
     environment:
       HTTP_PROXY:  http://egress-proxy:3128
       HTTPS_PROXY: http://egress-proxy:3128

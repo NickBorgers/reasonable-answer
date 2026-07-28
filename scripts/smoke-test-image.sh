@@ -9,6 +9,10 @@
 # response, the roster is baked into the image at /etc/ra/roster.yaml via RA_CONFIG, and
 # the image creates and chowns /data/runs itself. If any of those stop being true, this
 # script starts failing — which is the point.
+#
+# The last two checks are the exception and do take a volume: they assert the runtime
+# immutability posture (root-owned /app, and a clean boot under --read-only), which cannot
+# be observed from a container running with Docker's defaults.
 
 set -euo pipefail
 
@@ -16,8 +20,16 @@ IMAGE="${1:?usage: smoke-test-image.sh <image-ref>}"
 NAME="ra-smoke-$$"
 PORT="${SMOKE_PORT:-18080}"
 
+# The hardened run below gets its own container, port and volume so it can be asserted
+# without weakening the bare run above it — see the read-only section for why both exist.
+RO_NAME="ra-smoke-ro-$$"
+RO_PORT="${SMOKE_RO_PORT:-$((PORT + 1))}"
+RO_VOLUME="ra-smoke-runs-$$"
+
 cleanup() {
   docker rm -f "$NAME" >/dev/null 2>&1 || true
+  docker rm -f "$RO_NAME" >/dev/null 2>&1 || true
+  docker volume rm "$RO_VOLUME" >/dev/null 2>&1 || true
 }
 trap cleanup EXIT
 
@@ -118,6 +130,57 @@ if [ "$uid" = "0" ]; then
   exit 1
 fi
 echo "    uid $uid"
+
+# The app must not be able to rewrite its own code. /app is root-owned while the process
+# runs as uid 10001, so a compromised run cannot edit src/ or the venv's site-packages and
+# have the next restart execute it — and restarts are routine here, since an interrupted
+# run is re-enqueued at boot. `test -w` runs as the image's USER, so this is the runtime
+# uid's own view. Asserted on the image rather than in compose, because it holds for a
+# plain `docker run` too.
+echo "==> The app cannot write its own code"
+if ! docker run --rm --entrypoint sh "$IMAGE" -c \
+  'test ! -w /app/src && test ! -w /app/.venv && test ! -w /app/config'; then
+  echo "Some of /app is writable by the runtime user." >&2
+  echo "Almost certainly a '--chown=ra:ra' that came back on a COPY in the Dockerfile." >&2
+  exit 1
+fi
+echo "    ok"
+
+# Booting under the deployment's actual security posture. The container above runs with
+# Docker's defaults and proves the image needs no volume and no config mount; this one
+# proves the same image comes up with a read-only root filesystem, no capabilities and no
+# privilege escalation. Both matter, so neither run is folded into the other.
+#
+# A named volume rather than `--tmpfs /data/runs`: a volume inherits the image's ownership
+# of that directory (uid 10001), which is the deployed shape and what the app's startup
+# writability probe checks. A bare tmpfs mounts root-owned and would fail startup for a
+# reason that has nothing to do with what is being tested here.
+echo "==> Boots with a read-only root filesystem"
+docker run -d --name "$RO_NAME" \
+  --read-only \
+  --tmpfs /tmp:rw,noexec,nosuid,size=64m \
+  --cap-drop ALL \
+  --security-opt no-new-privileges:true \
+  -v "${RO_VOLUME}:/data/runs" \
+  -p "127.0.0.1:${RO_PORT}:8080" "$IMAGE" >/dev/null
+
+for i in $(seq 1 30); do
+  if ! docker ps --format '{{.Names}}' | grep -qx "$RO_NAME"; then
+    echo "Read-only container exited before becoming ready. Logs:" >&2
+    docker logs "$RO_NAME" >&2 || true
+    exit 1
+  fi
+  if curl -fsS "http://127.0.0.1:${RO_PORT}/healthz" 2>/dev/null | grep -qi ok; then
+    echo "    ok after ${i}s"
+    break
+  fi
+  if [ "$i" -eq 30 ]; then
+    echo "Timed out waiting for /healthz under --read-only. Logs:" >&2
+    docker logs "$RO_NAME" >&2 || true
+    exit 1
+  fi
+  sleep 1
+done
 
 echo
 echo "Smoke test passed: $IMAGE"

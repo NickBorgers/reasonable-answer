@@ -40,9 +40,17 @@ RUN apt-get update \
 # come back as the same user that wrote them.
 RUN useradd --uid 10001 --create-home --shell /usr/sbin/nologin ra
 
-COPY --from=build --chown=ra:ra /app/.venv /app/.venv
-COPY --from=build --chown=ra:ra /app/src /app/src
-COPY --from=build --chown=ra:ra /app/config /app/config
+# root:root deliberately — do NOT add --chown=ra:ra here, however natural it looks.
+# The app runs as `ra`, so chowning its own code to `ra` would let a compromised process
+# rewrite /app/src and the interpreter's own site-packages. Restarts are routine (compose
+# sets restart: unless-stopped, and an interrupted run is re-enqueued at boot), so that
+# turns a transient RCE into persistence. Root ownership costs nothing: the build stage
+# leaves everything world-readable and the console scripts world-executable, which is all
+# uid 10001 needs to run them. This holds even without a read-only rootfs, so it protects
+# `docker run` by hand as much as it protects compose.
+COPY --from=build /app/.venv /app/.venv
+COPY --from=build /app/src /app/src
+COPY --from=build /app/config /app/config
 
 ENV PATH="/app/.venv/bin:$PATH" \
     PYTHONUNBUFFERED=1 \

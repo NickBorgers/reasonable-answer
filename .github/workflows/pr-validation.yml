@@ -71,10 +71,14 @@ jobs:
             workflows:
               - '.github/**'
               - 'scripts/**'
+            # smoke-test-image.sh is here because this job is the only thing that runs it
+            # on a PR: an edit to the script itself would otherwise merge without ever
+            # having been executed, which is the one change guaranteed to matter.
             docker:
               - 'Dockerfile'
               - '.dockerignore'
               - 'compose.yaml'
+              - 'scripts/smoke-test-image.sh'
               - 'src/**'
               - 'pyproject.toml'
               - 'uv.lock'
