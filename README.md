@@ -168,9 +168,13 @@ than failing on your first submission.
 No database, no broker, no GPU, no model weights — all inference goes through the proxy.
 
 **Behind a reverse proxy that strips a path prefix** (e.g. Cloudflare Access serving the app
-under `/app` while `/` stays a public landing page), set `RA_ROOT_PATH=/app`. Every URL the
-app emits — links, redirects, the PWA manifest, the live stream and the service worker —
-then carries the prefix and stays same-origin, so nothing escapes back to the root. The app
+under `/app` while `/` stays a public landing page), set `RA_ROOT_PATH=/app`. Every
+app-internal URL the app emits — links, redirects, form actions, the PWA manifest, the live
+stream and the service worker — then carries the prefix and stays same-origin, so nothing
+escapes back to the root. The one deliberate exception is the static "how this works" link in
+the header, which points off-origin at the published docs site; it is navigation only, carries
+`rel="noreferrer"` so following it never hands a run id to that host, and fetches nothing, so
+the CSP is unaffected. The app
 still receives the stripped path, so the proxy is the ordinary
 `location /app/ { proxy_pass http://ra:8080/; }` (the trailing slashes strip `/app/`). Unset,
 it serves at the origin root exactly as before. The CSP is unchanged: this is purely
