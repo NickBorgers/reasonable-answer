@@ -76,6 +76,17 @@ STATUS_ADVICE = {
 }
 
 
+#: Shown under the defect heading when defects were recorded but keyed to a draft other
+#: than the shipped one (issue #93). An empty section would read as a clean result — the
+#: opposite of what a non-accepted terminal means — so the absence is stated, not left
+#: to be inferred.
+_DEFECTS_NOT_KEYED = (
+    "The defects on record were raised against a different draft than the one shipped "
+    "here, so they are not listed and the shipped artifact's own defect set was not "
+    "recorded. This report was not cleared — do not read the absence of a list as clean."
+)
+
+
 #: An exported file is opened from a filesystem, from a mail attachment, from wherever
 #: the recipient put it. It has no origin worth talking to, so nothing but its own
 #: inline stylesheet is permitted — no script at all, unlike the served pages.
@@ -112,6 +123,10 @@ class Provenance:
     outstanding: list[dict[str, Any]] = field(default_factory=list)
     warnings: list[str] = field(default_factory=list)
     reviewers: list[tuple[str, str]] = field(default_factory=list)
+    #: True when defects were recorded but none are keyed to the shipped artifact — an
+    #: older draft's list, which must be withheld rather than shown against this text
+    #: (issue #93). Distinct from an empty `outstanding`, which means genuinely none.
+    outstanding_withheld: bool = False
 
     @property
     def meaning(self) -> str:
@@ -161,6 +176,8 @@ def provenance(
             exported_on=exported_on or time.strftime("%Y-%m-%d", time.gmtime()),
         )
     artifact_hash = final.get("artifact_hash")
+    raw_defects = list(final.get("outstanding_defects") or [])
+    outstanding = _for_artifact(raw_defects, artifact_hash)
     return Provenance(
         run_id=run_id,
         question=question,
@@ -170,30 +187,40 @@ def provenance(
         chosen_round=final.get("chosen_round"),
         artifact_hash=artifact_hash,
         exported_on=exported_on or time.strftime("%Y-%m-%d", time.gmtime()),
-        outstanding=list(final.get("outstanding_defects") or []),
+        outstanding=outstanding,
+        # Defects existed but none belong to the shipped draft: say so, never imply
+        # the empty list means the report came back clean.
+        outstanding_withheld=bool(raw_defects) and not outstanding,
         warnings=list(final.get("warnings") or []),
         reviewers=_reviewers(final.get("clean_records") or [], artifact_hash),
     )
 
 
-def _reviewers(records: list[dict[str, Any]], artifact_hash: str | None) -> list[tuple[str, str]]:
-    """(lens, critic) for the clean records that attest to *this* artifact.
+def _for_artifact(
+    records: list[dict[str, Any]], artifact_hash: str | None
+) -> list[dict[str, Any]]:
+    """The records keyed to *this* artifact's hash (RC-001) — clean records or defects.
 
-    A clean record is keyed to one artifact hash (RC-001), and earlier drafts collect
-    their own. Listing those would credit reviewers with clearing text they never saw,
-    which is exactly the claim an export must not overstate.
+    Both of an export's annotation surfaces are per-artifact claims: who cleared the
+    report, and what is still wrong with it. Each earlier draft collects its own, and
+    the shipped draft on a non-accepted terminal need not be the last one written.
+    Listing another draft's would credit a reviewer with clearing text it never saw, or
+    charge this report with a defect it never contained — the same error in opposite
+    directions. One filter serves both, so a third surface inherits the discipline.
 
-    With no hash to key against there is no way to tell which draft a record cleared,
-    so nobody is credited. Crediting everyone would be the failure this function
+    With no hash to key against there is no way to tell which draft a record belongs to,
+    so nothing is attributed. Crediting or charging everything is the failure this guard
     exists to prevent, and it would happen precisely when the record is least reliable.
     """
     if not artifact_hash:
         return []
+    return [r for r in records if r.get("artifact_hash") == artifact_hash]
 
+
+def _reviewers(records: list[dict[str, Any]], artifact_hash: str | None) -> list[tuple[str, str]]:
+    """(lens, critic) for the clean records that attest to *this* artifact."""
     seen: list[tuple[str, str]] = []
-    for record in records:
-        if artifact_hash and record.get("artifact_hash") != artifact_hash:
-            continue
+    for record in _for_artifact(records, artifact_hash):
         pair = (str(record.get("lens", "")), str(record.get("critic_identity", "")))
         if pair not in seen:
             seen.append(pair)
@@ -252,6 +279,8 @@ def export_markdown(
             for d in prov.outstanding
         ]
         lines.append("")
+    elif prov.outstanding_withheld:
+        lines += ["### Outstanding defects in this report", "", _DEFECTS_NOT_KEYED, ""]
 
     if prov.warnings:
         lines += ["### Warnings", ""]
@@ -297,6 +326,11 @@ def provenance_html(prov: Provenance) -> str:
         outstanding = (
             "<h3>Outstanding defects in this report</h3>"
             f'<ul class="defects">{items}</ul>'
+        )
+    elif prov.outstanding_withheld:
+        outstanding = (
+            "<h3>Outstanding defects in this report</h3>"
+            f'<p class="advice">{_esc(_DEFECTS_NOT_KEYED)}</p>'
         )
 
     warnings = ""
