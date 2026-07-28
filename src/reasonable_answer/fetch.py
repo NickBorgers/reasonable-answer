@@ -110,9 +110,9 @@ class SourceOutcome(str, Enum):
 
 
 #: Statuses that mean "refused", as distinct from "not there". 999 is LinkedIn's
-#: non-standard bot-wall code and shows up in real citation lists.
+#: non-standard bot-wall code and shows up in real citation lists. The not-found
+#: counterpart is `NOT_FOUND_STATUSES` above, which D38 already owns.
 _BLOCKED_STATUSES = frozenset({401, 402, 403, 405, 406, 423, 429, 451, 999})
-_NOT_FOUND_STATUSES = frozenset({404, 410})
 
 
 @dataclass(frozen=True)
@@ -161,8 +161,12 @@ class FetchedSource:
         exist, which is exactly ``fabricated_citation`` under source verification. Every
         other failure (403, timeout, unreadable content type, empty body) is "could not
         read", which is never evidence of fabrication (D38, docs/convergence.md).
+
+        Expressed against `outcome` rather than `status` so the two cannot drift, and so
+        a not-found established by something other than an HTTP code — a registry that
+        has never heard of the identifier — lands here too when those tiers arrive.
         """
-        return not self.ok and self.status in NOT_FOUND_STATUSES
+        return self.outcome is SourceOutcome.NOT_FOUND
 
 
 def classify_status(status: int | None) -> SourceOutcome:
@@ -172,7 +176,7 @@ def classify_status(status: int | None) -> SourceOutcome:
     says nothing about whether the source exists, the second is the only evidence this
     system can offer that it does not.
     """
-    if status in _NOT_FOUND_STATUSES:
+    if status in NOT_FOUND_STATUSES:
         return SourceOutcome.NOT_FOUND
     if status in _BLOCKED_STATUSES:
         return SourceOutcome.BLOCKED

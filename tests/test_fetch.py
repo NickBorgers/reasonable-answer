@@ -522,26 +522,44 @@ def test_a_failed_fetch_is_not_presented_as_evidence_of_fabrication():
     assert "says nothing at all about whether the source exists" in block
 
 
-def test_a_blocked_source_does_not_sharpen_fabricated_citation():
+def test_a_blocked_source_keeps_the_on_its_face_bar():
     """403 is the shape most real paywalls take, and it is not evidence of anything.
 
-    The sharpened `fabricated_citation` reading is a checkable standard. Applying it to
-    a source nobody could check is how verification manufactures defects.
+    A sharpened `fabricated_citation` reading is a checkable standard. Applying it to a
+    source nobody could check is how verification manufactures defects.
     """
     blocked = FetchedSource(url="https://example.org/a", status=403, error="HTTP 403")
     prompt = prompts.critic_user(Lens.EVIDENCE, "q?", "report", [blocked])
 
-    assert "the server answered for the cited URL" not in prompt
+    assert "BLOCKED" in prompt
     assert "cannot be what it claims on its face" in prompt, "the on-its-face bar stands"
 
 
-def test_only_not_found_licenses_the_sharper_fabrication_standard():
+def test_a_not_found_source_is_not_offered_to_the_critic_to_raise_again():
+    """D38 mints that `fabricated_citation` mechanically in
+    `triage.mechanical_citation_issues`. Asking the critic for it as well would
+    double-report one defect, and both copies carry the blocking floor."""
     missing = FetchedSource(url="https://example.org/a", status=404, error="HTTP 404")
     prompt = prompts.critic_user(Lens.EVIDENCE, "q?", "report", [missing])
 
-    assert "the server answered for the cited URL" in prompt
-    assert "refused, blocked or paywalled does not meet this bar" in prompt
     assert "NOT FOUND" in prompt
+    assert "ALREADY been recorded" in prompt
+    assert "Do not raise it again" in prompt
+    # The category definition itself stays the weaker on-its-face one: nothing about a
+    # 404 makes the *critic's* judgement of the other citations sharper.
+    assert "cannot be what it claims on its face" in prompt
+
+
+def test_unresolvable_tracks_the_outcome_not_the_status():
+    """One source of truth. `unresolvable` is what triage keys off, and a future
+    not-found established without an HTTP code must reach it too."""
+    from reasonable_answer.fetch import SourceOutcome
+
+    assert FetchedSource(url="u", status=404, error="HTTP 404").unresolvable
+    assert not FetchedSource(url="u", status=403, error="HTTP 403").unresolvable
+    assert FetchedSource(
+        url="u", error="no registry has heard of it", outcome=SourceOutcome.NOT_FOUND
+    ).unresolvable
 
 
 def test_a_body_less_outcome_cannot_be_constructed_as_if_it_had_one():

@@ -254,23 +254,21 @@ def critic_user(
     # plausibility and become checkable facts. Say so, or the critic keeps applying
     # the weaker "on its face" standard it was written for.
     meanings = dict(_CATEGORY_MEANING)
-    if sources:
-        # Sharpened per outcome, not per "we fetched something". A blanket "the cited
-        # URL does not resolve" reading would misfire on the blocked and paywalled
-        # sources that make up most of a real failure set — the critic would apply a
-        # checkable standard to a source it cannot check.
-        if any(s.outcome is SourceOutcome.NOT_FOUND for s in sources):
-            meanings[Category.FABRICATED_CITATION] = (
-                "the server answered for the cited URL and said the document is not "
-                "there, or the page it returns is plainly not the source the report "
-                "describes. A fetch that was refused, blocked or paywalled does not "
-                "meet this bar"
-            )
-        if any(s.ok for s in sources):
-            meanings[Category.MISREPRESENTED_SOURCE] = (
-                "the fetched page does not contain the claim the report attributes to "
-                "it, or states something materially different"
-            )
+    # Sharpened per outcome, not per "we fetched something". Only a source whose body
+    # actually arrived turns `misrepresented_source` into a checkable fact; applying
+    # that standard to the blocked and paywalled sources that make up most of a real
+    # failure set is how verification manufactures defects.
+    #
+    # `fabricated_citation` is deliberately *not* sharpened toward the critic. D38
+    # raises it mechanically in `triage.mechanical_citation_issues`, so inviting the
+    # critic to raise it too would double-report one defect — at its blocking floor,
+    # twice. What the critic is told instead is that the finding is already recorded;
+    # see `fetched_sources_block`.
+    if sources and any(s.ok for s in sources):
+        meanings[Category.MISREPRESENTED_SOURCE] = (
+            "the fetched page does not contain the claim the report attributes to "
+            "it, or states something materially different"
+        )
     table = "\n".join(f"- `{c.value}` — {meanings[c]}" for c in categories)
     return (
         f"{UNTRUSTED_NOTE}\n\n"
@@ -335,10 +333,11 @@ def fetched_sources_block(sources: list) -> str:
         "- Anything other than a page of text above means the fetch failed, NOT that the "
         "source is fake. Sites block automated clients, paywall content, serve formats "
         "this cannot read, and go offline. Judge such a citation on its face instead.\n"
-        "- The one exception is `NOT FOUND`: the server answered, and said the document "
-        "is not there. That is the only failure that may support `fabricated_citation`, "
-        "and only where the rest of the citation is also implausible. A URL that has "
-        "merely moved is not a fabricated source.\n"
+        "- The one exception is `NOT FOUND`: the server answered and said the document "
+        "is not there. That citation has ALREADY been recorded as a "
+        "`fabricated_citation` mechanically, before you were asked. Do not raise it "
+        "again — a second finding for the same source is a duplicate, not a stronger "
+        "signal.\n"
         "- `BLOCKED` in particular says nothing at all about whether the source exists. "
         "Reputable paywalled journals and newspapers refuse automated clients as a "
         "matter of course.\n"
