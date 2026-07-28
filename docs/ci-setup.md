@@ -16,8 +16,8 @@ On the homelab host, register a repository-scoped runner for
 `NickBorgers/reasonable-answer` with the labels `self-hosted,homelab`. It can share the
 machine with other repositories' runners.
 
-**Register at least two.** The three reviewer roles run in parallel; with a single runner
-they serialise and every review cycle takes roughly three times as long.
+**Register at least two.** The five reviewer roles run in parallel; with a single runner
+they serialise and every review cycle takes roughly five times as long.
 
 Then, on that host:
 
@@ -185,9 +185,11 @@ break every time the matrix changes.
 
 1. Open a trivial PR (a README typo). `PR Validation Required` should go green, and the
    review pipeline should run the `invariant` and `docs` reviewers — every non-empty diff
-   selects both, and a docs-only change does not additionally select `security` or `test`.
-2. Open a PR touching `src/reasonable_answer/controller.py`. All four reviewers
-   (`invariant`, `docs`, `security`, and `test`) should run.
+   selects both, and a README-only change does not additionally select `security`, `test`,
+   or `quality`. (A change under `docs/` does select `quality`: empirical claims live
+   there.)
+2. Open a PR touching `src/reasonable_answer/controller.py`. All five reviewers
+   (`invariant`, `docs`, `security`, `test`, and `quality`) should run.
 3. File an issue with the **Agent task** template. An agent starts on it immediately. A PR
    should appear with `Resolves #N` — **and the review pipeline should fire on it.** If
    the PR appears but nothing reviews it, the resolver checkout is not using
