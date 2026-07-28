@@ -78,6 +78,7 @@ jobs:
       cycle: ${{ steps.cycle.outputs.cycle }}
       cap_exhausted: ${{ steps.cycle.outputs.cap_exhausted }}
       fix_allowed: ${{ steps.cycle.outputs.fix_allowed }}
+      needs_sync: ${{ steps.drift.outputs.needs_sync }}
       inherit: ${{ steps.inherit.outputs.inherit }}
       inherited_verdict: ${{ steps.inherit.outputs.inherited_verdict }}
       roles: ${{ steps.classify.outputs.roles }}
@@ -103,6 +104,41 @@ jobs:
           sha: ${{ inputs.reviewed_sha }}
           base_sha: ${{ inputs.base_sha }}
           github_token: ${{ secrets.WORKFLOW_PAT }}
+
+      # Whether the reviewed SHA is behind the base branch, i.e. a base-branch sync (D28)
+      # is needed. This is the one thing that lets `fix` run when every reviewer guard
+      # refused (D34, issue #70).
+      #
+      # A reviewer's guard requires a completed `PR Validation Required` on the reviewed
+      # SHA. Whenever that check is absent or red while the base has moved underneath the
+      # branch, every guard refuses, `record-cycle` is skipped, and the fixer — the only
+      # stage that can resync — never ran. The sharpest case is a PR that conflicts with
+      # its base: no merge ref ⇒ no `pull_request` event ⇒ no PR Validation, forever.
+      # `/review` reaches this graph via `issue_comment`, which fires regardless of merge
+      # state, but with the panel guarded off the run did nothing. A sync consumes no
+      # reviewer findings, so it does not need the reviewers to have run; `fix` keys its
+      # sync-only path on this output. That path is non-agentic, so it repairs a
+      # behind-the-base PR but not an already-conflicting one — see D34.
+      #
+      # `merge-base --is-ancestor origin/<base> HEAD` is exactly the test the fixer's own
+      # sync step uses, so the two agree on when a sync is due. Deliberately not a shallow
+      # fetch: a branch further behind than the depth would get a wrong merge base.
+      - name: Detect base-branch drift
+        id: drift
+        working-directory: pr-head
+        env:
+          BASE_REF: ${{ inputs.base_ref }}
+          SHA: ${{ inputs.reviewed_sha }}
+        run: |
+          set -euo pipefail
+          git fetch --quiet origin "${BASE_REF}"
+          if git merge-base --is-ancestor "origin/${BASE_REF}" "${SHA}"; then
+            echo "needs_sync=false" >> "$GITHUB_OUTPUT"
+            echo "gather: ${SHA} already contains origin/${BASE_REF}; no base-branch sync needed"
+          else
+            echo "needs_sync=true" >> "$GITHUB_OUTPUT"
+            echo "gather: ${SHA} is behind origin/${BASE_REF}; a base-branch sync is needed"
+          fi
 
       # A merge of main into the PR branch is not new content to review. Without this,
       # routinely resyncing a long-lived branch burns cycles and can push a PR into the
@@ -376,16 +412,45 @@ jobs:
   # this SHA's cycle back by walking the commit chain. Pushing before the counter is
   # durable would let that race-window run see no recorded cycle, believe itself to be
   # cycle 1, and fix the same commit again.
+  #
+  # Two ways in, and they are disjoint (`record-cycle` succeeded XOR skipped):
+  #
+  #   (a) reviewers ran (`record-cycle` succeeded) and a fix is allowed — the normal
+  #       path, unchanged. The fixer addresses blockers and, if the base moved, syncs in
+  #       the same commit.
+  #   (b) reviewers did NOT run (`record-cycle` was skipped: every guard refused) but the
+  #       branch is behind the base — the sync-only path (D34, issue #70). A base-branch
+  #       sync consumes no reviewer findings, so it does not need `record-cycle` to have
+  #       written a cycle. It is passed `sync_only: true`, which makes the fixer
+  #       **non-agentic**: it commits a clean host-side merge and nothing else, and a
+  #       merge that conflicts is abandoned rather than handed to the fixer agent. That
+  #       restriction is the whole safety argument — see review-fixer.yml's `sync_only`
+  #       input, and D34 for why an unvalidated, unreviewed tree must never reach a
+  #       credentialed agent on the self-hosted runner.
+  #
+  #       Path (b) deliberately does NOT require `fix_allowed`. `fix_allowed` bars a
+  #       blocker-fix on the last cycle because that fix would go unreviewed — but a sync
+  #       addresses no blockers, and its pushed SHA becomes reviewable once mergeable, so
+  #       the reason does not apply. It also writes no `review/cycle` (that is
+  #       `record-cycle`'s job, and it was skipped), so a sync-only cycle costs nothing on
+  #       the counter, exactly as a run that reviewed nothing should. `cap_exhausted` is
+  #       still honoured on both paths: a genuinely exhausted PR takes the terminal
+  #       cap-exhausted finalize and waits for a human, rather than being kept alive by an
+  #       endless resync.
   fix:
     name: Fix
     needs: [gather, review-invariant, review-docs, review-security, review-test, record-cycle]
     if: |
       always() &&
       needs.gather.result == 'success' &&
-      needs.record-cycle.result == 'success' &&
       needs.gather.outputs.cap_exhausted != 'true' &&
       needs.gather.outputs.inherit != 'true' &&
-      needs.gather.outputs.fix_allowed == 'true'
+      (
+        (needs.record-cycle.result == 'success' &&
+         needs.gather.outputs.fix_allowed == 'true') ||
+        (needs.record-cycle.result == 'skipped' &&
+         needs.gather.outputs.needs_sync == 'true')
+      )
     uses: ./.github/workflows/review-fixer.yml
     with:
       pr_number: ${{ inputs.pr_number }}
@@ -393,6 +458,10 @@ jobs:
       head_ref: ${{ inputs.head_ref }}
       base_ref: ${{ inputs.base_ref }}
       cycle: ${{ needs.gather.outputs.cycle }}
+      # True exactly on path (b): reviewers did not run, so nothing on this SHA has been
+      # validated or read. It bars the fixer agent outright — the sync-only pass is a
+      # host-side merge or nothing.
+      sync_only: ${{ needs.record-cycle.result == 'skipped' }}
     secrets:
       WORKFLOW_PAT: ${{ secrets.WORKFLOW_PAT }}
 
@@ -417,7 +486,7 @@ jobs:
 
   finalize:
     name: Finalize
-    needs: [gather, fix, judge]
+    needs: [gather, record-cycle, fix, judge]
     if: always() && needs.judge.result == 'success'
     uses: ./.github/workflows/review-finalize.yml
     with:
@@ -426,9 +495,17 @@ jobs:
       # `fix` is skipped outright (not merely a no-op) whenever fix_allowed was false —
       # e.g. the last permitted cycle — so its outputs.new_sha can be empty even on this
       # success path. Fall back to reviewed_sha in that case, same as a no-op push.
+      #
+      # A sync-only push (D34) is deliberately NOT a post-fix SHA either, which is why
+      # `record-cycle` is tested here. Everywhere else, finalize stamps review/cycle and
+      # review/verdict on the pushed SHA because the fixer's claim guarantees no other run
+      # ever will. The sync-only path suppresses that claim precisely so the successor gets
+      # its own panel, so stamping it here would contradict "a sync-only pass consumes no
+      # cycle" and — at cycle 2 — leave the successor already capped before that panel could
+      # run. The statuses stay on the pre-sync SHA, which the mergeable successor supersedes.
       post_fix_sha: >-
-        ${{ needs.fix.result == 'success' && needs.fix.outputs.new_sha != '' &&
-        needs.fix.outputs.new_sha || inputs.reviewed_sha }}
+        ${{ needs.record-cycle.result != 'skipped' && needs.fix.result == 'success' &&
+        needs.fix.outputs.new_sha != '' && needs.fix.outputs.new_sha || inputs.reviewed_sha }}
       cycle: ${{ needs.gather.outputs.cycle }}
       verdict: ${{ needs.judge.outputs.verdict }}
       category: ${{ needs.judge.outputs.category }}

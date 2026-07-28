@@ -53,7 +53,9 @@ review-entry            authorize · fork-reject · resolve SHA · prior-GO chec
        ├─ test          Claude    ─┘
        ├─ record-cycle  writes review/cycle — only if a reviewer actually ran
        ├─ fix           the ONLY branch-writing stage; syncs with the base branch and
-       │                addresses blockers; skipped on the last cycle
+       │                addresses blockers; skipped on the last cycle, but still runs a
+       │                non-agentic, clean-merge-only sync pass when the panel was guarded
+       │                off and the branch is behind the base (D34)
        ├─ judge         deterministic, from main, contents: read
        └─ finalize      labels · summary comment · merge gate
 ```
@@ -182,12 +184,15 @@ it holds `contents: read`, so it could not push if it tried.
   `record-cycle`, after the panel has read the code, and only when at least one reviewer's
   guard cleared. Every guard refusing — PR Validation red on the reviewed SHA, the branch
   moved on mid-run, an untrusted author — means no code was read, and the next push starts
-  from the same cycle number. This is fail-open on the counter and safe because `fix`
-  needs `record-cycle`: the only stage that can push, and therefore the only stage that
-  could ever advance the cap, cannot run on an unrecorded cycle. PR #49 is the case that
-  forced this: its first run recorded cycle 1 while all four guards refused, and the push
-  that repaired validation arrived as cycle 2, where `fix_allowed` is already false —
-  spending the PR's one automated fix attempt on a run that read nothing.
+  from the same cycle number. This is fail-open on the counter and safe because the only
+  way `fix` can push on an unrecorded cycle is the **sync-only** path (D34), which
+  addresses no blockers and writes no `review/cycle` of its own: it commits a clean merge of
+  the base and nothing else, so it cannot advance the review → fix → push → review loop the
+  cap bounds. Every *blocker-fixing* run still needs `record-cycle` to have succeeded. PR
+  #49 is the case that forced the deferred write: its first run recorded cycle 1 while all
+  four guards refused, and the push that repaired validation arrived as cycle 2, where
+  `fix_allowed` is already false — spending the PR's one automated fix attempt on a run
+  that read nothing.
 - **`MAX_CYCLES: 2`** is now mostly a race-window backstop, not the review → fix → push →
   review loop breaker it once was. The fixer claims its own post-push SHA (see "The fixer
   claims its own SHA" below), so the `synchronize` event that push fires is normally
@@ -263,6 +268,62 @@ The resulting merge commit lands on the merge-from-base inherit path like any ot
 does not burn a cycle. The conflicted-path list travels in a file rather than an
 environment variable: paths are contributor-controlled, and the agent's environment is
 assembled from an `--env-file`, where a newline in a path would inject arbitrary variables.
+
+**The sync still runs when the panel was guarded off (D34).** Every reviewer guard refusing
+normally means the fixer does not run either, because `fix` was gated on `record-cycle`
+having written a cycle. That left the D28 sync unreachable on any PR whose guards refuse for
+a reason a sync would repair — most sharply a PR whose `PR Validation Required` check is
+absent or red while the base has moved underneath it. So `fix` has a second way in: when
+`record-cycle` was skipped *and* `gather` reports the reviewed SHA is behind the base, the
+fixer runs a **sync-only** pass. It does not require `fix_allowed` — that bars a blocker-fix
+on the last cycle because the fix would go unreviewed, but a sync addresses no blockers and
+its pushed SHA becomes reviewable once mergeable. It still honours `cap_exhausted`, so a genuinely
+exhausted PR reaches the terminal cap-exhausted verdict and waits for a human rather than
+being kept alive by an endless resync.
+
+**The sync-only pass is non-agentic, and that bounds what it can fix.** It is entered
+precisely when no reviewer has read the SHA and PR Validation may be absent or red, so the
+tree, the PR body, and any conflict contents are contributor-controlled input that nothing
+has vetted. The fixer agent runs on the self-hosted runner with host networking and pipeline
+credentials, so the pass is passed `sync_only: true` and reduced to what needs no judgement:
+a clean host-side merge, committed and pushed, or nothing. A merge that *conflicts* is
+abandoned (`merge_state=blocked`), the tree returns to the reviewed SHA, and the PR waits for
+a human — an agent may not resolve conflicts on code no reviewer cleared.
+
+The consequence is worth stating plainly: this does **not** rescue a PR that already
+conflicts with its base. Such a PR has no computable merge ref, so GitHub fires no
+`pull_request` event, PR Validation never runs, every guard refuses, and the sync-only pass
+it reaches then hits conflicts and blocks. Clearing a true conflict still takes a human
+merging the base in by hand (as #54 and #56 did). What D34 fixes is the strictly larger,
+non-conflicting case: a behind-the-base PR whose panel was guarded off for any reason gets
+its sync, becomes mergeable, earns its `pull_request` event, gets validated, and becomes
+reachable by a panel — see the residual below for why that is "reachable" and not "reviewed".
+
+**And the sync-only successor is the one SHA the fixer does not claim.** Normally the fixer
+claims `review/pipeline` on the SHA it pushes, so dedup suppresses the `synchronize` event and
+no second panel re-reads the fix (D28) — licensed by "the pre-fix panel plus the fixer's own
+gates *are* the review". A sync-only pass has no pre-fix panel to point at: it runs because
+every guard refused and nothing was read. Claiming there would leave a successor SHA with no
+verdict, no way to earn one, and therefore no way through the merge gate — the original
+deadlock moved one commit forward. So `sync_only` suppresses the claim, and the merged SHA
+gets the panel the pass itself could not run.
+
+**And it is not passed to finalize as `post_fix_sha`.** That input is where `review/cycle`,
+`review/verdict`, and the merge gate land, and stamping them on the pushed SHA is only safe
+because the fixer's claim means no other run will ever write them there. Suppressing the claim
+removes that guarantee, so a sync-only successor would reach its own panel pre-stamped with a
+cycle it never spent — and at cycle 2 would arrive already capped, before the panel it was
+synced to receive. So the sync-only path passes the *pre-sync* SHA instead: the statuses stay
+where the review actually happened, and the successor stays clean for the run that will read
+it. Claim, stamp, and cycle have to move together; fixing any one alone puts the deadlock back
+somewhere else.
+
+One residual is worth naming rather than papering over: the successor is a merge-from-base,
+so if a prior verdict exists anywhere in its chain the inherit short-circuit above may
+re-stamp it instead of opening a panel. That is the fail-closed direction — a stale NO-GO,
+never a stale GO — and `/review` overrides it, which is what that gesture is for. The
+guarantee this path actually makes is narrower than "it will be reviewed": the successor is
+mergeable, validated, and *reachable* by a panel, where before it was none of the three.
 
 It runs in one of two modes.
 
@@ -405,6 +466,12 @@ the remote-head check), without a further cycle reading the post-fix tree. This 
 previously suppressed the claim on the theory that the fix itself needed its own review
 cycle; that was an agent's invention, not a decision the owner had made, and it has been
 reverted (see D28 in `docs/decisions.md`).
+
+The **sync-only** pass (D34) is the single exception, and it does not weaken the rule — it
+turns on it. The claim is licensed by "the pre-fix panel is the review", and a sync-only pass
+runs precisely because there was no panel. Claiming there would produce a successor SHA with
+no verdict and no event left to earn one. So `sync_only: true` suppresses the claim; every
+other push still makes it.
 
 Because the event is suppressed, nothing else will ever publish `review/cycle`,
 `review/verdict`, or the merge gate for that SHA — `review-finalize.yml` does it in the
