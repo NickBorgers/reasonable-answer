@@ -330,6 +330,15 @@ opt-in tier (`sources.enabled` and `sources.pdf.enabled`, both off by default an
 chose, which is SSRF exposure by construction; it is expected to be constrained at the network layer,
 not here.
 
+**Registry tiers (optional, off by default).** Most *good* citations fail that fetch, because
+serious journals and newspapers refuse automated clients. With `sources.identifiers` on, a citation
+carrying a DOI, arXiv id, PMID or PMCID is looked up at Crossref/OpenAlex, which answers the
+question that actually matters for fabrication — does this source exist — without needing the
+paywalled body, and stops a real paywalled paper looking like an invented one. With
+`sources.open_access` on, a free copy is read where one exists, and is labelled as a mirror rather
+than the version of record. Neither tier sharpens `misrepresented_source`: an abstract is not the
+source's text. See D39.
+
 **Known limitations.** Output is labelled *consensus-reviewed with in-artifact sourcing* by default,
 *…with retrieved sourcing* when `search.enabled: true`, and *…with verified sourcing* when
 `verify_sources` is also on. **None of the three is fact-checked.** Verification establishes that a

@@ -103,6 +103,21 @@ unreadable content type — so "a body this cannot read" narrows to formats no c
 text is truncated and the critic is told so, so a claim it cannot see is not read as a claim the page
 contradicts.
 
+**Existence is checkable even when the body is not (D39, off by default).** With
+`sources.identifiers` enabled, a cited URL that carries a DOI, arXiv id, PMID or PMCID and would
+not hand over its body is asked about at a bibliographic registry. A confirmed record yields
+`metadata_only` — or `paywalled`, when the direct fetch was also refused — and the critic is shown
+the citation details and, where one exists, the abstract, announced as confirmation that the
+source **exists** and explicitly labelled as not being its text. This does not sharpen
+`misrepresented_source`: an abstract is a summary the authors wrote, so a claim's absence from one
+is not evidence the paper does not make it, and the critic is told never to raise that category
+against a source shown only as metadata. It does move a real paywalled paper out of the class that
+looks like a fabricated one. In the other direction, an identifier that *every* authoritative
+registry denies is a not-found and reaches the mechanical finding above — gated hard, because that
+finding is blocking. With `sources.open_access` enabled a free copy may also be read; such a body
+is marked as coming from a mirror rather than the cited URL, and can never settle a dispute about
+that URL, because a preprint is not the version of record.
+
 **Every prompt carries the run's date (D22).** A date-plausibility judgement ("this citation is
 future-dated, so it must be fabricated") is only as good as the judge's sense of what day it is —
 and without grounding, that sense is the critic model's training-data recency. Run
