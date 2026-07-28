@@ -226,3 +226,49 @@ def test_bias_related_spans_may_describe_a_pattern_not_a_quote():
             update={"related_span": "the question's framing, which the report never examines"}
         )
         validate_issue(lens, described, STRUCTURE)  # must not raise
+
+
+# ------------------------------------------------------------------ repair guidance
+
+
+def test_a_misquote_carries_the_paragraph_it_should_have_quoted():
+    """The message names the problem; the hint names the fix. Without the paragraph
+    text a retry is a re-roll, which is what exhausted two production runs."""
+    bad = issue(Category.UNCITED_CLAIM, Severity.MAJOR)
+    bad = bad.model_copy(update={"claim_span": "a claim the report never makes"})
+
+    with pytest.raises(LensValidationError) as exc:
+        validate_issue(Lens.EVIDENCE, bad, STRUCTURE)
+
+    assert "not a verbatim quote" in str(exc.value)
+    assert "Intro paragraph making a claim." in exc.value.repair_hint()
+
+
+def test_an_invented_locus_is_told_which_loci_exist():
+    bad = issue(Category.UNCITED_CLAIM, Severity.MAJOR, section=9, paragraph=9)
+
+    with pytest.raises(LensValidationError) as exc:
+        validate_issue(Lens.EVIDENCE, bad, STRUCTURE)
+
+    assert "S1.P1" in exc.value.repair_hint()
+
+
+def test_a_category_out_of_scope_offers_no_hint():
+    """Not every rejection is a recoverable slip: a critic raising another lens's
+    category misread its brief, and there is no text to hand back that fixes that."""
+    wrong = issue(Category.UNCITED_CLAIM, Severity.MAJOR)  # evidence category
+
+    with pytest.raises(LensValidationError) as exc:
+        validate_issue(Lens.COMPLETENESS, wrong, STRUCTURE)
+
+    assert exc.value.repair_hint() == ""
+
+
+def test_typographic_punctuation_does_not_make_an_honest_quote_a_misquote():
+    report = "# T\n\nThe agency’s 2015 update — 0.7 mg/L — still stands…\n"
+    structure = report_mod.parse(report)
+    retyped = issue(Category.UNCITED_CLAIM, Severity.MAJOR).model_copy(
+        update={"claim_span": "The agency's 2015 update - 0.7 mg/L - still stands..."}
+    )
+
+    validate_issue(Lens.EVIDENCE, retyped, structure)  # does not raise

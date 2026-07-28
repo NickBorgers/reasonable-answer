@@ -203,3 +203,23 @@ def test_two_gemma_checkpoints_are_not_mistaken_for_independent_reviewers():
     cfg = Config(roster=roster, budgets=Budgets())
     warnings = validate_roster_health(cfg, identities)
     assert any("weak independence" in w for w in warnings)
+
+
+def test_an_exhausted_pool_rotates_instead_of_re_asking_the_same_critic(roster, identities):
+    """Once every eligible critic has reviewed, further attempts must spread across the
+    pool. The fallback used to be `eligible[0]` unconditionally: run-3b4fe4760289 spent
+    11 of its 12 critique attempts on one model and aborted without shipping."""
+    everyone = {
+        identities[a] for a in roles.eligible_critics(
+            roster, identities, Lens.LOGIC, identities["writer-a"]
+        )
+    }
+
+    picked = {
+        roles.pick_critic(
+            roster, identities, Lens.LOGIC, identities["writer-a"], everyone, rotation=n
+        )
+        for n in range(len(everyone))
+    }
+
+    assert len(picked) == len(everyone)

@@ -438,6 +438,47 @@ def test_the_audit_trail_records_what_was_fetched(tmp_path, identities, config):
     assert fetched and fetched[-1]["fetched"] == 2 and fetched[-1]["failed"] == 1
 
 
+def test_fetch_failure_reasons_are_redacted_to_their_class(tmp_path, identities, config):
+    """RA-016: a fetch failure enters the `fetch_sources` audit event as its reason
+    *class* only — a status code or an exception type — never the URL or page detail
+    that trails it. An untested redaction is an untested guarantee: a regression in the
+    `split(':')`/`split('(')` logic that leaked the tail would otherwise pass CI silently."""
+    import json
+
+    from reasonable_answer.graph import _critique_one, _failure_reasons
+
+    secret = "https://secret.example/leaked/path"
+
+    class _LeakyFailures:
+        def fetch_all(self, urls):
+            return [
+                FetchedSource(url=secret, error=f"ConnectionResetError: {secret}"),
+                FetchedSource(url=secret, error="unreadable content type (application/pdf)"),
+                FetchedSource(url=secret, status=503, error="HTTP 503"),
+            ]
+
+    # The helper itself collapses each error to its class, dropping the tail.
+    expected = {"ConnectionResetError": 1, "unreadable content type": 1, "HTTP 503": 1}
+    assert _failure_reasons(_LeakyFailures().fetch_all(["u"])) == expected
+
+    rt, _ = _runtime(tmp_path, identities, config, fetcher=_LeakyFailures())
+    _critique_one(
+        rt, Lens.EVIDENCE, "q?", REPORT, "h" * 64, "vendor-a/model-a", set(), attempt=1
+    )
+
+    events = [
+        json.loads(line)
+        for line in (rt.store.dir / "events.jsonl").read_text().splitlines()
+    ]
+    event = [e for e in events if e["kind"] == "fetch_sources"][-1]
+    assert event["failure_reasons"] == expected
+    # The tail — URL and page-type detail — must appear nowhere in the audit event.
+    blob = json.dumps(event)
+    assert secret not in blob
+    assert "leaked" not in blob
+    assert "pdf" not in blob
+
+
 @pytest.mark.parametrize(
     "kwargs",
     [

@@ -496,11 +496,18 @@ jobs:
           cp ".github/scripts/review/schema/reviewer-v1.json" "${PR_WORKSPACE}/.review-prompt/"
 
       # The primary attempt. In author-resume mode it is bounded and best-effort: a
-      # resumed session that stalls must not burn the whole timeout and leave the PR
-      # with no fix. `continue-on-error` there hands control to the cold fallback below
-      # instead of failing the job; in cold mode there is no fallback, so a failure is
-      # fatal as before. The resume budget is deliberately tighter than the cold one —
-      # a resume that has produced nothing in 25 minutes is hung, not thinking.
+      # resumed session that stalls must not burn the whole timeout and leave the PR with
+      # no fix. Containment does NOT rely on `continue-on-error` here — an expression-
+      # valued `continue-on-error` on a step that `uses:` a composite action did not
+      # actually keep the composite's inner-step failure from aborting the job (three
+      # consecutive runs proved it). Instead, run-in-container.sh contains the failure at
+      # its own boundary in resume mode: on a timeout it writes a sentinel and exits 0, so
+      # this step *succeeds*, and the "did the resume produce a fix?" step below reads the
+      # sentinel / result to decide whether to fall back. `continue-on-error` is kept only
+      # as defense-in-depth for a failure in one of the composite's *other* steps. In cold
+      # mode there is no fallback, so a failure is fatal as before. The resume budget is
+      # deliberately tighter than the cold one — a resume that has produced nothing in 25
+      # minutes is hung, not thinking.
       - name: Run the fixer
         id: run
         if: steps.work.outputs.agent == 'true'
@@ -530,24 +537,75 @@ jobs:
           llm_proxy_openai_base_url: ${{ vars.LLM_PROXY_OPENAI_BASE_URL }}
           llm_proxy_api_key: ${{ vars.AI_API_KEY || 'fake-key' }}
 
-      # ── Cold fallback: only when a resume attempt did not succeed ─────────────
+      # ── Did the author-resume attempt actually produce a fix? ─────────────────
+      #
+      # This exists because containment moved into run-in-container.sh: on a hung resume
+      # that step now *succeeds* (exit 0 + sentinel), so `steps.run.outcome` is no longer
+      # the signal — it would read `success` on exactly the hang the fallback exists to
+      # catch. The reliable signal is on disk. The script writes
+      # `fixer-incomplete.sentinel`, naming the reason, for *every* contained resume —
+      # deadline, crash, or a clean exit with no artifact — so this step never has to infer
+      # a crash from a missing result. It cannot: an agent that writes `fixer-result.json`
+      # and then exits nonzero leaves a result behind, and the inference would read that
+      # crash as a fix and push work the agent did not vouch for.
+      #
+      # `!cancelled()` rather than `always()`: the goal is only to stop an implicit
+      # `success()` being ANDed onto the condition, and `always()` would additionally keep
+      # this chain running through a cancellation — the fallback step below is not
+      # read-only (it resets the tree and replays the base merge), so a cancelled run must
+      # not enter it. `steps.run.outcome` is still consulted as a belt-and-suspenders check
+      # for a failure in one of the composite's other steps. Only meaningful in
+      # author-resume mode; cold mode skips it.
+      - name: Did the author-resume fixer produce a fix?
+        id: resume_result
+        if: >-
+          !cancelled()
+          && steps.work.outputs.agent == 'true'
+          && steps.session.outputs.mode == 'author-resume'
+        env:
+          RUN_OUTCOME: ${{ steps.run.outcome }}
+        run: |
+          set -euo pipefail
+          OUT_DIR="${GITHUB_WORKSPACE}/${PR_WORKSPACE}/.review-output"
+          RESULT="${OUT_DIR}/fixer-result.json"
+          SENTINEL="${OUT_DIR}/fixer-incomplete.sentinel"
+
+          ok=false
+          if [ -f "$SENTINEL" ]; then
+            echo "Author-resume fixer did not complete ($(cat "$SENTINEL")); falling back."
+          elif [ "$RUN_OUTCOME" != "success" ]; then
+            echo "Author-resume fixer step did not succeed (outcome=${RUN_OUTCOME}); falling back."
+          elif [ ! -s "$RESULT" ]; then
+            echo "Author-resume fixer left no result artifact; falling back."
+          else
+            ok=true
+            echo "Author-resume fixer produced a result; no fallback."
+          fi
+          echo "ok=${ok}" >> "$GITHUB_OUTPUT"
+
+      # ── Cold fallback: only when the resume attempt did not produce a fix ──────
       #
       # A resumed author is the better fixer when it works — it answers reviewers from
       # the conversation that wrote the code. But author-resume has been the failure
       # mode, not the happy path, and a hung resume that blocks the PR is strictly worse
-      # than a cold fix. So when the resume attempt does not produce a clean
-      # result, fall through to a fresh cold agent, exactly as the reference pipeline in
-      # hide-my-list does. The cold path is the more conservative one and always logged.
+      # than a cold fix. So when the resume attempt does not produce a clean result, fall
+      # through to a fresh cold agent, exactly as the reference pipeline in hide-my-list
+      # does. The cold path is the more conservative one and always logged.
       #
-      # `outcome != 'success'` covers both a hard failure (timeout, non-zero exit) and
-      # the composite completing without leaving a result. In cold mode this whole block
-      # is skipped: the primary run already was the cold agent.
+      # The trigger is the on-disk verdict computed above, not `steps.run.outcome`, which
+      # a contained timeout now reports as `success`. The status function is load-bearing:
+      # without one GitHub ANDs an implicit `success()` on, which would skip this on the
+      # very hang it must catch. It is `!cancelled()` and not `always()` because this step
+      # is not read-only — it resets the tree to the reviewed SHA and replays the base
+      # merge — and `always()` would run all of that while the job is being cancelled. In
+      # cold mode this whole block is skipped: the primary run already was the cold agent.
       - name: Fall back to a cold fixer
         id: fallback
         if: >-
-          steps.work.outputs.agent == 'true'
+          !cancelled()
+          && steps.work.outputs.agent == 'true'
           && steps.session.outputs.mode == 'author-resume'
-          && steps.run.outcome != 'success'
+          && steps.resume_result.outputs.ok != 'true'
         env:
           REVIEWED_SHA: ${{ inputs.reviewed_sha }}
           BASE_REF: ${{ inputs.base_ref }}
@@ -555,7 +613,7 @@ jobs:
           MERGE_STATE: ${{ steps.sync.outputs.merge_state }}
         run: |
           set -euo pipefail
-          echo "::warning::Author-resume fixer did not succeed (outcome=${{ steps.run.outcome }}); falling back to a cold fixer."
+          echo "::warning::Author-resume fixer did not produce a fix (see the preceding step for why); falling back to a cold fixer."
 
           PR_DIR="${GITHUB_WORKSPACE}/${PR_WORKSPACE}"
           OUT_DIR="${PR_DIR}/.review-output"

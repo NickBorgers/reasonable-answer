@@ -24,6 +24,7 @@ from reasonable_answer.config import Budgets, Config, ProxyConfig, Roster
 from reasonable_answer.llm import (
     Completion,
     LLMClient,
+    MalformedOutputError,
     ModelCallError,
     _message_dict,
     _Reply,
@@ -365,3 +366,87 @@ def test_timeout_is_absent_from_the_sdk_call_when_not_given(client):
     client.complete("writer-a", system="s", user="u")
 
     assert "timeout" not in calls[0]
+
+
+# ------------------------------------------------- unparsed tool-call markup as content
+
+
+#: What DeepSeek emitted, verbatim in shape, when the proxy failed to parse its tool
+#: call: fullwidth-bar markup arriving as `content` with `tool_calls` empty. It read as
+#: a successful completion and became run-5d4b1d9cb08b's shipped answer.
+_DSML_GARBAGE = (
+    '<｜DSML｜tool_calls> <｜DSML｜invoke name="web_search"> '
+    '<｜DSML｜parameter name="query" string="true">Ken Paxton securities fraud case '
+    "dismissed June 2025</｜DSML｜parameter> </｜DSML｜invoke> </｜DSML｜tool_calls>"
+)
+
+
+def test_tool_call_markup_returned_as_prose_is_retried_not_believed(client):
+    """A 200 whose "content" is an unparsed tool call is a failed call wearing prose's
+    clothes: `tool_calls` is empty, so nothing downstream can tell it apart from an
+    answer."""
+    calls: list[dict] = []
+    _sdk_scripted(client, [_DSML_GARBAGE, "REAL REPORT"], record=calls)
+
+    result = client.complete("writer-a", system="s", user="u")
+
+    assert result.text == "REAL REPORT"
+    assert len(calls) == 2
+
+
+def test_tool_call_markup_fails_closed_once_the_budget_is_gone(client):
+    _sdk_scripted(client, [_DSML_GARBAGE] * 3)  # call_retries=2 -> 3 attempts
+    with pytest.raises(ModelCallError, match="unparsed tool-call markup"):
+        client.complete("writer-a", system="s", user="u")
+
+
+def test_prose_that_merely_mentions_tool_call_syntax_is_left_alone(client):
+    """A report *about* tool calling quotes the token once in thousands of characters.
+    Failing that call would make the roster unable to answer a whole class of question."""
+    prose = (
+        "Models signal a tool invocation with a `<tool_call>` block. " + "Filler text. " * 60
+    )
+    _sdk_scripted(client, [prose])
+
+    assert client.complete("writer-a", system="s", user="u").text == prose.strip()
+
+
+# ----------------------------------------------------- the post-schema validate hook
+
+
+def test_a_validator_rejection_is_repaired_with_its_hint(client):
+    """`structured(validate=...)` repairs on the same loop as a schema violation, and
+    carries the error's `repair_hint()` into the re-ask. This is the mechanism the
+    critique path relies on; without the hint the second attempt is a blind re-roll."""
+
+    class _Rejected(ValueError):
+        def repair_hint(self) -> str:
+            return "COPY THIS EXACTLY: the cited paragraph"
+
+    seen: list[dict] = []
+    _sdk_scripted(client, ['{"value": "bad"}', '{"value": "good"}'], record=seen)
+
+    def validate(parsed: _Echo) -> None:
+        if parsed.value != "good":
+            raise _Rejected("value is not verbatim")
+
+    result = client.structured(
+        "writer-a", system="s", user="u", schema=_Echo, repair_retries=1, validate=validate
+    )
+
+    assert result.value == "good"
+    repair_prompt = seen[1]["messages"][-1]["content"]
+    assert "value is not verbatim" in repair_prompt
+    assert "COPY THIS EXACTLY" in repair_prompt
+
+
+def test_a_validator_that_never_passes_fails_closed(client):
+    _sdk_scripted(client, ['{"value": "bad"}'] * 3)
+
+    def validate(_parsed: _Echo) -> None:
+        raise ValueError("still wrong")
+
+    with pytest.raises(MalformedOutputError, match="still wrong"):
+        client.structured(
+            "writer-a", system="s", user="u", schema=_Echo, repair_retries=2, validate=validate
+        )

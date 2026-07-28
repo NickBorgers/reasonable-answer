@@ -8,12 +8,18 @@ Design notes worth keeping in mind while reading:
   them. A caller who can reach the port directly can claim to be anyone (D32,
   docs/authentication.md).
 * **Authentication is enforced by middleware, not by each route.** Every route but
-  `/healthz` is behind it, including routes nobody has written yet — the failure mode
-  of a per-route call is a new handler that forgets to make it.
+  `/healthz` and the GETs under `/runs/` is behind it, including routes nobody has
+  written yet — the failure mode of a per-route call is a new handler that forgets to
+  make it. The exemption is method-scoped, so a new *write* is gated by default and
+  only a new *read* under `/runs/` inherits the public rule (D35).
 * **Ownership is per run and scopes the index, not each read.** You see your own runs
-  listed; anyone signed in who holds a run id can read that run. Sharing a link is
-  the intended way to show someone a report. Runs with no owner — written before
-  ownership existed, or by `ra run` without `--owner` — are served to nobody.
+  listed; anyone who holds a run id can read that run, signed in or not — holding the
+  id is the credential. Sharing a link is the intended way to show someone a report.
+  Runs with no owner — written before ownership existed, or by `ra run` without
+  `--owner` — are served to nobody.
+* **Nothing public names a person.** A shared link reaches strangers, so the owner's
+  address is kept off every route under `/runs/`: no byline on the run page, no
+  `owner` field in `audit.json` (D35).
 * **Showing reports to a human does not weaken the isolation design.** Blindness is
   about what enters a *model's* context. This UI is a window onto the audit trail,
   which is the whole reason the pipeline keeps one.
@@ -25,6 +31,7 @@ import asyncio
 import logging
 import math
 import os
+import threading
 from contextlib import asynccontextmanager
 from pathlib import Path
 from typing import Any
@@ -62,7 +69,56 @@ from .worker import QueueFull, RateLimited, RunWorker
 #: It reports liveness only, and nothing about any run.
 _UNAUTHENTICATED_PATHS = frozenset({"/healthz"})
 
+#: Reading a run needs no identity: holding the id is the credential (D35). Everything
+#: under this prefix is a pure disk read of one run's own audit trail — no worker, no
+#: graph, no token cost — so a person can share the URL they are looking at and have it
+#: open for anyone.
+#:
+#: The rule is **method-scoped**, and that is what keeps it narrow: every route that
+#: spends tokens or changes state is a POST, so `POST /runs` (submit — no trailing slash,
+#: so it does not match), `POST /runs/{id}/resume` and `POST /runs/{id}/again` all fall
+#: through to the identity check unchanged, as do `/` and the app-shell assets. Matched
+#: against the same `request.url.path` the proxy has already stripped `RA_ROOT_PATH` from,
+#: exactly as `_UNAUTHENTICATED_PATHS` is (D29). An owner-less run still 404s via
+#: `_require`, so nothing that was unreadable before becomes readable here.
+#:
+#: A prefix means a *future* GET under `/runs/` is public the day it is written.
+#: `tests/test_web.py::test_public_run_get_routes_are_the_expected_set` enumerates the
+#: route table and fails on a new one, so widening this is a deliberate edit.
+_PUBLIC_GET_PREFIX = "/runs/"
+
 log = logging.getLogger(__name__)
+
+
+class _StreamLimit:
+    """A ceiling on simultaneously open SSE connections.
+
+    A counter rather than a semaphore because the answer to "full" is to refuse, not to
+    wait: a caller parked on a semaphore is an open connection too, which is the thing
+    being limited. Guarded by a lock because `release` runs from a generator's `finally`
+    on whichever task is unwinding, not necessarily the one that acquired.
+    """
+
+    def __init__(self, limit: int) -> None:
+        self._limit = limit
+        self._open = 0
+        self._lock = threading.Lock()
+
+    def acquire(self) -> bool:
+        with self._lock:
+            if self._open >= self._limit:
+                return False
+            self._open += 1
+            return True
+
+    def release(self) -> None:
+        with self._lock:
+            self._open = max(0, self._open - 1)
+
+    @property
+    def open(self) -> int:
+        with self._lock:
+            return self._open
 
 
 def create_app(
@@ -80,7 +136,26 @@ def create_app(
     # URLs the app *emits* — the proxy strips it from the path before the request lands, so
     # the routes below stay unprefixed. See D29.
     base_path = normalize_base_path(os.environ.get("RA_ROOT_PATH"))
+    # The prefix for the URLs a *reader* uses: the run page and everything hanging off it.
+    # Split from `base_path` because the two live behind different doors (D35). The edge
+    # gates `/app/` with Cloudflare Access and leaves `/runs/` open, so a run page emitted
+    # under `/app` is a link only a signed-in person can open — which is the whole thing
+    # this exists to fix. Setting `RA_PUBLIC_ROOT_PATH=/` puts every run URL at the origin
+    # root, so the URL in the reader's address bar is already the one they can share.
+    #
+    # Unset means "the same door as everything else": it falls back to `base_path`, so a
+    # deployment that has not opened a public path at its edge keeps today's behaviour
+    # exactly, and dev and the tailnet (where both are empty) are unaffected.
+    public_base = (
+        normalize_base_path(os.environ.get("RA_PUBLIC_ROOT_PATH"))
+        if os.environ.get("RA_PUBLIC_ROOT_PATH") is not None
+        else base_path
+    )
     concurrent = max_concurrent or int(os.environ.get("RA_MAX_CONCURRENT_RUNS", "1"))
+    # How many progress streams may be open at once, across everybody. One reader needs
+    # one; the number exists because the route is anonymous (D35) and an open connection
+    # is the only cost a stranger can impose here.
+    _streams = _StreamLimit(int(os.environ.get("RA_MAX_LIVE_STREAMS", "32")))
     if (cap := os.environ.get("RA_MAX_RESUME_ATTEMPTS")):
         config = config.model_copy(update={"max_resume_attempts": int(cap)})
     if (dev_identity := os.environ.get("RA_DEV_IDENTITY")):
@@ -149,6 +224,7 @@ def create_app(
     app.state.registry = registry
     app.state.refiner = refiner
     app.state.base_path = base_path
+    app.state.public_base = public_base
     # Read once here rather than per request: these files do not change while the process
     # runs, and resolving them at startup means a missing one is a 404 rather than a 500.
     # The base path shapes the URLs the manifest names and the worker precaches, so it is
@@ -164,18 +240,28 @@ def create_app(
         A middleware rather than a `Depends` or a hand-written call per route,
         because those are opt-in and this must not be: the cost of forgetting is an
         open route onto other people's seed material. Every handler below can assume
-        `request.state.viewer` is a real identity.
+        `request.state.viewer` is a real identity — except the GETs under `/runs/`,
+        which are public (D35) and where it may be None.
 
         `HTTPException` is not available here — it is raised past the exception
         middleware that would turn it into a response — so the refusal is returned
         directly. Nothing is logged about the failed attempt: the header is
         attacker-controlled, and a rejected request has no identity to attribute.
         """
-        if request.url.path not in _UNAUTHENTICATED_PATHS:
-            viewer = resolve_identity(request, config.auth)
-            if viewer is None:
-                return PlainTextResponse("authentication required", status_code=403)
-            request.state.viewer = viewer
+        if request.url.path in _UNAUTHENTICATED_PATHS:
+            return await call_next(request)
+        if request.method == "GET" and request.url.path.startswith(_PUBLIC_GET_PREFIX):
+            # Reading a run is public (D35). The identity is still resolved rather than
+            # forced to None, because the same page is reachable through the gated door
+            # too and a viewer we happen to know is not worth throwing away — but None is
+            # an ordinary value here, not a refusal, so every handler under `/runs/` must
+            # treat `request.state.viewer` as optional. None of them scope a read by it.
+            request.state.viewer = resolve_identity(request, config.auth)
+            return await call_next(request)
+        viewer = resolve_identity(request, config.auth)
+        if viewer is None:
+            return PlainTextResponse("authentication required", status_code=403)
+        request.state.viewer = viewer
         return await call_next(request)
 
     # ------------------------------------------------------------------ pages
@@ -188,6 +274,7 @@ def create_app(
             queue_depth=worker.queue_depth,
             config=config,
             base_path=base_path,
+            public_base=public_base,
             viewer=request.state.viewer,
         )
 
@@ -257,16 +344,26 @@ def create_app(
             else None
         )
 
+        run_id = _enqueue(
+            question,
+            ingested.markdown if ingested else None,
+            identity=request.state.viewer,
+            seed_format=ingested.format if ingested else None,
+            seed_source=ingested.source if ingested else None,
+            seed_warnings=ingested.warnings if ingested else (),
+            refinement=refinement,
+        )
+        return RedirectResponse(url=f"{public_base}/runs/{run_id}", status_code=303)
+
+    def _enqueue(question: str, seed: str | None, **kwargs: Any) -> str:
+        """`worker.submit` with the two saturation refusals turned into 429s.
+
+        Shared by `submit` and `again` so the second one cannot quietly skip a limit the
+        first one enforces — the rate limiter is the only thing standing between one
+        person and the token budget, and "ask this again" is a one-click way to spend it.
+        """
         try:
-            run_id = worker.submit(
-                question,
-                ingested.markdown if ingested else None,
-                identity=request.state.viewer,
-                seed_format=ingested.format if ingested else None,
-                seed_source=ingested.source if ingested else None,
-                seed_warnings=ingested.warnings if ingested else (),
-                refinement=refinement,
-            )
+            return worker.submit(question, seed, **kwargs)
         except RateLimited as exc:
             # A concrete Retry-After lets a well-behaved client back off precisely
             # instead of guessing; the ceil keeps it an integer count of seconds.
@@ -279,7 +376,6 @@ def create_app(
             raise HTTPException(
                 status_code=429, detail="the run queue is full; try again shortly"
             ) from exc
-        return RedirectResponse(url=f"{base_path}/runs/{run_id}", status_code=303)
 
     @app.get("/runs/{run_id}", response_class=HTMLResponse)
     def run_detail(run_id: str, request: Request, response: Response) -> str:
@@ -301,8 +397,45 @@ def create_app(
             lens_names=registry.lens_names(),
             record=record,
             base_path=base_path,
-            viewer=request.state.viewer,
+            public_base=public_base,
         )
+
+    @app.post("/runs/{run_id}/again")
+    def again(run_id: str, request: Request) -> RedirectResponse:
+        """Start a fresh run of this run's question.
+
+        The recovery path for a run that stopped without a verdict. It replaces the
+        resume button, which could not survive the run page becoming public: with no
+        identity on `/runs/<id>` the page cannot tell the owner from a stranger, and a
+        resume offered to everyone is an invitation to a 404. Asking again needs no such
+        knowledge — anyone signed in may spend their own tokens on their own new run,
+        which they could equally do by retyping the question on the index.
+
+        Nothing is read from the request but the run id: the question and the seed come
+        off disk, so no client-supplied text reaches a model context and the seed does
+        not have to ride into the DOM in a hidden field to get back here.
+
+        A *new* run, not a continuation — so it is owned by whoever asked, counts against
+        their rate limit, and leaves the original run exactly as it is.
+        """
+        _reject_cross_site(request)
+        summary = _require(registry, worker, run_id)
+        # Only once it has stopped. Re-asking a live question is a duplicate of work
+        # already in flight, and the 409 says so rather than silently spending twice.
+        if summary.is_live:
+            raise HTTPException(status_code=409, detail=f"run is {summary.status}; it has not stopped")
+        # `seed.md` holds the markdown the original run was given, already converted --
+        # the same bytes `resume` reads back, so the new run starts from the same seed
+        # without re-fetching a URL that may no longer resolve.
+        seed = registry.seed(run_id)
+        new_id = _enqueue(
+            summary.question,
+            seed,
+            identity=request.state.viewer,
+            seed_format="markdown" if seed else None,
+            seed_source=f"run:{run_id}" if seed else None,
+        )
+        return RedirectResponse(url=f"{public_base}/runs/{new_id}", status_code=303)
 
     @app.post("/runs/{run_id}/resume")
     def resume(run_id: str, request: Request) -> RedirectResponse:
@@ -324,7 +457,7 @@ def create_app(
         # `interrupted` forever. `seed.md` holds the converted markdown that was
         # hashed, so reading it back reproduces the fingerprint exactly.
         worker.resume(run_id, summary.question, registry.seed(run_id))
-        return RedirectResponse(url=f"{base_path}/runs/{run_id}", status_code=303)
+        return RedirectResponse(url=f"{public_base}/runs/{run_id}", status_code=303)
 
     @app.post("/refine")
     def refine(request: Request, question: str = Form(...)) -> JSONResponse:
@@ -379,34 +512,58 @@ def create_app(
         Polling a file looks crude next to a pub/sub channel, but the pipeline
         already writes every state change to `events.jsonl`, and a tick is minutes
         long — so a 1s poll is both simpler and entirely sufficient.
+
+        Anonymous since D35, which changes what an open connection costs: the ceiling
+        used to be the number of people who could sign in, and is now the number of
+        people who hold a run id. Nothing here writes — `Registry` has no write path at
+        all, and the only worker call is `active()`, a lock-guarded dict copy — so the
+        exposure is connections held open, not state changed or tokens spent. Two things
+        bound it: `_streams` caps how many run at once, and the loop now exits as soon as
+        the run is not live.
         """
         _require(registry, worker, run_id)
+        if not _streams.acquire():
+            # 503 rather than a queue: a stream is a live view of something already
+            # visible on the page, and a reader who is turned away can reload.
+            raise HTTPException(
+                status_code=503,
+                detail="too many live connections; the page still refreshes on reload",
+                headers={"Retry-After": "5"},
+            )
 
         async def events() -> Any:
             seen = 0
-            while True:
-                if await request.is_disconnected():
-                    return
-                # uvicorn drains connections *before* running lifespan shutdown, and this
-                # generator otherwise only ends when the client leaves or the run
-                # finishes. One forgotten browser tab would hold the whole grace period
-                # before the worker was even told to stop.
-                if shutdown.stop_requested():
-                    return
-                batch = list(registry.events(run_id, offset=seen))
-                if batch:
-                    seen += len(batch)
-                    fragment = render_run_progress(
-                        summary=registry.summary(run_id, worker.active()),
-                        timeline=registry.timeline(run_id),
-                        lens_names=registry.lens_names(),
-                    )
-                    yield _sse("progress", fragment)
-                summary = registry.summary(run_id, worker.active())
-                if not summary.is_live and registry.final(run_id) is not None:
-                    yield _sse("done", summary.status)
-                    return
-                await asyncio.sleep(1.0)
+            try:
+                while True:
+                    if await request.is_disconnected():
+                        return
+                    # uvicorn drains connections *before* running lifespan shutdown, and
+                    # this generator otherwise only ends when the client leaves or the run
+                    # finishes. One forgotten browser tab would hold the whole grace period
+                    # before the worker was even told to stop.
+                    if shutdown.stop_requested():
+                        return
+                    batch = list(registry.events(run_id, offset=seen))
+                    if batch:
+                        seen += len(batch)
+                        fragment = render_run_progress(
+                            summary=registry.summary(run_id, worker.active()),
+                            timeline=registry.timeline(run_id),
+                            lens_names=registry.lens_names(),
+                        )
+                        yield _sse("progress", fragment)
+                    summary = registry.summary(run_id, worker.active())
+                    # Not live is the whole exit condition. It used to also require a
+                    # `final.json`, which meant a run that stopped *without* one — a crash,
+                    # or `abandoned` — polled this file every second for as long as the tab
+                    # stayed open, and nothing would ever end it. Those are exactly the
+                    # states the page most needs to repaint into.
+                    if not summary.is_live:
+                        yield _sse("done", summary.status)
+                        return
+                    await asyncio.sleep(1.0)
+            finally:
+                _streams.release()
 
         return StreamingResponse(
             events(),
@@ -445,6 +602,7 @@ def create_app(
                 unreadable=prov.status == export.UNREADABLE_RECORD,
             ),
             base_path=base_path,
+            public_base=public_base,
         )
 
     @app.get("/runs/{run_id}/report.md", response_class=PlainTextResponse)
@@ -476,9 +634,19 @@ def create_app(
 
     @app.get("/runs/{run_id}/audit.json")
     def audit(run_id: str) -> dict[str, Any]:
+        """The whole audit trail: summary, verdict, every event.
+
+        Public since D35, which is the point — the trail is the reason the pipeline
+        keeps one, and a shared link that cannot be checked is not much of a claim.
+        `owner` is the one field held back: it is an email address, it is not evidence
+        about the run, and a link shared with a stranger should not hand them the
+        sender's address. Nothing else here names a person.
+        """
         _require(registry, worker, run_id)
+        summary = dict(registry.summary(run_id, worker.active()).__dict__)
+        summary.pop("owner", None)
         return {
-            "summary": registry.summary(run_id, worker.active()).__dict__,
+            "summary": summary,
             "final": registry.final(run_id),
             "events": list(registry.events(run_id)),
         }

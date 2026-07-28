@@ -12,9 +12,16 @@ from pathlib import Path
 
 import pytest
 import yaml
+from fakes import structured_with_repair
 
 from reasonable_answer import audition, prompts
-from reasonable_answer.config import AuditionConfig, AuditionThresholds, ConfigError, Roster
+from reasonable_answer.config import (
+    AuditionConfig,
+    AuditionThresholds,
+    Budgets,
+    ConfigError,
+    Roster,
+)
 from reasonable_answer.schemas import CritiqueOutput, LensResult, RawIssue, StructuralRef
 from reasonable_answer.taxonomy import Category, Lens, Severity
 
@@ -491,13 +498,21 @@ def test_prompt_hash_tracks_the_critic_prompt(monkeypatch):
 class ScriptedClient:
     """Returns a fixed issue list per call. No network."""
 
-    def __init__(self, respond):
+    def __init__(self, respond, critic_repair_retries=0):
         self.respond = respond
         self.prompts: list[tuple[str, str]] = []
+        self.budgets = Budgets(critic_repair_retries=critic_repair_retries)
 
-    def structured(self, alias, system, user, schema, max_tokens=0):
-        self.prompts.append((system, user))
-        return CritiqueOutput(issues=self.respond(alias, user))
+    def structured(self, alias, system, user, schema, max_tokens=0, validate=None,
+                   repair_retries=None):
+        def produce(attempt_user):
+            self.prompts.append((system, attempt_user))
+            return CritiqueOutput(issues=self.respond(alias, attempt_user))
+
+        # The audition harness must exercise the *production* validation path, which now
+        # runs inside the call — a stub that skipped it would grade a critic on issues a
+        # real run would have rejected.
+        return structured_with_repair(alias, user, produce, validate, repair_retries)
 
 
 def test_run_assignment_measures_both_directions_offline():
@@ -550,9 +565,21 @@ def test_failed_lens_counts_as_schema_failure_not_as_silence():
     slot = audition.Assignment(alias="a", identity="p/m", lens=Lens.LOGIC, position=0)
 
     class Broken:
-        def structured(self, alias, system, user, schema, max_tokens=0):
-            # An out-of-scope category fails the lens closed in triage.
-            return CritiqueOutput(issues=[issue(Category.UNCITED_CLAIM, 1, 1)])
+        budgets = Budgets(critic_repair_retries=0)
+
+        def structured(self, alias, system, user, schema, max_tokens=0, validate=None,
+                       repair_retries=None):
+            # An out-of-scope category fails the lens closed in triage — and keeps
+            # failing it, because no repair can turn an evidence category into a logic
+            # one. `structured_with_repair` is what runs that validation, exactly as the
+            # real client does.
+            return structured_with_repair(
+                alias,
+                user,
+                lambda _u: CritiqueOutput(issues=[issue(Category.UNCITED_CLAIM, 1, 1)]),
+                validate,
+                repair_retries,
+            )
 
     m = audition.run_assignment(Broken(), slot, fixtures, repetitions=1)
     assert m.schema_failures == m.calls

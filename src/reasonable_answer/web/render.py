@@ -197,10 +197,15 @@ def render_index(
     queue_depth: int,
     config: Config,
     base_path: str = "",
+    public_base: str | None = None,
     viewer: str | None = None,
 ) -> str:
+    # The index is behind the gate; the runs it links to are not (D35). Defaulting to
+    # `base_path` keeps a single-door deployment — dev, the tailnet — emitting exactly
+    # what it emitted before.
+    public_base = base_path if public_base is None else public_base
     rows = (
-        "\n".join(_run_row(r, base_path) for r in runs)
+        "\n".join(_run_row(r, public_base) for r in runs)
         or '<tr><td colspan="5" class="empty">No runs yet. Ask something above.</td></tr>'
     )
     # The list is yours alone, so say whose it is. It also makes a misconfigured
@@ -286,7 +291,7 @@ def _model_list(models: list[str]) -> str:
     return "".join(f"<li>{esc(m)}</li>" for m in models)
 
 
-def _run_row(run: RunSummary, base_path: str = "") -> str:
+def _run_row(run: RunSummary, public_base: str = "") -> str:
     question = run.question if len(run.question) <= 90 else run.question[:87] + "…"
     # `data-label` mirrors the `<th>` text above it. Below 34rem the stylesheet hides the
     # header row and restacks each `<tr>` as a card, where a bare "2" means nothing; the
@@ -295,7 +300,7 @@ def _run_row(run: RunSummary, base_path: str = "") -> str:
     # Status needs none — the badge says what it is — and neither does the question.
     return f"""<tr>
   <td>{_badge(run.status)}</td>
-  <td class="q"><a href="{base_path}/runs/{esc(run.run_id)}">{esc(question)}</a></td>
+  <td class="q"><a href="{public_base}/runs/{esc(run.run_id)}">{esc(question)}</a></td>
   <td class="num" data-label="rounds">{run.rounds or "—"}</td>
   <td class="dim" data-label="started">{_ago(run.started_at)}</td>
   <td class="dim mono" data-label="id">{esc(run.run_id)}</td>
@@ -320,40 +325,50 @@ def render_run(
     lens_names: list[str],
     record: str = "",
     base_path: str = "",
-    viewer: str | None = None,
+    public_base: str | None = None,
 ) -> str:
-    mine = viewer is not None and summary.owner == viewer
-    # Anyone signed in can open a run they hold the id for, but only its owner can
-    # resume it — so only its owner is offered the button. Showing it to everyone
-    # would be an invitation to a 404.
-    resume = (
-        f"""<form method="post" action="{base_path}/runs/{esc(summary.run_id)}/resume" class="inline">
-        <button type="submit" class="secondary">Resume this run</button></form>"""
-        if summary.status == "interrupted" and mine
-        else ""
-    )
+    # This page is public (D35): it is served without an identity, so it takes no viewer
+    # and shows nothing owner-scoped. That is what makes the URL in the address bar the
+    # URL you can send to someone. Two things went with it:
+    #
+    # * The byline. It said "submitted by <email>", which on a page a stranger can open
+    #   publishes the sender's address to whoever they shared the link with.
+    # * The resume button, which was shown only to the owner — a distinction this page
+    #   can no longer draw. `Ask this again` replaces it: it needs no knowledge of who is
+    #   reading, because it starts a *new* run owned by whoever clicks it, and the write
+    #   it posts to is gated like every other write.
+    #
+    # Run-scoped links use `public_base`; the header and the form action stay on
+    # `base_path`, behind the gate. When the two are equal — dev, the tailnet — every
+    # emitted URL is what it was before.
+    public_base = base_path if public_base is None else public_base
 
-    # A run reached by a shared link is otherwise unattributed, and "whose question is
-    # this?" is the first thing a reader needs. Your own runs need no byline.
-    byline = (
-        f'<span class="dim">submitted by {esc(summary.owner)}</span>'
-        if summary.owner and not mine
+    # Only once it has stopped: re-asking a live question duplicates work already in
+    # flight, and the route refuses it anyway. Anonymous readers see the button too and
+    # meet the identity gate when they press it, which is the honest failure — the
+    # alternative is hiding it from the owner as well, since this page cannot tell them
+    # apart.
+    again = (
+        f"""<form method="post" action="{base_path}/runs/{esc(summary.run_id)}/again" class="inline">
+        <button type="submit" class="secondary"
+          title="start a new run of the same question — sign-in required">Ask this again</button></form>"""
+        if not summary.is_live
         else ""
     )
 
     downloads = (
-        f"""<a class="button" href="{base_path}/runs/{esc(summary.run_id)}/report">Read the report</a>
-        {_share_links(summary.run_id, base_path)}
-        <a class="secondary button" href="{base_path}/runs/{esc(summary.run_id)}/audit.json">audit.json</a>"""
+        f"""<a class="button" href="{public_base}/runs/{esc(summary.run_id)}/report">Read the report</a>
+        {_share_links(summary.run_id, public_base)}
+        <a class="secondary button" href="{public_base}/runs/{esc(summary.run_id)}/audit.json">audit.json</a>"""
         if report
-        else f'<a class="secondary button" href="{base_path}/runs/{esc(summary.run_id)}/audit.json">audit.json</a>'
+        else f'<a class="secondary button" href="{public_base}/runs/{esc(summary.run_id)}/audit.json">audit.json</a>'
     )
 
     # Once there is a report to read, the report is the page and the round-by-round
     # trail is supporting evidence — so it moves below and folds away. While the run is
     # live it is the only thing there is to look at, so it stays open.
     progress = f"""<section class="panel" id="progress"
-   data-stream="{base_path}/runs/{esc(summary.run_id)}/stream"
+   data-stream="{public_base}/runs/{esc(summary.run_id)}/stream"
    data-live="{'1' if summary.is_live else '0'}">
 {render_run_progress(summary, timeline, lens_names)}
 </section>"""
@@ -372,12 +387,11 @@ def render_run(
       {_badge(summary.status)}
       <span class="dim mono">{esc(summary.run_id)}</span>
       <span class="dim">started {_ago(summary.started_at)}</span>
-      {byline}
     </div>
     <p class="lede">{esc(STATUS_MEANING.get(summary.status, ""))}
     {(" — " + esc(summary.terminal_note)) if summary.terminal_note else ""}</p>
   </div>
-  <div class="run-actions">{downloads}{resume}</div>
+  <div class="run-actions">{downloads}{again}</div>
 </section>
 
 {_report_section(report, final)}
@@ -476,13 +490,15 @@ def _report_section(report: str | None, final: dict[str, Any] | None) -> str:
 </section>"""
 
 
-def _share_links(run_id: str, base_path: str = "") -> str:
+def _share_links(run_id: str, public_base: str = "") -> str:
+    """Every one of these is a public GET (D35), so they take the public base — a reader
+    who followed a shared link must be able to follow them too."""
     return (
-        f'<a class="secondary button" href="{base_path}/runs/{esc(run_id)}/export.md" '
+        f'<a class="secondary button" href="{public_base}/runs/{esc(run_id)}/export.md" '
         f'title="the report with its review record, as markdown">Download .md</a>'
-        f'<a class="secondary button" href="{base_path}/runs/{esc(run_id)}/export.html" '
+        f'<a class="secondary button" href="{public_base}/runs/{esc(run_id)}/export.html" '
         f'title="one self-contained file that opens anywhere">Download .html</a>'
-        f'<a class="secondary button" href="{base_path}/runs/{esc(run_id)}/report.md" '
+        f'<a class="secondary button" href="{public_base}/runs/{esc(run_id)}/report.md" '
         f'title="the shipped artifact, exactly as stored">report.md</a>'
     )
 
@@ -512,6 +528,7 @@ def render_report(
     print_header: str = "",
     copy_markdown: str = "",
     base_path: str = "",
+    public_base: str | None = None,
 ) -> str:
     """The report on its own page — the thing to hand to someone who wants to *read* it,
     rather than watch the pipeline that produced it.
@@ -519,7 +536,11 @@ def render_report(
     Also the thing that gets printed: this page and the exported file share one
     stylesheet and one review record, so `Save as PDF` from a phone produces the same
     document as the download.
+
+    Public since D35, like every other read under `/runs/`, so its own links are emitted
+    from `public_base`: a recipient who can open this page can follow every link on it.
     """
+    public_base = base_path if public_base is None else public_base
     chosen = (final or {}).get("chosen_round")
     provenance = f" · shipped from round {esc(chosen)}" if chosen else ""
     body = f"""
@@ -527,11 +548,11 @@ def render_report(
 <section class="panel reading">
   <div class="run-meta screen-only">
     {_badge(summary.status)}
-    <a class="dim" href="{base_path}/runs/{esc(summary.run_id)}">back to the run</a>
+    <a class="dim" href="{public_base}/runs/{esc(summary.run_id)}">back to the run</a>
     <span class="dim mono">{esc(summary.run_id)}{provenance}</span>
   </div>
   <p class="question screen-only">{esc(summary.question)}</p>
-  <div class="share screen-only">{_copy_control(copy_markdown or report)}{_share_links(summary.run_id, base_path)}</div>
+  <div class="share screen-only">{_copy_control(copy_markdown or report)}{_share_links(summary.run_id, public_base)}</div>
   <article class="report">{to_html(report)}</article>
 </section>
 {record}"""

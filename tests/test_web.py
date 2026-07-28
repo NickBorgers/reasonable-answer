@@ -11,7 +11,7 @@ import urllib.request
 from contextlib import contextmanager
 
 import pytest
-from conftest import WEB_IDENTITY, web_client
+from conftest import WEB_IDENTITY, access_headers, web_client
 from fakes import FakeClient
 
 from reasonable_answer.graph import run as run_graph
@@ -368,6 +368,240 @@ def test_audit_json_exposes_the_whole_event_stream(client, config):
 
 def test_healthz(client):
     assert client.get("/healthz").text == "ok"
+
+
+# ----------------------------------------------------- public report sharing
+
+
+@contextmanager
+def _running_app(config, fake_client):
+    """An app whose worker runs real graphs behind the fake proxy, cleaned up after.
+
+    Yields the app itself, not a client, so a test can drive it from both a signed-in
+    and an anonymous `TestClient` without a second lifespan.
+    """
+
+    def runner(cfg, *, question, seed, run_id, stop=None, **prov):
+        return run_graph(
+            cfg, question=question, seed=seed, run_id=run_id, client=fake_client, **prov
+        )
+
+    worker = RunWorker(config, max_concurrent=1, runner=runner)
+    try:
+        yield create_app(config, worker=worker)
+    finally:
+        worker.shutdown()
+
+
+def test_every_read_of_a_run_is_public_and_every_write_stays_gated(config, fake_client):
+    """Holding the run id is the credential: every GET under `/runs/` answers an
+    anonymous caller, and every write still refuses one (#80, D35).
+
+    This is the whole point of the change — the URL a reader is looking at, not one
+    particular download, is what they can send to someone."""
+    with _running_app(config, fake_client) as app, web_client(app, identity=None) as c:
+        # An owned, finished run: submitted *with* an identity so it has an owner and
+        # therefore is not a 404 via `_require`.
+        resp = c.post(
+            "/runs",
+            data={"question": "Share this?"},
+            headers=access_headers(),
+            follow_redirects=False,
+        )
+        run_id = resp.headers["location"].rsplit("/", 1)[-1]
+        _wait_for_final(config, run_id)
+
+        # Every read of the run, all 403 before #80. The page itself is the one that
+        # matters: it is the URL in the address bar.
+        for path in (
+            "",
+            "/report",
+            "/report.md",
+            "/export.md",
+            "/export.html",
+            "/audit.json",
+            "/progress",
+        ):
+            assert c.get(f"/runs/{run_id}{path}").status_code == 200, path
+
+        # Every write is unchanged: still 403 with no identity.
+        assert c.post("/runs", data={"question": "spend tokens?"}).status_code == 403
+        assert c.post(f"/runs/{run_id}/again").status_code == 403
+        assert c.post(f"/runs/{run_id}/resume").status_code == 403
+        assert c.post("/refine", data={"question": "spend tokens?"}).status_code == 403
+        # The index is a per-viewer list, so it needs a viewer.
+        assert c.get("/").status_code == 403
+        # The exemption is method-scoped, not path-scoped: a POST to a public *read*
+        # path is refused before it reaches routing.
+        assert c.post(f"/runs/{run_id}/export.html").status_code == 403
+
+
+def test_public_run_get_routes_are_the_expected_set(config, fake_client):
+    """`_PUBLIC_GET_PREFIX` is a prefix, so a new GET under `/runs/` is public the day it
+    is written. This enumerates the route table and fails when that set changes, which
+    makes widening the public surface a deliberate edit rather than a side effect."""
+    with _running_app(config, fake_client) as app:
+        public = {
+            route.path
+            for route in app.routes
+            if "GET" in getattr(route, "methods", set()) and route.path.startswith("/runs/")
+        }
+    assert public == {
+        "/runs/{run_id}",
+        "/runs/{run_id}/report",
+        "/runs/{run_id}/report.md",
+        "/runs/{run_id}/export.md",
+        "/runs/{run_id}/export.html",
+        "/runs/{run_id}/audit.json",
+        "/runs/{run_id}/progress",
+        "/runs/{run_id}/stream",
+    }
+
+
+def test_a_public_run_page_names_nobody(config, fake_client):
+    """A shared link reaches strangers, so nothing under `/runs/` carries the owner's
+    address: no byline on the page, no `owner` in the audit trail (D35)."""
+    with _running_app(config, fake_client) as app, web_client(app, identity=None) as c:
+        resp = c.post(
+            "/runs",
+            data={"question": "Who asked?"},
+            headers=access_headers(),
+            follow_redirects=False,
+        )
+        run_id = resp.headers["location"].rsplit("/", 1)[-1]
+        _wait_for_final(config, run_id)
+
+        assert WEB_IDENTITY not in c.get(f"/runs/{run_id}").text
+        assert WEB_IDENTITY not in c.get(f"/runs/{run_id}/report").text
+        audit = c.get(f"/runs/{run_id}/audit.json").json()
+        assert "owner" not in audit["summary"]
+        assert WEB_IDENTITY not in json.dumps(audit)
+
+
+def test_an_owner_less_run_export_is_a_404_even_anonymously(config, fake_client):
+    """Making reads public does not make an owner-less run shareable: it stays a 404
+    via `_require`, so nothing that was unreadable becomes readable (#80)."""
+    run_graph(config, question="No owner?", seed=REPORT, run_id="run-ownerless", client=fake_client)
+    with _running_app(config, fake_client) as app, web_client(app, identity=None) as c:
+        assert c.get("/runs/run-ownerless/export.html").status_code == 404
+        assert c.get("/runs/run-ownerless").status_code == 404
+        assert c.get("/runs/run-ownerless/audit.json").status_code == 404
+
+
+def test_run_urls_are_emitted_at_the_public_base(config, fake_client, monkeypatch):
+    """The reader-facing URLs come from `RA_PUBLIC_ROOT_PATH` and the gated ones from
+    `RA_ROOT_PATH`, so the address bar after a run already holds the shareable link
+    (D35). Unset, the public base falls back to `RA_ROOT_PATH` and nothing moves."""
+    monkeypatch.setenv("RA_ROOT_PATH", "/app")
+    monkeypatch.setenv("RA_PUBLIC_ROOT_PATH", "/")
+    with _running_app(config, fake_client) as app, web_client(app) as c:
+        resp = c.post("/runs", data={"question": "Where do I land?"}, follow_redirects=False)
+        # Submitting lands the reader on the public URL, not the gated one.
+        location = resp.headers["location"]
+        assert location.startswith("/runs/")
+        run_id = location.rsplit("/", 1)[-1]
+        _wait_for_final(config, run_id)
+
+        page = c.get(f"/runs/{run_id}").text
+        # Reads are public...
+        assert f'href="/runs/{run_id}/report"' in page
+        assert f'href="/runs/{run_id}/audit.json"' in page
+        assert f'data-stream="/runs/{run_id}/stream"' in page
+        # ...and the write is not.
+        assert f'action="/app/runs/{run_id}/again"' in page
+        # The shell stays behind the gate.
+        assert 'href="/app/"' in page
+        # The index links out to the public run URL.
+        assert f'href="/runs/{run_id}"' in c.get("/").text
+
+    # Unset: one door, every URL exactly as before.
+    monkeypatch.delenv("RA_PUBLIC_ROOT_PATH")
+    with _running_app(config, fake_client) as app, web_client(app) as c:
+        page = c.get(f"/runs/{run_id}").text
+        assert f'href="/app/runs/{run_id}/report"' in page
+        assert f'action="/app/runs/{run_id}/again"' in page
+
+
+def test_the_stream_ends_when_a_run_stops_without_a_final(config, monkeypatch):
+    """A run that stopped without writing `final.json` — a crash, or `abandoned` — used to
+    hold the poll loop open forever: the exit condition wanted a final that would never
+    arrive. Anonymous callers (D35) make an endless 1s file poll something a stranger can
+    start, so `not is_live` is now the whole condition."""
+    monkeypatch.setenv("RA_RESUME_ON_BOOT", "0")  # or recovery re-enqueues it as live
+    store = RunStore(config.runs_dir, "run-crashed")
+    store.question("Stopped without a verdict?")
+    store.owner(WEB_IDENTITY)
+    store.event("queued", attempt=1, auto=False)
+    store.event("generate", author="writer-a", round=1)  # ...and then nothing
+
+    worker = RunWorker(config, max_concurrent=1, runner=lambda *a, **k: None)
+    app = create_app(config, worker=worker)
+    body: list[str] = []
+    try:
+        # In a thread with a join deadline: the regression this pins is a generator that
+        # never returns, and asserting on it inline would hang the suite instead of
+        # failing it.
+        def read() -> None:
+            with web_client(app, identity=None) as c:
+                body.append(c.get("/runs/run-crashed/stream").text)
+
+        reader = threading.Thread(target=read, daemon=True)
+        reader.start()
+        reader.join(timeout=15)
+        assert not reader.is_alive(), "the stream never closed on a run that had stopped"
+        assert "event: done" in body[0]
+        assert "interrupted" in body[0]
+    finally:
+        worker.shutdown(timeout=0.1)
+
+
+def test_open_streams_are_capped(config, monkeypatch):
+    """The connection count is the only cost an anonymous caller can impose here (D35),
+    so it has a ceiling and the answer past it is a refusal, not a queue."""
+    monkeypatch.setenv("RA_MAX_LIVE_STREAMS", "0")
+    worker = RunWorker(config, max_concurrent=1, runner=lambda *a, **k: None)
+    app = create_app(config, worker=worker)
+    store = RunStore(config.runs_dir, "run-capped")
+    store.question("Too many watchers?")
+    store.owner(WEB_IDENTITY)
+    store.event("queued", attempt=1, auto=False)
+    try:
+        with web_client(app, identity=None) as c:
+            resp = c.get("/runs/run-capped/stream")
+            assert resp.status_code == 503
+            assert resp.headers["Retry-After"] == "5"
+            # The page it is a live view of is still readable.
+            assert c.get("/runs/run-capped").status_code == 200
+    finally:
+        worker.shutdown(timeout=0.1)
+
+
+def test_ask_this_again_starts_a_new_run_owned_by_whoever_asked(config, fake_client):
+    """The replacement for the resume button: a new run of the same question, owned by
+    the caller, leaving the original alone. It needs an identity, so an anonymous reader
+    who presses it meets the gate (D35)."""
+    with _running_app(config, fake_client) as app, web_client(app) as c:
+        resp = c.post("/runs", data={"question": "Again?"}, follow_redirects=False)
+        run_id = resp.headers["location"].rsplit("/", 1)[-1]
+        _wait_for_final(config, run_id)
+
+        # The button is on the page once the run has stopped.
+        assert "Ask this again" in c.get(f"/runs/{run_id}").text
+
+        again = c.post(f"/runs/{run_id}/again", follow_redirects=False)
+        assert again.status_code == 303
+        new_id = again.headers["location"].rsplit("/", 1)[-1]
+        assert new_id != run_id
+        _wait_for_final(config, new_id)
+
+        registry = Registry(config.runs_dir)
+        assert registry.question(new_id) == registry.question(run_id)
+        assert registry.owner(new_id) == WEB_IDENTITY
+        # The original is untouched.
+        assert registry.summary(run_id, {}).status == registry.summary(new_id, {}).status
+
+    with _running_app(config, fake_client) as app, web_client(app, identity=None) as c:
+        assert c.post(f"/runs/{run_id}/again").status_code == 403
 
 
 # ------------------------------------------------------------------ timeline
@@ -919,16 +1153,17 @@ def owned(config):
 
 
 def test_a_request_with_no_identity_is_refused(owned):
-    """The middleware is the whole boundary: with no header and no dev identity there
-    is nobody to serve, so nothing but the healthcheck answers."""
+    """The middleware is the whole boundary: with no header and no dev identity there is
+    nobody to serve, so nothing but the healthcheck and the public reads under `/runs/`
+    answers (D35). The reads are covered by their own test; this pins the refusals."""
     app, plant = owned
     plant("run-mine", WEB_IDENTITY)
     with web_client(app, identity=None) as c:
         assert c.get("/").status_code == 403
-        assert c.get("/runs/run-mine").status_code == 403
-        assert c.get("/runs/run-mine/report.md").status_code == 403
-        assert c.get("/runs/run-mine/audit.json").status_code == 403
         assert c.post("/runs", data={"question": "Anonymous?"}).status_code == 403
+        assert c.post("/runs/run-mine/again").status_code == 403
+        assert c.post("/runs/run-mine/resume").status_code == 403
+        assert c.get("/manifest.webmanifest").status_code == 403
 
 
 def test_the_healthcheck_answers_without_an_identity(owned):
@@ -1048,14 +1283,18 @@ def test_anyone_signed_in_can_read_a_run_they_hold_the_id_for(owned):
         assert c.get("/runs/run-theirs/progress").status_code == 200
 
 
-def test_a_shared_run_says_who_submitted_it(owned):
-    """A run reached by a link is otherwise unattributed. Your own runs need no byline."""
+def test_a_shared_run_names_nobody(owned):
+    """A run page used to carry a byline for a run that was not yours. It cannot now: the
+    page is public (D35), so that byline would publish the submitter's address to whoever
+    the link reached. Reaching a run you did not submit still works; it is just anonymous
+    in both directions."""
     app, plant = owned
     plant("run-theirs", FRIEND)
     plant("run-mine", WEB_IDENTITY)
     with web_client(app) as c:
-        assert f"submitted by {FRIEND}" in c.get("/runs/run-theirs").text
-        assert "submitted by" not in c.get("/runs/run-mine").text
+        assert c.get("/runs/run-theirs").status_code == 200
+        assert FRIEND not in c.get("/runs/run-theirs").text
+        assert WEB_IDENTITY not in c.get("/runs/run-mine").text
 
 
 def test_only_the_owner_can_resume_a_run(config, monkeypatch):

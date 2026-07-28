@@ -343,7 +343,7 @@ class RunWorker:
                 self._status[job.run_id] = "running"
             started = time.time()
             try:
-                self._runner(
+                final = self._runner(
                     self._config,
                     question=job.question,
                     seed=job.seed,
@@ -353,7 +353,13 @@ class RunWorker:
                     seed_source=job.seed_source,
                     seed_warnings=list(job.seed_warnings),
                 )
-                log.info("%s finished in %.0fs", job.run_id, time.time() - started)
+                # With the status, because a run that aborted without shipping an answer
+                # reached here and logged "finished" exactly like one that succeeded —
+                # leaving container logs with no trace that anything had gone wrong.
+                status = (final or {}).get("terminal_status") or "unknown"
+                log.info(
+                    "%s finished in %.0fs (%s)", job.run_id, time.time() - started, status
+                )
             except GracefulStop:
                 # Expected during a deploy. The graph already wrote its `pause` event and
                 # the checkpoint is durable, so the next boot resumes from here.

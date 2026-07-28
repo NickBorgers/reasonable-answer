@@ -345,6 +345,21 @@ finding by clarifying the PR body instead of changing code. A cold fixer may **n
 `body_clarification`; the validator rejects it, because "the reviewer misread my intent" is
 not a claim an agent without that intent can make.
 
+`author-resume` is best-effort, and a resumed session that wedges must fall through to the
+cold fixer rather than fail the PR (D36). That containment lives in `run-in-container.sh`,
+not in a `continue-on-error` on the composite step — which does not reliably stop an inner
+composite-step failure from aborting the job. On a resume the script captures the `timeout`
+exit code (adding `--kill-after` so a CLI that ignores SIGTERM is still killed at the
+deadline): every contained outcome — timeout, crash, or a clean exit with no artifact —
+writes a `fixer-incomplete.sentinel` naming the reason, and exits 0. The workflow falls back
+whenever that sentinel is present (or, belt-and-braces, the result is missing). The sentinel
+is written for a crash rather than the crash being inferred from a missing result, because
+an agent can write `fixer-result.json` and *then* exit nonzero: inferring would read that as
+a fix and push work the agent never vouched for. The condition carries `!cancelled()` so an
+implicit `success()` is not ANDed onto it — which would skip the fallback on the very hang it
+exists to catch — while still stopping a cancelled run from entering a step that resets the
+tree and replays the base merge. In cold mode there is no fallback, so a timeout stays fatal.
+
 #### Context reconstruction
 
 Because cold is the normal path, the fixer rebuilds what it can of the author's intent
@@ -498,7 +513,7 @@ always for anything under `.github/`, `src/`, or the dependency and container fi
 `src/`, `config/`, every `docs/*.md` (empirical claims live there), and the review
 pipeline's own files (`.github/workflows/review-*`, `.github/scripts/review/`,
 `.github/actions/review-*`) — the surfaces where the design could drift off its evidence
-base ([quality-principles.md](./quality-principles.md), D35). Unlike `invariant` and
+base ([quality-principles.md](./quality-principles.md), D37). Unlike `invariant` and
 `docs` it **may abstain**, because it is conditionally selected and those two remain the
 never-abstain backstop; its prompt bounds abstention to diffs where no principle row has
 surface.

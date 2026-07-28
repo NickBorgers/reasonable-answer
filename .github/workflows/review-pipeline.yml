@@ -356,7 +356,7 @@ jobs:
       role: quality
       # Codex on purpose: this role deconflicts most heavily with `invariant`
       # (Claude), and the guard on the spec's direction should not share a model
-      # family with the guard on the spec's conformance (QP3, D35).
+      # family with the guard on the spec's conformance (QP3, D37).
       agent: codex
       pr_number: ${{ inputs.pr_number }}
       reviewed_sha: ${{ inputs.reviewed_sha }}

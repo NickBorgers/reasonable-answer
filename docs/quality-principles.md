@@ -1,10 +1,10 @@
-# Quality principles — the evidence register (D35)
+# Quality principles — the evidence register (D37)
 
 > **Status:** normative. This document is the register the `quality` CI reviewer audits
 > pull requests against. The `invariant` reviewer asks whether code and spec moved
 > *together*; the `quality` reviewer asks whether the position the spec now takes is still
 > the position the published evidence supports. A change to a principle here without the
-> procedure in [§4](#4-retiring-or-weakening-a-principle) is a graded violation. See D35 in
+> procedure in [§4](#4-retiring-or-weakening-a-principle) is a graded violation. See D37 in
 > [decisions.md](./decisions.md).
 
 Evidence base last verified: 2026-07-28

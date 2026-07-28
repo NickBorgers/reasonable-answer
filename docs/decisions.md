@@ -960,6 +960,11 @@ cookie and is bounced at the edge — where an app-level exemption could not hav
 and the only symptom is that the app quietly stops being installable. The container smoke test
 asserts both halves: `/` with no header is a 403, and the shell is there once a header is set.
 
+> Superseded in part by **D35**, which serves every `GET` under `/runs/` without an identity. The
+> reasoning above is why that is a method-scoped rule with a route-table test rather than a second
+> entry in `_UNAUTHENTICATED_PATHS` — which still holds `/healthz` alone. The app shell stays gated
+> exactly as argued here.
+
 **`auth.dev_identity` is the single knob, and its unset state is the safe one.** Set (via the
 roster or `$RA_DEV_IDENTITY`), it supplies an identity to requests with no header, which is what
 local development needs; unset, such a request is refused. A boolean `require_auth` alongside it
@@ -970,6 +975,10 @@ signed in who holds a run id can read that run — sharing a link is the intende
 someone a report, with export/publish to follow. Resume is the one exception: reading costs
 nothing, but resuming spends the owner's tokens for another 10–25 minutes, so it stays with the
 person who started it.
+
+> **D35** kept this and dropped the "signed in": holding the id is the whole credential. Resume
+> stays owner-only but loses its button, since a page served without an identity cannot tell an
+> owner from a stranger.
 
 **A run with no owner is served to nobody.** Runs written before this decision, and CLI runs
 started without `ra run --owner`, have no identity to attribute and none can be invented for
@@ -1210,7 +1219,179 @@ contents to a generator no longer exists. The judge still fails closed on the sy
 empty reviewer set (pre-existing behaviour when guards refuse), publishing a NO-GO on the pre-sync
 SHA that the mergeable successor supersedes.
 
-## D35 — a `quality` CI reviewer guards the design's evidence base, which is itself dated and refreshable
+## D35 — reading a run is public; holding the id is the credential
+
+D32 made every route but `/healthz` refuse a caller with no identity, which is the right default:
+the failure mode of an opt-in check is a new route that forgets it, and seed material, questions
+and audit trails are exactly what must not leak. But it also closed the one thing the interface
+most wants to do — hand a finished report to someone who is not invited. Under D32 sharing works
+only *between signed-in callers* (reads are share-by-id, not owner-scoped); a link sent to anyone
+outside the Access policy 403s at the app.
+
+**Decision.** Every `GET` under `/runs/` is served without an identity. Every write stays gated
+exactly as D32 left it. Holding the run id *is* the credential for reading that run — which is
+what D32 already said, minus the sign-in.
+
+**Why the line is read/write and not one filename.** The first shape of this change made a single
+route public, `GET /runs/<id>/export.html`, on the argument that the export is the safest possible
+artifact. It is — but it does not do the job. That route is served
+`Content-Disposition: attachment`, so the "public link" *downloads a file* instead of rendering a
+page; and the URL a person is actually looking at after a run is `/runs/<id>`, which stayed 403.
+The result was a share affordance that required copying a *second*, different URL out of a button
+— exactly the friction the change existed to remove. A person shares the URL in their address bar.
+If that URL does not work for the recipient, nothing else about the design matters.
+
+So the exemption is the read surface, whole: the run page, the report page, `progress`, `stream`,
+`report.md`, `export.md`, `export.html`, `audit.json`. "Reads of a run are public, writes are
+gated" is a rule a person can hold in their head and apply to a route that does not exist yet,
+which a list of blessed paths is not.
+
+**What keeps it narrow is the method, not the path.** Every route that spends tokens or changes
+state is a `POST`: `POST /runs` (submit — no trailing slash, so it does not match the prefix),
+`/runs/<id>/resume`, `/runs/<id>/again`, `/refine`. All still hit `resolve_identity` and 403
+without a header, as do `/` — a per-viewer list, which needs a viewer — and the app-shell assets.
+A `POST` to a public *read* path is refused before it reaches routing.
+
+A prefix does mean a future `GET` under `/runs/` is public the day it is written. That is a real
+cost, accepted with a guard rather than argued away:
+`tests/test_web.py::test_public_run_get_routes_are_the_expected_set` enumerates the route table and
+fails when the set changes, so widening the public surface is a deliberate edit with a test to
+update, not a side effect of adding a handler.
+
+**An owner-less run stays a 404, anonymously as much as before.** `_require` 404s a run with no
+owner (D32) and every route under `/runs/` passes through it, so this shares nothing that was
+unshareable: legacy and `ra run`-without-`--owner` runs remain served to nobody. `viewer` may now
+be `None` on these handlers, and none of them scope a read by it — the identity is still resolved
+when a header happens to be present, because the same pages are reachable through the gated door
+too, but `None` is an ordinary value here rather than a refusal.
+
+**The URL in the address bar has to be the shareable one, so the app emits two bases.** The edge
+gates `/app/` with Cloudflare Access and leaves `/runs/` open. A run page emitted under
+`/app/runs/<id>` is therefore a link only a signed-in person can open, no matter what the
+middleware allows. `RA_ROOT_PATH` keeps the gated surface — the index, form actions, the app shell;
+`RA_PUBLIC_ROOT_PATH` carries the reader-facing surface — the run page, everything linked from it,
+the SSE stream, and the `303` a submission lands on. Setting `RA_PUBLIC_ROOT_PATH=/` in production
+puts every run URL at the origin root. Unset, it falls back to `RA_ROOT_PATH`, so a single-door
+deployment — dev, the tailnet — emits byte-identical URLs to before (D29 is unchanged; this adds a
+second base, it does not alter how either is joined).
+
+**Nothing public names a person.** A shared link reaches strangers, so the owner's address is kept
+off every public route. The run page's byline ("submitted by …") is gone: it existed to attribute a
+run reached by a link *within* the org, and on a page anyone can open it publishes the sender's
+address to whoever received the link. `audit.json` drops its `summary.owner` field for the same
+reason — an email address is not evidence about a run. Nothing else under `/runs/` carries an
+identity: ownership lives in `owner.txt`, never in the event log.
+
+**Resume becomes "Ask this again".** The resume button was shown only to a run's owner, a
+distinction a page with no identity cannot draw, and a resume offered to everyone is an invitation
+to a 404. Rather than reintroduce an authenticated twin of the run page to host one button, the
+page now offers `POST /runs/<id>/again` on any stopped run: a *new* run of the same question,
+owned by whoever clicks, rate-limited as their own submission, leaving the original untouched. It
+needs no knowledge of who is reading, because it grants nothing a reader could not get by retyping
+the question on the index. An anonymous reader who presses it meets the identity gate, which is the
+honest failure. The question and the seed are read off disk from the run id — nothing is taken from
+the request — so no client-supplied text reaches a model context and the seed does not have to ride
+into the DOM in a hidden field. `POST /runs/<id>/resume` remains as a route for the operator; it
+just no longer has a button.
+
+This is a deliberate trade: a run that crashed at minute 18 is now re-run from scratch rather than
+resumed from its checkpoint, at full token cost. It is narrow. Automatic recovery already handles
+the common interruptions (deploy, restart) with no human involved (`worker.recover`), a run
+`abandoned` by a roster change *cannot* be resumed anyway (`ResumeMismatch` is why it is abandoned),
+and what remains is a crash that leaves the process alive. Paying tokens in that case is cheaper
+than an owner-aware second surface.
+
+**The progress stream is public, and that is a resource question, not a data one.** Nothing on this
+path writes: `Registry` has no write method at all, and the only worker call is `active()`, a
+lock-guarded dict copy. It spends no tokens — it polls the run's own `events.jsonl` once a second.
+What changes is that an open connection is now something a stranger can start, so two bounds were
+added with it. `RA_MAX_LIVE_STREAMS` (default 32) caps how many run at once and answers `503` past
+that rather than queueing, since a parked caller is an open connection too. And the loop now exits
+on `not is_live` alone: it previously also required a `final.json`, which meant a run that stopped
+*without* one — a crash, or `abandoned` — polled forever, and those are exactly the states the page
+most needs to repaint into.
+
+**The forgery caveat is the same one D32 already carries, no wider.** The tailnet path lets any peer
+set the identity header and read or submit as anyone; that is the accepted risk whose fix is the
+deferred JWT check below. This decision removes the identity *requirement* for reads that every
+signed-in caller could already perform by holding the id, so the set of things an anonymous tailnet
+peer can reach does not grow by anything they could not reach by claiming an identity.
+
+**Isolation is untouched.** This is entirely in the web layer, upstream of nothing that enters a
+model's context and downstream of every run. Author exclusion, the blind orchestrator
+(`OrchestratorView`), fail-closed lenses, severity-floor clamping, controller termination and the
+untrusted-text boundary all live in the Python review core and the convergence controller, none of
+which this changes. Showing a report to an anonymous human is the same act D32 already sanctioned
+for a signed-in one; blindness is about what a *model* may read, and this moves no data toward any
+model.
+
+Deployment and the route table are documented in [authentication.md](./authentication.md).
+
+## D36 — a hung author-resume is contained at the container boundary, not by `continue-on-error`
+
+**The problem.** The fixer runs in two modes (docs/ci-pipeline.md): `author-resume`, which resumes
+the agent that wrote the PR, and `cold`, a fresh agent. `author-resume` was designed as best-effort —
+a resumed session that stalls should fall through to the cold fixer rather than fail the PR — and the
+mechanism was `continue-on-error: ${{ ... == 'author-resume' }}` on the "Run the fixer" step, with a
+"Fall back to a cold fixer" step gated on `steps.run.outcome != 'success'`. It never worked. Three
+consecutive `Review pipeline — entry` runs resumed the same wedged session (`run-30224800178`), each
+died at exactly +25m00s on the coreutils `timeout` (exit 124), and each aborted the *job* — the
+fallback's `if:` was never reached, so the cold fixer that is the pipeline's only designed second
+attempt has **never fired**. The uploaded artifact was 148 bytes: `claude --continue` hung before its
+first token. Two mechanical defects underneath (issue #85): an expression-valued `continue-on-error`
+on a step that `uses:` a **composite action** does not keep the composite's inner-step failure from
+failing the job; and `run-in-container.sh`, under `set -euo pipefail`, died on the `timeout`'s 124
+before it could tell a deadline from a crash, so no caller could distinguish the two.
+
+**Why it mattered beyond the red X.** `record-cycle` runs before `fix` and gates it, and `MAX_CYCLES`
+is 2, so only cycle 1 ever gets a fixer. A hung resume that fails the job consumes the PR's single fix
+attempt and produces nothing; on an agent-authored branch the next push lands at cycle 2 where
+`fix_allowed=false`, and the blockers return with no fixer left. Human pushes resetting the cycle had
+been masking this.
+
+**The decision.** Containment moves to the boundary that actually fails — `run-in-container.sh` — and
+the fallback trigger moves from a step *outcome* to an on-disk *signal*.
+
+- The script captures `timeout`'s own status via `PIPESTATUS[0]` (not `tee`'s) under a scoped
+  `set +e`, and adds `--kill-after` so a CLI that ignores SIGTERM is still killed at the deadline
+  (surfacing as 137, handled alongside 124). A duration override seam (`AGENT_TIMEOUT`) exists purely
+  so the offline test can use a 2-second deadline.
+- In **resume mode** the script is best-effort and never fails the job. Every contained outcome —
+  a timeout, a crash, or a clean exit that produced no artifact — writes a `fixer-incomplete.sentinel`
+  beside the output log, naming the reason, and exits 0. The sentinel is *positive* for all three
+  rather than letting a missing `fixer-result.json` stand in for a crash, because an agent can write
+  its result and *then* exit nonzero: the absence-based signal would read that crash as a fix and push
+  work the agent never vouched for. Its stem comes from `OUTPUT_LOG_PATH`, not the role, so it always
+  matches the log and result it sits beside (the composite builds those from `ARTIFACT_BASE`, which is
+  allowed to differ from the role — a divergence would otherwise silently stop the fallback firing).
+  In **any non-resume mode** (cold fixer, reviewers, resolver, author) there is no fallback, so a
+  timeout or missing result stays fatal, exactly as before — the containment is gated on
+  `AGENT_RESUME=1` and touches nothing else.
+- The workflow adds a "Did the author-resume fixer produce a fix?" step that reads the sentinel /
+  result off disk and sets `ok`. The fallback fires on `!cancelled() && … && ok != 'true'`. A status
+  function is load-bearing: the "second-order trap" is that a condition with no status function has an
+  implicit `success()` ANDed onto it, which — now that a contained timeout reports the step as
+  `success` — would skip the fallback on exactly the hang it must catch. It is `!cancelled()` and not
+  `always()` because the fallback step is not read-only: it resets the tree to the reviewed SHA and
+  replays the base merge, and `always()` would run all of that while the job is being cancelled.
+  `continue-on-error` is kept only as defense-in-depth for a failure in one of the composite's
+  *other* steps.
+
+**What this does not do.** It does not stop the pipeline re-resuming a session that has already hung
+(defect 3 in #85): `validate` still cannot tell a loadable session from one `--continue` wedges on, and
+no cheap cross-run memory exists on the ephemeral, plural homelab runners to record "this run-id hung."
+That is deliberately out of scope, and its practical harm is now small — with the fallback firing, a
+hung resume no longer fails the run or burns the cycle's fix attempt; it costs one bounded resume
+attempt before the cold fixer succeeds in the same cycle. Left as an open item below.
+
+**Invariants.** None of the review-core invariants are touched — author exclusion, the blind
+orchestrator, fail-closed lenses, severity floors, controller termination, and the untrusted-text
+boundary all live in the Python core, and this is CI gating in `run-in-container.sh` and
+`review-fixer.yml`. The fixer's own pre-push gates (docs/ci-pipeline.md: artifact validates against
+main's schema, `input_sha`/`cycle`/`mode` match, ruff, marker and race gates) are unchanged, so a cold
+fix produced by the now-reachable fallback clears exactly the same bar it always had to.
+
+## D37 — a `quality` CI reviewer guards the design's evidence base, which is itself dated and refreshable
 
 **The problem.** The `invariant` reviewer audits conformance: code moving against the current
 spec, or either side moving alone (its row 12). A PR that coherently updates code, the normative
@@ -1261,3 +1442,9 @@ opaque strings, and needing to change them would have been a design smell.
 - Verifying `Cf-Access-Jwt-Assertion` against the team's JWKS with an `aud` check, replacing the
   trusted email header (D32). The prerequisite for exposing the service beyond a small invited
   group, or for closing the direct-to-origin forgery path the tailnet posture leaves open.
+- Detecting an *unresumable* author session before spending a resume attempt on it (D36, #85
+  defect 3). `validate` proves only that a non-empty transcript exists; it cannot tell a session
+  `claude --continue` loads from one it wedges on, and there is no cross-run memory on the
+  ephemeral runners to record that a given `run-id` has already hung. A durable signal (a marker
+  committed to the PR, or a per-`run-id` "hung" note surviving between runs) would let the fixer
+  skip straight to cold instead of re-paying the bounded resume timeout each cycle.
