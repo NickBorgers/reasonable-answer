@@ -98,8 +98,9 @@ Often, not always. The decorrelation this buys is real but **partial**: every ca
 trained on overlapping data, and when two of them are both wrong they are frequently wrong the
 *same way*. Diversity de-risks the failures that are peculiar to one model; it cannot vote away
 a mistake the whole model population shares. That shared residue is why the strongest checks in
-this system come from outside the roster entirely — retrieval and source verification test a
-citation against the fetched page rather than against another model's opinion, and the
+this system come from outside the roster entirely — retrieval constrains a citation to a URL a
+search actually returned, and source verification, when enabled, tests that citation against the
+text of the fetched page rather than against another model's opinion; and the
 [bias rulebook](./bias.md) exists precisely because a bias correlated across every rostered
 model cannot be caught by adding more of them.
 
