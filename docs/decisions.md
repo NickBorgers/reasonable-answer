@@ -1535,12 +1535,12 @@ existing floor, its text reaches only the writer-facing `Defect` and the audit s
 
 **The problem.** D18 fetches the URLs a report cites so the evidence lens can check them, and D38
 mints `fabricated_citation` mechanically when one of those fetches returns a definitive not-found.
-Both are sound, and both are undermined by the same fact: **most good citations fail the direct
-fetch.** Paywalled journals and reputable newspapers refuse automated clients as a matter of
-course, so a real, correctly-cited paper arrives as `blocked` — indistinguishable from a source
-nobody could check for any other reason, and one HTTP status away from looking like a source
-nobody ever published. Verification was therefore strongest exactly where citations are weakest (a
-fabricated blog URL 404s) and weakest exactly where the serious sources are.
+Both are sound, and both share a blind spot: **a direct fetch can fail for reasons that have
+nothing to do with whether the source is real.** A paywalled journal or a newspaper that refuses an
+automated client hands back a `blocked` — indistinguishable from a source nobody could check for
+any other reason, and one HTTP status away from looking like a source nobody ever published.
+Verification was therefore strongest exactly where a citation is easiest to fake (a fabricated blog
+URL 404s) and weakest exactly where a source is refused rather than absent.
 
 **The refusal, first.** There is no omni-passport service that hands over paywalled bodies, and the
 ways of faking one are all off the table. This system does not spoof a browser user agent to defeat
@@ -1572,9 +1572,12 @@ a second copy would double-report one defect at its blocking floor.
 direct fetch yielded no body.
 
 *Tier 0 — identifiers.* Extract a DOI / arXiv id / PMID / PMCID from the cited URL by regex alone
-and ask Crossref and OpenAlex. Yields the title, authors, year, venue and abstract, and — the point
-— *existence*. It runs even when tier 1 succeeds, because the attributed title is worth checking
-against the report whether or not a body arrived.
+and ask the configured registries. With the default roster — Crossref and OpenAlex — that answers
+*existence* for DOIs and PMIDs; arXiv ids and PMCIDs are covered when arXiv and Europe PMC are
+added to `sources.identifiers.providers` (both ship in the open-access roster, so a free copy is
+still sought for them there). A confirmed record yields the title, authors, year, venue and
+abstract, and — the point — *existence*. It runs even when tier 1 succeeds, because the attributed
+title is worth checking against the report whether or not a body arrived.
 
 *Tier 1 — open access.* OpenAlex's `best_oa_location`, Unpaywall, Europe PMC, arXiv. When one names
 a free copy, the direct/PDF path is re-entered **exactly once**, via an explicit depth argument

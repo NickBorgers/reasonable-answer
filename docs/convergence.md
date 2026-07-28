@@ -103,18 +103,20 @@ unreadable content type — so "a body this cannot read" narrows to formats no c
 text is truncated and the critic is told so, so a claim it cannot see is not read as a claim the page
 contradicts.
 
-**Existence is checkable even when the body is not (D39, off by default).** With
-`sources.identifiers` enabled, a cited URL that carries a DOI, arXiv id, PMID or PMCID and would
-not hand over its body is asked about at a bibliographic registry. A confirmed record yields
-`metadata_only` — or `paywalled`, when the direct fetch was also refused — and the critic is shown
-the citation details and, where one exists, the abstract, announced as confirmation that the
-source **exists** and explicitly labelled as not being its text. This does not sharpen
+**Existence is checkable even when the body is not (D39, off by default).** With `sources.enabled`
+and `sources.identifiers.enabled` both true, a cited URL that carries a DOI or PMID and would not
+hand over its body is asked about at a bibliographic registry (Crossref, OpenAlex by default; arXiv
+ids and PMCIDs are covered when arXiv and Europe PMC are added to the tier's provider list). A
+confirmed record yields `metadata_only` — or `paywalled`, when the direct fetch was also refused —
+and the critic is shown the citation details and, where one exists, the abstract, announced as
+confirmation that the source **exists** and explicitly labelled as not being its text. This does
+not sharpen
 `misrepresented_source`: an abstract is a summary the authors wrote, so a claim's absence from one
 is not evidence the paper does not make it, and the critic is told never to raise that category
 against a source shown only as metadata. It does move a real paywalled paper out of the class that
 looks like a fabricated one. In the other direction, an identifier that *every* authoritative
 registry denies is a not-found and reaches the mechanical finding above — gated hard, because that
-finding is blocking. With `sources.open_access` enabled a free copy may also be read; such a body
+finding is blocking. With `sources.open_access.enabled` also true a free copy may be read; such a body
 is marked as coming from a mirror rather than the cited URL, and can never settle a dispute about
 that URL, because a preprint is not the version of record.
 
@@ -129,8 +131,10 @@ stays byte-identical even across midnight (RB-010). It is deliberately absent fr
 prompt-hash surface: it is run context, not lens semantics.
 
 Even with both options on, the output is *consensus-reviewed with verified sourcing* — **not
-fact-checked**. Verification establishes that a cited page exists and says something compatible
-with the claim; it does not establish that the page is *right*, nor that the roster picked good
+fact-checked**. Verification establishes that a cited source exists and, when a body can be read,
+that the page says something compatible with the claim; a registry-confirmed source whose body
+cannot be read proves existence only, and an open-access mirror is a different document from the
+cited page. It does not establish that the page is *right*, nor that the roster picked good
 sources in the first place.
 
 ## Two signal schemas — content-free vs. operational (RB-004, RB-008)
