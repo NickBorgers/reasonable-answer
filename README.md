@@ -392,10 +392,12 @@ Lint with `uv run ruff check src/ tests/`.
 ## CI and agentic review
 
 Every PR gets a secret-free validation run (ruff, the offline suite on 3.11 and 3.12, a lockfile
-check, `actionlint`, and a container build with a health-check smoke test), plus an agent review by
-five roles: **invariant**, **docs**, **security**, **test**, and **quality**. A deterministic judge
-aggregates their structured verdicts and writes the merge gate; it runs from `main` with read-only
-permissions, so a PR cannot modify the code that judges it. Nothing in the pipeline can push.
+check, `actionlint`, and a container build with a health-check smoke test), plus an agent review
+whose panel the diff selects: **invariant** and **docs** run on every non-empty PR, and **security**,
+**test**, and **quality** are added by path rules (see [docs/ci-pipeline.md](./docs/ci-pipeline.md)).
+A deterministic judge aggregates their structured verdicts and writes the merge gate; it runs from
+`main` with read-only permissions, so a PR cannot modify the code that judges it. Nothing in the
+pipeline can push.
 
 File an issue and an agent opens a PR for it; `/review` forces a fresh review
 cycle on a PR.
