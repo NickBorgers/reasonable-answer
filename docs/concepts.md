@@ -19,14 +19,30 @@ And they are reliably bad at the surrounding activity that turns those skills in
 result:
 
 - **Self-review.** A model asked to critique its own output mostly grades its own homework
-  generously. It made the errors *because* it couldn't see them.
+  generously. It made the errors *because* it couldn't see them. Asked to self-correct reasoning
+  without external input, models often come out *worse* than they went in
+  ([Huang et al. 2024](https://arxiv.org/abs/2310.01798)); a survey of the whole literature found
+  no prior work demonstrating successful self-correction from a prompted LLM's own feedback
+  ([Kamoi et al. 2024](https://arxiv.org/abs/2406.01297)). Evaluators also recognise their own
+  writing and mark it up accordingly
+  ([Panickssery et al. 2024](https://arxiv.org/abs/2404.13076)).
 - **Sycophancy.** A model shown someone else's verdict drifts toward that verdict instead of
-  forming its own.
+  forming its own — a general behaviour of state-of-the-art assistants, not a quirk of one model
+  ([Sharma et al. 2023](https://arxiv.org/abs/2310.13548)).
 - **Context pollution.** Judgment degrades as a conversation accumulates: prior reasoning,
-  social dynamics, and earlier drafts all leak into what should be an independent look.
+  social dynamics, and earlier drafts all leak into what should be an independent look. Even
+  setting the social effects aside, material buried mid-context is measurably harder for a model
+  to use than the same material at either end
+  ([Liu et al. 2023](https://arxiv.org/abs/2307.03172)).
 - **No stopping rule.** Ask models to review each other in a loop and they either agree too
   early (politeness) or never agree at all (the nitpick spiral — ever-smaller objections,
-  forever). A model cannot tell you, calibratedly, "this is done."
+  forever). A model cannot tell you, calibratedly, "this is done." Iterated refine-against-a-judge
+  loops are also where a model starts optimising the judge rather than the artifact
+  ([Pan et al. 2024](https://arxiv.org/abs/2402.06627)). Worth calibrating against humans, too:
+  when NeurIPS 2021 sent 10% of submissions to two independent committees, they disagreed on 23%
+  of papers, and about half the accept list would have changed on a rerun
+  ([Beygelzimer et al. 2023](https://arxiv.org/abs/2306.03262)). Reviewers failing to converge is
+  the normal condition of review, not a symptom of using LLMs for it.
 
 Every design choice in this repo is one of those strengths pressed against one of those
 weaknesses.
@@ -163,10 +179,16 @@ it — each one, again, a guard against a known LLM failure mode:
   structured fix-tasks — category, severity, location, a verbatim quote, an instruction — with the
   critic's identity stripped. The next writer experiences "improve the artifact," never "someone
   judged you," and a critic has no free-text channel through which to steer (or prompt-inject)
-  the writer.
+  the writer. The framing appears to matter mechanically and not just socially: holding the
+  erroneous claim byte-identical and changing only whether it is labelled the model's own thought
+  or an external message moves the correction rate by tens of percentage points
+  ([Chen et al. 2026](https://arxiv.org/abs/2606.05976)).
 - **Severity floors, clamp-up only.** Every category has a mechanical minimum severity — a
   fabricated citation is *always* blocking. A critic can escalate, never soften, so materiality
-  cannot be negotiated away.
+  cannot be negotiated away. This is the oldest result the design leans on: a meta-analysis of
+  clinical versus mechanical prediction found mechanically combining assessments about 10% more
+  accurate on average than case-by-case holistic judgment, and only rarely worse
+  ([Grove et al. 2000](https://pubmed.ncbi.nlm.nih.gov/10752360/)).
 - **Fail closed.** A malformed critique fails its whole lens rather than being silently dropped,
   and "no issues" only counts if every lens actually completed. Silence is never evidence.
 - **Clean records reset.** Every attestation of "this lens found nothing" is bound to the exact
@@ -176,10 +198,15 @@ it — each one, again, a guard against a known LLM failure mode:
   are ones a search actually returned rather than remembered (LLM memory is where fabricated
   citations come from). With the full feature set enabled, the system also fetches the cited
   pages and hands them to the evidence lens, turning "does this source say that?" from a
-  plausibility guess into a check against the page. (The shipped config leaves that last switch
-  off only because fetching model-chosen URLs needs a network egress boundary the deployment must
-  provide — see [ssrf-egress-isolation.md](./ssrf-egress-isolation.md); with one in place, it
-  belongs on.)
+  plausibility guess into a check against the page — the same per-claim-against-fetched-text move
+  that [FActScore](https://arxiv.org/abs/2305.14251) (Min et al. 2023) uses to score long-form
+  factuality. (The shipped config leaves that last switch off only because fetching model-chosen
+  URLs needs a network egress boundary the deployment must provide — see
+  [ssrf-egress-isolation.md](./ssrf-egress-isolation.md); with one in place, it belongs on.)
+  Retrieval is a floor, not a guarantee: a preregistered study of commercial legal-research tools
+  built on retrieval still measured hallucination rates of 17–33%
+  ([Magesh et al. 2024](https://arxiv.org/abs/2405.20362)), which is why the output is labelled
+  *not fact-checked* no matter how many switches are on.
 - **Date grounding.** Every prompt carries the run's actual date, because a model's sense of
   "now" is frozen at its training cutoff — without this, critics have flagged legitimate current
   citations as impossible future-dated fabrications.
@@ -187,7 +214,10 @@ it — each one, again, a guard against a known LLM failure mode:
   sin. So critics are auditioned offline against reports with *planted* defects and known-sound
   controls, and graded by plain code — measuring both whether they catch what's there and whether
   they invent what isn't. An LLM grader is expressly forbidden: the harness must not depend on
-  the property it exists to measure.
+  the property it exists to measure. Model judges carry documented and reproducible biases —
+  position, verbosity, and self-enhancement among them
+  ([Zheng et al. 2023](https://arxiv.org/abs/2306.05685)) — so a grader built from one would
+  import exactly the failure modes the audition is supposed to detect.
 - **The dispute channel.** Critics can be wrong, and a false positive is otherwise
   indistinguishable from a real defect — floors escalate it, the blind referee counts it, and a
   compliant writer would "fix" the report into falsehood. An opt-in channel (D25) lets the writer

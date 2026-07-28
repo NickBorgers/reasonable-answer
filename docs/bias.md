@@ -17,9 +17,15 @@ other finding.
 Why rules-as-documentation rather than another isolation layer: fresh contexts defeat social
 drift and model diversity decorrelates blind spots (see [isolation.md](./isolation.md)), but
 **every model in any roster shares training-corpus and cultural priors** — a bias correlated
-across the whole roster cannot be voted away by more of the roster. The only lever left is an
-explicit, mechanical, text-anchored rulebook that every critic applies and every writer is held
-to. That is this file.
+across the whole roster cannot be voted away by more of the roster. This is measurable rather
+than merely plausible: across 350+ models, error correlation persisted through differences in
+training data, architecture, and provider, and was *strongest* among the largest and most
+accurate models ([Kim et al. 2025](https://arxiv.org/abs/2506.07962)) — so scaling the roster up
+in capability tightens the shared residue rather than dissolving it. Relatedness between models
+biases judgement in the same direction: a judge favours models it shares a lineage or family with
+([Li et al. 2025](https://arxiv.org/abs/2502.01534)). The only lever left is an explicit,
+mechanical, text-anchored rulebook that every critic applies and every writer is held to. That is
+this file.
 
 ## 2. Source-diversity rule (`one_sided_sourcing`, evidence lens, floor: major)
 
