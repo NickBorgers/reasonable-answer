@@ -57,6 +57,8 @@ FINAL = {
             "severity": "blocking",
             "category": "unsupported_claim",
             "instruction": "Cite or drop the 40% figure.",
+            # Keyed to the shipped artifact, exactly as `finalize` stamps it (issue #93).
+            "artifact_hash": "aaaabbbbccccdddd",
         }
     ],
     "warnings": ["the seed carried no headings"],
@@ -131,6 +133,61 @@ def test_nobody_is_credited_when_there_is_no_hash_to_key_against():
         assert "Reviewed clean by" not in document
         assert "vendor-c/logic" not in document
         assert "vendor-d/evidence" not in document
+
+
+def test_a_defect_raised_against_another_draft_is_not_charged_to_this_report():
+    """The twin of `_reviewers` (issue #93). On a non-accepted terminal the shipped
+    draft can be an earlier round than the one the loop stopped on; a defect keyed to
+    that later draft quotes text this report never contained, so it must not render
+    under a heading asserting the defect belongs to the artifact in hand."""
+    final = dict(
+        FINAL,
+        outstanding_defects=[
+            {
+                "severity": "blocking",
+                "category": "unsupported_claim",
+                "instruction": "Cite or drop the 40% figure.",
+                "artifact_hash": "0000-round-8-draft",  # a different draft
+            }
+        ],
+    )
+    document = export.export_markdown("Q?", REPORT, final, "run-shared")
+
+    assert "Cite or drop the 40% figure." not in document
+    # And the empty list is not passed off as a clean result.
+    assert "### Outstanding defects in this report" in document
+    assert "not read the absence of a list as clean" in document
+
+
+def test_the_withheld_note_is_absent_when_the_defects_do_key_to_this_report():
+    """The note only fires when defects exist but belong elsewhere; a report whose own
+    defect set is on record renders it, and a genuinely clean one renders nothing."""
+    document = export.export_markdown("Q?", REPORT, FINAL, "run-shared")
+    assert "Cite or drop the 40% figure." in document
+    assert "not read the absence of a list as clean" not in document
+
+    clean = dict(FINAL, terminal_status="accepted", outstanding_defects=[], warnings=[])
+    clean_doc = export.export_markdown("Q?", REPORT, clean, "run-shared")
+    assert "Outstanding defects" not in clean_doc
+
+
+def test_the_html_export_withholds_another_drafts_defects_too():
+    """The three render paths must agree on what is claimed about the shipped artifact."""
+    final = dict(
+        FINAL,
+        outstanding_defects=[
+            {
+                "severity": "blocking",
+                "category": "unsupported_claim",
+                "instruction": "Cite or drop the 40% figure.",
+                "artifact_hash": "0000-round-8-draft",
+            }
+        ],
+    )
+    document = export.export_html("Q?", REPORT, final, "run-shared")
+
+    assert "Cite or drop the 40% figure." not in document
+    assert "not read the absence of a list as clean" in document
 
 
 def test_a_final_summary_that_is_not_an_object_reads_as_unknown_not_as_a_verdict():

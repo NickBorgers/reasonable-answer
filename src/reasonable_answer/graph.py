@@ -850,6 +850,11 @@ def _triage(state: State, rt: Runtime) -> dict:
             "major": totals.major,
             "minor": totals.minor,
             "report": state["report"],
+            # The defect list belongs to *this* artifact. Carried on the row so that
+            # when finalize ships an earlier draft than the terminal one, it can hand
+            # the export that draft's own defects rather than the terminal round's —
+            # the same per-artifact keying the clean records already have (issue #93).
+            "defects": defects,
         },
     ]
 
@@ -1041,6 +1046,7 @@ def _finalize(state: State, rt: Runtime) -> dict:
     if status in ("accepted", "converged_unconfirmed"):
         text = state.get("report", "")
         chosen_round = state.get("round", 0)
+        defects = state.get("defects", [])
     elif board:
         # Never ship the last draft just because it is last — ship the best-scoring one,
         # scored on each artifact's most-critiqued triage rather than its first.
@@ -1050,9 +1056,22 @@ def _finalize(state: State, rt: Runtime) -> dict:
         idx = best_scoring_index([(b["blocking"], b["major"], b["minor"]) for b in rows])
         text = rows[idx]["report"]
         chosen_round = rows[idx]["round"]
+        # The defects that annotate the shipped report must be the ones raised against
+        # *it*, not against whatever draft the loop stopped on — on a non-accepted
+        # terminal those differ (issue #93). The chosen row carries its own defect set;
+        # a row written before this field existed has none, and the export keys on hash
+        # and says so rather than substituting the terminal round's.
+        defects = rows[idx].get("defects", [])
     else:
         text = state.get("report", "")
         chosen_round = state.get("round", 0)
+        defects = state.get("defects", [])
+
+    artifact_hash = report_mod.artifact_hash(text) if text else None
+    # Stamp each outstanding defect with the artifact it belongs to, so an export can
+    # filter to the shipped draft exactly as `_reviewers` filters the clean records —
+    # one keying discipline for both annotation surfaces (issue #93).
+    outstanding = [{**d, "artifact_hash": artifact_hash} for d in defects]
 
     view = state.get("view", {})
     summary = {
@@ -1060,10 +1079,10 @@ def _finalize(state: State, rt: Runtime) -> dict:
         "terminal_status": status,
         "rounds": state.get("round", 0),
         "chosen_round": chosen_round,
-        "artifact_hash": report_mod.artifact_hash(text) if text else None,
+        "artifact_hash": artifact_hash,
         "final_view": view,
         "clean_records": state.get("clean_records", []),
-        "outstanding_defects": state.get("defects", []),
+        "outstanding_defects": outstanding,
         "warnings": state.get("warnings", []),
         "note": Decision.model_validate(state["decision"]).note if state.get("decision") else "",
         "label": (
