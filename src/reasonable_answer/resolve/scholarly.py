@@ -282,10 +282,18 @@ class EuropePmc:
 class Arxiv:
     """`export.arxiv.org/api/query` — metadata and the PDF, from one Atom response.
 
-    Parsed with narrow regexes rather than an XML parser. Not laziness: `xml.etree` is
-    documented as vulnerable to entity-expansion attacks, this is a third-party document
-    fetched over a network, and `defusedxml` is not a dependency of this project. Five
-    fields do not justify either the parser's attack surface or a new dependency.
+    Parsed with narrow regexes rather than an XML parser, which needs a word because
+    `textconv` reaches for `xml.etree` on a .docx and argues there that the classic XXE
+    vectors do not apply — stdlib ElementTree resolves no external entities and fetches
+    no DTDs, and `http_get`'s byte cap bounds the residual entity-expansion risk here
+    exactly as the uncompressed-size guard does there. So security is *not* the reason,
+    and claiming it would contradict a position this codebase already took.
+
+    The reason is narrower: five fields out of a machine-generated Atom feed, where the
+    only structure that matters is one `<entry>` element. A parser would be more robust
+    against a feed that restructured itself, which arXiv's has not in twenty years; it
+    would also be the second XML idiom in the package. If this ever grows past a handful
+    of fields, ElementTree is the right answer and `textconv` is the precedent.
     """
 
     name = Provider.ARXIV
