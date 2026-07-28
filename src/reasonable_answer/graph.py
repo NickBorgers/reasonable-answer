@@ -77,6 +77,12 @@ class State(TypedDict, total=False):
     pending_lenses: list[str]
     lens_results: dict[str, Any]
     used_critics: dict[str, list[str]]
+    #: Per-lens count of critique attempts made on THIS artifact. `used_critics` is a
+    #: set of distinct identities and so stops growing once the eligible pool is
+    #: exhausted; this counter keeps climbing, so `pick_critic`'s rotation advances on
+    #: every rule-2 retry instead of freezing on one fallback model (mirrors the
+    #: `writer_rotation` idiom).
+    critique_rounds: dict[str, int]
     clean_records: list[dict]
     defects: list[dict]
 
@@ -252,6 +258,7 @@ def _intake(state: State, rt: Runtime) -> dict:
         "writer_rotation": 0,
         "lens_results": {},
         "used_critics": {},
+        "critique_rounds": {},
         "clean_records": [],
         "defects": [],
         "polish_used": 0,
@@ -428,6 +435,7 @@ def _generate(state: State, rt: Runtime) -> dict:
         "clean_records": [],
         "lens_results": {},
         "used_critics": {},
+        "critique_rounds": {},
         "defects": [],
         "polish_next": False,
         "pending_lenses": [lens.value for lens in LENSES],
@@ -708,12 +716,16 @@ def _critique(state: State, rt: Runtime) -> dict:
 
     used_raw: dict[str, list[str]] = dict(state.get("used_critics", {}))
     used = {k: set(v) for k, v in used_raw.items()}
+    # Count of tries per lens on this artifact. Unlike `used`, this keeps climbing after
+    # the eligible pool is exhausted, so rule-2 retries keep rotating (docs/convergence.md)
+    # rather than freezing `attempt` — and so the rotation index passed to `pick_critic`.
+    rounds: dict[str, int] = dict(state.get("critique_rounds", {}))
     results = dict(state.get("lens_results", {}))
 
     run_date = state.get("run_date")
 
     def work(lens: Lens) -> LensResult:
-        attempt = 1 + len(used.get(lens.value, set()))
+        attempt = rounds.get(lens.value, 0) + 1
         return _critique_one(
             rt,
             lens,
@@ -730,6 +742,7 @@ def _critique(state: State, rt: Runtime) -> dict:
         for result in pool.map(work, pending):
             results[result.lens.value] = result.model_dump(mode="json")
             used.setdefault(result.lens.value, set()).add(result.critic_identity)
+            rounds[result.lens.value] = rounds.get(result.lens.value, 0) + 1
             rt.store.critique(artifact_hash, result.lens.value, result.attempt, result)
             rt.store.event(
                 "critique",
@@ -744,6 +757,7 @@ def _critique(state: State, rt: Runtime) -> dict:
     return {
         "lens_results": results,
         "used_critics": {k: sorted(v) for k, v in used.items()},
+        "critique_rounds": rounds,
     }
 
 

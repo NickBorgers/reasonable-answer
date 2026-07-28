@@ -199,6 +199,61 @@ def test_every_critique_call_excludes_the_author(identities, config):
             assert identities[call.alias] != author
 
 
+def test_rule_2_retries_keep_rotating_after_the_critic_pool_is_exhausted(
+    identities, config, tmp_path
+):
+    """docs/convergence.md promises that once every eligible critic has reviewed a lens,
+    successive rule-2 retries rotate through the pool instead of re-asking the model that
+    just failed. `used_critics` is a set of distinct identities, so its length stops
+    growing at exhaustion; the rotation index must come from a monotonic per-lens counter
+    (`critique_rounds`), not `len(used_critics)` — which would freeze `attempt` and pin
+    every later retry on one fallback (run-3b4fe4760289 spent 11 of 12 attempts on one
+    critic and aborted). This drives the round-level `_critique` so the graph, not just
+    `pick_critic`, is exercised."""
+    from reasonable_answer.graph import Runtime, _critique
+    from reasonable_answer.llm import ModelCallError
+    from reasonable_answer.store import RunStore
+
+    def always_fails(_alias, _user):
+        raise ModelCallError("provider exploded")
+
+    client = FakeClient(
+        identities=identities,
+        critique_fn=always_fails,
+        report_fn=lambda n: REPORT,
+    )
+    rt = Runtime(
+        config=config,
+        client=client,
+        identities=identities,
+        store=RunStore(tmp_path, "run-rotate"),
+    )
+
+    # Author is writer-a, so the logic lens's eligible non-author pool is
+    # {logic-spec, writer-b} — exactly two identities.
+    pool = {identities["logic-spec"], identities["writer-b"]}
+    state = {
+        "question": "Is it so?",
+        "report": REPORT,
+        "artifact_hash": "h" * 64,
+        "author_identity": identities["writer-a"],
+        "pending_lenses": ["logic"],
+        "run_date": "2026-07-28",
+    }
+
+    picks = []
+    for _ in range(5):
+        out = _critique(state, rt)
+        state = {**state, **out}
+        assert state["lens_results"]["logic"]["failed"] is True
+        picks.append(state["lens_results"]["logic"]["critic_identity"])
+
+    # The first two retries exhaust the pool; the guarantee is about what happens after.
+    assert set(picks[:2]) == pool, picks
+    assert set(picks[2:]) == pool, picks  # later retries still cover the whole pool
+    assert picks[2] != picks[3], picks  # consecutive post-exhaustion retries alternate
+
+
 def test_intake_rejects_a_seed_without_a_question(identities, config):
     client = make_client(identities)
     with pytest.raises(ConfigError, match="question is required"):
