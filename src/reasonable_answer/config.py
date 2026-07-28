@@ -231,11 +231,75 @@ class OpenAccessTierConfig(BaseModel):
     enabled: bool = False
     #: Tried in order, stopping at the first that names a copy: they answer the same
     #: question and every extra call costs budget for an answer already in hand.
+    #: `core` is deliberately absent. It is the one keyed provider on this tier, and a
+    #: default that includes it would turn "enable open access" into "and also supply a
+    #: CORE key or fail to start". Add it explicitly, and only where the keyless four
+    #: leave a gap worth closing.
     providers: list[str] = Field(
         default_factory=lambda: ["openalex", "unpaywall", "europe_pmc", "arxiv"]
     )
+    core_api_key_env: str = "CORE_API_KEY"
+    #: local dev convenience; gitignored via *.token. Env var wins when both exist.
+    core_token_file: str | None = "core.token"
     timeout_seconds: float = Field(default=10.0, gt=0, le=60)
     max_calls_per_run: int = Field(default=40, ge=1, le=2000)
+
+
+class ExtractionTierConfig(BaseModel):
+    """Tier 2 (D40): a rendering service reads the cited URL when this process cannot.
+
+    The first tier that costs money, and the first that reaches a host chosen by neither
+    the report nor a registry. It renders JavaScript and gets past the bot walls that
+    refuse an unknown client — it does **not** get past a hard paywall, and no
+    configuration here pretends otherwise.
+
+    There is deliberately no stealth switch. A rendering provider's stealth mode rotates
+    residential IPs to defeat bot detection, which is the industrial form of the browser
+    impersonation `fetch.py` refuses and D39 records as doctrine. Rendering a page is not
+    disguising who is asking for it, and only the first is in scope.
+    """
+
+    model_config = ConfigDict(extra="forbid")
+
+    enabled: bool = False
+    #: No default. An empty name with the tier on is fatal at load rather than a silent
+    #: fallback to whichever provider happens to be first in the registry — a paid call
+    #: should never be made to a vendor nobody named.
+    provider: str = ""
+    api_key_env: str = "FIRECRAWL_API_KEY"
+    #: local dev convenience; gitignored via *.token. Env var wins when both exist.
+    token_file: str | None = "firecrawl.token"
+    #: Rendering a page in a real browser is slower than fetching one.
+    timeout_seconds: float = Field(default=45.0, gt=0, le=180)
+    #: None means the structural ceiling: `search.max_sources * budgets.hard_cap`, the
+    #: most distinct URLs a run could ever cite. Derived rather than guessed so that
+    #: raising `hard_cap` does not silently start starving the tier. This is a guard
+    #: against a fetch loop, not a spending limit — the per-run cache already means a
+    #: URL is resolved once however many rounds and critics re-verify it.
+    max_calls_per_run: int | None = Field(default=None, ge=1, le=5_000)
+
+
+class DeliveryTierConfig(BaseModel):
+    """Tier 3 (D40): licensed document delivery. A seam, with nothing behind it.
+
+    Services like CCC RightFind and Reprints Desk Article Galaxy do lawfully deliver
+    paywalled bodies, per article, under copyright-cleared single-use terms. Those terms
+    are the reason no provider ships here: a system that splices a delivered document
+    into a model's context has to reason about redistribution explicitly, and that is a
+    licensing question rather than an engineering one.
+
+    So the shape exists and the registry is open. `provider: ""` with the tier enabled is
+    fatal, which makes this inert rather than half-built.
+    """
+
+    model_config = ConfigDict(extra="forbid")
+
+    enabled: bool = False
+    provider: str = ""
+    api_key_env: str = ""
+    token_file: str | None = None
+    timeout_seconds: float = Field(default=60.0, gt=0, le=300)
+    max_calls_per_run: int | None = Field(default=None, ge=1, le=5_000)
 
 
 class SourcesConfig(BaseModel):
@@ -255,6 +319,8 @@ class SourcesConfig(BaseModel):
     pdf: PdfSourceConfig = Field(default_factory=PdfSourceConfig)
     identifiers: IdentifierTierConfig = Field(default_factory=IdentifierTierConfig)
     open_access: OpenAccessTierConfig = Field(default_factory=OpenAccessTierConfig)
+    extraction: ExtractionTierConfig = Field(default_factory=ExtractionTierConfig)
+    delivery: DeliveryTierConfig = Field(default_factory=DeliveryTierConfig)
     #: Env var naming the address Crossref and Unpaywall want for their polite pool. Its
     #: absence is a WARNING, never fatal, and the difference from a missing credential is
     #: the point: an anonymous request still works, it is only served from a busier

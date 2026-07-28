@@ -157,6 +157,37 @@ search:
 #     providers: [openalex, unpaywall, europe_pmc, arxiv]
 #     timeout_seconds: 10.0
 #     max_calls_per_run: 40
+#   # Tier 2 (D40): a rendering service reads the cited URL when this process cannot.
+#   #
+#   # What it buys: JavaScript-rendered pages, and the bot walls that refuse an unknown
+#   # HTTP client. What it does NOT buy, and no setting here changes: a hard paywall. A
+#   # subscription wall serves a teaser to a real browser too.
+#   #
+#   # There is no stealth option, deliberately. Every vendor in this market also sells
+#   # residential-IP rotation and fingerprint randomisation to defeat bot detection —
+#   # the industrial form of the browser impersonation fetch.py has refused since D18.
+#   # The request is pinned to `proxy: basic` in code and a test asserts no stealth mode
+#   # appears in the body, so this is not a default someone can flip.
+#   #
+#   # Needs FIRECRAWL_API_KEY. Enabled with no key, or with no provider named, is fatal
+#   # at startup rather than a tier that spends its budget on 401s and calls them
+#   # coverage. `max_calls_per_run` unset means the structural ceiling
+#   # (search.max_sources * budgets.hard_cap): a guard against a fetch loop, not a
+#   # spending limit — the per-run cache already resolves each URL once however many
+#   # rounds and critics re-verify it.
+#   extraction:
+#     enabled: false
+#     provider: firecrawl
+#     timeout_seconds: 45.0
+#
+#   # Tier 3 (D40): licensed document delivery — CCC RightFind, Reprints Desk. A seam
+#   # with nothing behind it. Those services do lawfully deliver paywalled bodies, per
+#   # article, under copyright-cleared single-use terms; reasoning about what those
+#   # terms permit when the document is spliced into a model's context is a licensing
+#   # question, not an engineering one. `provider: ""` with the tier on is fatal, which
+#   # keeps this inert rather than half-built.
+#   delivery:
+#     enabled: false
 
 # Writer dispute channel (D25, docs/decisions.md). Lets a writer challenge a fix-task
 # it believes is factually wrong instead of falsifying the report to satisfy it —

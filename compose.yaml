@@ -70,6 +70,12 @@ services:
       # quietly fall back to the anonymous, harder-throttled pool while the roster claims
       # otherwise. Startup warns when it is unset, which is what makes that visible.
       RA_CONTACT_EMAIL: ${RA_CONTACT_EMAIL:-}
+      # The keyed source tiers (D40). Unlike the contact email above, a missing one of
+      # these is never silent: the tier that wants it refuses to start rather than
+      # spending its whole call budget on 401s and reporting them as coverage. Both are
+      # inert until the matching tier is switched on in the roster.
+      FIRECRAWL_API_KEY: ${FIRECRAWL_API_KEY:-}
+      CORE_API_KEY: ${CORE_API_KEY:-}
     healthcheck:
       test: ["CMD", "python", "-c", "import urllib.request;urllib.request.urlopen('http://127.0.0.1:8080/healthz',timeout=2)"]
       interval: 30s
