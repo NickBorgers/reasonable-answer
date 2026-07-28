@@ -77,17 +77,25 @@ def pick_critic(
     lens: Lens,
     author_identity: str,
     used_identities: set[str],
+    rotation: int = 0,
 ) -> str:
     """Prefer a model that has not yet reviewed this lens on this artifact — that is
-    what turns a weak clearance into a strong one. Falls back to the first eligible
-    model when everyone has already reviewed (a re-critique after a lens failure)."""
+    what turns a weak clearance into a strong one. Once everyone has reviewed (a
+    re-critique after a lens failure) it rotates through the pool by `rotation`
+    rather than always returning the first eligible model.
+
+    The fallback used to be `eligible[0]` unconditionally, which meant a lens that kept
+    failing asked the *same* model every remaining attempt: one production run spent 11
+    of its 12 `critique_attempts` on a single critic and aborted. Rotating spends the
+    budget on different models, which is the only thing a bare retry can vary.
+    """
     eligible = eligible_critics(roster, identities, lens, author_identity)
     if not eligible:
         raise RosterExhausted(f"lens '{lens.value}' has no eligible non-author critic")
     for alias in eligible:
         if identities[alias] not in used_identities:
             return alias
-    return eligible[0]
+    return eligible[rotation % len(eligible)]
 
 
 def lens_statuses(

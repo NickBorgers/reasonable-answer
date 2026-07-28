@@ -163,6 +163,12 @@ budgets:
   stagnation_limit: 3
   cycle_period: 4
   repair_retries: 1
+  # Repairs offered to a critic whose issue failed validation — a `claim_span` that is
+  # not really in the paragraph it cites, a locus that does not exist. The repair shows
+  # it the text it should have quoted. Wider than `repair_retries` because the fallback
+  # is controller rule 2, which discards every issue in the response and spends one of
+  # the 12 `critique_attempts` re-asking a fresh model the identical question.
+  critic_repair_retries: 2
   call_retries: 2
   # Distinct writers tried for one draft before the run gives up. A model that is
   # down or answering with nothing gets routed around, not treated as a verdict.

@@ -194,6 +194,15 @@ rule generates once `round ≥ hard_cap`** and the hard cap is genuinely hard (R
 |---|-----------|-------------------|
 | 1 | `fatal` (writer pool empty, a lens has no eligible non-author, repeated malformed) | **aborted** |
 | 2 | `lenses_failed > 0` **and** `critique_attempts_remaining > 0` | **re-critique** failed lens(es) (→ Critiquing); `critique_attempts_remaining -= 1`; partial counts never used |
+
+A lens only reaches rule 2 once the critic has already been given
+`budgets.critic_repair_retries` chances to correct itself *within its own call*, shown
+what its rejected field should have quoted (see `docs/isolation.md`). Rule 2 is the
+expensive fallback — it discards every issue in the response and re-asks a different
+model — so it must not be the first response to a fixable quoting slip. When the pool of
+eligible critics is exhausted, successive attempts rotate through it rather than re-asking
+the model that just failed.
+
 | 3 | `lenses_failed > 0` **and** no budget | **aborted** (cannot complete a review) |
 | 4 | `round < min_ticks` | **continue** (generate) — never accept before `min_ticks` |
 | 5 | `round ≥ hard_cap` **and** `blocking > 0` | **needs_human_review** |

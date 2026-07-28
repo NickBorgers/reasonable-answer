@@ -24,7 +24,7 @@ from typing import Any, TypeVar
 from openai import OpenAI
 from pydantic import BaseModel, ValidationError
 
-from .config import Config, ConfigError
+from .config import Budgets, Config, ConfigError
 
 log = logging.getLogger(__name__)
 
@@ -36,6 +36,32 @@ ToolHandler = Callable[[str, str], str]
 
 #: strongest first
 MODES = ("json_schema", "json_object", "prompt")
+
+
+#: Tool-call syntax as it arrives when the proxy failed to parse it and handed the raw
+#: text back as content: DeepSeek's fullwidth-bar `<｜DSML｜invoke ...>` and
+#: `<｜tool▁calls▁begin｜>`, the ASCII `<|...|>` control-token family, and the
+#: `<tool_call>` form several open models use.
+_TOOL_CALL_SPAN = re.compile(r"<\s*/?\s*[｜|][^>]{0,300}?>|</?\s*tool_call\s*>", re.IGNORECASE)
+_TOOL_CALL_OPENERS = ("<｜", "<|", "<tool_call>")
+#: Share of a response that must be markup before it is called a failed call rather than
+#: prose that merely mentions the syntax. A report *about* tool calling quotes the token
+#: once in thousands of characters; a response that *is* an unparsed tool call is mostly
+#: tags.
+_TOOL_CALL_MARKUP_SHARE = 0.3
+
+
+def _unparsed_tool_call(content: str) -> bool:
+    """Is this "prose" actually a tool call the proxy failed to parse?"""
+    text = content.strip()
+    spans = _TOOL_CALL_SPAN.findall(text)
+    if not spans:
+        return False
+    # Nothing legitimate opens with the token; past that, go by how much of the
+    # response is markup, so quoting the syntax in a report stays safe.
+    if text.lower().startswith(_TOOL_CALL_OPENERS):
+        return True
+    return sum(len(s) for s in spans) >= len(text) * _TOOL_CALL_MARKUP_SHARE
 
 
 class ModelCallError(RuntimeError):
@@ -80,6 +106,12 @@ class LLMClient:
         self._identities: dict[str, str] = {}
         self._modes: dict[str, str] = {}
         self._tool_capable: dict[str, bool] = {}
+
+    @property
+    def budgets(self) -> Budgets:
+        """The budgets this client was built with, for callers that need to size their
+        own retry against the same config the client uses (e.g. `critique_once`)."""
+        return self._config.budgets
 
     # ------------------------------------------------------------------ identity
 
@@ -278,9 +310,24 @@ class LLMClient:
             # forgot to say so — small models in the roster do this intermittently.
             # It costs a caller its whole run if it escapes as "success", so it is
             # retried on the same budget as a transport error rather than returned.
-            if not (message.get("content") or "").strip() and not _tool_calls(message):
+            content = (message.get("content") or "").strip()
+            if not content and not _tool_calls(message):
                 last = ModelCallError(f"{alias}: empty completion")
                 log.warning("call to %s returned empty content (attempt %d)", alias, attempt + 1)
+                continue
+            # The same failure wearing prose's clothes: the model emitted its tool call
+            # as *text* and the proxy did not parse it, so `tool_calls` is empty and the
+            # "content" is markup. It reads as success, and one production run shipped a
+            # final answer that was nothing but a `<｜DSML｜tool_calls>` block. Fail it on
+            # the same budget — and if the retries do not shake it loose, the writer
+            # rotation in `graph._generate` moves to a different model.
+            if not _tool_calls(message) and _unparsed_tool_call(content):
+                last = ModelCallError(f"{alias}: emitted unparsed tool-call markup as content")
+                log.warning(
+                    "call to %s returned unparsed tool-call markup (attempt %d)",
+                    alias,
+                    attempt + 1,
+                )
                 continue
             return _Reply(
                 message=message,
@@ -355,6 +402,7 @@ class LLMClient:
         max_tokens: int = 16000,
         repair_retries: int | None = None,
         timeout: float | None = None,
+        validate: Callable[[T], None] | None = None,
     ) -> T:
         """A completion validated against a closed schema. Bounded repair, then raise.
 
@@ -362,6 +410,16 @@ class LLMClient:
         attempt in this call, repairs included — callers with their own, tighter
         per-call deadline (e.g. `web.refine.RefinementService`) want that deadline to
         apply to the repair attempt too, not just the first.
+
+        `validate` runs *after* the schema parses and rejects by raising `ValueError`.
+        It exists so that checks the schema cannot express — a critic's `claim_span`
+        having to be real text from the paragraph it cites — are repaired on this loop
+        rather than outside it. A caller that validates after `structured()` returns
+        has only one move left when it fails, which is to throw the whole response away
+        and ask a fresh model the identical question; that is a retry that cannot
+        converge, and it is what aborted two production runs. If the raised error
+        offers a `repair_hint()`, its text is handed to the model alongside the error,
+        so the second attempt knows what the first got wrong.
         """
         mode = mode or self.mode_for(alias)
         repair_retries = (
@@ -383,14 +441,23 @@ class LLMClient:
                 timeout=timeout,
             )
             try:
-                return schema.model_validate(_extract_json(completion.text))
+                parsed = schema.model_validate(_extract_json(completion.text))
+                if validate is not None:
+                    validate(parsed)
+                return parsed
             except (ValidationError, ValueError) as exc:
                 last_err = str(exc)[:800]
                 log.info("schema violation from %s (attempt %d): %s", alias, attempt + 1, last_err)
+                # Duck-typed rather than a shared base class: the validators that carry
+                # guidance live in `triage`, which is deliberately LLM-free and must not
+                # import this module to say so.
+                hint = getattr(exc, "repair_hint", None)
+                guidance = hint() if callable(hint) else ""
                 attempt_user = (
                     f"{user}\n\n{instruction}\n\n"
                     f"Your previous response was rejected by the schema validator:\n"
                     f"{last_err}\n"
+                    f"{guidance}\n"
                     f"Return corrected JSON only. No prose, no code fence."
                 )
         raise MalformedOutputError(f"{alias}: schema violation after repair: {last_err}")

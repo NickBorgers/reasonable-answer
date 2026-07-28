@@ -14,6 +14,8 @@ does neither: it pins the critic under test and gives every model the same input
 
 from __future__ import annotations
 
+import logging
+
 from pydantic import ValidationError
 
 from . import prompts, triage
@@ -21,6 +23,8 @@ from . import report as report_mod
 from .llm import LLMClient, MalformedOutputError, ModelCallError
 from .schemas import CritiqueOutput, LensResult
 from .taxonomy import Lens
+
+log = logging.getLogger(__name__)
 
 #: Matches the graph's historical budget. A critic that needs more than this on a
 #: report-sized artifact is not being truncated, it is looping.
@@ -61,6 +65,10 @@ def critique_once(
     rendered = report_mod.render_with_loci(report_text)
     structure = report_mod.parse(report_text)
 
+    def validate(output: CritiqueOutput) -> None:
+        for issue in output.issues:
+            triage.validate_issue(lens, issue, structure, require_verbatim_spans)
+
     try:
         output = client.structured(
             alias,
@@ -68,15 +76,19 @@ def critique_once(
             user=prompts.critic_user(lens, question, rendered, sources, current_date=current_date),
             schema=CritiqueOutput,
             max_tokens=CRITIC_MAX_TOKENS,
+            # Validated *inside* the call so a quoting slip is repaired against the
+            # paragraph it misquoted, rather than failing the lens and costing a whole
+            # critique attempt. The fail-closed contract is unchanged: once the repair
+            # budget is gone the violation still fails the lens below, and one bad field
+            # still fails the whole lens — nothing is silently dropped.
+            repair_retries=client.budgets.critic_repair_retries,
+            validate=validate,
         )
     except (ModelCallError, MalformedOutputError, ValidationError) as exc:
-        return base.model_copy(update={"failed": True, "failure_reason": str(exc)[:400]})
-
-    try:
-        for issue in output.issues:
-            triage.validate_issue(lens, issue, structure, require_verbatim_spans)
-    except triage.LensValidationError as exc:
-        # Fail-closed: one bad field fails the whole lens; nothing is silently dropped.
-        return base.model_copy(update={"failed": True, "failure_reason": str(exc)[:400]})
+        reason = str(exc)[:400]
+        log.warning(
+            "lens %s failed on %s (critic %s): %s", lens.value, artifact_hash[:12], alias, reason
+        )
+        return base.model_copy(update={"failed": True, "failure_reason": reason})
 
     return base.model_copy(update={"issues": output.issues})

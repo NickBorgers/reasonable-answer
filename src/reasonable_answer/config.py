@@ -70,6 +70,12 @@ class Budgets(BaseModel):
     stagnation_limit: int = Field(default=3, ge=1, le=100)
     cycle_period: int = Field(default=4, ge=1, le=100)
     repair_retries: int = Field(default=1, ge=0, le=10)
+    # A critic's rejections are mostly quoting slips — a `claim_span` retyped instead of
+    # copied — and they are correctable once the model is shown the paragraph it should
+    # have quoted. Given a wider budget than the generic `repair_retries` because the
+    # alternative is controller rule 2, which throws away every issue in the response
+    # and spends a whole `critique_attempts` slot to ask a fresh model the same thing.
+    critic_repair_retries: int = Field(default=2, ge=0, le=10)
     call_retries: int = Field(default=2, ge=0, le=10)
     # How many *distinct* writers a single draft may be asked of before the run dies.
     # Bounded by the pool: rotating past its end would re-ask the model that failed.
