@@ -84,9 +84,18 @@ Two categories change character:
 Only the evidence lens receives them. Logic and completeness cannot raise a citation category, so
 page text would widen what those lenses see without widening what they may report.
 
-**A failed fetch is never evidence of fabrication.** Sites block automated clients, paywall, and go
-offline; the critic is told the difference explicitly, because treating "could not read" as "does
-not exist" would manufacture `blocking` defects out of transient network conditions. Page text is
+**A definitive not-found is resolution; every other failed fetch is not (D38).** An HTTP 404 or 410
+(Gone) establishes that the cited URL does not exist — which is exactly what the table above calls
+`fabricated_citation` under verification. That case is settled **mechanically**, in the fetch path
+(`triage.mechanical_citation_issues`, raised from `graph._critique_one`), so the finding is a fact
+the pipeline reports rather than a judgement a critic model must elect to make; it clamps to its
+`blocking` floor like any other `fabricated_citation`.
+
+**Every other failed fetch is never evidence of fabrication.** Sites block automated clients (403),
+paywall, time out, go offline, or serve a body this cannot read — and treating that "could not
+read" as "does not exist" would manufacture `blocking` defects out of transient network conditions.
+The critic is told never to raise a defect on the basis of a failed fetch; only the definitive
+not-found above is escalated, and that escalation is the pipeline's, not the model's. Page text is
 truncated and the critic is told so, so a claim it cannot see is not read as a claim the page
 contradicts.
 
