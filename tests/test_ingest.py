@@ -13,6 +13,7 @@ import urllib.request
 import zipfile
 
 import pytest
+from fakes import minimal_pdf
 
 from reasonable_answer import fetch, ingest, report
 from reasonable_answer.ingest import IngestError
@@ -243,37 +244,12 @@ def test_a_missing_pypdf_names_the_extra(monkeypatch):
         ingest._pdf_to_markdown(b"%PDF-1.4")
 
 
-def _minimal_pdf(*lines: str) -> bytes:
-    """A hand-built single-page PDF, so the test needs no fixture binary."""
-    drawn = " 0 -20 Td ".join(f"({line}) Tj" for line in lines)
-    content = f"BT /F1 12 Tf 72 720 Td {drawn} ET".encode()
-    objs = [
-        b"<< /Type /Catalog /Pages 2 0 R >>",
-        b"<< /Type /Pages /Kids [3 0 R] /Count 1 >>",
-        b"<< /Type /Page /Parent 2 0 R /MediaBox [0 0 612 792] /Contents 4 0 R "
-        b"/Resources << /Font << /F1 5 0 R >> >> >>",
-        b"<< /Length %d >>\nstream\n" % len(content) + content + b"\nendstream",
-        b"<< /Type /Font /Subtype /Type1 /BaseFont /Helvetica >>",
-    ]
-    out = bytearray(b"%PDF-1.4\n")
-    offsets = []
-    for index, obj in enumerate(objs, 1):
-        offsets.append(len(out))
-        out += b"%d 0 obj\n" % index + obj + b"\nendobj\n"
-    xref = len(out)
-    out += b"xref\n0 %d\n0000000000 65535 f \n" % (len(objs) + 1)
-    for off in offsets:
-        out += b"%010d 00000 n \n" % off
-    out += b"trailer\n<< /Size %d /Root 1 0 R >>\nstartxref\n%d\n%%%%EOF\n" % (len(objs) + 1, xref)
-    return bytes(out)
-
-
 def test_pdf_text_is_extracted_and_warns_about_structure(tmp_path):
     """PDF carries no recoverable heading semantics, so the text arrives and the
     warning is the honest report of what was lost."""
     pytest.importorskip("pypdf")
     path = tmp_path / "report.pdf"
-    path.write_bytes(_minimal_pdf("Executive Summary", "Margin fell four points."))
+    path.write_bytes(minimal_pdf("Executive Summary", "Margin fell four points."))
     out = ingest.from_path(path, config=_config())
 
     assert out.format == "pdf"
@@ -352,7 +328,7 @@ def test_a_truncated_binary_seed_is_fatal(monkeypatch):
     produce plausible garbage, so this fails instead."""
     from fakes import http_stub
 
-    body = _minimal_pdf("Summary") + b"x" * 20_000
+    body = minimal_pdf("Summary") + b"x" * 20_000
     monkeypatch.setattr(
         urllib.request.OpenerDirector,
         "open",

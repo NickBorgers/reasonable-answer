@@ -147,6 +147,176 @@ def test_unreadable_content_type_is_reported_honestly(monkeypatch):
     assert "unreadable content type" in result.error
 
 
+# ------------------------------------------------------------------------- pdfs
+
+
+def _pdf_fetcher(**kwargs):
+    return SourceFetcher(read_pdfs=True, **kwargs)
+
+
+def test_a_cited_pdf_is_read_rather_than_refused(monkeypatch):
+    """The gap this closes: `_pdf_to_markdown` shipped with D24, and until now every
+    cited PDF still came back `unreadable content type (application/pdf)`."""
+    pytest.importorskip("pypdf")
+    from fakes import minimal_pdf
+
+    pdf = minimal_pdf("Findings", "Margin fell four points.")
+    monkeypatch.setattr(
+        urllib.request.OpenerDirector,
+        "open",
+        lambda self, *a, **k: _stub(pdf, ctype="application/pdf"),
+    )
+    result = _pdf_fetcher().fetch("https://example.org/paper.pdf")
+
+    assert result.ok
+    assert "Margin fell four points." in result.text
+
+
+def test_pdf_reading_stays_off_unless_asked(monkeypatch):
+    from reasonable_answer.fetch import SourceOutcome
+
+    monkeypatch.setattr(
+        urllib.request.OpenerDirector,
+        "open",
+        lambda self, *a, **k: _stub(b"%PDF-1.4", ctype="application/pdf"),
+    )
+    result = SourceFetcher().fetch("https://example.org/paper.pdf")
+
+    assert not result.ok
+    assert result.outcome is SourceOutcome.UNREADABLE
+    assert "unreadable content type" in result.error
+
+
+def test_a_truncated_pdf_is_refused_not_parsed(monkeypatch):
+    """A truncated PDF is a mangled file, not a shorter document. Handing one to pypdf
+    yields either an exception or nonsense presented to a critic as the source's text —
+    the same rule `ingest.from_url` applies to a truncated seed."""
+    from reasonable_answer.fetch import SourceOutcome
+
+    parsed = []
+    monkeypatch.setattr(
+        urllib.request.OpenerDirector,
+        "open",
+        lambda self, *a, **k: _stub(b"%PDF-1.4" + b"x" * 5_000, ctype="application/pdf"),
+    )
+    monkeypatch.setattr(
+        "reasonable_answer.textconv.pdf_to_markdown",
+        lambda *a, **k: parsed.append(1) or "should never be reached",
+    )
+    result = _pdf_fetcher(pdf_max_bytes=1_000).fetch("https://example.org/paper.pdf")
+
+    assert not parsed, "the parser must never see a body that hit the cap"
+    assert result.outcome is SourceOutcome.UNREADABLE
+    assert "cap" in result.error
+
+
+def test_a_scanned_pdf_says_so_rather_than_looking_empty(monkeypatch):
+    """No text layer is a permanent property of that URL, unlike an EMPTY page which
+    may just be a rendering problem. The critic is owed the difference."""
+    from reasonable_answer.fetch import SourceOutcome
+
+    monkeypatch.setattr(
+        urllib.request.OpenerDirector,
+        "open",
+        lambda self, *a, **k: _stub(b"%PDF-1.4 fake", ctype="application/pdf"),
+    )
+    monkeypatch.setattr("reasonable_answer.textconv.pdf_to_markdown", lambda *a, **k: "   ")
+    result = _pdf_fetcher().fetch("https://example.org/scan.pdf")
+
+    assert result.outcome is SourceOutcome.UNREADABLE
+    assert "no text layer" in result.error
+
+
+def test_a_pdf_served_as_octet_stream_is_still_read(monkeypatch):
+    """Repositories routinely mislabel PDFs, and the magic bytes are unavailable here
+    because the first request deliberately reads no body."""
+    monkeypatch.setattr(
+        urllib.request.OpenerDirector,
+        "open",
+        lambda self, *a, **k: _stub(b"%PDF-1.4 fake", ctype="application/octet-stream"),
+    )
+    monkeypatch.setattr(
+        "reasonable_answer.textconv.pdf_to_markdown", lambda *a, **k: "Real prose."
+    )
+    result = _pdf_fetcher().fetch("https://repo.example/files/paper.pdf?download=1")
+
+    assert result.ok and result.text == "Real prose."
+
+
+@pytest.mark.parametrize(
+    ("ctype", "body", "expected_caps"),
+    [
+        ("text/html", "<html><body><p>hi</p></body></html>", [400_000]),
+        # Two requests for a PDF: the first reads no body (`want_body` declines the
+        # content type), the second downloads under the larger cap.
+        ("application/pdf", b"%PDF-1.4 fake", [400_000, 25_000_000]),
+    ],
+)
+def test_the_larger_pdf_cap_applies_only_to_pdfs(monkeypatch, ctype, body, expected_caps):
+    """400 KB exists so one enormous *page* cannot exhaust a run. Reading PDFs must not
+    buy that back for HTML."""
+    from reasonable_answer import fetch as fetch_mod
+
+    caps = []
+    real_http_get = fetch_mod.http_get
+
+    def recording(url, *, max_bytes, **kwargs):
+        caps.append(max_bytes)
+        return real_http_get(url, max_bytes=max_bytes, **kwargs)
+
+    monkeypatch.setattr(
+        urllib.request.OpenerDirector, "open", lambda self, *a, **k: _stub(body, ctype=ctype)
+    )
+    monkeypatch.setattr("reasonable_answer.textconv.pdf_to_markdown", lambda *a, **k: "prose")
+    monkeypatch.setattr(fetch_mod, "http_get", recording)
+
+    _pdf_fetcher(max_bytes=400_000, pdf_max_bytes=25_000_000).fetch("https://example.org/a.pdf")
+
+    assert caps == expected_caps
+
+
+def test_pdf_reading_without_pypdf_refuses_to_start(monkeypatch, tmp_path, config):
+    """Fail closed at load, like a missing search credential.
+
+    Discovering the missing dependency at the first cited PDF costs a run's worth of
+    tokens to find out, and arrives disguised as a per-source `unreadable` that reads
+    like the site's fault rather than ours.
+    """
+    import builtins
+
+    from reasonable_answer.config import ConfigError
+    from reasonable_answer.graph import _pdf_reading_enabled
+
+    config = config.model_copy(
+        update={"sources": config.sources.model_copy(update={"enabled": True})}
+    )
+    config.sources.pdf = config.sources.pdf.model_copy(update={"enabled": True})
+
+    real_import = builtins.__import__
+
+    def no_pypdf(name, *args, **kwargs):
+        if name == "pypdf":
+            raise ImportError("no module named pypdf")
+        return real_import(name, *args, **kwargs)
+
+    monkeypatch.setattr(builtins, "__import__", no_pypdf)
+    with pytest.raises(ConfigError, match="ingest"):
+        _pdf_reading_enabled(config)
+
+
+def test_both_switches_are_required_to_read_pdfs(config):
+    """One tier being on must never turn another on — the reason for two switches."""
+    from reasonable_answer.graph import _pdf_reading_enabled
+
+    only_tier = config.model_copy(
+        update={"sources": config.sources.model_copy(update={"enabled": False})}
+    )
+    only_tier.sources.pdf = only_tier.sources.pdf.model_copy(update={"enabled": True})
+
+    assert _pdf_reading_enabled(config) is False
+    assert _pdf_reading_enabled(only_tier) is False
+
+
 def test_non_http_scheme_is_refused():
     result = SourceFetcher().fetch("file:///etc/passwd")
     assert not result.ok

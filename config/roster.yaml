@@ -92,6 +92,24 @@ search:
   fetch_max_bytes: 400000
   fetch_max_chars: 6000
 
+# Tiers tried when a plain fetch does not yield the cited document. All off; none of
+# this does anything unless search.verify_sources above is on, because nothing fetches.
+#
+# sources:
+#   enabled: false
+#   # Read a cited PDF instead of reporting it as an unreadable content type. Until
+#   # this existed every cited PDF failed — which is most of the good academic
+#   # citations. It reaches no new host: it re-fetches the URL the report already
+#   # cited, under its own byte cap, because the 400 KB above exists to stop one
+#   # enormous *page* exhausting a run and a real paper routinely clears 10 MB.
+#   #
+#   # Needs the optional `ingest` extra for pypdf. Enabling it without pypdf installed
+#   # is fatal at startup, not at the first citation twenty minutes into a run.
+#   pdf:
+#     enabled: false
+#     max_bytes: 25000000
+#     max_pages: 40
+
 # Writer dispute channel (D25, docs/decisions.md). Lets a writer challenge a fix-task
 # it believes is factually wrong instead of falsifying the report to satisfy it —
 # the failure mode of run-75eb136b9bfb, where critics with stale knowledge demanded

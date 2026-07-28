@@ -164,6 +164,50 @@ class SearchConfig(BaseModel):
     fetch_max_chars: int = Field(default=6_000, ge=500, le=100_000)
 
 
+class PdfSourceConfig(BaseModel):
+    """Reading a cited PDF, as opposed to reporting it as an unreadable content type.
+
+    A PDF is one of the commonest shapes an academic citation takes, and until this
+    existed every one of them failed — `fetch` refused the content type outright even
+    though the converter had been in the tree since D24. No new host is involved: this
+    re-fetches the URL the report already cited.
+    """
+
+    model_config = ConfigDict(extra="forbid")
+
+    #: Off by default like every other retrieval affordance, and additionally because it
+    #: needs the optional `ingest` extra. Enabling it without `pypdf` installed is fatal
+    #: at config load, not at the first citation twenty minutes into a run.
+    enabled: bool = False
+    #: Deliberately far above `SearchConfig.fetch_max_bytes` (400 KB) and above
+    #: `SeedConfig`'s 4 MB. A truncated PDF is not a shorter document, it is a mangled
+    #: file that the parser must refuse — so the cap is a hard refusal threshold, and a
+    #: scanned or figure-heavy paper routinely clears 10 MB. Peak memory is bounded by
+    #: critic concurrency rather than by source count: fetches are sequential per
+    #: critic, and only the extracted text is retained.
+    max_bytes: int = Field(default=25_000_000, ge=100_000, le=100_000_000)
+    #: Pages read before the rest is dropped. A thousand-page appendix would otherwise
+    #: spend real time producing text that `fetch_max_chars` throws away anyway.
+    max_pages: int = Field(default=40, ge=1, le=2_000)
+
+
+class SourcesConfig(BaseModel):
+    """Tiers tried when a plain fetch does not yield the cited document.
+
+    Two switches per tier — this master one and the tier's own — is deliberate. An
+    operator turning the resolver on for one tier must not silently acquire another
+    from a roster they inherited, which matters most for the tiers that cost money.
+
+    Independent of `search.verify_sources` only in the sense that it does nothing
+    without it: no tier runs if nothing fetches in the first place.
+    """
+
+    model_config = ConfigDict(extra="forbid")
+
+    enabled: bool = False
+    pdf: PdfSourceConfig = Field(default_factory=PdfSourceConfig)
+
+
 class SeedConfig(BaseModel):
     """Bounds on ingesting a seed report the user supplied.
 
@@ -457,6 +501,7 @@ class Config(BaseModel):
     roster: Roster
     budgets: Budgets = Field(default_factory=Budgets)
     search: SearchConfig = Field(default_factory=SearchConfig)
+    sources: SourcesConfig = Field(default_factory=SourcesConfig)
     audition: AuditionConfig = Field(default_factory=AuditionConfig)
     seed: SeedConfig = Field(default_factory=SeedConfig)
     disputes: DisputeConfig = Field(default_factory=DisputeConfig)

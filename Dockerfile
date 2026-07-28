@@ -18,14 +18,19 @@ WORKDIR /app
 
 # Dependency layer first: it changes far less often than the source, so edits to
 # src/ don't re-resolve the whole tree.
+#
+# `ingest` is here despite pyproject's note about keeping the image lean. It buys
+# pypdf, which two paths need: a PDF seed, and — since sources.pdf — a cited PDF. A
+# PDF is one of the commonest shapes an academic citation takes, and verification
+# that cannot read one has a hole in it exactly where the good sources are.
 COPY pyproject.toml uv.lock README.md ./
 RUN --mount=type=cache,target=/root/.cache/uv \
-    uv sync --frozen --no-install-project --extra web
+    uv sync --frozen --no-install-project --extra web --extra ingest
 
 COPY src/ ./src/
 COPY config/ ./config/
 RUN --mount=type=cache,target=/root/.cache/uv \
-    uv sync --frozen --extra web
+    uv sync --frozen --extra web --extra ingest
 
 
 FROM python:3.12-slim AS runtime

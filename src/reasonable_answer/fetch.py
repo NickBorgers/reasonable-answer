@@ -39,6 +39,8 @@ from dataclasses import dataclass
 from enum import Enum
 from html.parser import HTMLParser
 
+from . import textconv
+
 log = logging.getLogger(__name__)
 
 #: A plain, honest UA. Some sites 403 an unknown client, and pretending to be a
@@ -53,7 +55,6 @@ NOT_FOUND_STATUSES = frozenset({404, 410})
 
 _SOURCES_HEADING = re.compile(r"^#{1,6}\s*sources\s*$", re.IGNORECASE | re.MULTILINE)
 _URL = re.compile(r"https?://[^\s<>\"'\)\]]+")
-_SKIP_TAGS = {"script", "style", "noscript", "svg", "head"}
 
 
 @dataclass(frozen=True)
@@ -217,13 +218,13 @@ class _TextExtractor(HTMLParser):
         self._in_title = False
 
     def handle_starttag(self, tag, attrs):
-        if tag in _SKIP_TAGS:
+        if tag in textconv.SKIP_TAGS:
             self._skip += 1
         elif tag == "title":
             self._in_title = True
 
     def handle_endtag(self, tag):
-        if tag in _SKIP_TAGS:
+        if tag in textconv.SKIP_TAGS:
             self._skip = max(0, self._skip - 1)
         elif tag == "title":
             self._in_title = False
@@ -259,11 +260,17 @@ class SourceFetcher:
         max_bytes: int = 400_000,
         max_chars: int = 6_000,
         max_redirects: int = 3,
+        read_pdfs: bool = False,
+        pdf_max_bytes: int = 25_000_000,
+        pdf_max_pages: int = 40,
     ) -> None:
         self._timeout = timeout
         self._max_bytes = max_bytes
         self._max_chars = max_chars
         self._max_redirects = max_redirects
+        self._read_pdfs = read_pdfs
+        self._pdf_max_bytes = pdf_max_bytes
+        self._pdf_max_pages = pdf_max_pages
         self._cache: dict[str, FetchedSource] = {}
         self._lock = threading.Lock()
 
@@ -293,8 +300,10 @@ class SourceFetcher:
                 timeout=self._timeout,
                 max_bytes=self._max_bytes,
                 max_redirects=self._max_redirects,
-                accept="text/html,text/plain;q=0.9",
-                # Don't spend the byte budget on a body this can't read anyway.
+                accept=self._accept(),
+                # Don't spend the byte budget on a body this can't read anyway — and
+                # not on a PDF either, whose own cap is sixty times larger and is
+                # applied on the second request below.
                 want_body=lambda ct: "html" in ct or "text" in ct,
             )
         except urllib.error.HTTPError as exc:
@@ -313,8 +322,10 @@ class SourceFetcher:
 
         status = resp.status
         if "html" not in resp.content_type and "text" not in resp.content_type:
-            # A PDF is a legitimate citation but not something this can read. Saying so
-            # is more useful than pretending the page was empty.
+            if self._read_pdfs and _looks_like_pdf(url, resp.content_type):
+                return self._fetch_pdf(url)
+            # Anything else is a legitimate citation this cannot read. Saying so is
+            # more useful than pretending the page was empty.
             return FetchedSource(
                 url=url,
                 status=status,
@@ -353,6 +364,93 @@ class SourceFetcher:
             status=status,
             outcome=SourceOutcome.FULL_TEXT,
         )
+
+    def _accept(self) -> str:
+        base = "text/html,text/plain;q=0.9"
+        return f"{base},application/pdf;q=0.8" if self._read_pdfs else base
+
+    def _fetch_pdf(self, url: str) -> FetchedSource:
+        """Re-fetch the same URL under the PDF byte cap and convert it.
+
+        A second request rather than one large first request: the citation cap is
+        400 KB precisely so an enormous *page* cannot exhaust a run, and raising it for
+        everything to accommodate PDFs would give that up. The first request read no
+        body at all (`want_body` declined the content type), so what is repeated is the
+        round trip, not the download.
+        """
+        try:
+            resp = http_get(
+                url,
+                timeout=self._timeout,
+                max_bytes=self._pdf_max_bytes,
+                max_redirects=self._max_redirects,
+                accept="application/pdf",
+            )
+        except urllib.error.HTTPError as exc:
+            return FetchedSource(
+                url=url,
+                status=exc.code,
+                error=f"HTTP {exc.code}",
+                outcome=classify_status(exc.code),
+            )
+        except Exception as exc:
+            return FetchedSource(
+                url=url,
+                error=f"{type(exc).__name__}: {exc}"[:200],
+                outcome=SourceOutcome.ERROR,
+            )
+
+        if resp.truncated:
+            # A truncated PDF is a mangled file, not a shorter document, and pypdf
+            # given one either raises or emits nonsense. Refusing is the honest
+            # outcome; the same rule governs a truncated seed (ingest.from_url).
+            return FetchedSource(
+                url=url,
+                status=resp.status,
+                error=f"PDF exceeds the {self._pdf_max_bytes}-byte cap and cannot be parsed",
+                outcome=SourceOutcome.UNREADABLE,
+            )
+
+        try:
+            markdown = textconv.pdf_to_markdown(resp.body, max_pages=self._pdf_max_pages)
+        except textconv.ConversionError as exc:
+            return FetchedSource(
+                url=url,
+                status=resp.status,
+                error=str(exc)[:200],
+                outcome=SourceOutcome.UNREADABLE,
+            )
+
+        text = " ".join(markdown.split())[: self._max_chars]
+        if not text.strip():
+            # Overwhelmingly a scanned paper with no text layer. Distinguish it from an
+            # empty HTML page: nothing about this URL will ever get better, whereas an
+            # EMPTY page might be a rendering problem.
+            return FetchedSource(
+                url=url,
+                status=resp.status,
+                error="the PDF carries no text layer (a scan, most likely)",
+                outcome=SourceOutcome.UNREADABLE,
+            )
+        return FetchedSource(
+            url=url,
+            text=text,
+            status=resp.status,
+            outcome=SourceOutcome.FULL_TEXT,
+        )
+
+
+def _looks_like_pdf(url: str, content_type: str) -> bool:
+    """Content type first, then the path.
+
+    The path check is not redundant: repositories routinely serve a PDF as
+    `application/octet-stream`, and the magic bytes are unavailable here because the
+    body was deliberately not read.
+    """
+    if "pdf" in content_type:
+        return True
+    path = url.split("?", 1)[0].split("#", 1)[0]
+    return path.lower().endswith(".pdf")
 
 
 def http_get(

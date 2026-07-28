@@ -157,11 +157,15 @@ def build_runtime(
         log.info("structured-output mode for %s (%s): %s", alias, identities[alias], mode)
 
     searcher = _build_searcher(config, client)
+    read_pdfs = _pdf_reading_enabled(config)
     fetcher = (
         fetch.SourceFetcher(
             timeout=config.search.fetch_timeout_seconds,
             max_bytes=config.search.fetch_max_bytes,
             max_chars=config.search.fetch_max_chars,
+            read_pdfs=read_pdfs,
+            pdf_max_bytes=config.sources.pdf.max_bytes,
+            pdf_max_pages=config.sources.pdf.max_pages,
         )
         if config.search.verify_sources
         else None
@@ -178,12 +182,33 @@ def build_runtime(
         search_enabled=searcher is not None,
         search_query_budget=config.search.query_budget if searcher else 0,
         verify_sources=fetcher is not None,
+        read_pdfs=read_pdfs,
         audition_enforced=config.audition.enforce,
     )
     for warning in warnings:
         log.warning("roster: %s", warning)
     return Runtime(config=config, client=client, identities=identities, store=store,
                    warnings=warnings, searcher=searcher, fetcher=fetcher)
+
+
+def _pdf_reading_enabled(config: Config) -> bool:
+    """Both switches on, and `pypdf` actually importable. Fatal if not.
+
+    Checked here rather than at the first cited PDF, for the same reason
+    `_build_searcher` checks a credential at startup: a dependency failure that
+    surfaces mid-run costs a run's worth of tokens to discover, and arrives disguised
+    as a per-source `unreadable` that looks like the site's fault rather than ours.
+    """
+    if not (config.sources.enabled and config.sources.pdf.enabled):
+        return False
+    try:
+        import pypdf  # noqa: F401
+    except ImportError as exc:
+        raise ConfigError(
+            "sources.pdf.enabled is on but pypdf is not installed. Install the extra "
+            "(uv sync --extra ingest) or set sources.pdf.enabled: false."
+        ) from exc
+    return True
 
 
 def _build_searcher(config: Config, client: LLMClient) -> search.BraveSearch | None:
