@@ -61,6 +61,12 @@
             "type": "string",
             "enum": ["reviewer", "inline_comment"],
             "description": "How this blocker was discovered. `inline_comment` means the reviewer ingested a human's inline PR comment."
+          },
+          "confidence": {
+            "type": "number",
+            "minimum": 0,
+            "maximum": 1,
+            "description": "Optional. The fourth instance of the class `id`, `decision_ref`, `severity` and `source` were admitted to close, and the one most certain to recur: `confidence` is *required* on every fix_suggestions[] entry, and every reviewer prompt states the 0.7 confidence ladder that decides blocking vs note. A reviewer reasoning in those terms, with the field already in its output contract one array over, attaches it to the finding itself. Admitted on both arrays rather than forbidden, because the number is real signal a reader wants and rejecting the artifact loses every other finding with it."
           }
         }
       }
@@ -86,7 +92,7 @@
           },
           "category": {
             "type": ["string", "null"],
-            "description": "Same meaning as on a blocking issue. Third instance of the same class after `id` and `decision_ref`: blocking_issues and non_blocking_notes describe the same findings at different confidence, so every descriptive field on a blocker eventually shows up on a note, and each one killed a reviewer via `additionalProperties` before being admitted here. `severity` and `source` are admitted below pre-emptively to close the class instead of losing one more reviewer per field."
+            "description": "Same meaning as on a blocking issue. Third instance of the same class after `id` and `decision_ref`: blocking_issues and non_blocking_notes describe the same findings at different confidence, so every descriptive field on a blocker eventually shows up on a note, and each one killed a reviewer via `additionalProperties` before being admitted here. `severity` and `source` are admitted below pre-emptively to close the class instead of losing one more reviewer per field. That pre-emption missed `confidence`, which then killed the `test` reviewer twice on PR #75 — the lesson being that \"admit the fields a blocker has\" was the wrong frame: the leak-prone set is every field named anywhere in a reviewer's output contract or prompt, and `confidence` was required on `fix_suggestions[]` and cited in all four prompts' confidence ladders."
           },
           "severity": {
             "type": ["string", "null"],
@@ -95,6 +101,12 @@
           "source": {
             "type": ["string", "null"],
             "description": "Same meaning as on a blocking issue; loose-typed for the same reason as `severity` above."
+          },
+          "confidence": {
+            "type": ["number", "null"],
+            "minimum": 0,
+            "maximum": 1,
+            "description": "Same meaning as on a blocking issue — see there for why this field was the next one certain to leak. This is the array it actually killed reviewers on (PR #75, twice), because the 0.7 ladder sends a low-confidence finding here, so this is exactly where a reviewer has a number in hand and somewhere to put it. Nullable for the same reason as `severity` above."
           }
         }
       }
