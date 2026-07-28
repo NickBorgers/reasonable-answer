@@ -1,3 +1,7 @@
+<p align="center">
+  <img src="docs/assets/logo.png" alt="reasonable-answer" width="140">
+</p>
+
 # reasonable-answer
 
 [![PR Validation](https://github.com/NickBorgers/reasonable-answer/actions/workflows/pr-validation.yml/badge.svg)](https://github.com/NickBorgers/reasonable-answer/actions/workflows/pr-validation.yml)
@@ -113,11 +117,11 @@ Runs are live data, so offline you get the offline page rather than a stale run 
 page is never stored on the device at all. See [D27](docs/decisions.md) for why that is a
 structural property rather than a rule someone has to remember.
 
-The icons are placeholders. To use your own, replace the PNGs in
+The icons are the project logo. To use your own, replace the PNGs in
 `src/reasonable_answer/web/static/icons/` keeping the same filenames and pixel sizes, and restart
 — no Python to touch, and nothing to clear on already-installed devices. See
 [the README in that directory](src/reasonable_answer/web/static/icons/README.md) for what each
-file has to be, and `scripts/make-icons.py` if you want to regenerate the placeholders.
+file has to be, and `scripts/make-icons.py` if you want the old flat-green placeholder set back.
 
 ## Sharing a result
 
