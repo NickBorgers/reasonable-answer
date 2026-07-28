@@ -1,8 +1,8 @@
 # Icons
 
 The PNGs here are the project logo — a speech-bubble-and-checklist mark on a navy plate.
-`scripts/make-icons.py` draws a different, flat-green placeholder set; run it only if you
-want to go back to that mark.
+`scripts/make-icons.py` draws a simpler placeholder set — a plain check on the accent-blue
+plate — run it only if you want that generated mark instead.
 
 ## Using your own
 
