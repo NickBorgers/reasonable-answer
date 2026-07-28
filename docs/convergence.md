@@ -51,8 +51,10 @@ well-formed/resolvable in format.
 (D22).** The two postures differ in what a citation *is*:
 
 * **`search.enabled: false` (default)** — no external retrieval, exactly as D5 specifies. A diverse
-  roster can still share a factual blind spot, and a citation is whatever the writer recalled.
-  Output is labeled *consensus-reviewed with in-artifact sourcing*, not fact-checked.
+  roster can still share a factual blind spot — error correlation survives differences in training
+  data, architecture, and provider ([Kim et al. 2025](https://arxiv.org/abs/2506.07962)) — and a
+  citation is whatever the writer recalled. Output is labeled *consensus-reviewed with in-artifact
+  sourcing*, not fact-checked.
 * **`search.enabled: true`** — writers hold a `web_search` tool and may cite only URLs a search
   actually returned, so a citation is a real, retrieved page. Output is labeled *consensus-reviewed
   with retrieved sourcing*, still not fact-checked. Startup fails closed if a writer cannot emit
@@ -60,7 +62,12 @@ well-formed/resolvable in format.
   memory — and no downstream check distinguishes that from a retrieved citation.
 
 **Retrieval alone does not make the report fact-checked.** It constrains where citations come from;
-it does not establish that a cited page *supports the specific claim attached to it*.
+it does not establish that a cited page *supports the specific claim attached to it* — the
+attributable-to-identified-sources distinction ([Rashkin et al. 2021](https://arxiv.org/abs/2112.12870)),
+and the gap the labeling here is careful not to paper over. The empirical case for that caution:
+a preregistered study of commercial legal-research tools built on retrieval still measured
+hallucination rates of 17–33%, against vendor claims of being hallucination-free
+([Magesh et al. 2024](https://arxiv.org/abs/2405.20362)).
 
 **Source verification (D18), also opt-in and off by default — including in the shipped roster,
 which enables retrieval only (D22): verification fetches model-chosen URLs, and the egress
