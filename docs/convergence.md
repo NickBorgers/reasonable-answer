@@ -95,8 +95,12 @@ the pipeline reports rather than a judgement a critic model must elect to make; 
 paywall, time out, go offline, or serve a body this cannot read — and treating that "could not
 read" as "does not exist" would manufacture `blocking` defects out of transient network conditions.
 The critic is told never to raise a defect on the basis of a failed fetch; only the definitive
-not-found above is escalated, and that escalation is the pipeline's, not the model's. Page text is
-truncated and the critic is told so, so a claim it cannot see is not read as a claim the page
+not-found above is escalated, and that escalation is the pipeline's, not the model's. Each class is
+now surfaced under its own `SourceOutcome` label (`BLOCKED`, `COULD NOT READ`, …) rather than one
+flat "could not fetch", and an opt-in tier (`sources.enabled` **and** `sources.pdf.enabled`, both off
+by default, fatal at startup without `pypdf`) **reads** a cited PDF rather than reporting it as an
+unreadable content type — so "a body this cannot read" narrows to formats no converter handles. Page
+text is truncated and the critic is told so, so a claim it cannot see is not read as a claim the page
 contradicts.
 
 **Every prompt carries the run's date (D22).** A date-plausibility judgement ("this citation is
