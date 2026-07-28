@@ -311,9 +311,13 @@ queries/month; when it runs out the writer is told so explicitly rather than bei
 **Source verification (optional, off by default).** Set `search.verify_sources: true` and the pages
 the report cites are fetched and handed to the **evidence lens only**, as untrusted data. That turns
 `fabricated_citation` and `misrepresented_source` from judgements about plausibility into checks
-against the page. A failed fetch is explicitly *not* treated as evidence of fabrication — sites
-block automated clients, paywall, and go offline. This fetches URLs a model chose, which is SSRF
-exposure by construction; it is expected to be constrained at the network layer, not here.
+against the page. A cited URL that returns a definitive not-found — HTTP 404 or 410 Gone — is
+treated as a `fabricated_citation`, because that status establishes the URL does not resolve rather
+than that it could not be read. Every other failed fetch is explicitly *not* treated as evidence of
+fabrication — a 403, a timeout, a paywall, an unreadable content type, or an empty body means the
+fetch failed, not that the source is fake, because sites block automated clients, paywall, and go
+offline. This fetches URLs a model chose, which is SSRF exposure by construction; it is expected to
+be constrained at the network layer, not here.
 
 **Known limitations.** Output is labelled *consensus-reviewed with in-artifact sourcing* by default,
 *…with retrieved sourcing* when `search.enabled: true`, and *…with verified sourcing* when
