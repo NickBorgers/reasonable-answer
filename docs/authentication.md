@@ -12,12 +12,12 @@ Two proxies are supported, checked in this order:
 | `Cf-Access-Authenticated-User-Email` | Cloudflare Access | invited users, over the internet |
 | `Tailscale-User-Login` | `tailscale serve` | the operator, over the tailnet |
 
-A request carrying neither is refused with `403` on every route but two: `/healthz`,
-which is exempt because the container healthcheck runs inside the container with nothing
-in front of it to attach a header; and `GET /runs/<id>/export.html`, the anonymous report
-share (D35, [below](#sharing-a-report-publicly)). `Tailscale-User-Name` sits beside the
-login header and is deliberately **not** read: it carries a display name, which is a
-different namespace from the address Access reports.
+A request carrying neither is refused with `403` on every route except `/healthz` — the
+container healthcheck runs inside the container with nothing in front of it to attach a
+header — and every `GET` under `/runs/`, which is the public read surface (D35,
+[below](#sharing-a-run-publicly)). `Tailscale-User-Name` sits beside the login header and
+is deliberately **not** read: it carries a display name, which is a different namespace
+from the address Access reports.
 
 **Installing the app needs the manifest fetch to carry your session.** The app shell —
 `manifest.webmanifest`, `sw.js`, `offline.html`, the icons — is gated like every other
@@ -91,9 +91,15 @@ it returns `200`, `auth.dev_identity` or `$RA_DEV_IDENTITY` is set — see below
 A run belongs to whoever submitted it, recorded in `runs/<run-id>/owner.txt`.
 
 - The index lists **only your own** runs.
-- **Anyone signed in** who has a run id can open that run, its report and its
-  `audit.json`. Sharing a link is the intended way to show someone a report.
+- **Anyone** who has a run id can open that run, its report and its `audit.json` —
+  signed in or not (D35). Sharing a link is the intended way to show someone a report.
+- **No public route names a person.** No byline on the run page, no `owner` in
+  `audit.json`: a shared link reaches strangers, and the owner's address is not evidence
+  about the run.
 - **Only the owner** can resume a run: reading costs nothing, resuming spends tokens.
+  Resuming has no button — the run page cannot tell an owner from a stranger — so the
+  page offers **Ask this again** instead, which starts a new run owned by whoever clicks
+  and needs an identity like any other write.
 - Runs with **no owner** are served to nobody — 404 on every route, absent from every
   index. That is every run created before this feature, and every `ra run` without
   `--owner`. They are untouched on disk and still reachable through the CLI, and boot
@@ -105,29 +111,49 @@ To attribute a CLI run so it shows up in the web interface:
 ra run -q "your question" --owner you@example.com
 ```
 
-## Sharing a report publicly
+## Sharing a run publicly
 
-`GET /runs/<id>/export.html` is the one route served to an **unauthenticated** caller
-(D35), so a finished report can be shared by URL to anyone, no sign-in. It is the ideal
-public artifact: the export is a single self-contained file (inline CSS, `default-src
-'none'`, nothing fetched), and the handler is a pure disk read of `final.md` — no worker,
-no graph, no LLM, no token cost. Every other route — the index, the interactive run page,
-`audit.json`, the `.md` exports, and every token-spending POST — stays gated. The
-exemption is `GET`-only and pinned to that exact path; an owner-less run still 404s, so
-this shares nothing that a signed-in caller could not already read by holding the id.
+**Every `GET` under `/runs/` answers an unauthenticated caller** (D35). Holding the run
+id is the credential — which is what ownership already said for signed-in callers, minus
+the sign-in. So the URL a reader is looking at is the URL they can send to someone.
 
-The app serves this off its own (identity-gated) root prefix like everything else; the
-deployment exposes it publicly at the edge — see the `host-config-as-code` repo, which
-maps `https://reasonable-answer.nickborgers.net/runs/<id>` to it off the Access-gated
-`/app` prefix. To surface a **Copy public link** button on the run page, tell the app that
-public edge base:
+| surface | routes | identity |
+|---|---|---|
+| reads of a run | `GET /runs/<id>`, `/report`, `/report.md`, `/export.md`, `/export.html`, `/audit.json`, `/progress`, `/stream` | **not required** |
+| writes | `POST /runs`, `/runs/<id>/again`, `/runs/<id>/resume`, `/refine` | required |
+| the index | `GET /` | required (it is a per-viewer list) |
+| the app shell | `manifest.webmanifest`, `sw.js`, `offline.html`, icons | required |
+| healthcheck | `GET /healthz` | not required |
+
+The rule is method-scoped: a `POST` to a public read path is refused before it reaches
+routing. An owner-less run still 404s, so nothing that was unreadable becomes readable.
+
+### The two root paths
+
+For the shared URL to be the one in the address bar, the app has to emit reader-facing
+URLs at the base the edge leaves open, and gated URLs at the base the edge protects:
 
 ```bash
-RA_PUBLIC_SHARE_BASE=https://reasonable-answer.nickborgers.net/runs
+RA_ROOT_PATH=/app          # index, form actions, app shell — behind Cloudflare Access
+RA_PUBLIC_ROOT_PATH=/      # run pages and everything linked from them — open
 ```
 
-Unset (the default, and the whole tailnet/dev case, which has no public edge) the button
-is not rendered — core sharing does not depend on it; the link is just `<base>/<run-id>`.
+With this pair, submitting a question lands the browser on `https://<host>/runs/<id>`,
+which is directly shareable, while the header, the submit form and **Ask this again** all
+point back into `/app/`. The edge must route `/runs/` to the app **path-preserving** —
+no rewrite to a specific file — and apply Access to `/app/` only. See the
+`host-config-as-code` repo for that half.
+
+`RA_PUBLIC_ROOT_PATH` unset falls back to `RA_ROOT_PATH`, so a single-door deployment —
+dev, or the tailnet — emits exactly the URLs it did before.
+
+Two caveats for a strictly-scoped edge: the app shell is emitted from `RA_ROOT_PATH`, so
+a stranger's browser cannot fetch the favicon or the manifest from a public run page. The
+page renders fine — those fetches fail silently and the service-worker registration
+already swallows its own error — you just get a default tab icon. And `RA_MAX_LIVE_STREAMS`
+(default 32) caps how many progress streams may be open at once across everybody, since
+an anonymous route makes an open connection something a stranger can start; past the cap
+`/stream` answers `503` and the page still works on reload.
 
 ## Local development
 

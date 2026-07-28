@@ -180,6 +180,14 @@ still receives the stripped path, so the proxy is the ordinary
 it serves at the origin root exactly as before. The CSP is unchanged: this is purely
 path-prefixing, not a relaxation. See D29.
 
+**To let a finished run be shared with anyone**, add `RA_PUBLIC_ROOT_PATH=/` and route
+`/runs/` to the app path-preserving, without Access in front. Every `GET` under `/runs/` —
+the run page, the report, the exports, `audit.json`, the live stream — answers an
+unauthenticated caller, so the URL a reader is looking at is the one they can send to
+someone; every write stays behind the gate. Unset, it falls back to `RA_ROOT_PATH` and
+nothing changes. See [D35](./docs/decisions.md) and
+[authentication.md](./docs/authentication.md).
+
 ## Configuration
 
 Everything lives in [config/roster.yaml](./config/roster.yaml). The roster is **role-structured**:
