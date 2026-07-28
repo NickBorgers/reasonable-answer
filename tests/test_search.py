@@ -1,13 +1,16 @@
 """Web search: credential resolution, budget, result fencing, and fail-closed startup.
 
 Everything here is offline. The one place a real HTTP call would happen is stubbed at
-`urllib.request.urlopen`, so the suite keeps its "no network, no API keys" property.
+`urllib.request.OpenerDirector.open`, so the suite keeps its "no network, no API keys"
+property — and stubbing there rather than at `urlopen` keeps the real
+`_http_only_opener` and `_BoundedRedirects` on the path under test.
 """
 
 from __future__ import annotations
 
 import json
 import urllib.error
+import urllib.request
 from io import BytesIO
 
 import pytest
@@ -131,7 +134,7 @@ def test_search_parses_results_and_strips_markup(monkeypatch):
         }
     }
     monkeypatch.setattr(
-        "urllib.request.urlopen", lambda *a, **k: _stub_response(payload)
+        urllib.request.OpenerDirector, "open", lambda self, *a, **k: _stub_response(payload)
     )
     client = BraveSearch("tok", budget=QueryBudget(5), min_interval=0)
     results = client.search("cap theorem")
@@ -145,12 +148,12 @@ def test_search_parses_results_and_strips_markup(monkeypatch):
 def test_search_sends_the_token_as_a_header_not_a_query_param(monkeypatch):
     seen = {}
 
-    def capture(req, *a, **k):
+    def capture(self, req, *a, **k):
         seen["headers"] = dict(req.headers)
         seen["url"] = req.full_url
         return _stub_response({"web": {"results": []}})
 
-    monkeypatch.setattr("urllib.request.urlopen", capture)
+    monkeypatch.setattr(urllib.request.OpenerDirector, "open", capture)
     BraveSearch("secret-key", budget=QueryBudget(5), min_interval=0).search("q")
 
     # urllib title-cases header names.
@@ -158,11 +161,35 @@ def test_search_sends_the_token_as_a_header_not_a_query_param(monkeypatch):
     assert "secret-key" not in seen["url"], "the key must never land in a URL or a log"
 
 
+def test_the_credentialled_request_is_not_redirectable(monkeypatch):
+    """The token must not be replayable at a host nobody here chose.
+
+    CPython's `HTTPRedirectHandler.redirect_request` copies every header except
+    content-length/content-type onto the redirect target, cross-host — so a 302 out of
+    the Brave endpoint would carry `X-Subscription-Token` with it. The endpoint is a
+    constant, so the request has no business being redirectable at all.
+    """
+    seen = {}
+
+    def capture(self, req, *a, **k):
+        seen["handlers"] = {type(h).__name__ for h in self.handlers}
+        seen["caps"] = [h.max_redirections for h in self.handlers if hasattr(h, "max_redirections")]
+        return _stub_response({"web": {"results": []}})
+
+    monkeypatch.setattr(urllib.request.OpenerDirector, "open", capture)
+    BraveSearch("secret-key", budget=QueryBudget(5), min_interval=0).search("q")
+
+    # Not the default opener: that one ships FTP/File/Data handlers and follows ten
+    # redirects. This is the same hardened opener citation fetching uses.
+    assert not seen["handlers"] & {"FTPHandler", "FileHandler", "DataHandler"}
+    assert seen["caps"] == [0], "a credential-bearing request follows no redirects"
+
+
 def test_http_error_becomes_search_error(monkeypatch):
-    def boom(*a, **k):
+    def boom(self, *a, **k):
         raise urllib.error.HTTPError("u", 429, "Too Many Requests", {}, None)
 
-    monkeypatch.setattr("urllib.request.urlopen", boom)
+    monkeypatch.setattr(urllib.request.OpenerDirector, "open", boom)
     client = BraveSearch("tok", budget=QueryBudget(5), min_interval=0)
     with pytest.raises(SearchError, match="429"):
         client.search("q")
@@ -181,7 +208,9 @@ def test_untrusted_result_fields_are_length_capped(monkeypatch):
             ]
         }
     }
-    monkeypatch.setattr("urllib.request.urlopen", lambda *a, **k: _stub_response(payload))
+    monkeypatch.setattr(
+        urllib.request.OpenerDirector, "open", lambda self, *a, **k: _stub_response(payload)
+    )
     results = BraveSearch("tok", budget=QueryBudget(5), min_interval=0).search("q")
 
     # max_results bounds the count; without per-field caps one pathological result

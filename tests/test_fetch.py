@@ -223,6 +223,37 @@ def test_http_redirects_are_still_followed(target):
     assert result.full_url == target
 
 
+def test_a_zero_cap_refuses_the_very_first_redirect():
+    """A limit of zero must mean zero.
+
+    The stock handler consults `max_redirections` only once `redirect_dict` exists —
+    from the second hop onwards — so it would follow one redirect on a zero cap and
+    N+1 on a cap of N. Cosmetic for a cited page; load-bearing for `search.py`, whose
+    request carries an API key.
+    """
+    import urllib.error
+
+    from reasonable_answer.fetch import _BoundedRedirects
+
+    with pytest.raises(urllib.error.HTTPError, match="past the cap"):
+        _BoundedRedirects(0).redirect_request(
+            _FakeReq(), None, 302, "Found", {}, "https://example.org/ok"
+        )
+
+
+def test_the_cap_counts_hops_not_repeats():
+    """A cap of N permits exactly N hops, not N+1."""
+    import urllib.error
+
+    from reasonable_answer.fetch import _BoundedRedirects
+
+    handler = _BoundedRedirects(2)
+    req = _FakeReq()
+    req.redirect_dict = {"https://example.org/1": 1, "https://example.org/2": 1}
+    with pytest.raises(urllib.error.HTTPError, match="past the cap"):
+        handler.redirect_request(req, None, 302, "Found", {}, "https://example.org/3")
+
+
 def test_the_opener_has_no_handler_for_other_schemes():
     from reasonable_answer.fetch import _http_only_opener
 

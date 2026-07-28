@@ -320,6 +320,16 @@ class _BoundedRedirects(urllib.request.HTTPRedirectHandler):
         self.max_redirections = limit
 
     def redirect_request(self, req, fp, code, msg, headers, newurl):
+        # Count the hops ourselves. The stock handler consults `max_redirections` only
+        # once `redirect_dict` exists, which is to say from the *second* hop onwards —
+        # so a limit of N actually permits N+1, and a limit of 0 permits one. That
+        # off-by-one is cosmetic for a cited page and load-bearing for a request that
+        # carries a credential, where a single hop is enough to replay an API key at a
+        # host nobody here chose.
+        if len(getattr(req, "redirect_dict", None) or ()) >= self.max_redirections:
+            raise urllib.error.HTTPError(
+                newurl, code, f"refused redirect past the cap: {newurl}", headers, fp
+            )
         if not newurl.lower().startswith(("http://", "https://")):
             raise urllib.error.HTTPError(
                 newurl, code, f"refused redirect to non-http(s) URL: {newurl}", headers, fp
