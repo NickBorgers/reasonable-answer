@@ -137,7 +137,7 @@ services:
     tmpfs: ["/tmp:rw,noexec,nosuid,size=64m"]   # see the README's Docker section
     cap_drop: [ALL]
     security_opt: ["no-new-privileges:true"]
-    volumes: [ra-runs:/data/runs]           # the one writable path
+    volumes: [ra-runs:/data/runs]           # persistent writable storage; /tmp above is tmpfs scratch
     environment:
       HTTP_PROXY:  http://egress-proxy:3128
       HTTPS_PROXY: http://egress-proxy:3128
