@@ -324,8 +324,11 @@ treated as a `fabricated_citation`, because that status establishes the URL does
 than that it could not be read. Every other failed fetch is explicitly *not* treated as evidence of
 fabrication — a 403, a timeout, a paywall, an unreadable content type, or an empty body means the
 fetch failed, not that the source is fake, because sites block automated clients, paywall, and go
-offline. This fetches URLs a model chose, which is SSRF exposure by construction; it is expected to
-be constrained at the network layer, not here.
+offline. Reading a cited **PDF** rather than reporting it as an unreadable content type is a separate
+opt-in tier (`sources.enabled` and `sources.pdf.enabled`, both off by default and needing the
+`ingest` extra); `search.verify_sources` alone does not read PDF bodies. This fetches URLs a model
+chose, which is SSRF exposure by construction; it is expected to be constrained at the network layer,
+not here.
 
 **Known limitations.** Output is labelled *consensus-reviewed with in-artifact sourcing* by default,
 *…with retrieved sourcing* when `search.enabled: true`, and *…with verified sourcing* when

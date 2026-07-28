@@ -147,6 +147,176 @@ def test_unreadable_content_type_is_reported_honestly(monkeypatch):
     assert "unreadable content type" in result.error
 
 
+# ------------------------------------------------------------------------- pdfs
+
+
+def _pdf_fetcher(**kwargs):
+    return SourceFetcher(read_pdfs=True, **kwargs)
+
+
+def test_a_cited_pdf_is_read_rather_than_refused(monkeypatch):
+    """The gap this closes: `_pdf_to_markdown` shipped with D24, and until now every
+    cited PDF still came back `unreadable content type (application/pdf)`."""
+    pytest.importorskip("pypdf")
+    from fakes import minimal_pdf
+
+    pdf = minimal_pdf("Findings", "Margin fell four points.")
+    monkeypatch.setattr(
+        urllib.request.OpenerDirector,
+        "open",
+        lambda self, *a, **k: _stub(pdf, ctype="application/pdf"),
+    )
+    result = _pdf_fetcher().fetch("https://example.org/paper.pdf")
+
+    assert result.ok
+    assert "Margin fell four points." in result.text
+
+
+def test_pdf_reading_stays_off_unless_asked(monkeypatch):
+    from reasonable_answer.fetch import SourceOutcome
+
+    monkeypatch.setattr(
+        urllib.request.OpenerDirector,
+        "open",
+        lambda self, *a, **k: _stub(b"%PDF-1.4", ctype="application/pdf"),
+    )
+    result = SourceFetcher().fetch("https://example.org/paper.pdf")
+
+    assert not result.ok
+    assert result.outcome is SourceOutcome.UNREADABLE
+    assert "unreadable content type" in result.error
+
+
+def test_a_truncated_pdf_is_refused_not_parsed(monkeypatch):
+    """A truncated PDF is a mangled file, not a shorter document. Handing one to pypdf
+    yields either an exception or nonsense presented to a critic as the source's text —
+    the same rule `ingest.from_url` applies to a truncated seed."""
+    from reasonable_answer.fetch import SourceOutcome
+
+    parsed = []
+    monkeypatch.setattr(
+        urllib.request.OpenerDirector,
+        "open",
+        lambda self, *a, **k: _stub(b"%PDF-1.4" + b"x" * 5_000, ctype="application/pdf"),
+    )
+    monkeypatch.setattr(
+        "reasonable_answer.textconv.pdf_to_markdown",
+        lambda *a, **k: parsed.append(1) or "should never be reached",
+    )
+    result = _pdf_fetcher(pdf_max_bytes=1_000).fetch("https://example.org/paper.pdf")
+
+    assert not parsed, "the parser must never see a body that hit the cap"
+    assert result.outcome is SourceOutcome.UNREADABLE
+    assert "cap" in result.error
+
+
+def test_a_scanned_pdf_says_so_rather_than_looking_empty(monkeypatch):
+    """No text layer is a permanent property of that URL, unlike an EMPTY page which
+    may just be a rendering problem. The critic is owed the difference."""
+    from reasonable_answer.fetch import SourceOutcome
+
+    monkeypatch.setattr(
+        urllib.request.OpenerDirector,
+        "open",
+        lambda self, *a, **k: _stub(b"%PDF-1.4 fake", ctype="application/pdf"),
+    )
+    monkeypatch.setattr("reasonable_answer.textconv.pdf_to_markdown", lambda *a, **k: "   ")
+    result = _pdf_fetcher().fetch("https://example.org/scan.pdf")
+
+    assert result.outcome is SourceOutcome.UNREADABLE
+    assert "no text layer" in result.error
+
+
+def test_a_pdf_served_as_octet_stream_is_still_read(monkeypatch):
+    """Repositories routinely mislabel PDFs, and the magic bytes are unavailable here
+    because the first request deliberately reads no body."""
+    monkeypatch.setattr(
+        urllib.request.OpenerDirector,
+        "open",
+        lambda self, *a, **k: _stub(b"%PDF-1.4 fake", ctype="application/octet-stream"),
+    )
+    monkeypatch.setattr(
+        "reasonable_answer.textconv.pdf_to_markdown", lambda *a, **k: "Real prose."
+    )
+    result = _pdf_fetcher().fetch("https://repo.example/files/paper.pdf?download=1")
+
+    assert result.ok and result.text == "Real prose."
+
+
+@pytest.mark.parametrize(
+    ("ctype", "body", "expected_caps"),
+    [
+        ("text/html", "<html><body><p>hi</p></body></html>", [400_000]),
+        # Two requests for a PDF: the first reads no body (`want_body` declines the
+        # content type), the second downloads under the larger cap.
+        ("application/pdf", b"%PDF-1.4 fake", [400_000, 25_000_000]),
+    ],
+)
+def test_the_larger_pdf_cap_applies_only_to_pdfs(monkeypatch, ctype, body, expected_caps):
+    """400 KB exists so one enormous *page* cannot exhaust a run. Reading PDFs must not
+    buy that back for HTML."""
+    from reasonable_answer import fetch as fetch_mod
+
+    caps = []
+    real_http_get = fetch_mod.http_get
+
+    def recording(url, *, max_bytes, **kwargs):
+        caps.append(max_bytes)
+        return real_http_get(url, max_bytes=max_bytes, **kwargs)
+
+    monkeypatch.setattr(
+        urllib.request.OpenerDirector, "open", lambda self, *a, **k: _stub(body, ctype=ctype)
+    )
+    monkeypatch.setattr("reasonable_answer.textconv.pdf_to_markdown", lambda *a, **k: "prose")
+    monkeypatch.setattr(fetch_mod, "http_get", recording)
+
+    _pdf_fetcher(max_bytes=400_000, pdf_max_bytes=25_000_000).fetch("https://example.org/a.pdf")
+
+    assert caps == expected_caps
+
+
+def test_pdf_reading_without_pypdf_refuses_to_start(monkeypatch, tmp_path, config):
+    """Fail closed at load, like a missing search credential.
+
+    Discovering the missing dependency at the first cited PDF costs a run's worth of
+    tokens to find out, and arrives disguised as a per-source `unreadable` that reads
+    like the site's fault rather than ours.
+    """
+    import builtins
+
+    from reasonable_answer.config import ConfigError
+    from reasonable_answer.graph import _pdf_reading_enabled
+
+    config = config.model_copy(
+        update={"sources": config.sources.model_copy(update={"enabled": True})}
+    )
+    config.sources.pdf = config.sources.pdf.model_copy(update={"enabled": True})
+
+    real_import = builtins.__import__
+
+    def no_pypdf(name, *args, **kwargs):
+        if name == "pypdf":
+            raise ImportError("no module named pypdf")
+        return real_import(name, *args, **kwargs)
+
+    monkeypatch.setattr(builtins, "__import__", no_pypdf)
+    with pytest.raises(ConfigError, match="ingest"):
+        _pdf_reading_enabled(config)
+
+
+def test_both_switches_are_required_to_read_pdfs(config):
+    """One tier being on must never turn another on — the reason for two switches."""
+    from reasonable_answer.graph import _pdf_reading_enabled
+
+    only_tier = config.model_copy(
+        update={"sources": config.sources.model_copy(update={"enabled": False})}
+    )
+    only_tier.sources.pdf = only_tier.sources.pdf.model_copy(update={"enabled": True})
+
+    assert _pdf_reading_enabled(config) is False
+    assert _pdf_reading_enabled(only_tier) is False
+
+
 def test_non_http_scheme_is_refused():
     result = SourceFetcher().fetch("file:///etc/passwd")
     assert not result.ok
@@ -221,6 +391,37 @@ def test_http_redirects_are_still_followed(target):
         _FakeReq(), None, 302, "Found", {}, target
     )
     assert result.full_url == target
+
+
+def test_a_zero_cap_refuses_the_very_first_redirect():
+    """A limit of zero must mean zero.
+
+    The stock handler consults `max_redirections` only once `redirect_dict` exists —
+    from the second hop onwards — so it would follow one redirect on a zero cap and
+    N+1 on a cap of N. Cosmetic for a cited page; load-bearing for `search.py`, whose
+    request carries an API key.
+    """
+    import urllib.error
+
+    from reasonable_answer.fetch import _BoundedRedirects
+
+    with pytest.raises(urllib.error.HTTPError, match="past the cap"):
+        _BoundedRedirects(0).redirect_request(
+            _FakeReq(), None, 302, "Found", {}, "https://example.org/ok"
+        )
+
+
+def test_the_cap_counts_hops_not_repeats():
+    """A cap of N permits exactly N hops, not N+1."""
+    import urllib.error
+
+    from reasonable_answer.fetch import _BoundedRedirects
+
+    handler = _BoundedRedirects(2)
+    req = _FakeReq()
+    req.redirect_dict = {"https://example.org/1": 1, "https://example.org/2": 1}
+    with pytest.raises(urllib.error.HTTPError, match="past the cap"):
+        handler.redirect_request(req, None, 302, "Found", {}, "https://example.org/3")
 
 
 def test_the_opener_has_no_handler_for_other_schemes():
@@ -312,13 +513,76 @@ def test_fetched_pages_are_fenced_as_untrusted():
 
 def test_a_failed_fetch_is_not_presented_as_evidence_of_fabrication():
     block = prompts.fetched_sources_block(
-        [FetchedSource(url="https://example.org/a", error="HTTP 403")]
+        [FetchedSource(url="https://example.org/a", status=403, error="HTTP 403")]
     )
-    assert "COULD NOT FETCH: HTTP 403" in block
+    assert "BLOCKED" in block and "HTTP 403" in block
     # Sites block automated clients, paywall, and go down. Treating that as "the source
     # does not exist" would manufacture BLOCKING defects from transient conditions.
     assert "NOT that the source is fake" in block
-    assert "Never raise a defect on the basis of a failed fetch" in block
+    assert "says nothing at all about whether the source exists" in block
+
+
+def test_a_blocked_source_keeps_the_on_its_face_bar():
+    """403 is the shape most real paywalls take, and it is not evidence of anything.
+
+    A sharpened `fabricated_citation` reading is a checkable standard. Applying it to a
+    source nobody could check is how verification manufactures defects.
+    """
+    blocked = FetchedSource(url="https://example.org/a", status=403, error="HTTP 403")
+    prompt = prompts.critic_user(Lens.EVIDENCE, "q?", "report", [blocked])
+
+    assert "BLOCKED" in prompt
+    assert "cannot be what it claims on its face" in prompt, "the on-its-face bar stands"
+
+
+def test_a_not_found_source_is_not_offered_to_the_critic_to_raise_again():
+    """D38 mints that `fabricated_citation` mechanically in
+    `triage.mechanical_citation_issues`. Asking the critic for it as well would
+    double-report one defect, and both copies carry the blocking floor."""
+    missing = FetchedSource(url="https://example.org/a", status=404, error="HTTP 404")
+    prompt = prompts.critic_user(Lens.EVIDENCE, "q?", "report", [missing])
+
+    assert "NOT FOUND" in prompt
+    assert "ALREADY been recorded" in prompt
+    assert "Do not raise it again" in prompt
+    # The category definition itself stays the weaker on-its-face one: nothing about a
+    # 404 makes the *critic's* judgement of the other citations sharper.
+    assert "cannot be what it claims on its face" in prompt
+
+
+def test_unresolvable_tracks_the_outcome_not_the_status():
+    """One source of truth. `unresolvable` is what triage keys off, and a future
+    not-found established without an HTTP code must reach it too."""
+    from reasonable_answer.fetch import SourceOutcome
+
+    assert FetchedSource(url="u", status=404, error="HTTP 404").unresolvable
+    assert not FetchedSource(url="u", status=403, error="HTTP 403").unresolvable
+    assert FetchedSource(
+        url="u", error="no registry has heard of it", outcome=SourceOutcome.NOT_FOUND
+    ).unresolvable
+
+
+def test_a_body_less_outcome_cannot_be_constructed_as_if_it_had_one():
+    """`ok` is what `dispute.adjudicate_mechanical` gates on, so it has to stay true
+    that a non-`FULL_TEXT` outcome never carries quotable text."""
+    from reasonable_answer.fetch import SourceOutcome
+
+    with pytest.raises(ValueError, match="cannot carry readable body text"):
+        FetchedSource(url="u", text="t", outcome=SourceOutcome.METADATA_ONLY)
+
+
+def test_an_error_without_a_named_outcome_never_claims_full_text():
+    from reasonable_answer.fetch import SourceOutcome
+
+    assert FetchedSource(url="u", error="boom").outcome is SourceOutcome.ERROR
+    assert (
+        FetchedSource(url="u", status=404, error="HTTP 404").outcome
+        is SourceOutcome.NOT_FOUND
+    )
+    assert (
+        FetchedSource(url="u", status=429, error="HTTP 429").outcome
+        is SourceOutcome.BLOCKED
+    )
 
 
 def test_truncation_is_disclosed_so_absence_is_not_read_as_contradiction():
@@ -439,12 +703,14 @@ def test_the_audit_trail_records_what_was_fetched(tmp_path, identities, config):
 
 
 def test_fetch_failure_reasons_are_redacted_to_their_class(tmp_path, identities, config):
-    """RA-016: a fetch failure enters the `fetch_sources` audit event as its reason
-    *class* only — a status code or an exception type — never the URL or page detail
-    that trails it. An untested redaction is an untested guarantee: a regression in the
-    `split(':')`/`split('(')` logic that leaked the tail would otherwise pass CI silently."""
+    """RA-016: a fetch failure enters the `fetch_sources` audit event as a member of the
+    closed `SourceOutcome` vocabulary, optionally suffixed with an HTTP status — never
+    the URL or page detail that trails `error`. The redaction is now structural rather
+    than a `split(':')` that could regress, but an untested guarantee is still an
+    untested guarantee."""
     import json
 
+    from reasonable_answer.fetch import SourceOutcome
     from reasonable_answer.graph import _critique_one, _failure_reasons
 
     secret = "https://secret.example/leaked/path"
@@ -453,13 +719,22 @@ def test_fetch_failure_reasons_are_redacted_to_their_class(tmp_path, identities,
         def fetch_all(self, urls):
             return [
                 FetchedSource(url=secret, error=f"ConnectionResetError: {secret}"),
-                FetchedSource(url=secret, error="unreadable content type (application/pdf)"),
-                FetchedSource(url=secret, status=503, error="HTTP 503"),
+                FetchedSource(
+                    url=secret,
+                    error="unreadable content type (application/pdf)",
+                    outcome=SourceOutcome.UNREADABLE,
+                ),
+                FetchedSource(url=secret, status=403, error="HTTP 403"),
             ]
 
-    # The helper itself collapses each error to its class, dropping the tail.
-    expected = {"ConnectionResetError": 1, "unreadable content type": 1, "HTTP 503": 1}
-    assert _failure_reasons(_LeakyFailures().fetch_all(["u"])) == expected
+    # Every key is an enum member, so no free text can reach the event at all. The
+    # status rides along only where it changes what an operator would do.
+    expected = {"error": 1, "unreadable": 1, "blocked:403": 1}
+    reasons = _failure_reasons(_LeakyFailures().fetch_all(["u"]))
+    assert reasons == expected
+    assert all(
+        key.split(":")[0] in {o.value for o in SourceOutcome} for key in reasons
+    ), "every audit key must be a member of the closed vocabulary"
 
     rt, _ = _runtime(tmp_path, identities, config, fetcher=_LeakyFailures())
     _critique_one(

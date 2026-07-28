@@ -53,6 +53,11 @@ def test_default_roster_boots_without_a_proxy_or_a_credential(default_config: Co
     assert default_config.refine.enabled is False, "refine makes the proxy a boot dependency"
     assert default_config.search.enabled is False, "search needs a Brave credential"
     assert default_config.search.verify_sources is False, "fetching model-chosen URLs needs egress"
+    # Two switches, both off. `sources.pdf` needs the optional `ingest` extra, which the
+    # "clone and run the tests" path does not install — and the master switch has to
+    # stay off independently so that enabling one tier never turns on another.
+    assert default_config.sources.enabled is False
+    assert default_config.sources.pdf.enabled is False
     assert default_config.disputes.enabled is False
     # Auditioning itself needs no withholding — it only happens via `ra audition`. What
     # must stay off is the gate that reads its cache: `enforce` is warn-by-default (D20).

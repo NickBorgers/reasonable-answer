@@ -157,11 +157,15 @@ def build_runtime(
         log.info("structured-output mode for %s (%s): %s", alias, identities[alias], mode)
 
     searcher = _build_searcher(config, client)
+    read_pdfs = _pdf_reading_enabled(config)
     fetcher = (
         fetch.SourceFetcher(
             timeout=config.search.fetch_timeout_seconds,
             max_bytes=config.search.fetch_max_bytes,
             max_chars=config.search.fetch_max_chars,
+            read_pdfs=read_pdfs,
+            pdf_max_bytes=config.sources.pdf.max_bytes,
+            pdf_max_pages=config.sources.pdf.max_pages,
         )
         if config.search.verify_sources
         else None
@@ -178,12 +182,33 @@ def build_runtime(
         search_enabled=searcher is not None,
         search_query_budget=config.search.query_budget if searcher else 0,
         verify_sources=fetcher is not None,
+        read_pdfs=read_pdfs,
         audition_enforced=config.audition.enforce,
     )
     for warning in warnings:
         log.warning("roster: %s", warning)
     return Runtime(config=config, client=client, identities=identities, store=store,
                    warnings=warnings, searcher=searcher, fetcher=fetcher)
+
+
+def _pdf_reading_enabled(config: Config) -> bool:
+    """Both switches on, and `pypdf` actually importable. Fatal if not.
+
+    Checked here rather than at the first cited PDF, for the same reason
+    `_build_searcher` checks a credential at startup: a dependency failure that
+    surfaces mid-run costs a run's worth of tokens to discover, and arrives disguised
+    as a per-source `unreadable` that looks like the site's fault rather than ours.
+    """
+    if not (config.sources.enabled and config.sources.pdf.enabled):
+        return False
+    try:
+        import pypdf  # noqa: F401
+    except ImportError as exc:
+        raise ConfigError(
+            "sources.pdf.enabled is on but pypdf is not installed. Install the extra "
+            "(uv sync --extra ingest) or set sources.pdf.enabled: false."
+        ) from exc
+    return True
 
 
 def _build_searcher(config: Config, client: LLMClient) -> search.BraveSearch | None:
@@ -600,22 +625,30 @@ def _adjudicate(state: State, rt: Runtime) -> dict:
 
 # ------------------------------------------------------------------- critique
 
+#: Outcomes whose HTTP status tells an operator something the outcome alone does not.
+_STATUS_BEARING_OUTCOMES = frozenset(
+    {fetch.SourceOutcome.BLOCKED, fetch.SourceOutcome.NOT_FOUND}
+)
+
 
 def _failure_reasons(failed: list) -> dict[str, int]:
-    """Tally why fetches failed, keeping the reason class only.
+    """Tally why fetches failed, from the closed outcome vocabulary.
 
-    A `FetchedSource.error` can be `"ConnectionResetError: <detail>"` or
-    `"unreadable content type (application/pdf)"` — the tail of either may carry the
-    URL or page detail, which does not belong in the audit trail. The status code or
-    the exception type is what a diagnosis actually needs.
+    This used to slice `FetchedSource.error` — free text that can be
+    `"ConnectionResetError: <detail>"` or `"unreadable content type (application/pdf)"`,
+    whose tail may carry a URL or page detail that does not belong in the audit trail
+    (RA-016). `SourceOutcome` removes the hazard rather than filtering it: every key
+    here is now a member of a fixed enum, optionally suffixed with the HTTP status,
+    which is a number and not private run material.
+
+    The status suffix is kept only where it changes what an operator would do —
+    `blocked:403` (add a provider) reads differently from `blocked:429` (slow down).
     """
     counts: dict[str, int] = {}
     for source in failed:
-        if source.status:
-            reason = f"HTTP {source.status}"
-        else:
-            error = source.error or "unknown"
-            reason = error.split(":", 1)[0].split("(", 1)[0].strip() or "unknown"
+        reason = source.outcome.value
+        if source.status and source.outcome in _STATUS_BEARING_OUTCOMES:
+            reason = f"{reason}:{source.status}"
         counts[reason] = counts.get(reason, 0) + 1
     return counts
 

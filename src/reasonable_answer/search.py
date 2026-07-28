@@ -30,10 +30,21 @@ from dataclasses import dataclass
 from pathlib import Path
 
 from . import prompts
+from .fetch import _http_only_opener
 
 log = logging.getLogger(__name__)
 
 BRAVE_ENDPOINT = "https://api.search.brave.com/res/v1/web/search"
+
+
+def _no_redirect_opener() -> urllib.request.OpenerDirector:
+    """The hardened opener from :mod:`.fetch`, with redirects refused outright.
+
+    Built per call rather than once at import so `ProxyHandler()` keeps reading
+    HTTP(S)_PROXY from the environment at request time, exactly as citation fetching
+    does (docs/ssrf-egress-isolation.md).
+    """
+    return _http_only_opener(0)
 
 
 class SearchError(RuntimeError):
@@ -161,7 +172,15 @@ class BraveSearch:
             },
         )
         try:
-            with urllib.request.urlopen(req, timeout=self._timeout) as resp:  # noqa: S310
+            # Never the default opener. It follows redirects, and CPython's
+            # `HTTPRedirectHandler.redirect_request` copies every header except
+            # content-length/content-type onto the redirect target — *cross-host*. A
+            # 302 out of the Brave endpoint would therefore replay
+            # `X-Subscription-Token` at whatever host it named. TLS means such a
+            # redirect has to come from Brave itself, so this is defence in depth
+            # rather than a live hole, but a credential-bearing request has no reason
+            # to be redirectable at all: the endpoint is a constant.
+            with _no_redirect_opener().open(req, timeout=self._timeout) as resp:  # noqa: S310
                 payload = json.loads(resp.read())
         except urllib.error.HTTPError as exc:
             # 429 is the one a caller can act on (back off); everything else is opaque.
