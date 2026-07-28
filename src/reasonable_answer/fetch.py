@@ -33,8 +33,9 @@ import logging
 import re
 import threading
 import urllib.error
+import urllib.parse
 import urllib.request
-from collections.abc import Callable
+from collections.abc import Callable, Mapping
 from dataclasses import dataclass
 from enum import Enum
 from html.parser import HTMLParser
@@ -469,20 +470,58 @@ def http_get(
 ) -> RawResponse:
     """Fetch one http(s) URL through the bounded, http(s)-only opener.
 
-    The single egress point for the whole package. Both callers — citation
-    verification and seed ingest — come through here, so `_http_only_opener` and
-    `_BoundedRedirects` stay the only way out to the network.
+    The plain-GET shape, which is every fetch of a page some model named: citation
+    verification and seed ingest. No credential is involved, so no redirect allowlist is
+    imposed — a cited page legitimately redirects wherever its publisher likes.
 
     Raises whatever `urllib` raises; callers map exceptions to their own error shape.
     `want_body`, when given, is consulted with the lowercased content-type *before* the
     body is read: returning False yields an empty body rather than spending the byte
     budget on something the caller cannot use.
     """
+    return _request(
+        url,
+        method="GET",
+        data=None,
+        headers={"User-Agent": user_agent, "Accept": accept},
+        timeout=timeout,
+        max_bytes=max_bytes,
+        max_redirects=max_redirects,
+        want_body=want_body,
+    )
+
+
+def _request(
+    url: str,
+    *,
+    method: str = "GET",
+    data: bytes | None = None,
+    headers: Mapping[str, str],
+    timeout: float,
+    max_bytes: int,
+    max_redirects: int = 3,
+    want_body: Callable[[str], bool] | None = None,
+    allowed_hosts: frozenset[str] | None = None,
+) -> RawResponse:
+    """The single egress point for the whole package.
+
+    Everything that leaves this process for the network arrives here, so
+    `_http_only_opener` and `_BoundedRedirects` stay the only way out. That is the
+    reason this exists apart from `http_get`: a provider API needing a POST and an
+    `Authorization` header would otherwise have had to build its own opener, and an
+    exemption from the hardened path is exactly what the hardened path is for.
+
+    `allowed_hosts` names the hosts a *redirect* may land on; None permits any, which is
+    what a cited page needs. A caller sending a credential should pass both a host set
+    and `max_redirects=0` — the credential is stripped on any redirect regardless (see
+    `_BoundedRedirects`), but a request carrying a key has no business being
+    redirectable at all.
+    """
     if not url.lower().startswith(("http://", "https://")):
         raise ValueError(f"not an http(s) URL: {url}")
 
-    opener = _http_only_opener(max_redirects)
-    req = urllib.request.Request(url, headers={"User-Agent": user_agent, "Accept": accept})
+    opener = _http_only_opener(max_redirects, allowed_hosts)
+    req = urllib.request.Request(url, data=data, headers=dict(headers), method=method)
     with opener.open(req, timeout=timeout) as resp:  # noqa: S310
         status = getattr(resp, "status", None)
         ctype = (resp.headers.get("Content-Type") or "").lower()
@@ -496,7 +535,9 @@ def http_get(
     return RawResponse(url, status, ctype, raw[:max_bytes], truncated)
 
 
-def _http_only_opener(max_redirects: int) -> urllib.request.OpenerDirector:
+def _http_only_opener(
+    max_redirects: int, allowed_hosts: frozenset[str] | None = None
+) -> urllib.request.OpenerDirector:
     """An opener that can speak http(s) and nothing else.
 
     `build_opener()` installs `FTPHandler`, `FileHandler` and `DataHandler` alongside
@@ -515,24 +556,48 @@ def _http_only_opener(max_redirects: int) -> urllib.request.OpenerDirector:
         urllib.request.HTTPSHandler(),
         urllib.request.HTTPDefaultErrorHandler(),
         urllib.request.HTTPErrorProcessor(),
-        _BoundedRedirects(max_redirects),
+        _BoundedRedirects(max_redirects, allowed_hosts),
     ):
         opener.add_handler(handler)
     return opener
 
 
+#: The only request headers allowed to survive a redirect. An allowlist rather than a
+#: list of credential names, because the credential names are the part nobody can
+#: enumerate: `Authorization`, `X-API-Key`, `X-Subscription-Token`, `Api-Key`, `Cookie`
+#: and whatever the next provider invents all have to be dropped, and a blocklist that
+#: misses one replays a key at a host nobody here chose. Everything this package sends
+#: on its own behalf is content negotiation or identification, so default-deny costs
+#: nothing today and cannot rot as callers are added.
+_REDIRECT_SAFE_HEADERS = frozenset(
+    {"user-agent", "accept", "accept-language", "accept-encoding"}
+)
+
+
 class _BoundedRedirects(urllib.request.HTTPRedirectHandler):
-    """Follow redirects, but not forever and not out of http(s).
+    """Follow redirects, but not forever, not out of http(s), and never with a secret.
 
     Python's stock handler allows a redirect target whose scheme is `http`, `https`
     **or `ftp`** (`HTTPRedirectHandler.http_error_302`), and `build_opener()` installs
     an `FTPHandler` by default. Checking only the *initial* URL therefore does not give
     http(s)-only fetching: a cited page can 302 verification into a different egress
     protocol. This narrows the allowlist to what the module actually claims.
+
+    It also copies every request header except content-length/content-type onto the
+    redirect target — cross-host, with no comparison of old host to new
+    (`redirect_request` in CPython's urllib/request.py). So the moment `_request` grew a
+    `headers` argument, a provider endpoint that 302s could hand our API key to whatever
+    host it named. Two independent guards, because either alone is thin: the credential
+    is stripped from the follow-up request, and `allowed_hosts` bounds where a follow-up
+    may be sent at all.
     """
 
-    def __init__(self, limit: int) -> None:
+    def __init__(self, limit: int, allowed_hosts: frozenset[str] | None = None) -> None:
         self.max_redirections = limit
+        #: Hosts a redirect may land on, or None for any. None is right for a cited
+        #: page, which legitimately redirects wherever its publisher likes; a request
+        #: carrying a credential should name the one host it trusts.
+        self.allowed_hosts = allowed_hosts
 
     def redirect_request(self, req, fp, code, msg, headers, newurl):
         # Count the hops ourselves. The stock handler consults `max_redirections` only
@@ -549,4 +614,25 @@ class _BoundedRedirects(urllib.request.HTTPRedirectHandler):
             raise urllib.error.HTTPError(
                 newurl, code, f"refused redirect to non-http(s) URL: {newurl}", headers, fp
             )
-        return super().redirect_request(req, fp, code, msg, headers, newurl)
+        if self.allowed_hosts is not None:
+            host = (urllib.parse.urlsplit(newurl).hostname or "").lower()
+            if host not in self.allowed_hosts:
+                raise urllib.error.HTTPError(
+                    newurl,
+                    code,
+                    f"refused redirect to a host outside the allowlist: {host}",
+                    headers,
+                    fp,
+                )
+
+        new = super().redirect_request(req, fp, code, msg, headers, newurl)
+        if new is not None:
+            # Strip the credential the stock handler just copied over. Unconditional,
+            # including onto an allowlisted host: the allowlist says the hop is
+            # somewhere this caller expects to talk to, not that the key was issued for
+            # it, and a redirect within a provider's own CDN is still a second place
+            # that key comes to rest.
+            new.headers = {
+                k: v for k, v in new.headers.items() if k.lower() in _REDIRECT_SAFE_HEADERS
+            }
+        return new

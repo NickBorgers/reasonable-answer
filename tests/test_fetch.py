@@ -8,6 +8,8 @@ from __future__ import annotations
 
 import urllib.error
 import urllib.request
+from email.message import Message
+from io import BytesIO
 
 import pytest
 from fakes import http_stub
@@ -422,6 +424,215 @@ def test_the_cap_counts_hops_not_repeats():
     req.redirect_dict = {"https://example.org/1": 1, "https://example.org/2": 1}
     with pytest.raises(urllib.error.HTTPError, match="past the cap"):
         handler.redirect_request(req, None, 302, "Found", {}, "https://example.org/3")
+
+
+# ------------------------------------ credential-bearing requests (`_request`)
+
+
+def _hop(
+    status: int = 200,
+    *,
+    location: str | None = None,
+    body: bytes = b"",
+    ctype: str = "text/html",
+):
+    """One canned response, shaped enough for the real handler chain to process it."""
+    hdrs = Message()
+    hdrs["Content-Type"] = ctype
+    if location is not None:
+        hdrs["Location"] = location
+
+    class _Hop(BytesIO):
+        def __init__(self):
+            super().__init__(body)
+            self.status = self.code = status
+            self.msg = "canned"
+            self.headers = hdrs
+
+        def info(self):
+            return self.headers
+
+        def geturl(self):
+            return location or ""
+
+    return _Hop()
+
+
+def _transport(monkeypatch, *responses):
+    """Answer each hop from a canned response, capturing the Request that carried it.
+
+    Stubbed at `AbstractHTTPHandler.do_open`, one layer below the house stub on
+    `OpenerDirector.open`, because a redirect is only *processed* above that layer:
+    stubbing `open` would take the code under test off the path entirely. The real
+    `_BoundedRedirects` runs here, and so does CPython's header-copying
+    `redirect_request` beneath it — which is the whole point, since the guard exists to
+    hold against what the stdlib actually does rather than what it is described as doing.
+    """
+    sent: list = []
+    queue = list(responses)
+
+    def do_open(self, http_class, req, **kwargs):
+        sent.append(req)
+        return queue.pop(0)
+
+    monkeypatch.setattr(urllib.request.AbstractHTTPHandler, "do_open", do_open)
+    return sent
+
+
+#: A provider call's shape: identification plus two credentials under names nobody
+#: could have enumerated in advance.
+_CREDENTIALLED = {
+    "User-Agent": "reasonable-answer/1.0",
+    "Authorization": "Bearer sk-live-secret",
+    "X-API-Key": "sk-live-secret",
+}
+
+
+def test_a_credential_is_not_replayed_at_a_redirect_target(monkeypatch):
+    """The reason `_request` may take headers at all.
+
+    CPython's `redirect_request` copies every header but content-length/content-type
+    onto the redirect target, cross-host and without asking. A provider that 302s would
+    otherwise hand our API key to whatever host it named — and the allowlisted hop here
+    shows the strip is unconditional, not a side effect of refusing the redirect.
+    """
+    from reasonable_answer.fetch import _request
+
+    sent = _transport(
+        monkeypatch,
+        _hop(302, location="https://cdn.example/moved"),
+        _hop(200, body=b"landed"),
+    )
+    resp = _request(
+        "https://api.example/scrape",
+        method="POST",
+        data=b'{"url": "https://x.test"}',
+        headers=_CREDENTIALLED,
+        timeout=5,
+        max_bytes=1_000,
+        max_redirects=1,
+        allowed_hosts=frozenset({"api.example", "cdn.example"}),
+    )
+
+    assert resp.body == b"landed"
+    first, second = ({k.lower() for k in req.headers} for req in sent)
+    assert {"authorization", "x-api-key"} <= first, (
+        "the first hop must carry them, or this test proves nothing"
+    )
+    assert not {"authorization", "x-api-key"} & second
+    # Content negotiation survives; the request is still recognisably ours.
+    assert "user-agent" in second
+
+
+def test_a_redirect_off_the_allowlist_is_refused(monkeypatch):
+    """Defence in depth behind the strip above: even a credential-free follow-up is a
+    request to a host the caller never named, made with the caller's egress."""
+    from reasonable_answer.fetch import _request
+
+    _transport(
+        monkeypatch,
+        _hop(302, location="https://evil.example/collect"),
+        _hop(200, body=b"never reached"),
+    )
+    with pytest.raises(urllib.error.HTTPError, match="outside the allowlist"):
+        _request(
+            "https://api.example/scrape",
+            headers=_CREDENTIALLED,
+            timeout=5,
+            max_bytes=1_000,
+            max_redirects=1,
+            allowed_hosts=frozenset({"api.example"}),
+        )
+
+
+def test_a_redirect_inside_the_allowlist_is_followed(monkeypatch):
+    """Without this the refusal above would pass for the wrong reason: a guard that
+    refuses every redirect is not an allowlist."""
+    from reasonable_answer.fetch import _request
+
+    sent = _transport(
+        monkeypatch,
+        _hop(302, location="https://cdn.example/moved"),
+        _hop(200, body=b"landed"),
+    )
+    resp = _request(
+        "https://api.example/scrape",
+        headers=_CREDENTIALLED,
+        timeout=5,
+        max_bytes=1_000,
+        max_redirects=1,
+        allowed_hosts=frozenset({"api.example", "cdn.example"}),
+    )
+
+    assert resp.body == b"landed"
+    assert [req.full_url for req in sent] == [
+        "https://api.example/scrape",
+        "https://cdn.example/moved",
+    ]
+
+
+def test_a_zero_cap_refuses_the_first_hop_end_to_end(monkeypatch):
+    """The hop counting is asserted directly elsewhere; this is the same cap seen from
+    the caller's side, which is how a provider adapter will actually rely on it."""
+    from reasonable_answer.fetch import _request
+
+    _transport(
+        monkeypatch,
+        _hop(302, location="https://api.example/elsewhere"),
+        _hop(200, body=b"never reached"),
+    )
+    with pytest.raises(urllib.error.HTTPError, match="past the cap"):
+        _request(
+            "https://api.example/scrape",
+            headers=_CREDENTIALLED,
+            timeout=5,
+            max_bytes=1_000,
+            max_redirects=0,
+            allowed_hosts=frozenset({"api.example"}),
+        )
+
+
+def test_a_post_body_reaches_the_wire_intact(monkeypatch):
+    from reasonable_answer.fetch import _request
+
+    payload = b'{"url": "https://x.test", "formats": ["markdown"]}'
+    sent = _transport(monkeypatch, _hop(200, body=b"{}", ctype="application/json"))
+    resp = _request(
+        "https://api.example/v1/scrape",
+        method="POST",
+        data=payload,
+        headers={"Content-Type": "application/json", "Authorization": "Bearer sk-live"},
+        timeout=5,
+        max_bytes=1_000,
+        max_redirects=0,
+    )
+    (req,) = sent
+
+    assert req.get_method() == "POST"
+    assert req.data == payload
+    assert req.get_header("Authorization") == "Bearer sk-live"
+    assert resp.content_type == "application/json"
+
+
+def test_http_get_still_follows_a_cross_host_redirect(monkeypatch):
+    """`http_get` names no allowlist, and must not acquire one by default: a cited page
+    redirecting to another domain is ordinary web behaviour, and refusing it would
+    report a live source as unreachable — which D38 now reads as fabrication."""
+    from reasonable_answer.fetch import http_get
+
+    sent = _transport(
+        monkeypatch,
+        _hop(302, location="https://cdn.elsewhere/final"),
+        _hop(200, body=b"<html><body><p>hi</p></body></html>"),
+    )
+    resp = http_get("https://example.org/a", timeout=5, max_bytes=1_000, accept="text/html")
+
+    assert resp.body.startswith(b"<html")
+    assert [req.full_url for req in sent] == [
+        "https://example.org/a",
+        "https://cdn.elsewhere/final",
+    ]
+    assert sent[0].get_method() == "GET" and sent[0].data is None
 
 
 def test_the_opener_has_no_handler_for_other_schemes():
