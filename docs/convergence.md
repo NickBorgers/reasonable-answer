@@ -54,7 +54,7 @@ well-formed/resolvable in format.
   roster can still share a factual blind spot — error correlation survives differences in training
   data, architecture, and provider ([Kim et al. 2025](https://arxiv.org/abs/2506.07962)) — and a
   citation is whatever the writer recalled. Output is labeled *consensus-reviewed with in-artifact
-  sourcing*, not fact-checked.
+  sourcing (no external retrieval)*, not fact-checked.
 * **`search.enabled: true`** — writers hold a `web_search` tool and may cite only URLs a search
   actually returned, so a citation is a real, retrieved page. Output is labeled *consensus-reviewed
   with retrieved sourcing*, still not fact-checked. Startup fails closed if a writer cannot emit
