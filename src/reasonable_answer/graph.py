@@ -691,7 +691,7 @@ def _critique_one(
                     ", ".join(f"{reason}x{count}" for reason, count in sorted(reasons.items())),
                 )
 
-    return critique_mod.critique_once(
+    result = critique_mod.critique_once(
         rt.client,
         alias,
         identity,
@@ -705,6 +705,19 @@ def _critique_one(
         attempt=attempt,
         current_date=run_date,
     )
+
+    # A cited URL that a definitive not-found (404/410) does not resolve is a
+    # `fabricated_citation` as a matter of fact, not a critic's judgement — so raise it
+    # mechanically here, in the fetch path, rather than trusting a critic model to elect
+    # to make the finding. This closes the launder that let a wholly-404 bibliography
+    # clear the evidence lens (issue #92, D38). Attached only to a *completed* review: a
+    # failed lens is discarded and re-critiqued (rule 2), and because the fetch is cached
+    # the finding is simply re-derived on the next attempt, so nothing is lost.
+    if sources and not result.failed:
+        mechanical = triage.mechanical_citation_issues(sources, report_mod.parse(report_text))
+        if mechanical:
+            result = result.model_copy(update={"issues": [*mechanical, *result.issues]})
+    return result
 
 
 def _critique(state: State, rt: Runtime) -> dict:

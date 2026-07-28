@@ -68,7 +68,7 @@
 | Resume/replay | checkpoint replay idempotency; stale-hash rejection |
 | Redeploy survival (`tests/test_shutdown.py`) | a stop flag pauses the graph at a **node boundary**, never mid-node: work completed before the pause survives and is not re-run on resume, and the run reaches its normal terminal status; the pause is recorded as an event and is not logged as a crash; `shutdown()` returns within its budget while a job is in flight; queued-but-unstarted work is durable on disk, not only in the in-memory queue; boot recovery re-enqueues `queued`/`interrupted` runs and skips finished ones, and can be switched off; a run that makes no progress across `max_resume_attempts` **consecutive** auto-resumes is abandoned, while any progress event resets the count; `ResumeMismatch` (e.g. a roster change under an in-flight run) abandons rather than retrying every boot; abandonment writes an event and **never** a `final.json` — the audit trail must not claim a terminal status the controller never issued; `abandoned` is terminal for the UI yet still manually resumable; the grace budget is read from the platform and falls back rather than crashing on a bad value |
 | Retrieval / web search (D17) | offline-when-off (no `tools` offered, prompt byte-identical to the pre-retrieval path); startup fails closed on a missing credential **and** on a tool-incapable writer; `probe_tool_calling` returns False for a model that accepts `tools` and never calls one, and for a probe that raises; per-**run** query budget (not per-call) enforced under concurrency; budget exhaustion and fetch failure surfaced to the model as text, never as silence; results fenced as untrusted (RA-010); the agentic tool loop terminates — the exhausted round drops `tools` and forces prose — and `Completion.tool_calls` matches the number executed; the query string never reaches a log (RA-016) |
-| Source verification (D18) | citation URLs extracted from the `## Sources` section only (a URL mentioned in passing is not fetched); **only the evidence lens** receives page text — logic and completeness never do; a failed fetch is surfaced as "could not fetch" and never as evidence of fabrication; truncation disclosed; unreadable content types (PDF) reported honestly; pages fetched once per run and cached across rounds; bounded by timeout, byte cap, redirect cap and http(s)-only; verification off ⇒ the evidence prompt is byte-identical to the D17 path |
+| Source verification (D18, D38) | citation URLs extracted from the `## Sources` section only (a URL mentioned in passing is not fetched); **only the evidence lens** receives page text — logic and completeness never do; a cited URL that returns a definitive not-found (HTTP 404/410) yields a mechanical `fabricated_citation` at its `blocking` floor, independent of any critic (D38); every other failed fetch (403, connection error/timeout, unreadable content type, empty body) yields **no** defect and is surfaced as "could not fetch", never as evidence of fabrication, each class pinned by a test; a twelve-of-twelve-404 fetch leaves the evidence lens **not** clean; truncation disclosed; unreadable content types (PDF) reported honestly; pages fetched once per run and cached across rounds; bounded by timeout, byte cap, redirect cap and http(s)-only; verification off ⇒ the evidence prompt is byte-identical to the D17 path |
 | Seed ingest / format conversion (D24) | every converter meets the output contract (blank-line-separated blocks, headings alone on their line) so `report.parse` loci survive; PDF/`.docx`/HTML/`.txt` conversion each covered offline (urllib's opener stubbed — no network, no keys); one bounded http(s)-only egress point reused from `fetch.http_get`; `file:`/`ftp:`/`data:` schemes refused before any opener exists; the `.docx` zip-bomb guard (`seed.docx_max_uncompressed_bytes`) trips **before** decompression; truncation is fatal for binary formats and a warning for text; a heading-less format yields one section plus a warning, never a failure; URL seeds refused when `seed.allow_url` is off (the default) — the form field disappears and the parameter 400s; the web layer never constructs a `Path` from request data; converted markdown is byte-identical between what is hashed, stored and critiqued (resume fingerprint) |
 | End-to-end | labeled fixtures where a known-flawed seed must reach `accepted` with the flaw fixed |
 
@@ -129,7 +129,7 @@ and confirmation-indistinguishability tests.
 | D21 | **`proxy.base_url` is overridable by an environment variable, named by `proxy.base_url_env` (default `RA_PROXY_BASE_URL`).** Precedence: env value > roster file value > built-in default. The roster's `base_url` becomes the *fallback*, not necessarily the effective value; the override is applied once in a `ProxyConfig` after-validator so every reader (`LLMClient`, `_fetch_model_info`) sees the resolved URL with no call-site change. Unset or empty env leaves the file value untouched. | Mirrors the existing `api_key_env` hook so the config surface stays consistent. Before this, `base_url` was readable only from the file, so a containerized deployment on a Docker bridge network — which cannot resolve the baked Tailscale MagicDNS URL and reaches the LiteLLM proxy by container DNS name (`http://litellm-proxy:4000/v1`) — had to mount a whole override `roster.yaml` just to change one line, shadowing every upstream roster change (model retunes, new critics, search defaults) and forcing a manual re-sync each time. Injecting one env var lets the baked roster stay authoritative for models, critics, search, and budgets. Kept backward-compatible: a roster with a plain `base_url:` and no env set behaves exactly as before. Applied in a validator rather than as an `api_key`-style lazy property because `base_url` is a plain field read across the codebase as an attribute, and a property cannot share its name; resolving at load also means nothing ever reads a URL the env was meant to override. No invariant is touched — this is a deployment-config affordance, not a change to isolation, author-exclusion, the orchestrator's blindness, or the controller. |
 | D22 | **Critics and writers are grounded in the run's date, and the shipped roster opts into retrieval (D17); source verification (D18) stays off everywhere by default.** A `run_date` (UTC) is captured once at intake, stored in graph state, and injected into every writer and critic prompt as trusted context outside the data fence. The code defaults for `search.enabled` and `search.verify_sources` stay `false`; `config/roster.yaml` flips on `search.enabled` only. The completeness brief and the critic `instruction` contract now require that every demanded fix be resolvable within the report itself (add the perspective, weaken the claim, or state the limitation) — a critic may not make a specific external document the only acceptable resolution. | Run `run-75eb136b9bfb` stagnated to `needs_human_review` with good output: the evidence lens, judging "on its face" plausibility from its training-data recency, flagged legitimate current-year citations (one dated the previous day) as future-dated `fabricated_citation` — a blocking defect with a severity floor the writer can never argue down and, without retrieval, never fix. Simultaneously the completeness lens demanded a specific budget-vote record the writer had no way to retrieve, while `writer_revision` (correctly) forbids inventing sources — an unsatisfiable demand. One date per run (not per call) keeps RB-010's byte-identical confirmation critiques across midnight; old checkpoints without `run_date` resume dateless, i.e. with the prior behavior. The date is excluded from the audition prompt-hash surface because it is run context, not lens semantics. Enabling search makes citation demands satisfiable, and retrieval-grounded citations carry real, current dates — closing the false-`fabricated_citation` loop even without verification. Verification would go further (URL resolves, page matches), but it fetches model-chosen URLs, and the egress boundary that makes that safe is a network-layer deployment concern deliberately not implemented in this repo (docs/ssrf-egress-isolation.md documents the pattern); the shipped roster therefore leaves `verify_sources: false`, to be enabled per-deployment behind such a boundary. Search itself is not that exposure: it talks only to the fixed public Brave endpoint. |
 
-| D18 | **Source verification for the evidence lens, opt-in and off by default.** With `search.verify_sources: true` the pages a report cites are fetched and handed to the **evidence lens only**, as untrusted data. `fabricated_citation` and `misrepresented_source` become checkable against the page instead of judgements about plausibility. A failed fetch is explicitly *not* evidence of fabrication. Not an SSRF boundary — egress is constrained at the network layer, not here. | D17 constrained where citations come from; it did not establish that a cited page supports the claim attached to it, because no critic could open one. Evidence-lens-only is an isolation requirement, not an optimization: logic and completeness cannot raise a citation category, so page text would widen what they see without widening what they may report. Off by default because fetching model-chosen URLs is exposure a deployment must opt into. |
+| D18 | **Source verification for the evidence lens, opt-in and off by default.** With `search.verify_sources: true` the pages a report cites are fetched and handed to the **evidence lens only**, as untrusted data. `fabricated_citation` and `misrepresented_source` become checkable against the page instead of judgements about plausibility. A failed fetch is explicitly *not* evidence of fabrication — **except** a definitive not-found (HTTP 404/410), which D38 later carves out as a mechanical `fabricated_citation` because that status proves the URL does not resolve rather than that it could not be read. Not an SSRF boundary — egress is constrained at the network layer, not here. | D17 constrained where citations come from; it did not establish that a cited page supports the claim attached to it, because no critic could open one. Evidence-lens-only is an isolation requirement, not an optimization: logic and completeness cannot raise a citation category, so page text would widen what they see without widening what they may report. Off by default because fetching model-chosen URLs is exposure a deployment must opt into. |
 
 ## Codex adversarial review — round 3 (verdict: CHANGES_REQUESTED; 5 resolved / 4 partial / 1 unresolved + 6 new)
 
@@ -1460,6 +1460,66 @@ three `needs:` lists and the `reviewed` OR-chain in `review-pipeline.yml`; `qual
 the prompt-ranges test; `quality-principles.md` added to `is_spec_critical`, the mkdocs nav, and
 the DESIGN.md document map. Judge, aggregator, and fixer are untouched — they treat role names as
 opaque strings, and needing to change them would have been a design smell.
+
+## D38 — a definitive not-found is `fabricated_citation`, settled mechanically; every other failed fetch is not
+
+**The problem.** Source verification (D18) fetches the pages a report cites and hands them to the
+evidence lens so `fabricated_citation` can mean *the URL does not resolve* rather than *implausible
+on its face* (the convergence table). But the prompt rendered **every** failed fetch identically —
+`COULD NOT FETCH: <error>` — and then told the critic, correctly for a 403/timeout/paywall,
+*"never raise a defect on the basis of a failed fetch."* An HTTP **404** (and 410 Gone) is not
+"could not read"; it is "does not exist" — the single status that proves the URL does not resolve.
+Lumping it with the unreadable class laundered the one signal that establishes fabrication, so the
+evidence lens was instructed to ignore exactly the fact that would flag it. `docs/convergence.md`
+carried the same contradiction: its table said a non-resolving URL is `fabricated_citation` while
+the paragraph below said a failed fetch is never evidence of fabrication.
+
+The failure mode is concrete and reproducible: a writer that runs zero searches with retrieval
+enabled fills `## Sources` from parametric memory, and if every one of those cited URLs returns HTTP
+404, the old prompt led the evidence lens to raise **zero** issues on it, because it had been told
+to. `fabricated_citation` floors at `blocking` (taxonomy), so suppressing it is what converts a
+wholly-fabricated bibliography into a clean evidence lens and ships it. This diff pins the regression
+publicly rather than resting the claim on private run audit material: `tests/test_fetch.py` replays a
+twelve-of-twelve-404 fetch result and asserts the evidence lens does **not** come back clean, while a
+twelve-of-twelve-403 run still does — so the empirical claim above is checkable from the diff itself
+(QP9).
+
+**Decision.** Split *unreachable* from *unreadable*. A cited URL that returns a definitive not-found
+(HTTP 404 or 410) yields a `fabricated_citation` **mechanically** — raised in the fetch path
+(`triage.mechanical_citation_issues`, called from `graph._critique_one`), where the fetch already
+happens — so the finding is a fact the pipeline reports, not a judgement a critic model must elect
+to make. This mirrors `dispute.adjudicate_mechanical` (a citation category a fetched page settles
+without an arbiter) and QP10 (verification is fetched text, never parametric memory). The finding is
+attached only to a **completed** review; a failed lens is discarded and re-critiqued (rule 2), and
+because the per-run fetch cache is warm the finding is simply re-derived on the next attempt, so
+nothing is lost and no failed-lens result is silently promoted to countable.
+
+Every other failure class — 403, a connection error/timeout, an unreadable content type, an empty
+body — is unchanged: no defect, surfaced honestly as "could not fetch". The distinction rides on
+`FetchedSource.status`, already populated (`fetch.py`), via `FetchedSource.unresolvable` against
+`NOT_FOUND_STATUSES = {404, 410}`.
+
+**Preferred over prompt-only.** The issue offered a fallback (approach 2): stop laundering the
+status in the prompt and let the critic raise it. Rejected as the primary route because
+`fabricated_citation` floors at `blocking` and forces `needs_human_review` — too consequential to
+leave to a critic model choosing to make it, when the fetch already proves it. The critic prompt is
+therefore left unchanged: *"never raise a defect on the basis of a failed fetch"* stays correct for
+the critic, because the not-found escalation is now the pipeline's job, not the model's — the critic
+still judges misrepresentation and on-its-face plausibility and must not double-raise on a fetch
+failure.
+
+**Spec.** `docs/convergence.md` no longer contradicts itself: the not-found row of the verification
+table is now explained as mechanical, and the "a failed fetch is never evidence of fabrication"
+paragraph is scoped to the failure classes it was written for — the `run-75eb136b9bfb`
+future-dated-citation failure mode it guards against (a *judgement* about date plausibility, D22) is
+untouched and must not return. The RA-019 test matrix row is updated and populated: 404/410 →
+mechanical blocking finding; 403/timeout/unreadable/empty → no defect (each pinned); the
+twelve-of-twelve-404 regression asserts the evidence lens does not come back clean.
+
+**Invariants.** Fail-closed lenses, severity floors clamp-up-only, blind orchestrator, and author
+exclusion are all preserved: the mechanical finding is a normal `fabricated_citation` at its
+existing floor, its text reaches only the writer-facing `Defect` and the audit store (never
+`OrchestratorView`, which stays counts-only), and it never touches who may critique what.
 
 ## Open items for a future round
 

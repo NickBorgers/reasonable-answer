@@ -37,6 +37,12 @@ log = logging.getLogger(__name__)
 #: browser to get around that would be the wrong kind of clever.
 USER_AGENT = "reasonable-answer/1.0 (citation verification)"
 
+#: HTTP statuses that establish a cited URL does not exist — "not found", not "could
+#: not read". 404 (Not Found) and 410 (Gone) are the definitive not-found codes; every
+#: other failure class (403, timeout, unreadable content type, empty body) is
+#: unreadable, not absent, and must never be read as fabrication (D38, docs/convergence.md).
+NOT_FOUND_STATUSES = frozenset({404, 410})
+
 _SOURCES_HEADING = re.compile(r"^#{1,6}\s*sources\s*$", re.IGNORECASE | re.MULTILINE)
 _URL = re.compile(r"https?://[^\s<>\"'\)\]]+")
 _SKIP_TAGS = {"script", "style", "noscript", "svg", "head"}
@@ -73,6 +79,17 @@ class FetchedSource:
     @property
     def ok(self) -> bool:
         return self.error is None
+
+    @property
+    def unresolvable(self) -> bool:
+        """The fetch *proves* the URL does not resolve — a fact, not a judgement.
+
+        True only for a definitive not-found (HTTP 404 / 410 Gone): the page does not
+        exist, which is exactly ``fabricated_citation`` under source verification. Every
+        other failure (403, timeout, unreadable content type, empty body) is "could not
+        read", which is never evidence of fabrication (D38, docs/convergence.md).
+        """
+        return not self.ok and self.status in NOT_FOUND_STATUSES
 
 
 def extract_source_urls(report: str, limit: int = 20) -> list[str]:

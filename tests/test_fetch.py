@@ -511,3 +511,158 @@ def test_a_report_with_no_sources_section_fetches_nothing(tmp_path, identities, 
         "vendor-a/model-a", set(), attempt=1,
     )
     assert "PAGES CITED BY THE REPORT" not in client.calls[-1].user
+
+
+# ------------------------------------------- a definitive not-found is fabrication (D38)
+
+
+def test_not_found_status_is_unresolvable():
+    """Only a definitive not-found proves the URL does not exist. Every other failure
+    is 'could not read', which is never evidence of fabrication."""
+    assert FetchedSource(url="u", status=404, error="HTTP 404").unresolvable
+    assert FetchedSource(url="u", status=410, error="HTTP 410").unresolvable
+
+
+@pytest.mark.parametrize(
+    "source",
+    [
+        FetchedSource(url="u", status=403, error="HTTP 403"),  # blocked, not absent
+        FetchedSource(url="u", status=500, error="HTTP 500"),  # server error, not absent
+        FetchedSource(url="u", error="URLError: Connection refused"),  # no status at all
+        FetchedSource(url="u", status=200, error="unreadable content type (application/pdf)"),
+        FetchedSource(url="u", status=200, title="T", error="no readable text"),
+        FetchedSource(url="u", status=200, title="T", text="body"),  # a good fetch
+    ],
+)
+def test_everything_but_a_not_found_is_resolvable(source):
+    assert not source.unresolvable
+
+
+def test_mechanical_issue_raised_only_for_a_not_found():
+    """The finding is a fact of the fetch, minted mechanically — a `fabricated_citation`
+    at its blocking floor, anchored to the paragraph that cites the dead URL."""
+    from reasonable_answer import report as report_mod
+    from reasonable_answer import triage
+    from reasonable_answer.taxonomy import Category, Severity
+
+    report = "# T\n\nClaim [1][2].\n\n## Sources\n\n[1] https://x.test/gone\n[2] https://x.test/live\n"
+    structure = report_mod.parse(report)
+    sources = [
+        FetchedSource(url="https://x.test/gone", status=404, error="HTTP 404"),
+        FetchedSource(url="https://x.test/live", status=200, title="T", text="ok"),
+    ]
+
+    issues = triage.mechanical_citation_issues(sources, structure)
+
+    assert len(issues) == 1
+    (issue,) = issues
+    assert issue.category is Category.FABRICATED_CITATION
+    assert issue.severity is Severity.BLOCKING
+    assert issue.claim_span == "https://x.test/gone"
+    # Anchored to the Sources paragraph, not a placeholder locus.
+    assert structure.contains(issue.locus)
+
+
+@pytest.mark.parametrize(
+    "source",
+    [
+        FetchedSource(url="https://x.test/a", status=403, error="HTTP 403"),
+        FetchedSource(url="https://x.test/a", error="TimeoutError: timed out"),
+        FetchedSource(url="https://x.test/a", status=200, error="unreadable content type (application/pdf)"),
+        FetchedSource(url="https://x.test/a", status=200, title="T", error="no readable text"),
+    ],
+)
+def test_no_mechanical_issue_for_the_unreadable_class(source):
+    from reasonable_answer import report as report_mod
+    from reasonable_answer import triage
+
+    structure = report_mod.parse("# T\n\nClaim [1].\n\n## Sources\n\n[1] https://x.test/a\n")
+    assert triage.mechanical_citation_issues([source], structure) == []
+
+
+_TWELVE = "# T\n\nClaim.\n\n## Sources\n\n" + "\n".join(
+    f"[{i}] https://x.test/page-{i}" for i in range(1, 13)
+)
+
+
+class _AllNotFound:
+    def fetch_all(self, urls):
+        return [FetchedSource(url=u, status=404, error="HTTP 404") for u in urls]
+
+
+def test_twelve_of_twelve_404_does_not_clear_the_evidence_lens(tmp_path, identities, config):
+    """The `run-d3bb2e4d2d94` regression: a wholly-fabricated bibliography every page of
+    which 404s must not produce a clean evidence lens (D38)."""
+    from reasonable_answer import triage
+    from reasonable_answer.graph import _critique_one
+    from reasonable_answer.taxonomy import Category
+
+    rt, _ = _runtime(tmp_path, identities, config, fetcher=_AllNotFound())
+    result = _critique_one(
+        rt, Lens.EVIDENCE, "q?", _TWELVE, "h" * 64, "vendor-a/model-a", set(), attempt=1
+    )
+
+    # The critic elected zero issues (fake returns []); the twelve findings are the
+    # pipeline's, raised mechanically from the 404s.
+    assert not result.failed
+    fabricated = [i for i in result.issues if i.category is Category.FABRICATED_CITATION]
+    assert len(fabricated) == 12
+    # Not clean: a lens with a material finding mints no clean record.
+    assert triage.clean_records([result]) == []
+    _, totals = triage.tally([result])
+    assert totals.blocking == 12
+
+
+class _AllBlocked:
+    def fetch_all(self, urls):
+        return [FetchedSource(url=u, status=403, error="HTTP 403") for u in urls]
+
+
+def test_twelve_of_twelve_403_still_clears_the_evidence_lens(tmp_path, identities, config):
+    """The other side of the split: a blocked client is not a fabricated citation, so a
+    clean critic response stays clean — the launder this fix removes must not overshoot
+    and start manufacturing blocking defects out of transient conditions."""
+    from reasonable_answer import triage
+    from reasonable_answer.graph import _critique_one
+
+    rt, _ = _runtime(tmp_path, identities, config, fetcher=_AllBlocked())
+    result = _critique_one(
+        rt, Lens.EVIDENCE, "q?", _TWELVE, "h" * 64, "vendor-a/model-a", set(), attempt=1
+    )
+
+    assert not result.failed
+    assert result.issues == []
+    assert len(triage.clean_records([result])) == 1
+
+
+def test_a_failed_critic_lens_is_not_promoted_by_a_mechanical_finding(
+    tmp_path, identities, config
+):
+    """A failed lens must stay failed (rule 2 re-critiques); a mechanical 404 finding
+    must not be smuggled onto it and counted as a completed review. The cached fetch
+    re-derives the finding once a critic completes."""
+    from fakes import FakeClient
+
+    from reasonable_answer.graph import Runtime, _critique_one
+    from reasonable_answer.llm import ModelCallError
+    from reasonable_answer.store import RunStore
+
+    def boom(alias, user):
+        raise ModelCallError("critic unavailable")
+
+    client = FakeClient(
+        identities=identities, critique_fn=boom, report_fn=lambda n: _TWELVE
+    )
+    rt = Runtime(
+        config=config,
+        client=client,
+        identities=identities,
+        store=RunStore(tmp_path, "run-fail"),
+        fetcher=_AllNotFound(),
+    )
+    result = _critique_one(
+        rt, Lens.EVIDENCE, "q?", _TWELVE, "h" * 64, "vendor-a/model-a", set(), attempt=1
+    )
+
+    assert result.failed
+    assert result.issues == []

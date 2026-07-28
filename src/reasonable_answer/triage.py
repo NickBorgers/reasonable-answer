@@ -19,12 +19,14 @@ import re
 
 from .report import Structure
 from .schemas import (
+    MAX_SPAN,
     CleanRecord,
     Defect,
     LensResult,
     OrchestratorView,
     RawIssue,
     SeverityCounts,
+    StructuralRef,
 )
 from .taxonomy import (
     LENS_CATEGORIES,
@@ -180,6 +182,59 @@ def _require_quote(span: str, source_text: str, field: str, locus, scope: str) -
             f"{field} at {locus} is not a verbatim quote from the {scope}",
             hint=_quote_hint(field, scope, source_text),
         )
+
+
+def _locate_url(url: str, structure: Structure) -> StructuralRef:
+    """The locus of the paragraph that cites ``url``.
+
+    The URL was pulled from the report's own ``## Sources`` section, so it is present;
+    the last-paragraph fallback is defensive — a fabricated citation must never be
+    dropped for want of an anchor, and Sources is conventionally the final section.
+    """
+    for p in structure.paragraphs:
+        if url in p.text:
+            return StructuralRef(section=p.section, paragraph=p.paragraph)
+    if structure.paragraphs:
+        last = structure.paragraphs[-1]
+        return StructuralRef(section=last.section, paragraph=last.paragraph)
+    return StructuralRef(section=0, paragraph=0)
+
+
+def mechanical_citation_issues(sources: list, structure: Structure) -> list[RawIssue]:
+    """``fabricated_citation`` findings a fetch *settles*, not that a critic judges (D38).
+
+    A cited URL that returns a definitive not-found (HTTP 404 / 410 Gone) does not
+    resolve — the page does not exist. That is the one fetch outcome that establishes
+    ``fabricated_citation`` as fact rather than plausibility (docs/convergence.md), so it
+    is raised here, mechanically, and never depends on a critic model electing to make
+    it. Every other failure class (403, a connection error/timeout, an unreadable content
+    type, an empty body) is "could not read", not "absent", and is deliberately excluded.
+
+    Mechanically minted, so this deliberately bypasses ``validate_issue`` (a verbatim
+    span check aimed at model-authored fields): the ``claim_span`` is the cited URL and
+    ``severity`` is already its category floor, which the clamp keeps.
+    """
+    issues: list[RawIssue] = []
+    for source in sources:
+        if not source.unresolvable:
+            continue
+        issues.append(
+            RawIssue(
+                category=Category.FABRICATED_CITATION,
+                severity=Severity.BLOCKING,
+                locus=_locate_url(source.url, structure),
+                claim_span=source.url[:MAX_SPAN],
+                rationale=(
+                    f"The cited URL returned HTTP {source.status}: the page does not "
+                    "exist, so the citation cannot be what it claims on its face."
+                ),
+                instruction=(
+                    "Remove this citation or replace it with a source that resolves and "
+                    "supports the claim; do not invent a URL."
+                ),
+            )
+        )
+    return issues
 
 
 def clamp(issues: list[RawIssue]) -> list[RawIssue]:
