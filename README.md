@@ -126,9 +126,11 @@ check on the accent-blue plate — instead.
 
 ## Sharing a result
 
-Anyone signed in through the tailnet or Access who holds a run id can open that run, so sharing
-inside that audience is just handing over a **link**. Sharing with anyone *outside* it means
-handing over a **file** instead, not a link. Every export carries
+Anyone who holds a run id can open that run — signed in or not — because every `GET` under
+`/runs/` answers an unauthenticated caller (D35). So the URL a reader is looking at is the one
+they can hand to someone, inside the tailnet or Access audience or outside it: sharing is handing
+over a **link**. A **file** is the durable alternative — for a recipient who cannot reach the
+host, or a copy that must outlive the run's retention sweep. Every export carries
 the report *and* its review record — status, sourcing label, which round shipped, the reviewers
 whose clean records key to that exact artifact, and any outstanding defects. As prose, an
 `accepted` report and a `needs_human_review` one look identical; that difference is the whole

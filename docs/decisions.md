@@ -825,6 +825,12 @@ than by a server-side engine — the alternative costs a large dependency to rep
 path every reader already has, and the print stylesheet is the same stylesheet as the screen, so
 the printed page cannot drift from the page it was printed from.
 
+> Superseded in part by **D35**, which serves every `GET` under `/runs/` without an identity, so a
+> run page *is* now a share link that needs no account for the recipient. The export files stay for
+> the reasons above — the review record travels attached, PDF needs no server-side engine, and a
+> file reaches a recipient who cannot reach the host or outlives the retention sweep — but a link is
+> no longer confined to the invited audience.
+
 **Why the reviewer list is filtered by artifact hash.** A `CleanRecord` attests to one artifact
 (RC-001/RC-002). Earlier drafts collect their own, and listing those in an export would credit a
 critic with clearing text it never read — an overstatement of review coverage in the one artifact
