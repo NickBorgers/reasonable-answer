@@ -91,7 +91,17 @@ do, like demanding false balance where the evidence genuinely points one way.
 Running the same model twice in two fresh contexts fixes context pollution, but not blind spots:
 a model that misses a flaw once tends to miss it every time, systematically. So the roster mixes
 **distinct models from distinct families** (different labs, different training corpora), because
-different models fail differently. Where one family's blind spot sits, another family sees fine.
+different models fail differently — where one family's idiosyncratic blind spot sits, another
+family often sees fine.
+
+Often, not always. The decorrelation this buys is real but **partial**: every capable model is
+trained on overlapping data, and when two of them are both wrong they are frequently wrong the
+*same way*. Diversity de-risks the failures that are peculiar to one model; it cannot vote away
+a mistake the whole model population shares. That shared residue is why the strongest checks in
+this system come from outside the roster entirely — retrieval and source verification test a
+citation against the fetched page rather than against another model's opinion, and the
+[bias rulebook](./bias.md) exists precisely because a bias correlated across every rostered
+model cannot be caught by adding more of them.
 
 Three roster rules do the heavy lifting:
 
@@ -102,7 +112,9 @@ Three roster rules do the heavy lifting:
   peer verdict to be sycophantic toward.
 - **A verdict needs two distinct witnesses.** Full acceptance means every lens was cleared by at
   least **two different non-author models** looking at the *identical* final text. One model's
-  approval is an opinion; two decorrelated models finding nothing is evidence.
+  approval is an opinion; a second model with different blind spots finding nothing is
+  meaningfully stronger evidence — though never proof, because no two capable models fail fully
+  independently.
 
 One deliberate asymmetry: the strongest model in the roster never writes — it is a
 **critic-only specialist**. If it wrote drafts, the no-self-review rule would bar it from
