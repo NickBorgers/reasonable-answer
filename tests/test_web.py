@@ -1323,6 +1323,34 @@ def test_the_head_advertises_the_installable_app(client):
     assert "viewport-fit=cover" in page
 
 
+def test_every_page_links_out_to_the_published_docs(client, config):
+    """The link lives in the shared shell, so someone who arrives on a shared run link —
+    never having seen the landing page — still has a route to the explanation.
+
+    `rel="noreferrer"` is the load-bearing attribute, not decoration: the app sets no
+    Referrer-Policy, so without it, following this link from a run page would hand that
+    run's id to an off-origin host in the Referer header."""
+    response = client.post("/runs", data={"question": "Documented?"}, follow_redirects=False)
+    run_id = response.headers["location"].rsplit("/", 1)[-1]
+    _wait_for_final(config, run_id)
+
+    expected = '<a class="docs" href="https://nickborgers.github.io/reasonable-answer/" rel="noreferrer">'
+    for url in ("/", f"/runs/{run_id}", f"/runs/{run_id}/report"):
+        assert expected in client.get(url).text, url
+
+
+def test_the_header_does_not_claim_a_sourcing_level_it_cannot_know(client):
+    """The tagline is global; a sourcing label belongs to one finished run. It used to be
+    hard-coded to `in-artifact` — the weakest of the three labels `graph.py` can produce —
+    and so understated any run that verified or retrieved its sources. Sourcing is stated
+    per-run in the review record, where it is derived from `final.json` and is true."""
+    page = client.get("/").text
+    header = page[page.index("<header>") : page.index("</header>")]
+
+    assert "sourcing" not in header
+    assert "consensus-reviewed" not in header
+
+
 def test_the_csp_admits_the_manifest_and_the_worker_and_nothing_off_origin(client, config):
     """Pinned as an exact literal on purpose. Widening this policy is a decision recorded
     in docs/decisions.md (D27), not a tidy-up — so it should not be possible to widen it

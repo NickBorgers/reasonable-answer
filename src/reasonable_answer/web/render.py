@@ -89,6 +89,21 @@ CSP = (
     "worker-src 'self'; form-action 'self'; base-uri 'none'"
 )
 
+#: The published design docs. The only off-origin link the app emits, and it is a link
+#: rather than a fetch — nothing here loads from that host, so the CSP above is unchanged.
+#: Deliberately the site root and not a deep link: `docs/index.md` routes a reader onward,
+#: and a page-level URL would rot the first time a doc is renamed.
+DOCS_URL = "https://nickborgers.github.io/reasonable-answer/"
+
+#: The header tagline. An identity line, not a claim about any particular run.
+#:
+#: It previously read "consensus-reviewed with in-artifact sourcing", which is one of the
+#: three sourcing labels `graph.py` attaches to a finished run — pinned here to the weakest
+#: of them, on every page, including runs whose real label was stronger. A global element
+#: cannot state a per-run property. The accurate statement is the `Review label` row of the
+#: review record, which is derived from that run's `final.json`.
+TAGLINE = "models take turns writing and critiquing; none reviews its own work"
+
 
 # --------------------------------------------------------------------- layout
 
@@ -161,7 +176,12 @@ def render_layout(
 <body>
 <header>
   <a class="brand" href="{base_path}/">reasonable&#8209;answer</a>
-  <span class="tag">consensus-reviewed with in-artifact sourcing</span>
+  <span class="tag">{TAGLINE}</span>
+  <!-- `rel="noreferrer"` is load-bearing: no Referrer-Policy is set anywhere, and this link
+       is in the shell, so without it a reader following it from a run page hands that run's
+       id to an off-origin host. The CSP is unchanged — it has no directive governing
+       navigation, and this is a link, not a fetch. -->
+  <a class="docs" href="{DOCS_URL}" rel="noreferrer">how this works</a>
 </header>
 <main>{body}</main>
 {scripts}
@@ -215,9 +235,10 @@ def render_index(
     body = f"""
 <section class="panel">
   <h1>Ask a question</h1>
-  <p class="lede">A roster of models will take turns writing and critiquing an answer until no
-  eligible reviewer can find a material defect &mdash; or until the cap stops them.
-  Expect this to take <strong>10&ndash;25 minutes</strong>.</p>
+  <p class="lede">A roster of models takes turns writing and critiquing an answer. It ships when
+  no eligible reviewer can still find a material defect &mdash; not because any model declared it
+  good &mdash; or when the round cap stops it. The decision to stop belongs to plain code, not to
+  a model. Expect this to take <strong>10&ndash;25 minutes</strong>.</p>
   <form method="post" action="{base_path}/runs">
     <label for="question">Question</label>
     <textarea id="question" name="question" rows="3" required maxlength="{config.max_question_chars}"
@@ -242,7 +263,9 @@ def render_index(
 
 <section class="panel roster">
   <h2>Roster</h2>
-  <p class="lede">A report is never critiqued &mdash; on any lens &mdash; by the model that wrote it.</p>
+  <p class="lede">A report is never critiqued &mdash; on any lens &mdash; by the model that wrote it,
+  and full acceptance needs two <em>different</em> non-author models to clear the same final text.
+  One model's approval is an opinion; two finding nothing is evidence.</p>
   <div class="roster-grid">
     <div><h3>writers</h3><ul>{_model_list(config.roster.writers)}</ul></div>
     {"".join(f"<div><h3>{esc(lens)}</h3><ul>{_model_list(pool)}</ul></div>"
@@ -871,6 +894,11 @@ header {
 }
 .brand { font-weight: 650; letter-spacing: -.01em; color: var(--ink); text-decoration: none; font-size: 1.05rem; }
 .tag { color: var(--dim); font-size: .8rem; }
+/* `margin-left: auto` pushes this to the far end of the header. The header already wraps,
+   so on a narrow screen it drops to its own line rather than crowding the tagline. The
+   print stylesheet hides `header` wholesale, so this never reaches paper. */
+.docs { margin-left: auto; color: var(--dim); font-size: .8rem; text-decoration: underline; text-underline-offset: .2em; }
+.docs:hover, .docs:focus-visible { color: var(--ink); }
 main { max-width: 60rem; margin: 0 auto; padding: var(--gutter); display: grid; gap: 1.25rem; }
 /* A grid item defaults to `min-width: auto`, which means it refuses to shrink below the
    widest unbreakable thing inside it — and on a phone that silently widens the layout
