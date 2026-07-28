@@ -337,6 +337,24 @@ class SourcesConfig(BaseModel):
         somebody's address into a container image."""
         return os.environ.get(self.contact_email_env, "").strip()
 
+    @model_validator(mode="after")
+    def _delivery_fails_closed(self) -> SourcesConfig:
+        # D40: `delivery` ships as a seam with no provider behind it, so enabling it
+        # without naming one can never make a call — and unlike `extraction`, there is not
+        # even a registry entry to fall back to by mistake. That is what makes it inert
+        # rather than half-built: the config refuses to boot instead of silently ignoring
+        # the tier. Gated on the master switch like every other tier (see
+        # `graph._enabled_tiers`): the whole subsystem does nothing with it off, so a
+        # delivery stanza sitting in a roster with `sources.enabled: false` is not yet a
+        # claim to enforce.
+        if self.enabled and self.delivery.enabled and not self.delivery.provider:
+            raise ConfigError(
+                "fail closed: sources.delivery.enabled is on but no provider is named. "
+                "The delivery tier ships as a seam with no provider behind it (D40), so "
+                "enabling it without one makes no call — inert rather than half-built."
+            )
+        return self
+
 
 class SeedConfig(BaseModel):
     """Bounds on ingesting a seed report the user supplied.

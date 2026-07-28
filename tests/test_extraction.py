@@ -274,3 +274,39 @@ def test_the_call_ceiling_is_derived_from_the_run_s_own_shape(config):
         }
     )
     assert _extraction_call_ceiling(pinned) == 7, "an explicit number still wins"
+
+
+# ---------------------------------------------------------- the delivery seam (D40)
+
+
+def test_enabling_delivery_without_a_provider_is_fatal():
+    """The seam ships with no provider behind it, so enabling it while naming none can
+    never make a call. D40 says that is fatal at load — inert rather than half-built —
+    and here that promise is enforced rather than merely written down."""
+    from reasonable_answer.config import (
+        ConfigError,
+        DeliveryTierConfig,
+        SourcesConfig,
+    )
+
+    with pytest.raises(ConfigError, match="sources.delivery.enabled is on but no provider"):
+        SourcesConfig(enabled=True, delivery=DeliveryTierConfig(enabled=True, provider=""))
+
+
+def test_delivery_is_inert_when_the_master_switch_is_off():
+    """Consistent with every other tier: the subsystem does nothing with `sources.enabled`
+    off, so a delivery stanza there is not yet a claim to enforce."""
+    from reasonable_answer.config import DeliveryTierConfig, SourcesConfig
+
+    # No raise: the empty-provider delivery tier is only fatal once the resolver is on.
+    cfg = SourcesConfig(enabled=False, delivery=DeliveryTierConfig(enabled=True, provider=""))
+    assert cfg.delivery.enabled and not cfg.delivery.provider
+
+
+def test_a_named_delivery_provider_is_accepted_even_though_none_ships():
+    """The registry is open. Naming a provider clears the fail-closed check; that no such
+    provider is built yet is a separate matter the resolver ladder owns."""
+    from reasonable_answer.config import DeliveryTierConfig, SourcesConfig
+
+    cfg = SourcesConfig(enabled=True, delivery=DeliveryTierConfig(enabled=True, provider="acme"))
+    assert cfg.delivery.provider == "acme"

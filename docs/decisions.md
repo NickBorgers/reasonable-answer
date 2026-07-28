@@ -1710,12 +1710,15 @@ startup. `sources.extraction` sends the cited URL to a rendering service (Firecr
 reference implementation; the registry is open) and takes back markdown. `sources.delivery` is a
 config shape and a registry entry with **no provider behind it**.
 
-**The line, which is the whole decision.** Every vendor in this market also sells a stealth mode —
-residential IP rotation, fingerprint randomisation, anti-bot defeat. On Firecrawl it is one string:
-`proxy: "stealth"`, or `"auto"`, which starts basic and escalates silently when a site refuses. That
-is the industrial form of the browser impersonation `fetch.py` has refused since D18 and D39 records
-as doctrine, bought by the page instead of coded by hand. **Rendering a page is not disguising who
-is asking for it, and only the first is in scope.**
+**The line, which is the whole decision.** A rendering provider can be pointed at a page in two
+registers: read it as a normal client, or disguise the client to defeat anti-bot defences —
+residential IP rotation, fingerprint randomisation. On the provider integrated here, Firecrawl, the
+second is a `proxy` mode, and `resolve/extraction.py` pins the request to `proxy: "basic"` while
+naming `"stealth"` and `"auto"` in `FORBIDDEN_PROXY_MODES` as values it must never send — `"auto"`
+because it starts basic and escalates into stealth silently when a site refuses. That is the
+industrial form of the browser impersonation `fetch.py` has refused since D18 and D39 records as
+doctrine, bought by the page instead of coded by hand. **Rendering a page is not disguising who is
+asking for it, and only the first is in scope.**
 
 So `proxy` is pinned to `"basic"` in `resolve/extraction.py` and there is no configuration field
 that can change it — absent, not defaulted-off, because a knob makes doctrine an operator
@@ -1724,18 +1727,21 @@ options constant, so a future code path assembling its own payload is caught too
 now something CI fails on rather than a comment somebody can delete. It is also, incidentally, one
 credit per page instead of five; that is a coincidence and not the argument.
 
-**What the paid tier does and does not buy.** It reads JavaScript-rendered pages and survives bot
-walls, which is a large share of why citation fetches fail. It does **not** pass a hard paywall: a
-subscription wall serves a teaser to a real browser too. Anyone reading "paid tier" as "universal
-access" is wrong, and the module docstring, the roster comment and this record all say so, because
-that misreading is the one most likely to be made.
+**What the paid tier does and does not buy.** It reads JavaScript-rendered pages and is not turned
+away by the bot walls that refuse an unknown HTTP client — two reasons a cited body fails to arrive
+that are neither a paywall nor a fabrication. It does **not** pass a hard paywall: a subscription
+wall serves a teaser to a real browser too. Anyone reading "paid tier" as "universal access" is
+wrong, and the module docstring, the roster comment and this record all say so, because that
+misreading is the one most likely to be made.
 
-**Why delivery ships empty.** CCC RightFind and Reprints Desk Article Galaxy do lawfully deliver
-paywalled bodies, per article, under copyright-cleared single-use terms. Whether those terms permit
-splicing a delivered document into a model's context is a licensing question, not an engineering
-one. Building a speculative adapter against an API nobody holds credentials for produces untested
-code that will be wrong when someone finally needs it, so the seam exists and `provider: ""` with
-the tier enabled is fatal — inert rather than half-built.
+**Why delivery ships empty.** A document-delivery provider would return a paywalled body under some
+licensing terms, and whether those terms permit splicing a delivered document into a model's context
+is a licensing question, not an engineering one — one this repository has not answered. Building a
+speculative adapter against an API nobody here holds credentials for produces untested code that
+will be wrong when someone finally needs it, so the seam exists with no provider behind it. That the
+seam is *inert rather than half-built* is enforced, not merely asserted: a `SourcesConfig` validator
+makes `sources.delivery.enabled: true` with `provider: ""` fatal at load, because a tier that can
+name no provider can make no call.
 
 **Ordering, and why extraction runs last.** By cost, not by likelihood. Extraction is the likelier
 fix for a news citation and still runs after the free rungs, because a registry answer is worth
