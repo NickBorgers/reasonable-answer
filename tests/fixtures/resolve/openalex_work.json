@@ -1,0 +1,49 @@
+{
+  "id": "https://openalex.org/W3177828909",
+  "doi": "https://doi.org/10.1038/s41586-021-03819-2",
+  "display_name": "Highly accurate protein structure prediction with AlphaFold",
+  "publication_year": 2021,
+  "publication_date": "2021-07-15",
+  "type": "article",
+  "primary_location": {
+    "is_oa": false,
+    "landing_page_url": "https://doi.org/10.1038/s41586-021-03819-2",
+    "pdf_url": null,
+    "source": {
+      "id": "https://openalex.org/S137773608",
+      "display_name": "Nature",
+      "type": "journal"
+    }
+  },
+  "best_oa_location": {
+    "is_oa": true,
+    "landing_page_url": "https://www.nature.com/articles/s41586-021-03819-2",
+    "pdf_url": "https://www.nature.com/articles/s41586-021-03819-2.pdf",
+    "version": "publishedVersion",
+    "license": "cc-by"
+  },
+  "authorships": [
+    {
+      "author_position": "first",
+      "author": {
+        "id": "https://openalex.org/A5018444498",
+        "display_name": "John Jumper"
+      }
+    },
+    {
+      "author_position": "middle",
+      "author": {
+        "id": "https://openalex.org/A5075978862",
+        "display_name": "Richard Evans"
+      }
+    }
+  ],
+  "abstract_inverted_index": {
+    "Proteins": [0],
+    "are": [1],
+    "essential": [2],
+    "to": [3],
+    "life.": [4]
+  },
+  "cited_by_count": 21456
+}

@@ -58,10 +58,29 @@ def test_default_roster_boots_without_a_proxy_or_a_credential(default_config: Co
     # stay off independently so that enabling one tier never turns on another.
     assert default_config.sources.enabled is False
     assert default_config.sources.pdf.enabled is False
+    # The registry tiers (D39) reach hosts of their own, so they need egress the smoke
+    # test withholds — and the identifier tier can raise a blocking `fabricated_citation`
+    # via D38, which is not something an unattended default should be able to do.
+    assert default_config.sources.identifiers.enabled is False
+    assert default_config.sources.open_access.enabled is False
     assert default_config.disputes.enabled is False
     # Auditioning itself needs no withholding — it only happens via `ra audition`. What
     # must stay off is the gate that reads its cache: `enforce` is warn-by-default (D20).
     assert default_config.audition.enforce is False
+
+
+def test_the_deployment_roster_keeps_the_resolver_tiers_off(
+    deployment_config: Config,
+) -> None:
+    """This deployment opts into things the default cannot have, but not into these.
+
+    Both tiers stay off in the shipped file — the block is commented out entirely — so
+    that the roster mounted over the baked copy cannot silently start spending registry
+    calls, or start minting `fabricated_citation` from a registry's silence, on the
+    strength of a config edit nobody reviewed.
+    """
+    assert deployment_config.sources.identifiers.enabled is False
+    assert deployment_config.sources.open_access.enabled is False
 
 
 def test_the_two_rosters_name_the_same_models(

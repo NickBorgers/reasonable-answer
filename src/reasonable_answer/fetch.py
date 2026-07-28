@@ -17,6 +17,12 @@ are entirely different facts; only the first is evidence of anything. Collapsing
 what obliged :mod:`.prompts` to tell the evidence critic to disregard every failed
 fetch — throwing away the one case verification exists to catch.
 
+When the cited URL yields no body at all — which is what a paywalled journal does — an
+injected resolver (:mod:`.resolve`, D39) may still establish that the source *exists*, or
+find an open-access copy of it. That is an addition to this module's vocabulary, not to
+its reach: the ladder is constructed in `graph._build_resolver` and handed in, so `fetch`
+never imports `resolve`, and every provider call goes back out through `http_get` below.
+
 **Not an SSRF boundary** (D18). This fetches URLs a model chose, which is exposure by
 construction; the deployment is expected to constrain egress at the network layer. The
 bounds here — timeout, byte cap, redirect cap, http(s) only — exist so one slow or
@@ -38,6 +44,7 @@ from collections.abc import Callable
 from dataclasses import dataclass
 from enum import Enum
 from html.parser import HTMLParser
+from typing import Any
 
 from . import textconv
 
@@ -115,6 +122,92 @@ class SourceOutcome(str, Enum):
 _BLOCKED_STATUSES = frozenset({401, 402, 403, 405, 406, 423, 429, 451, 999})
 
 
+class ResolutionTier(str, Enum):
+    """Which rung of the ladder produced a result (D39).
+
+    In the audit trail across *every* source, not only the failures: a tally of
+    `{"direct": 5, "open_access": 2, "identifier": 4}` is what tells an operator whether
+    a tier is earning the calls it spends. A closed vocabulary for the same reason
+    `SourceOutcome` is one — it goes into `events.jsonl`, where free text does not
+    belong (RA-016).
+    """
+
+    #: The cited URL answered by itself. Every result was this before D39, and most
+    #: still are.
+    DIRECT = "direct"
+    #: A bibliographic registry answered for the identifier embedded in the cited URL.
+    IDENTIFIER = "identifier"
+    #: A body arrived from an open-access copy that is not the cited URL.
+    OPEN_ACCESS = "open_access"
+
+
+class Provider(str, Enum):
+    """Which registry answered. Names are safe to log; their request URLs are not —
+    see `resolve/base.py`, which owns that rule and the reason for it (RA-016)."""
+
+    CROSSREF = "crossref"
+    OPENALEX = "openalex"
+    UNPAYWALL = "unpaywall"
+    EUROPE_PMC = "europe_pmc"
+    ARXIV = "arxiv"
+
+
+#: Per-field caps on registry metadata, in the manner of `search.py`'s `MAX_TITLE_CHARS`.
+#: A registry record is third-party text entering a critic's context exactly as a search
+#: snippet is, and the field count alone does not bound it: one pathological abstract
+#: could otherwise dominate what the evidence lens reads about twelve sources.
+MAX_METADATA_TITLE_CHARS = 300
+MAX_METADATA_AUTHORS = 12
+MAX_METADATA_AUTHOR_CHARS = 120
+MAX_METADATA_VENUE_CHARS = 200
+MAX_METADATA_DOI_CHARS = 200
+MAX_METADATA_ABSTRACT_CHARS = 2_000
+
+
+@dataclass(frozen=True)
+class SourceMetadata:
+    """What a bibliographic registry knows about a citation — existence, chiefly (D39).
+
+    This is deliberately *not* a body. It answers "does this source exist, and is it the
+    thing the report says it is", which is the question paywalls make unanswerable and
+    which is what stops a real paywalled journal looking like a fabricated citation. It
+    cannot answer "does the source support this claim": an abstract is a summary the
+    authors wrote, and `prompts` must say so wherever it renders one.
+
+    `registry` names which provider answered, so a reader of the run can tell a Crossref
+    record from an arXiv one without consulting the event log.
+    """
+
+    title: str = ""
+    authors: tuple[str, ...] = ()
+    year: int | None = None
+    venue: str = ""
+    doi: str = ""
+    registry: str = ""
+    abstract: str = ""
+
+    def __post_init__(self) -> None:
+        object.__setattr__(self, "title", _clip(self.title, MAX_METADATA_TITLE_CHARS))
+        object.__setattr__(
+            self,
+            "authors",
+            tuple(
+                _clip(a, MAX_METADATA_AUTHOR_CHARS)
+                for a in self.authors[:MAX_METADATA_AUTHORS]
+                if _clip(a, MAX_METADATA_AUTHOR_CHARS)
+            ),
+        )
+        object.__setattr__(self, "venue", _clip(self.venue, MAX_METADATA_VENUE_CHARS))
+        object.__setattr__(self, "doi", _clip(self.doi, MAX_METADATA_DOI_CHARS))
+        object.__setattr__(
+            self, "abstract", _clip(self.abstract, MAX_METADATA_ABSTRACT_CHARS)
+        )
+
+
+def _clip(value: str | None, limit: int) -> str:
+    return " ".join((value or "").split())[:limit]
+
+
 @dataclass(frozen=True)
 class FetchedSource:
     """One resolved citation. `error` set means the fetch failed; `text` is then empty.
@@ -128,7 +221,14 @@ class FetchedSource:
     2. `text` is exactly what the critic was shown. Never populate it with something
        :mod:`.prompts` does not render.
     3. `outcome` is a closed vocabulary safe to put in the audit trail; `error` is free
-       text that may embed a URL and is not (RA-016).
+       text that may embed a URL and is not (RA-016). `tier` and `provider` are closed
+       vocabularies too, for the same reason and the same destination.
+
+    D39 adds `body_source_url` and `metadata`, both additive and both defaulting to the
+    pre-D39 shape. `body_source_url` is set **only** when `text` came from somewhere
+    other than `url` — an open-access mirror — because a preprint is not the version of
+    record, and `dispute.adjudicate_mechanical` must refuse to settle a dispute about
+    the cited URL on a different copy's wording.
     """
 
     url: str
@@ -137,6 +237,15 @@ class FetchedSource:
     status: int | None = None
     error: str | None = None
     outcome: SourceOutcome = SourceOutcome.FULL_TEXT
+    #: Where `text` actually came from, when that is not `url`. None means the body is
+    #: the cited page's own — which is the only case anything may quote against `url`.
+    body_source_url: str | None = None
+    #: What a registry knows about this citation, when a tier asked one. Present
+    #: alongside a body as well as instead of one: the attributed title is checkable
+    #: even when the fetch succeeded.
+    metadata: SourceMetadata | None = None
+    tier: ResolutionTier = ResolutionTier.DIRECT
+    provider: Provider | None = None
 
     def __post_init__(self) -> None:
         # Invariant 1 enforced, not merely documented. A caller that sets `error`
@@ -148,6 +257,11 @@ class FetchedSource:
             object.__setattr__(self, "outcome", classify_status(self.status))
         elif self.error is None and self.outcome is not SourceOutcome.FULL_TEXT:
             raise ValueError(f"{self.outcome.value} cannot carry readable body text")
+        # Same discipline for the mirror field: "the body came from elsewhere" is only
+        # meaningful when there is a body. A result that named a mirror while carrying
+        # no text would make the dispute guard look satisfied on a page nobody read.
+        if self.body_source_url is not None and self.outcome is not SourceOutcome.FULL_TEXT:
+            raise ValueError(f"{self.outcome.value} carries no body to have a source")
 
     @property
     def ok(self) -> bool:
@@ -254,7 +368,16 @@ class SourceFetcher:
     """Fetches and caches cited pages for the lifetime of a run.
 
     Cached by URL because the same '## Sources' list is re-verified on every round; a
-    ten-round run would otherwise re-download the same four pages ten times.
+    ten-round run would otherwise re-download the same four pages ten times. The cache
+    is monotone: an entry is written once and never invalidated, so every round of a
+    run sees the same evidence and a failure is not silently retried into a success
+    halfway through.
+
+    `resolver` is injected rather than imported (D39). The tiers need `search.QueryBudget`
+    and `prompts`, both of which sit downstream of this module, so `fetch -> resolve`
+    would close a cycle. `graph._build_resolver` constructs it, exactly as
+    `_build_searcher` constructs the searcher, which keeps network I/O out of the graph
+    and the test suite offline (D24).
     """
 
     def __init__(
@@ -267,6 +390,7 @@ class SourceFetcher:
         read_pdfs: bool = False,
         pdf_max_bytes: int = 25_000_000,
         pdf_max_pages: int = 40,
+        resolver: Any | None = None,
     ) -> None:
         self._timeout = timeout
         self._max_bytes = max_bytes
@@ -275,6 +399,7 @@ class SourceFetcher:
         self._read_pdfs = read_pdfs
         self._pdf_max_bytes = pdf_max_bytes
         self._pdf_max_pages = pdf_max_pages
+        self._resolver = resolver
         self._cache: dict[str, FetchedSource] = {}
         self._lock = threading.Lock()
 
@@ -287,10 +412,30 @@ class SourceFetcher:
         if cached is not None:
             return cached
 
-        result = self._fetch_uncached(url)
+        result = self._resolved(url)
         with self._lock:
             self._cache[url] = result
         return result
+
+    def _resolved(self, url: str, depth: int = 0) -> FetchedSource:
+        """The direct fetch, and — only if it yielded no body — the resolver ladder.
+
+        `depth` is explicit and passed down rather than inferred from a flag or a call
+        stack, because the one thing the ladder must never do is recurse: a tier hands
+        back an open-access URL, that URL is fetched *once*, and if it too fails it is
+        simply a failure. A mirror that redirected into another mirror could otherwise
+        walk a run's whole fetch budget on one citation.
+        """
+        result = self._fetch_uncached(url)
+        if result.ok or self._resolver is None or depth > 0:
+            return result
+        return self._resolver.resolve(
+            url,
+            result,
+            # Bound to depth+1, so whatever the ladder hands back is fetched by the same
+            # direct/PDF path and cannot re-enter the ladder.
+            fetch_body=lambda mirror: self._resolved(mirror, depth + 1),
+        )
 
     def _fetch_uncached(self, url: str) -> FetchedSource:
         if not url.lower().startswith(("http://", "https://")):

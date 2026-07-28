@@ -109,6 +109,54 @@ search:
 #     enabled: false
 #     max_bytes: 25000000
 #     max_pages: 40
+#
+#   # Env var naming the address Crossref and Unpaywall want for their "polite pool".
+#   # Unset is a WARNING, never fatal: requests then go to the anonymous pool, which is
+#   # slower and throttled harder — degraded service, not a broken config. Contrast a
+#   # missing search credential, which is fatal, because without it the feature cannot
+#   # function at all. Unpaywall is the one provider that refuses anonymous requests
+#   # outright; it is skipped with its own warning rather than failing the tier.
+#   # The value lives in the environment, never in this file (compose.yaml passes it in).
+#   contact_email_env: RA_CONTACT_EMAIL
+#
+#   # D39. Ask a bibliographic registry whether the cited source EXISTS, when the cited
+#   # URL would not hand over its body. This is the cheapest and largest win available:
+#   # most good academic and newspaper citations fail the direct fetch precisely because
+#   # they are paywalled, and until a registry confirms the DOI a real paywalled paper
+#   # looks exactly like a citation nobody ever published.
+#   #
+#   # What it must NOT do is sharpen `misrepresented_source`. An abstract is a summary
+#   # the authors wrote; a claim's absence from one is not evidence the paper does not
+#   # make the claim, and the prompt says so wherever it renders metadata.
+#   #
+#   # It is also the only tier that can RAISE a defect. An identifier every authoritative
+#   # registry denies is NOT_FOUND, which D38 mints as a blocking `fabricated_citation` —
+#   # so the escalation is gated twice over (see resolve/__init__.py) and the tier is off
+#   # by default like every other retrieval affordance.
+#   identifiers:
+#     enabled: false
+#     # Every listed provider that covers the identifier is asked: the second answer is
+#     # what makes a denial worth acting on.
+#     providers: [crossref, openalex]
+#     timeout_seconds: 10.0
+#     # Whole-run call cap. Twelve sources re-verified every round would otherwise scale
+#     # with the round count.
+#     max_calls_per_run: 60
+#
+#   # D39. Find a free copy of the body and read it exactly once. A separate switch from
+#   # the tier above because it is a materially different act: that one asks a registry a
+#   # question, this one fetches a DIFFERENT document and shows its text to a critic.
+#   # Such a body is marked `body_source_url` all the way through, the critic is told it
+#   # is reading a mirror (commonly a preprint), and it can never settle a dispute about
+#   # the cited URL — a quote present in arXiv v1 and absent from the version of record
+#   # would otherwise uphold a dispute about a page nobody read.
+#   open_access:
+#     enabled: false
+#     # Tried in order, stopping at the first that names a copy. `unpaywall` needs the
+#     # contact email above; without one it is skipped.
+#     providers: [openalex, unpaywall, europe_pmc, arxiv]
+#     timeout_seconds: 10.0
+#     max_calls_per_run: 40
 
 # Writer dispute channel (D25, docs/decisions.md). Lets a writer challenge a fix-task
 # it believes is factually wrong instead of falsifying the report to satisfy it —

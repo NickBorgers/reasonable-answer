@@ -191,6 +191,53 @@ class PdfSourceConfig(BaseModel):
     max_pages: int = Field(default=40, ge=1, le=2_000)
 
 
+class IdentifierTierConfig(BaseModel):
+    """Tier 0 (D39): ask a bibliographic registry whether the cited source exists.
+
+    The cheapest and largest win in the ladder. A paywalled journal refuses the fetch and
+    is then indistinguishable from a citation nobody published — until a registry
+    confirms the DOI, at which point it is a real source whose body simply could not be
+    read. That answer costs one keyless GET and never needs the paywalled body.
+
+    It is also the only tier that can *raise* a defect: an identifier every authoritative
+    registry denies is `NOT_FOUND`, which D38 mints as a blocking `fabricated_citation`.
+    Hence the budget and the deliberate conservatism in `resolve/`.
+    """
+
+    model_config = ConfigDict(extra="forbid")
+
+    enabled: bool = False
+    #: Order matters only for which record is kept when two registries both answer; every
+    #: listed provider that covers the identifier is asked, because the second answer is
+    #: what makes a denial worth acting on.
+    providers: list[str] = Field(default_factory=lambda: ["crossref", "openalex"])
+    timeout_seconds: float = Field(default=10.0, gt=0, le=60)
+    #: Whole-run call cap, enforced by `search.QueryBudget`. A twelve-source report
+    #: re-verified every round would otherwise scale with the round count.
+    max_calls_per_run: int = Field(default=60, ge=1, le=2000)
+
+
+class OpenAccessTierConfig(BaseModel):
+    """Tier 1 (D39): find a free copy of the body, and read it exactly once.
+
+    Separate switch from tier 0 because it is a materially different act: tier 0 asks a
+    registry a question, tier 1 fetches a *different document* and hands its text to a
+    critic. The result is marked with `body_source_url` all the way through, and it can
+    never settle a dispute about the cited URL — a preprint is not the version of record.
+    """
+
+    model_config = ConfigDict(extra="forbid")
+
+    enabled: bool = False
+    #: Tried in order, stopping at the first that names a copy: they answer the same
+    #: question and every extra call costs budget for an answer already in hand.
+    providers: list[str] = Field(
+        default_factory=lambda: ["openalex", "unpaywall", "europe_pmc", "arxiv"]
+    )
+    timeout_seconds: float = Field(default=10.0, gt=0, le=60)
+    max_calls_per_run: int = Field(default=40, ge=1, le=2000)
+
+
 class SourcesConfig(BaseModel):
     """Tiers tried when a plain fetch does not yield the cited document.
 
@@ -206,6 +253,23 @@ class SourcesConfig(BaseModel):
 
     enabled: bool = False
     pdf: PdfSourceConfig = Field(default_factory=PdfSourceConfig)
+    identifiers: IdentifierTierConfig = Field(default_factory=IdentifierTierConfig)
+    open_access: OpenAccessTierConfig = Field(default_factory=OpenAccessTierConfig)
+    #: Env var naming the address Crossref and Unpaywall want for their polite pool. Its
+    #: absence is a WARNING, never fatal, and the difference from a missing credential is
+    #: the point: an anonymous request still works, it is only served from a busier
+    #: rate-limit pool. Compare `SearchConfig.api_key_env`, where absence means the
+    #: feature cannot function and startup fails closed. Unpaywall is the one exception
+    #: — it refuses anonymous requests outright — and is skipped with its own warning
+    #: rather than dragging the whole tier down.
+    contact_email_env: str = "RA_CONTACT_EMAIL"
+
+    @property
+    def contact_email(self) -> str:
+        """Resolved at read time, like `ProxyConfig.api_key`: the value belongs to the
+        environment, never to the roster file, so a checked-in config cannot carry
+        somebody's address into a container image."""
+        return os.environ.get(self.contact_email_env, "").strip()
 
 
 class SeedConfig(BaseModel):

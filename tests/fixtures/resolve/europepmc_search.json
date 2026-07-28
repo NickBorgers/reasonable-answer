@@ -1,0 +1,45 @@
+{
+  "version": "6.9",
+  "hitCount": 1,
+  "request": {
+    "queryString": "EXT_ID:34265844 AND SRC:\"MED\"",
+    "resultType": "core",
+    "pageSize": 1
+  },
+  "resultList": {
+    "result": [
+      {
+        "id": "34265844",
+        "source": "MED",
+        "pmid": "34265844",
+        "pmcid": "PMC8371605",
+        "doi": "10.1038/s41586-021-03819-2",
+        "title": "Highly accurate protein structure prediction with AlphaFold.",
+        "authorString": "Jumper J, Evans R, Pritzel A.",
+        "journalTitle": "Nature",
+        "pubYear": "2021",
+        "abstractText": "Proteins are essential to life, and understanding their structure can facilitate a mechanistic understanding of their function.",
+        "isOpenAccess": "Y",
+        "inEPMC": "Y",
+        "fullTextUrlList": {
+          "fullTextUrl": [
+            {
+              "availability": "Open access",
+              "availabilityCode": "OA",
+              "documentStyle": "html",
+              "site": "Europe_PMC",
+              "url": "https://europepmc.org/articles/PMC8371605"
+            },
+            {
+              "availability": "Open access",
+              "availabilityCode": "OA",
+              "documentStyle": "pdf",
+              "site": "Europe_PMC",
+              "url": "https://europepmc.org/articles/PMC8371605?pdf=render"
+            }
+          ]
+        }
+      }
+    ]
+  }
+}

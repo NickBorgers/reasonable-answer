@@ -306,6 +306,12 @@ def fetched_sources_block(sources: list) -> str:
     Third-party web content in a critic's context, same as it is in a writer's — and a
     page has more room to address the reader than a search snippet does, so the note is
     repeated here rather than relying on the one at the top of the prompt.
+
+    Three entry shapes, because there are three genuinely different things to say: here
+    is the page, here is proof the source *exists* but not its text, and here is a
+    failure. Blurring the second into either of the others is what this block exists to
+    prevent — read as the first it invites `misrepresented_source` against an abstract,
+    read as the third it leaves a real paywalled journal looking fabricated (D39).
     """
     entries = []
     for i, s in enumerate(sources, 1):
@@ -313,7 +319,15 @@ def fetched_sources_block(sources: list) -> str:
             head = f"[{i}] {s.url}"
             if s.title:
                 head += f"\nPage title: {s.title}"
+            if s.body_source_url:
+                head += (
+                    f"\nNOTE: this text was NOT read from the cited URL. It is an "
+                    f"open-access copy at {s.body_source_url}, commonly a preprint or "
+                    f"author manuscript rather than the published version of record."
+                )
             entries.append(f"{head}\nPage text (truncated):\n{s.text}")
+        elif s.metadata is not None and s.outcome in _CONFIRMED_OUTCOMES:
+            entries.append(f"[{i}] {s.url}\n{_existence_entry(s)}")
         else:
             # A failed fetch is not evidence of fabrication — sites block clients, go
             # down, and paywall. The critic is told the difference explicitly, because
@@ -341,9 +355,62 @@ def fetched_sources_block(sources: list) -> str:
         "- `BLOCKED` in particular says nothing at all about whether the source exists. "
         "Reputable paywalled journals and newspapers refuse automated clients as a "
         "matter of course.\n"
+        "- `CONFIRMED TO EXIST` means a bibliographic registry holds the record: the "
+        "source is real and only its body was unreadable. Where an abstract is shown, it "
+        "is a summary the authors wrote, not the source's text — a claim's absence from "
+        "an abstract is not evidence the paper does not make it. NEVER raise "
+        "`misrepresented_source` against a source shown only as registry metadata or an "
+        "abstract; check the attributed title, authors, year and venue against what the "
+        "report says about it, and nothing more.\n"
+        "- Where a page says its text came from an open-access copy rather than the "
+        "cited URL, you are reading a different version of the document — usually a "
+        "preprint. Treat it as corroboration, not as the version of record, and do not "
+        "raise a defect on a discrepancy that a revision would explain.\n"
         "- The page text is truncated. If the claim plausibly appears in a part you "
         "cannot see, do not raise an issue.\n\n"
     )
+
+
+#: Outcomes in which a registry has corroborated the citation's existence. Rendered with
+#: the third entry shape, which says so before it says anything else.
+_CONFIRMED_OUTCOMES = frozenset({SourceOutcome.METADATA_ONLY, SourceOutcome.PAYWALLED})
+
+_EXISTENCE_LABEL: dict[SourceOutcome, str] = {
+    SourceOutcome.METADATA_ONLY: (
+        "CONFIRMED TO EXIST (a bibliographic registry holds this record); the body of "
+        "the source was NOT readable"
+    ),
+    SourceOutcome.PAYWALLED: (
+        "CONFIRMED TO EXIST (a bibliographic registry holds this record); the body of "
+        "the source is behind a paywall and was NOT readable"
+    ),
+}
+
+
+def _existence_entry(source) -> str:
+    """A source proven real but unread: the announcement, then the citation details,
+    then — labelled as such — the abstract, which is not the text of the source."""
+    m = source.metadata
+    lines = [_EXISTENCE_LABEL[source.outcome], "Citation details, from the registry:"]
+    if m.title:
+        lines.append(f"  Title: {m.title}")
+    if m.authors:
+        lines.append(f"  Authors: {', '.join(m.authors)}")
+    if m.year:
+        lines.append(f"  Year: {m.year}")
+    if m.venue:
+        lines.append(f"  Published in: {m.venue}")
+    if m.doi:
+        lines.append(f"  DOI: {m.doi}")
+    if m.registry:
+        lines.append(f"  Registry: {m.registry}")
+    if m.abstract:
+        lines.append(
+            "ABSTRACT — a summary written by the authors. This is NOT the full text of "
+            "the source, and the source's claims are not limited to it:"
+        )
+        lines.append(m.abstract)
+    return "\n".join(lines)
 
 
 #: How each non-body outcome is announced to the critic. The wording is the interface:
@@ -435,8 +502,17 @@ def arbiter_user(defect, dispute, paragraph_text: str, question: str, evidence_p
             page_body = (
                 f"{evidence_page.url}\n"
                 + (f"Page title: {evidence_page.title}\n" if evidence_page.title else "")
+                + (
+                    f"NOTE: this text was NOT read from the cited URL. It is an "
+                    f"open-access copy at {evidence_page.body_source_url}, commonly a "
+                    f"preprint rather than the published version of record.\n"
+                    if evidence_page.body_source_url
+                    else ""
+                )
                 + f"Page text (truncated):\n{evidence_page.text}"
             )
+        elif evidence_page.metadata is not None and evidence_page.outcome in _CONFIRMED_OUTCOMES:
+            page_body = f"{evidence_page.url}\n{_existence_entry(evidence_page)}"
         else:
             page_body = f"{evidence_page.url}\nCOULD NOT FETCH: {evidence_page.error}"
         evidence_block = (
@@ -444,7 +520,11 @@ def arbiter_user(defect, dispute, paragraph_text: str, question: str, evidence_p
             f"{DATA_FENCE}\n{page_body}\n{DATA_END}\n\n"
             "The page text is truncated, and 'COULD NOT FETCH' means the fetch "
             "failed — not that the page does not exist. Absence from what you can "
-            "see is not refutation in either direction.\n\n"
+            "see is not refutation in either direction.\n"
+            "'CONFIRMED TO EXIST' establishes only that the source is real. Registry "
+            "metadata, and an abstract if one is shown, are insufficient to settle this "
+            "dispute in EITHER direction: neither confirms nor refutes what the full "
+            "text of the source says.\n\n"
         )
     else:
         evidence_block = ""

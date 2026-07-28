@@ -26,7 +26,7 @@ from langgraph.graph import END, START, StateGraph
 from . import audition as audition_mod
 from . import critique as critique_mod
 from . import dispute as dispute_mod
-from . import fetch, prompts, roles, search, triage
+from . import fetch, prompts, resolve, roles, search, triage
 from . import report as report_mod
 from .config import Config, ConfigError, validate_roster_health
 from .controller import acceptance_state, decide, detect_cycle
@@ -158,6 +158,7 @@ def build_runtime(
 
     searcher = _build_searcher(config, client)
     read_pdfs = _pdf_reading_enabled(config)
+    resolver = _build_resolver(config, warnings)
     fetcher = (
         fetch.SourceFetcher(
             timeout=config.search.fetch_timeout_seconds,
@@ -166,6 +167,7 @@ def build_runtime(
             read_pdfs=read_pdfs,
             pdf_max_bytes=config.sources.pdf.max_bytes,
             pdf_max_pages=config.sources.pdf.max_pages,
+            resolver=resolver,
         )
         if config.search.verify_sources
         else None
@@ -183,6 +185,7 @@ def build_runtime(
         search_query_budget=config.search.query_budget if searcher else 0,
         verify_sources=fetcher is not None,
         read_pdfs=read_pdfs,
+        resolve_tiers=sorted(_enabled_tiers(config)),
         audition_enforced=config.audition.enforce,
     )
     for warning in warnings:
@@ -209,6 +212,80 @@ def _pdf_reading_enabled(config: Config) -> bool:
             "(uv sync --extra ingest) or set sources.pdf.enabled: false."
         ) from exc
     return True
+
+
+def _enabled_tiers(config: Config) -> set[str]:
+    """The resolver tiers actually switched on, master switch included."""
+    if not config.sources.enabled:
+        return set()
+    tiers = set()
+    if config.sources.identifiers.enabled:
+        tiers.add(fetch.ResolutionTier.IDENTIFIER.value)
+    if config.sources.open_access.enabled:
+        tiers.add(fetch.ResolutionTier.OPEN_ACCESS.value)
+    return tiers
+
+
+def _build_resolver(config: Config, warnings: list[str]):
+    """Construct the resolver ladder (D39), or return None when no tier is on.
+
+    A sibling of `_build_searcher` and `_pdf_reading_enabled` for the same reason both of
+    those live here: network clients are assembled at startup and injected, so the graph
+    itself performs no I/O and the test suite stays offline (D24).
+
+    Two failure modes, deliberately graded differently. An unrecognised provider name is
+    **fatal**: it silently disables a tier the operator believes they enabled, which is
+    the same class of failure `_build_searcher` refuses to start with. A missing contact
+    email is a **warning**: the polite pool is a courtesy, and demotion to the anonymous
+    pool is degraded service rather than a broken configuration.
+    """
+    tiers = _enabled_tiers(config)
+    if not tiers:
+        return None
+    if not config.search.verify_sources:
+        warnings.append(
+            "sources: resolver tiers are enabled but search.verify_sources is off, so "
+            "nothing fetches and no tier will ever run"
+        )
+
+    sources = config.sources
+    contact_email = sources.contact_email
+    if not contact_email:
+        warnings.append(
+            f"sources: ${sources.contact_email_env} is unset, so registry requests go to "
+            f"the anonymous rate-limit pool instead of Crossref/Unpaywall's polite pool "
+            f"— expect slower answers and more throttling under load"
+        )
+
+    identifiers_on = fetch.ResolutionTier.IDENTIFIER.value in tiers
+    open_access_on = fetch.ResolutionTier.OPEN_ACCESS.value in tiers
+    if open_access_on and not config.sources.pdf.enabled:
+        # Most free copies are PDFs (arXiv's only form is one), and without PDF reading
+        # each of those mirrors fetches, comes back as an unreadable content type, and
+        # falls through to metadata. The tier still helps — it just helps far less than
+        # its call budget suggests.
+        warnings.append(
+            "sources: the open-access tier is on but sources.pdf.enabled is off, so most "
+            "free copies (arXiv has no other form) will fetch and then be unreadable"
+        )
+    try:
+        resolver, resolver_warnings = resolve.build(
+            # A disabled tier is handed no provider names, so nothing is constructed for
+            # it at all — enabling one tier can never turn the other on.
+            identifier_providers=sources.identifiers.providers if identifiers_on else [],
+            identifier_timeout=sources.identifiers.timeout_seconds,
+            identifier_budget=sources.identifiers.max_calls_per_run,
+            open_access_providers=sources.open_access.providers if open_access_on else [],
+            open_access_timeout=sources.open_access.timeout_seconds,
+            open_access_budget=sources.open_access.max_calls_per_run,
+            contact_email=contact_email,
+        )
+    except resolve.UnknownProvider as exc:
+        raise ConfigError(f"fail closed: {exc}") from exc
+
+    warnings.extend(resolver_warnings)
+    log.info("source resolver enabled: tiers %s", sorted(tiers))
+    return resolver
 
 
 def _build_searcher(config: Config, client: LLMClient) -> search.BraveSearch | None:
@@ -653,6 +730,22 @@ def _failure_reasons(failed: list) -> dict[str, int]:
     return counts
 
 
+def _resolution_tiers(sources: list) -> dict[str, int]:
+    """Tally which rung of the ladder produced each source — **all** of them, not just
+    the failures (D39).
+
+    A tier that never fires costs calls and buys nothing, and the failure tally cannot
+    show that: a source the open-access tier rescued is a *success* and leaves no trace
+    there. `{"direct": 5, "open_access": 2, "identifier": 4}` is what tells an operator
+    whether a tier is earning its keep, and is closed-vocabulary throughout (RA-016).
+    """
+    counts: dict[str, int] = {}
+    for source in sources:
+        tier = source.tier.value
+        counts[tier] = counts.get(tier, 0) + 1
+    return counts
+
+
 def _critique_one(
     rt: Runtime,
     lens: Lens,
@@ -715,6 +808,7 @@ def _critique_one(
                 fetched=len(sources),
                 failed=len(failed),
                 failure_reasons=reasons,
+                tiers=_resolution_tiers(sources),
             )
             if failed:
                 log.warning(

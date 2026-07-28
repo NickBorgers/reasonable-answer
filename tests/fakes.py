@@ -6,6 +6,7 @@ role could *possibly* have seen.
 
 from __future__ import annotations
 
+import json
 from collections.abc import Callable
 from dataclasses import dataclass, field
 from io import BytesIO
@@ -203,6 +204,48 @@ def http_stub(body: bytes | str, *, ctype: str = "text/html", status: int = 200)
             return False
 
     return _Resp()
+
+
+def json_stub(payload, *, status: int = 200):
+    """`http_stub` for a registry response. Same opener seam, JSON content type."""
+    return http_stub(json.dumps(payload), ctype="application/json", status=status)
+
+
+class http_sequence:  # noqa: N801 - a factory used exactly like `http_stub`
+    """Successive responses for successive opens, and a record of what was asked.
+
+    The resolver ladder turns one logical fetch into several HTTP calls — the cited URL,
+    then a registry, then another registry, then an open-access mirror — so the thing
+    worth asserting is the *sequence*: which hosts were consulted, in what order, and
+    that a tier which should have been skipped was never reached. A single-response stub
+    cannot express any of that.
+
+    Items are either responses (from `http_stub`/`json_stub`, as zero-argument callables
+    or plain values) or exceptions, which are raised in place — that is how a 404 from a
+    registry is expressed, since `http_get` reads it from `urllib.error.HTTPError`.
+    """
+
+    def __init__(self, *responses) -> None:
+        self._responses = list(responses)
+        self.urls: list[str] = []
+
+    def __call__(self, *args, **kwargs):
+        # Assigned onto `OpenerDirector.open`, this instance is not a descriptor, so it
+        # receives no `self` — unlike the lambdas the older fetch tests patch in, which
+        # do. Picking the request out of the positional arguments works either way.
+        request = next(a for a in args if isinstance(a, str) or hasattr(a, "full_url"))
+        url = request if isinstance(request, str) else request.full_url
+        self.urls.append(url)
+        if not self._responses:
+            raise AssertionError(f"unexpected request {len(self.urls)} to {url}")
+        item = self._responses.pop(0)
+        if isinstance(item, BaseException):
+            raise item
+        return item() if callable(item) else item
+
+    @property
+    def exhausted(self) -> bool:
+        return not self._responses
 
 
 def minimal_pdf(*lines: str) -> bytes:

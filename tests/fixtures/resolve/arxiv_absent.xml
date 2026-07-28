@@ -1,0 +1,16 @@
+<?xml version="1.0" encoding="UTF-8"?>
+<feed xmlns="http://www.w3.org/2005/Atom">
+  <title type="html">ArXiv Query: search_query=&amp;id_list=9999.99999</title>
+  <id>http://arxiv.org/api/cHxKY7Zt2u7lTfSlaW8gT5vJ0dM</id>
+  <updated>2024-01-01T00:00:00-05:00</updated>
+  <opensearch:totalResults xmlns:opensearch="http://a9.com/-/spec/opensearch/1.1/">1</opensearch:totalResults>
+  <opensearch:startIndex xmlns:opensearch="http://a9.com/-/spec/opensearch/1.1/">0</opensearch:startIndex>
+  <opensearch:itemsPerPage xmlns:opensearch="http://a9.com/-/spec/opensearch/1.1/">1</opensearch:itemsPerPage>
+  <entry>
+    <id>http://arxiv.org/api/errors#incorrect_id_format_for_9999.99999</id>
+    <title>Error</title>
+    <summary>incorrect id format for 9999.99999</summary>
+    <updated>2024-01-01T00:00:00-05:00</updated>
+    <link href="http://arxiv.org/api/errors#incorrect_id_format_for_9999.99999" rel="alternate" type="text/html"/>
+  </entry>
+</feed>
