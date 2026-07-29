@@ -245,6 +245,18 @@ def render_index(
         if config.refine.enabled
         else ""
     )
+    # "Fetched and checked against what the report says they say" is the D18 verified-sourcing
+    # posture (`search.verify_sources: true`): the cited pages are fetched and handed to the
+    # evidence lens. The shipped roster enables retrieval only and keeps verification off (D22),
+    # and retrieval alone does not establish that a page supports the claim attached to it
+    # (docs/convergence.md). So this claim is config-derived, unlike the static header tagline:
+    # here `render_index` has the `Config` the tagline's element does not.
+    sources_note = (
+        "Cited pages are fetched and checked against what the report says they say, which is "
+        "not a check that they are right."
+        if config.search.verify_sources
+        else "Whether a cited page actually supports the claim attached to it is not checked."
+    )
     body = f"""
 <section class="panel">
   <h1>Ask a question</h1>
@@ -253,9 +265,9 @@ def render_index(
   That split is the point: spotting a specific flaw is what an LLM is sharp at, and grading its
   own work is what it is worst at. An answer ships when no eligible reviewer can still find a
   material defect &mdash; never because one declared it good &mdash; and plain code, not an LLM,
-  makes that call; a run that hits the round cap ships its best draft flagged for human review
-  instead. Cited pages are fetched and checked against what the report says they say, which is
-  not a check that they are right. Expect this to take <strong>10&ndash;25 minutes</strong>.</p>
+  makes that call; a run that hits the round cap ships its best-scoring draft with the defects it
+  could not resolve recorded against it instead. {sources_note} Expect this to take
+  <strong>10&ndash;25 minutes</strong>.</p>
   <form method="post" action="{base_path}/runs">
     <label for="question">Question</label>
     <textarea id="question" name="question" rows="3" required maxlength="{config.max_question_chars}"
