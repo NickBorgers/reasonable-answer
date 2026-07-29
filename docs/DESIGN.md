@@ -185,6 +185,9 @@ and the docs reviewer blocks on the first.
   schema, the ordered stop-decision (guaranteed to terminate), and terminal statuses.
 - **[authentication.md](./authentication.md)** — who the web interface believes you are, what
   a run's owner does and does not gate, and the Cloudflare Access setup behind it.
+- **[deployment-profile.md](./deployment-profile.md)** — how the production instance is actually
+  configured, as distinct from what the repository ships: the edge that makes header trust safe,
+  the outbound credentials, and the source-verification tiers that run there but ship off.
 - **[decisions.md](./decisions.md)** — design decisions, the Codex review, and how each of the
   20 findings was resolved.
 - **[question-refinement.md](./question-refinement.md)** — the edge-side, ambient
