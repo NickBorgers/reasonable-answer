@@ -102,7 +102,15 @@ DOCS_URL = "https://nickborgers.github.io/reasonable-answer/"
 #: of them, on every page, including runs whose real label was stronger. A global element
 #: cannot state a per-run property. The accurate statement is the `Review label` row of the
 #: review record, which is derived from that run's `final.json`.
-TAGLINE = "models take turns writing and critiquing; none reviews its own work"
+#:
+#: "research" is a claim about the deployment rather than about a run, and it is true only
+#: where `search.enabled` is on — the code default is off (`config.py`) and this deployment
+#: opts in (`config/roster.yaml`). Deliberately static rather than config-derived: a build
+#: that turns retrieval off should edit this line, and `render_layout` takes no `Config`.
+#: "drafts" is load-bearing and not a synonym for "each other": critiques reach the next
+#: writer as depersonalized fix-tasks, and LLMs never argue in a shared transcript — the
+#: line must not suggest a debate the design exists to prevent (QP6).
+TAGLINE = "LLMs research and write, then critique each other&rsquo;s drafts &mdash; never their own"
 
 
 # --------------------------------------------------------------------- layout
@@ -240,10 +248,14 @@ def render_index(
     body = f"""
 <section class="panel">
   <h1>Ask a question</h1>
-  <p class="lede">A roster of models takes turns writing and critiquing an answer. It ships when
-  no eligible reviewer can still find a material defect &mdash; not because any model declared it
-  good &mdash; or when the round cap stops it. The decision to stop belongs to plain code, not to
-  a model. Expect this to take <strong>10&ndash;25 minutes</strong>.</p>
+  <p class="lede">A roster of LLMs from different families researches, writes and critiques
+  &mdash; none reviewing its own draft, each critic in a fresh context with one narrow question.
+  That split is the point: spotting a specific flaw is what an LLM is sharp at, and grading its
+  own work is what it is worst at. An answer ships when no eligible reviewer can still find a
+  material defect &mdash; never because one declared it good &mdash; and plain code, not an LLM,
+  makes that call; a run that hits the round cap ships its best draft flagged for human review
+  instead. Cited pages are fetched and checked against what the report says they say, which is
+  not a check that they are right. Expect this to take <strong>10&ndash;25 minutes</strong>.</p>
   <form method="post" action="{base_path}/runs">
     <label for="question">Question</label>
     <textarea id="question" name="question" rows="3" required maxlength="{config.max_question_chars}"
@@ -268,9 +280,9 @@ def render_index(
 
 <section class="panel roster">
   <h2>Roster</h2>
-  <p class="lede">A report is never critiqued &mdash; on any lens &mdash; by the model that wrote it,
-  and full acceptance needs two <em>different</em> non-author models to clear the same final text.
-  One model's approval is an opinion; two finding nothing is evidence.</p>
+  <p class="lede">A report is never critiqued &mdash; on any lens &mdash; by the LLM that wrote it,
+  and full acceptance needs two <em>different</em> non-author LLMs to clear the same final text.
+  One LLM's approval is an opinion; two finding nothing is evidence.</p>
   <div class="roster-grid">
     <div><h3>writers</h3><ul>{_model_list(config.roster.writers)}</ul></div>
     {"".join(f"<div><h3>{esc(lens)}</h3><ul>{_model_list(pool)}</ul></div>"
