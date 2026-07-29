@@ -63,6 +63,10 @@ def test_default_roster_boots_without_a_proxy_or_a_credential(default_config: Co
     # via D38, which is not something an unattended default should be able to do.
     assert default_config.sources.identifiers.enabled is False
     assert default_config.sources.open_access.enabled is False
+    # The paid tiers (D40) additionally need a credential the smoke test withholds, and
+    # refuse to start without one — so "off" here is what keeps `make test` bootable.
+    assert default_config.sources.extraction.enabled is False
+    assert default_config.sources.delivery.enabled is False
     assert default_config.disputes.enabled is False
     # Auditioning itself needs no withholding — it only happens via `ra audition`. What
     # must stay off is the gate that reads its cache: `enforce` is warn-by-default (D20).
@@ -81,6 +85,11 @@ def test_the_deployment_roster_keeps_the_resolver_tiers_off(
     """
     assert deployment_config.sources.identifiers.enabled is False
     assert deployment_config.sources.open_access.enabled is False
+    assert deployment_config.sources.extraction.enabled is False
+    assert deployment_config.sources.delivery.enabled is False
+    # `core` is keyed, so a default list containing it would turn "enable open access"
+    # into "and also supply a CORE key or fail to boot".
+    assert "core" not in deployment_config.sources.open_access.providers
 
 
 def test_the_two_rosters_name_the_same_models(

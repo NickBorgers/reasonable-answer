@@ -13,10 +13,20 @@ need the paywalled body.** Two questions matter, and they are not equally expens
 2. *Does it say what the report claims?* Needs the body, and often there is no lawful,
    non-clever way to get one.
 
-So tier 0 always answers (1), and tier 1 tries for (2) only where a free copy genuinely
-exists. What this package will **not** do is listed in D39 and is not negotiable: no
+So tier 0 always answers (1); tier 1 tries for (2) where a free copy genuinely exists; and
+tier 2 (D40) pays a rendering service to read the cited URL when this process cannot —
+which buys JavaScript and bot walls, and buys nothing at all against a hard paywall.
+
+Ordered by cost rather than by likelihood. Extraction is the likelier fix for a news
+citation, and still runs last, because a registry answer is worth having even on a source
+whose body later arrives: it is what lets a critic check the *title* the report attributes
+rather than only its prose.
+
+What this package will **not** do is listed in D39 and D40 and is not negotiable: no
 browser-user-agent spoofing, no CAPTCHA solving, no archive.org paywall laundering, no
-cookie-jar credential replay. `fetch.py`'s "the wrong kind of clever" comment is doctrine.
+cookie-jar credential replay — and, for the rendering tier specifically, no stealth mode,
+which is that same impersonation bought by the page. `fetch.py`'s "the wrong kind of
+clever" comment is doctrine.
 
 **Three caches, three key spaces, one lock.**
 
@@ -51,8 +61,9 @@ from ..fetch import (
 from ..search import QueryBudget
 from . import identifiers
 from .base import MetadataProvider, OpenAccessProvider, ProviderUnavailable
+from .extraction import EXTRACTION_PROVIDERS
 from .identifiers import Identifier
-from .scholarly import PROVIDERS, ContactEmailRequired, UnknownProvider
+from .scholarly import PROVIDERS, ApiKeyRequired, ContactEmailRequired, UnknownProvider
 
 log = logging.getLogger(__name__)
 
@@ -98,17 +109,39 @@ class SourceResolver:
         open_access_providers: list[OpenAccessProvider] | None = None,
         metadata_budget: QueryBudget | None = None,
         open_access_budget: QueryBudget | None = None,
+        extractor=None,
+        extraction_budget: QueryBudget | None = None,
+        max_chars: int = 6_000,
     ) -> None:
         self._metadata_providers = list(metadata_providers or [])
         self._open_access_providers = list(open_access_providers or [])
         self._metadata_budget = metadata_budget or QueryBudget(0)
         self._open_access_budget = open_access_budget or QueryBudget(0)
+        self._extractor = extractor
+        self._extraction_budget = extraction_budget or QueryBudget(0)
+        #: The critic-facing character cap. Every other rung gets this applied by
+        #: `SourceFetcher`, which reads the body; extraction receives markdown straight
+        #: from a provider, so it is the one rung that must apply the cap itself.
+        self._max_chars = max_chars
         self._known: dict[str, _Known] = {}
         self._oa_urls: dict[str, tuple[str, Provider] | None] = {}
         self._lock = threading.Lock()
 
     def resolve(self, url: str, direct: FetchedSource, fetch_body) -> FetchedSource:
-        """The ladder, given a direct fetch that yielded no body.
+        """The whole ladder: the free rungs, then the paid one if they came up short.
+
+        Ordered by cost, not by likelihood. The free tiers run first even though
+        extraction is the likelier fix for a news citation, because a registry answer is
+        worth having on a source whose body later arrives anyway — it is what lets a
+        critic check the *title* the report attributes, not just the prose.
+        """
+        resolved = self._free_ladder(url, direct, fetch_body)
+        if resolved.ok or self._extractor is None:
+            return resolved
+        return self._extract(url, resolved)
+
+    def _free_ladder(self, url: str, direct: FetchedSource, fetch_body) -> FetchedSource:
+        """Registries and open-access copies, given a direct fetch that yielded no body.
 
         `fetch_body` re-enters the direct/PDF path exactly once for an open-access URL;
         `SourceFetcher` binds the depth, so nothing here can recurse.
@@ -185,6 +218,51 @@ class SourceResolver:
             )
 
         return direct
+
+    # ------------------------------------------------------------------ tier 2
+
+    def _extract(self, url: str, resolved: FetchedSource) -> FetchedSource:
+        """Ask the rendering provider for the cited page, keeping what tier 0 learned.
+
+        Tried on every outcome the free ladder could not resolve except `NOT_FOUND`:
+        there is nothing for a renderer to render at a URL the server says is not there,
+        and spending a paid call to confirm that would also risk a success overwriting
+        D38's mechanical finding on the strength of a soft-404 landing page.
+        """
+        if resolved.outcome is SourceOutcome.NOT_FOUND:
+            return resolved
+        if not self._extraction_budget.take():
+            # Never over NOT_FOUND, which the guard above already returned — the same
+            # rule the free tiers follow, and for the same reason: turning a tier on must
+            # not weaken a defect the pipeline raises without it.
+            return replace(
+                resolved,
+                error=f"{resolved.error}; the resolver was out of extraction calls",
+                outcome=SourceOutcome.BUDGET_EXHAUSTED,
+            )
+        try:
+            markdown = self._extractor.extract(url)
+        except ProviderUnavailable as exc:
+            log.info(
+                "resolver: %s could not answer (%s)", self._extractor.name.value, exc
+            )
+            return resolved
+        if not markdown:
+            return resolved
+
+        return FetchedSource(
+            url=url,
+            text=" ".join(markdown.split())[: self._max_chars],
+            status=resolved.status,
+            outcome=SourceOutcome.FULL_TEXT,
+            # No `body_source_url`. This *is* the cited page, read by a client that can
+            # run its JavaScript — not a copy from somewhere else. So unlike an
+            # open-access mirror it may settle a dispute (D39's guard in `dispute.py`
+            # keys off exactly that field), and saying so here is the whole distinction.
+            metadata=resolved.metadata,
+            tier=ResolutionTier.EXTRACTION,
+            provider=self._extractor.name,
+        )
 
     # ------------------------------------------------------------------ tier 0
 
@@ -306,6 +384,12 @@ def build(
     open_access_timeout: float,
     open_access_budget: int,
     contact_email: str = "",
+    core_api_key: str = "",
+    extraction_provider: str = "",
+    extraction_api_key: str = "",
+    extraction_timeout: float = 45.0,
+    extraction_budget: int = 0,
+    max_chars: int = 6_000,
 ) -> tuple[SourceResolver, list[str]]:
     """Construct the resolver and whatever warnings its construction earned.
 
@@ -321,18 +405,20 @@ def build(
     open_access: list[OpenAccessProvider] = []
 
     for name in identifier_providers:
-        built = _construct(name, identifier_timeout, contact_email, warnings)
+        built = _construct(name, identifier_timeout, contact_email, warnings, core_api_key)
         if built is not None and hasattr(built, "metadata"):
             metadata_providers.append(built)
         elif built is not None:
             raise UnknownProvider(f"'{name}' answers open-access questions, not existence")
 
     for name in open_access_providers:
-        built = _construct(name, open_access_timeout, contact_email, warnings)
+        built = _construct(name, open_access_timeout, contact_email, warnings, core_api_key)
         if built is not None and hasattr(built, "open_access_url"):
             open_access.append(built)
         elif built is not None:
             raise UnknownProvider(f"'{name}' answers existence questions, not open access")
+
+    extractor = _construct_extractor(extraction_provider, extraction_api_key, extraction_timeout)
 
     return (
         SourceResolver(
@@ -340,20 +426,54 @@ def build(
             open_access_providers=open_access,
             metadata_budget=QueryBudget(identifier_budget),
             open_access_budget=QueryBudget(open_access_budget),
+            extractor=extractor,
+            extraction_budget=QueryBudget(extraction_budget) if extractor else None,
+            max_chars=max_chars,
         ),
         warnings,
     )
 
 
-def _construct(name: str, timeout: float, contact_email: str, warnings: list[str]):
+def _construct_extractor(name: str, api_key: str, timeout: float):
+    """The rendering provider, or None when the tier is off.
+
+    No default provider. An enabled tier with no name is refused by the caller before it
+    gets here, because falling back to whichever entry happens to be first in the
+    registry would send a paid call to a vendor nobody chose.
+    """
+    if not name:
+        return None
+    factory = EXTRACTION_PROVIDERS.get(name)
+    if factory is None:
+        raise UnknownProvider(
+            f"unknown extraction provider '{name}'; known providers are "
+            f"{sorted(EXTRACTION_PROVIDERS)}"
+        )
+    return factory(api_key=api_key, timeout=timeout)
+
+
+def _construct(
+    name: str, timeout: float, contact_email: str, warnings: list[str], api_key: str = ""
+):
     factory = PROVIDERS.get(name)
     if factory is None:
         raise UnknownProvider(
             f"unknown source provider '{name}'; known providers are "
             f"{sorted(PROVIDERS)}"
         )
+    # A declared flag, not a `TypeError` probe on the constructor. Probing looked tidy
+    # and was wrong twice over: it cannot tell "this provider takes no key" from "this
+    # provider was called wrongly", and a retry inside the handler escapes the
+    # `ContactEmailRequired` arm below, since an `except` clause does not cover code
+    # running in another one.
+    extra = {"api_key": api_key} if getattr(factory, "NEEDS_API_KEY", False) else {}
     try:
-        return factory(timeout=timeout, contact_email=contact_email)
+        return factory(timeout=timeout, contact_email=contact_email, **extra)
+    except ApiKeyRequired:
+        # Fatal rather than skipped, unlike a missing contact email. A keyed provider
+        # without a key makes no successful call ever, so continuing would spend the
+        # tier's budget on 401s and report them as coverage.
+        raise
     except ContactEmailRequired:
         warnings.append(
             f"sources: provider '{name}' needs a contact email and is being skipped; "

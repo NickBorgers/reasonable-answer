@@ -15,10 +15,11 @@ provider name, the identifier *kind*, and an outcome class — never the identif
 the URL, and never an exception's `str()`, which several `urllib` errors build out of the
 request URL. `search.BraveSearch` keeps only the exception type for exactly this reason.
 
-`json_get` and `text_get` below are the only network calls in this package, and they go
-through `fetch.http_get` — the single egress point for the whole codebase. No module
-under `resolve/` imports `urllib.request`; `tests/test_resolve.py` enforces that
-mechanically, so a future contributor cannot open a second way out by accident.
+`json_get`, `text_get` and `json_post` below are the only network calls in this package,
+and they go through `fetch.http_get`/`fetch._request` — the single egress point for the
+whole codebase. No module under `resolve/` imports `urllib.request`;
+`tests/test_resolve.py` enforces that mechanically, so a future contributor cannot open a
+second way out by accident.
 """
 
 from __future__ import annotations
@@ -30,6 +31,7 @@ import json
 # definitive 404 from "the provider could not answer" is the whole point of importing it,
 # and that distinction is what stops a flaky registry reading as a fabricated citation.
 import urllib.error
+import urllib.parse
 from typing import Protocol
 
 from .. import fetch
@@ -126,6 +128,61 @@ def text_get(url: str, *, timeout: float, accept: str) -> str | None:
     return None if raw is None else raw.decode("utf-8", errors="replace")
 
 
+def json_post(
+    url: str,
+    *,
+    payload: dict,
+    api_key: str,
+    timeout: float,
+    max_bytes: int = MAX_RESPONSE_BYTES,
+) -> dict | None:
+    """A credentialled POST to a provider, through the same hardened opener (D40).
+
+    The paid tiers need what `json_get` cannot express: a request body and an
+    `Authorization` header. `fetch._request` is where that lives, so this stays inside
+    the single-egress-point claim rather than becoming the exception that hollows it out.
+
+    Two things are not configurable, both for the same reason. The host is taken from the
+    caller's own constant endpoint, and `_request` is given `allowed_hosts` naming only
+    that host with `max_redirects=0` — a request carrying an API key has no business
+    being redirectable, and `fetch._BoundedRedirects` strips the key on any redirect
+    anyway. Belt and braces, because a leaked key is not a recoverable mistake.
+    """
+    host = urllib.parse.urlsplit(url).hostname or ""
+    body = json.dumps(payload).encode("utf-8")
+    try:
+        response = fetch._request(
+            url,
+            method="POST",
+            data=body,
+            headers={
+                "Authorization": f"Bearer {api_key}",
+                "Content-Type": "application/json",
+                "Accept": "application/json",
+                "User-Agent": fetch.USER_AGENT,
+            },
+            timeout=timeout,
+            max_bytes=max_bytes,
+            max_redirects=0,
+            allowed_hosts=frozenset({host.lower()}),
+        )
+    except urllib.error.HTTPError as exc:
+        if exc.code in fetch.NOT_FOUND_STATUSES:
+            return None
+        raise ProviderUnavailable(f"HTTP {exc.code}") from exc
+    except Exception as exc:
+        raise ProviderUnavailable(type(exc).__name__) from exc
+    if response.truncated:
+        raise ProviderUnavailable(f"response exceeded {max_bytes} bytes")
+    try:
+        decoded = json.loads(response.body)
+    except (json.JSONDecodeError, UnicodeDecodeError) as exc:
+        raise ProviderUnavailable(f"malformed JSON: {type(exc).__name__}") from exc
+    if not isinstance(decoded, dict):
+        raise ProviderUnavailable(f"expected a JSON object, got {type(decoded).__name__}")
+    return decoded
+
+
 def _get(url: str, *, timeout: float, accept: str) -> bytes | None:
     try:
         response = fetch.http_get(
@@ -152,5 +209,6 @@ __all__ = [
     "OpenAccessProvider",
     "ProviderUnavailable",
     "json_get",
+    "json_post",
     "text_get",
 ]

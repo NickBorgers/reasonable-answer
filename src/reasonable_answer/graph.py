@@ -223,7 +223,26 @@ def _enabled_tiers(config: Config) -> set[str]:
         tiers.add(fetch.ResolutionTier.IDENTIFIER.value)
     if config.sources.open_access.enabled:
         tiers.add(fetch.ResolutionTier.OPEN_ACCESS.value)
+    if config.sources.extraction.enabled:
+        tiers.add(fetch.ResolutionTier.EXTRACTION.value)
     return tiers
+
+
+def _extraction_call_ceiling(config: Config) -> int:
+    """The configured cap, or the structural one when none is set (D40).
+
+    `max_sources * hard_cap` is the most distinct URLs a run could ever cite — every
+    citation replaced in every round. Derived rather than written down so that raising
+    `budgets.hard_cap` cannot silently start starving the tier at the old number.
+
+    This bounds a *bug*, not a bill. `SourceFetcher` caches per URL for the whole run, so
+    three critics re-verifying one '## Sources' list across eight rounds cost one call per
+    URL, not twenty-four; what this catches is a fetch loop that ignores that cache.
+    """
+    configured = config.sources.extraction.max_calls_per_run
+    if configured is not None:
+        return configured
+    return max(1, config.search.max_sources * config.budgets.hard_cap)
 
 
 def _build_resolver(config: Config, warnings: list[str]):
@@ -259,6 +278,27 @@ def _build_resolver(config: Config, warnings: list[str]):
 
     identifiers_on = fetch.ResolutionTier.IDENTIFIER.value in tiers
     open_access_on = fetch.ResolutionTier.OPEN_ACCESS.value in tiers
+    extraction_on = fetch.ResolutionTier.EXTRACTION.value in tiers
+
+    # Credentials resolved here, before a single call: the same fail-closed posture
+    # `_build_searcher` applies to Brave. A tier that starts without its key spends its
+    # whole budget on 401s and reports them as coverage.
+    extraction_key = ""
+    if extraction_on:
+        if not sources.extraction.provider:
+            raise ConfigError(
+                "fail closed: sources.extraction.enabled is on but no provider is named. "
+                "Defaulting to whichever provider happens to be first would send a paid "
+                "call to a vendor nobody chose."
+            )
+        extraction_key = search.resolve_token(
+            sources.extraction.api_key_env, sources.extraction.token_file
+        )
+    core_key = ""
+    if open_access_on and fetch.Provider.CORE.value in sources.open_access.providers:
+        core_key = search.resolve_token(
+            sources.open_access.core_api_key_env, sources.open_access.core_token_file
+        )
     if open_access_on and not config.sources.pdf.enabled:
         # Most free copies are PDFs (arXiv's only form is one), and without PDF reading
         # each of those mirrors fetches, comes back as an unreadable content type, and
@@ -279,6 +319,12 @@ def _build_resolver(config: Config, warnings: list[str]):
             open_access_timeout=sources.open_access.timeout_seconds,
             open_access_budget=sources.open_access.max_calls_per_run,
             contact_email=contact_email,
+            core_api_key=core_key,
+            extraction_provider=sources.extraction.provider if extraction_on else "",
+            extraction_api_key=extraction_key,
+            extraction_timeout=sources.extraction.timeout_seconds,
+            extraction_budget=_extraction_call_ceiling(config),
+            max_chars=config.search.fetch_max_chars,
         )
     except resolve.UnknownProvider as exc:
         raise ConfigError(f"fail closed: {exc}") from exc

@@ -1,15 +1,16 @@
-"""The five keyless registries: Crossref, OpenAlex, Unpaywall, Europe PMC, arXiv.
+"""The bibliographic registries: Crossref, OpenAlex, Unpaywall, Europe PMC, arXiv, CORE.
 
-One module, not five. Each of these is a single bounded GET and a dozen lines of shape
-translation; a file per provider would be five docstrings restating the same contract and
+One module, not six. Each of these is a single bounded request and a dozen lines of shape
+translation; a file per provider would be six docstrings restating the same contract and
 one real difference each. What varies is worth reading side by side — which identifier
 kinds a provider covers, whether its *silence* means anything, and where it hides the
 abstract.
 
-Every one is keyless by construction. A provider that wanted an API key would need
-credential-bearing requests, which is a different security posture (a token in a header,
-a no-redirect opener, fail-closed startup validation) and is deliberately not built here.
-CORE is excluded for exactly that reason, not for a lack of coverage.
+Five of the six are keyless. **CORE is not**, and that difference is load-bearing rather
+than incidental: a keyed provider needs a credential-bearing request (a token in a header,
+a no-redirect opener, fail-closed startup validation), and "enabled without a key" has to
+be fatal at load rather than a tier that silently spends its budget on 401s and reports
+them as coverage. D40 added that posture for the paid tiers, and CORE inherits it.
 
 Coverage, and therefore what a denial is worth (`authoritative`):
 
@@ -26,6 +27,9 @@ Coverage, and therefore what a denial is worth (`authoritative`):
   absence as non-existence would mint a blocking defect out of a coverage boundary.
 * **arXiv** is authoritative for arXiv ids and is always open access, so its metadata and
   its open-access answer come from one call.
+* **CORE** aggregates open-access repositories. Tier 1 only, and deliberately last in the
+  order: the keyless providers answer the same question, and CORE earns its call only for
+  what they miss.
 """
 
 from __future__ import annotations
@@ -360,6 +364,55 @@ class Arxiv:
         return entry
 
 
+class ApiKeyRequired(RuntimeError):
+    """A provider that cannot run without a credential, configured without one.
+
+    Distinct from `ContactEmailRequired`, which is a courtesy this system can proceed
+    without. A keyed provider with no key makes no successful call ever, so constructing
+    it would spend the tier's budget on a column of 401s and report them as coverage.
+    """
+
+
+class Core:
+    """`api.core.ac.uk/v3/discover` — open-access full text, aggregated (D40).
+
+    The one provider here that needs a credential, which is why it sits with the paid
+    tiers rather than beside Unpaywall: not because CORE charges (the tier it is on is
+    free), but because "enabled without a key" has to be fatal at load, and that is the
+    fail-closed rule the paid tiers already carry.
+
+    Deliberately last in the open-access order. Crossref and OpenAlex answer the same
+    question without a credential, and CORE is worth the call only for what they miss.
+    """
+
+    name = Provider.CORE
+    ENDPOINT = "https://api.core.ac.uk/v3/discover"
+    #: Read by `resolve._construct`, which passes a key only to providers that say they
+    #: need one. The alternative — probing the constructor signature — cannot distinguish
+    #: "takes no key" from "called wrongly".
+    NEEDS_API_KEY = True
+
+    def __init__(self, *, timeout: float, api_key: str = "", contact_email: str = "") -> None:
+        if not api_key:
+            raise ApiKeyRequired("core requires an API key")
+        self._timeout = timeout
+        self._api_key = api_key
+
+    def supports(self, kind: IdKind) -> bool:
+        return kind is IdKind.DOI
+
+    def open_access_url(self, ident: Identifier) -> str | None:
+        payload = base.json_post(
+            self.ENDPOINT,
+            payload={"doi": ident.value},
+            api_key=self._api_key,
+            timeout=self._timeout,
+        )
+        if payload is None:
+            return None
+        return _http_url(payload.get("fullTextLink"))
+
+
 #: The closed set of provider names a roster may list, and the constructor for each.
 #: Keeping this a mapping rather than a chain of `if name ==` is what lets
 #: `providers_for` fail closed on an unknown name with the valid set in the message.
@@ -369,6 +422,7 @@ PROVIDERS = {
     Provider.UNPAYWALL.value: Unpaywall,
     Provider.EUROPE_PMC.value: EuropePmc,
     Provider.ARXIV.value: Arxiv,
+    Provider.CORE.value: Core,
 }
 
 
@@ -467,8 +521,10 @@ def _from_inverted_index(index: object) -> str:
 
 __all__ = [
     "PROVIDERS",
+    "ApiKeyRequired",
     "Arxiv",
     "ContactEmailRequired",
+    "Core",
     "Crossref",
     "EuropePmc",
     "OpenAlex",

@@ -140,6 +140,10 @@ class ResolutionTier(str, Enum):
     IDENTIFIER = "identifier"
     #: A body arrived from an open-access copy that is not the cited URL.
     OPEN_ACCESS = "open_access"
+    #: A rendering service read the cited URL itself (D40). Distinct from `OPEN_ACCESS`
+    #: in the way that matters downstream: this is the cited page's own body, so it
+    #: carries no `body_source_url` and may settle a dispute.
+    EXTRACTION = "extraction"
 
 
 class Provider(str, Enum):
@@ -151,6 +155,11 @@ class Provider(str, Enum):
     UNPAYWALL = "unpaywall"
     EUROPE_PMC = "europe_pmc"
     ARXIV = "arxiv"
+    #: Keyed, and on the paid ladder for that reason rather than for a fee (D40).
+    CORE = "core"
+    #: The rendering provider. Renders JavaScript and survives a bot wall; does not and
+    #: cannot pass a hard paywall.
+    FIRECRAWL = "firecrawl"
 
 
 #: Per-field caps on registry metadata, in the manner of `search.py`'s `MAX_TITLE_CHARS`.

@@ -319,6 +319,70 @@ def test_arxiv_offers_the_pdf_not_the_abstract_page(monkeypatch):
     assert url == "https://arxiv.org/pdf/1706.03762"
 
 
+# ------------------------------------------------------------- CORE (the keyed provider)
+
+
+def test_core_refuses_to_be_built_without_an_api_key():
+    """The keyed counterpart to `test_unpaywall_refuses_to_be_built_without_a_contact_email`.
+    A keyed provider with no key makes no successful call ever, so constructing one would
+    spend the tier's budget on 401s and report them as coverage — fatal, not degraded."""
+    from reasonable_answer.resolve.scholarly import ApiKeyRequired, Core
+
+    with pytest.raises(ApiKeyRequired):
+        Core(timeout=5, api_key="")
+
+
+def test_core_reads_the_full_text_link_and_answers_only_for_a_doi(monkeypatch):
+    """`open_access_url` parses CORE's `fullTextLink`, and `supports` accepts a DOI alone —
+    CORE keys on the DOI, so an arXiv or PMID identifier is not its question to answer."""
+    from reasonable_answer.resolve.scholarly import Core
+
+    core = Core(timeout=5, api_key="secret")
+    assert core.supports(IdKind.DOI)
+    assert not core.supports(IdKind.ARXIV)
+
+    seq = http_sequence(json_stub({"fullTextLink": "https://core.ac.uk/download/42.pdf"}))
+    monkeypatch.setattr(urllib.request.OpenerDirector, "open", seq)
+    assert core.open_access_url(ids.extract(DOI_URL)) == "https://core.ac.uk/download/42.pdf"
+
+
+def test_core_without_a_key_is_fatal_not_skipped_like_a_missing_contact_email():
+    """`_construct`'s two credential arms are graded differently on purpose: a missing
+    contact email warns and skips (a courtesy), a missing API key propagates. This drives
+    the `except ApiKeyRequired: raise` arm and the `NEEDS_API_KEY` true-branch that feeds
+    it — the false side is already exercised by every keyless provider."""
+    from reasonable_answer.resolve import build
+    from reasonable_answer.resolve.scholarly import ApiKeyRequired
+
+    with pytest.raises(ApiKeyRequired):
+        build(
+            identifier_providers=[],
+            identifier_timeout=5,
+            identifier_budget=10,
+            open_access_providers=["core"],
+            open_access_timeout=5,
+            open_access_budget=10,
+            core_api_key="",
+        )
+
+
+def test_core_with_a_key_is_constructed_on_the_open_access_tier():
+    """The positive side of the same branch: a key present, `NEEDS_API_KEY` routes it to
+    the constructor, and CORE joins the open-access providers rather than being skipped."""
+    from reasonable_answer.resolve import build
+
+    resolver, _ = build(
+        identifier_providers=[],
+        identifier_timeout=5,
+        identifier_budget=10,
+        open_access_providers=["core"],
+        open_access_timeout=5,
+        open_access_budget=10,
+        core_api_key="secret",
+    )
+    assert [p.name for p in resolver._open_access_providers] == [Provider.CORE]
+
+
 # ------------------------------------------------------------- provider records
 
 
@@ -868,6 +932,27 @@ def test_a_missing_contact_email_warns_about_what_is_actually_lost(config, monke
 def test_the_contact_email_comes_from_the_environment(config, monkeypatch):
     monkeypatch.setenv("RA_CONTACT_EMAIL", " ops@example.org ")
     assert config.sources.contact_email == "ops@example.org"
+
+
+def test_open_access_with_core_but_no_key_refuses_to_start(config, tmp_path, monkeypatch):
+    """CORE is the one keyed member of the open-access tier, so it inherits the paid tiers'
+    fail-closed posture: enabling it with no key resolvable is fatal at startup, the
+    counterpart to the *warning* a missing contact email earns."""
+    from reasonable_answer.config import OpenAccessTierConfig
+    from reasonable_answer.graph import _build_resolver
+    from reasonable_answer.search import SearchConfigError
+
+    monkeypatch.delenv("CORE_API_KEY", raising=False)
+    cfg = with_sources(
+        config,
+        open_access=OpenAccessTierConfig(
+            enabled=True,
+            providers=["core"],
+            core_token_file=str(tmp_path / "absent.token"),
+        ),
+    )
+    with pytest.raises(SearchConfigError):
+        _build_resolver(cfg, [])
 
 
 def test_open_access_without_pdf_reading_says_what_it_will_cost(config):
