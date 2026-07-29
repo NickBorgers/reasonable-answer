@@ -82,6 +82,10 @@ search:
 
 sources:
   enabled: true          # master switch; each tier still opts in separately
+  identifiers:           # D39 — ask a registry whether the cited source exists
+    enabled: true
+  pdf:                   # D39 — read a cited/mirrored PDF instead of failing on it
+    enabled: true        # required alongside open_access: a free copy is usually a PDF
   open_access:           # D39 — fetch a free copy of the body and read it once
     enabled: true
     providers: [openalex, unpaywall, europe_pmc, arxiv, core]
