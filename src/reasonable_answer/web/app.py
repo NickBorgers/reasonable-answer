@@ -59,6 +59,7 @@ from .registry import Registry, RunSummary
 from .render import (
     normalize_base_path,
     render_index,
+    render_index_rows,
     render_report,
     render_run,
     render_run_progress,
@@ -438,6 +439,10 @@ def create_app(
             record=record,
             base_path=base_path,
             public_base=public_base,
+            # Only for a signed-in caller. This page is anonymous by design (D-id-as-credential), and a
+            # stranger reading a shared run has no runs to be notified about and could not
+            # subscribe anyway — the route is a gated write.
+            vapid_key=push_key if request.state.viewer else "",
         )
 
     @app.post("/runs/{run_id}/again")
@@ -593,6 +598,20 @@ def create_app(
 
     # ------------------------------------------------------------- fragments
 
+    @app.get("/runs-table", response_class=HTMLResponse)
+    def runs_table(request: Request, response: Response) -> str:
+        """The index's runs table, re-rendered (D-self-refreshing-index).
+
+        Owner-scoped exactly like the index it belongs to, and gated exactly like it: the
+        path is deliberately `/runs-table` and not `/runs/table`, because everything under
+        `/runs/` answers an anonymous caller (D-id-as-credential) and this is a per-viewer list. The
+        trailing-slash detail matters — `_PUBLIC_GET_PREFIX` is the string `"/runs/"`, so a
+        sibling name cannot fall inside it by accident.
+        """
+        response.headers["Cache-Control"] = "no-store"
+        runs = registry.list(active=worker.active(), owner=request.state.viewer)
+        return render_index_rows(runs, public_base)
+
     @app.get("/runs/{run_id}/progress", response_class=HTMLResponse)
     def progress(run_id: str, response: Response) -> str:
         """The live region, re-rendered. Kept separate from the page so the SSE
@@ -674,7 +693,7 @@ def create_app(
     # ----------------------------------------------------------------- assets
 
     @app.get("/runs/{run_id}/report", response_class=HTMLResponse)
-    def report_page(run_id: str) -> str:
+    def report_page(run_id: str, request: Request) -> str:
         summary = _require(registry, worker, run_id)
         report = registry.report(run_id)
         if report is None:
@@ -703,6 +722,7 @@ def create_app(
             ),
             base_path=base_path,
             public_base=public_base,
+            vapid_key=push_key if request.state.viewer else "",
         )
 
     @app.get("/runs/{run_id}/report.md", response_class=PlainTextResponse)
