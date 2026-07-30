@@ -1790,10 +1790,12 @@ raise, only fail to suppress one.
 
 ## D41 — a transient provider failure costs minutes, never the run
 
-**The finding.** Three production runs aborted inside forty minutes on 2026-07-29, every one of them
-`terminal=aborted … rule 1: every eligible writer failed`, and every one of them logging
-`writer attempt 1/1`. No model was actually unavailable. Four separate weaknesses had to line up,
-and they did:
+**The finding.** A single flaky provider response — an empty completion, a transient error, or a
+tool call arriving where prose was due — could abort a whole run as
+`terminal=aborted … rule 1: every eligible writer failed`, having logged only `writer attempt 1/1`.
+No model need be unavailable for this. Four separate weaknesses in the code compound, each
+reproducible offline and pinned by a test added with this change, and together they turn one bad
+sample into a terminal abort:
 
 *The writer pool is one model deep on every revision round.* Author exclusion applies to writers,
 not only critics: `roles.writer_pool` removes the previous author, so a two-writer roster leaves
@@ -1803,17 +1805,16 @@ exactly one eligible model from round two onward. `_generate` then computed
 revision round, not there.
 
 *Retries did not wait.* `LLMClient._create` looped with a bare `continue`. Nothing in the package
-slept between attempts. The three empty completions that killed `run-6f54b5a33e26` landed at
-06:01:28, :31 and :33 — the entire retry budget spent inside five seconds, which is three samples of
-one bad moment rather than three chances.
+slept between attempts, so a three-deep call budget was spent in the time it takes to round-trip
+three requests — three samples of one bad moment rather than three chances spread across it.
 
 *An exhausted tool loop could return success with nothing in it.* The final round of `complete()`
 drops `tools`, but a model may answer it with another tool call anyway. `_create` accepts such a
 message — correctly, since a message carrying tool calls is not an empty completion — and the loop
 returned `Completion(text="")`. `_generate` read that as "the writer produced an empty report", a
 condition it never classified as a call failure, so it received **none** of the three call retries.
-Two of the three aborts came through this path, and because the call had "succeeded" they logged
-nothing at all at the `llm` layer.
+Because the call had "succeeded", this path logged nothing at all at the `llm` layer — it is
+invisible from the logs, which is why it is pinned by a test rather than read from one.
 
 *A tool with no budget left was still offered.* Once `search.query_budget` is gone the handler
 returns "budget exhausted" as *text*, by design — a writer told nothing would read the silence as
@@ -1845,8 +1846,9 @@ the defect above.
    the eligible pool is two deep on revision rounds rather than one. `docs/DESIGN.md` previously
    recorded it as *excluded by choice*; the choice is reversed here, and the reason is availability.
    It is writer-only, so it shrinks no critic pool. Critic pools were **not** widened: they are
-   already three deep per lens and they behaved correctly through the same night — rule 2 rotated
-   around a `glm-5.2` that timed out three times at 300s without aborting anything.
+   already three deep per lens, and rule 2's rotation already absorbs a critic that times out
+   repeatedly without aborting the run — the writer path, one-deep on revision rounds, was the only
+   one that lacked that depth.
 
 **Author exclusion is untouched, and this is the claim to check.** Wrapping the writer rotation
 re-asks a model that already failed; it never re-asks the *previous author*, because
@@ -1856,14 +1858,17 @@ reach an excluded model. Nothing here touches critic selection, the blind orches
 floors, or termination: retries are bounded by `call_retries` and `writer_attempts`, the extra
 toolless round is exactly one, and rule 1 still fires when every attempt fails.
 
-**Observability, because this was diagnosed by inference.** Production ran at WARNING — the
-container's CMD is fixed, so `--verbose` was unreachable — leaving no run starts, no controller
-decisions, and no search results in the logs. `$RA_LOG_LEVEL` now names a level, and `compose.yaml`
-sets `INFO`. RA-016 holds at that level: `search.py` logs query *lengths* and never query text, and
-the controller whose decisions are now logged is blind to the report by construction.
+**Observability.** The shipped log level was WARNING and the container's CMD is fixed, so
+`--verbose` was unreachable: a deployment left at that default records no run starts, no controller
+decisions, and no search results, which is why a failure of this shape has to be reconstructed from
+code rather than read from a log. `$RA_LOG_LEVEL` now names a level, and `compose.yaml` sets `INFO`.
+RA-016 holds at that level: `search.py` logs query *lengths* and never query text; the controller
+whose decisions are now logged is blind to the report by construction; and `structured()`'s
+schema-violation log names the exception class only, never the rejected value (see the `sec-audit-log`
+guard in `llm.py`).
 
-**Not fixed here, because they are not in this repository.** The same night showed `gemma4` being
-served by `meta-llama/llama-4-scout` — silent fallback routing on the LiteLLM proxy, which RA
-correctly fails closed on (RA-017) at the cost of a burnt lens attempt — and five occurrences of
-DeepSeek tool-call syntax arriving unparsed as message content. Both are proxy configuration; see
-`docs/deployment-profile.md`.
+**Not fixed here, because they are not in this repository.** Two related failure modes are proxy
+configuration rather than application code: silent fallback routing on the LiteLLM proxy — e.g.
+`gemma4` served by `meta-llama/llama-4-scout` — which RA correctly fails closed on (RA-017) at the
+cost of a burnt lens attempt, and DeepSeek tool-call syntax arriving unparsed as message content.
+Both are written up in `docs/deployment-profile.md`.

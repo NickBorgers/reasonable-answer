@@ -13,12 +13,19 @@ The wait is asserted, never served: `sleep` and `jitter` are injected, exactly a
 
 from __future__ import annotations
 
+import logging
 from types import SimpleNamespace
 
 import pytest
+from pydantic import BaseModel
 
 from reasonable_answer.config import Budgets, Config, ProxyConfig, Roster
-from reasonable_answer.llm import LLMClient, ModelCallError, PermanentCallError
+from reasonable_answer.llm import (
+    LLMClient,
+    MalformedOutputError,
+    ModelCallError,
+    PermanentCallError,
+)
 
 
 def make_client(tmp_path, **budget_overrides) -> tuple[LLMClient, list[float]]:
@@ -257,3 +264,56 @@ def test_a_transient_status_is_retried(tmp_path, status):
         client.complete("writer-a", system="s", user="u")
 
     assert calls["n"] == 3
+
+
+# ------------------------------------------------------ audit privacy (RA-016)
+
+
+class _Verdict(BaseModel):
+    """A trivial closed schema for exercising `structured()`'s repair loop."""
+
+    verdict: str
+
+
+def _returning(content: str):
+    """A `create` stand-in that always returns `content` as the assistant message."""
+
+    def create(**kwargs):
+        return SimpleNamespace(
+            model=kwargs["model"],
+            usage=SimpleNamespace(prompt_tokens=1, completion_tokens=1),
+            choices=[SimpleNamespace(message={"role": "assistant", "content": content})],
+        )
+
+    return create
+
+
+def test_a_schema_violation_never_logs_the_rejected_content_at_info(tmp_path, caplog):
+    """RA-016: `structured()`'s repair loop must not copy report-derived validation
+    input into ordinary logs. `RA_LOG_LEVEL=INFO` is the container default (D41), so a
+    validator that quotes a private `claim_span` back in its error must not reach INFO.
+
+    The report content is synthetic, but it stands in for exactly what a real `triage`
+    validator embeds in its message — the span it could not find in the paragraph."""
+    secret = "PRIVATE-CLAIM-SPAN-fluoridation-reduces-decay-by-25pct"
+    client, _ = make_client(tmp_path)
+    _install(client, _returning('{"verdict": "ok"}'))
+
+    def validate(_parsed):
+        raise ValueError(f"claim_span {secret!r} is not verbatim in the cited paragraph")
+
+    with caplog.at_level(logging.INFO), pytest.raises(MalformedOutputError):
+        client.structured(
+            "writer-a",
+            system="s",
+            user="u",
+            schema=_Verdict,
+            repair_retries=0,
+            validate=validate,
+        )
+
+    # The repair path ran and logged at INFO...
+    assert "schema violation" in caplog.text
+    assert "ValueError" in caplog.text
+    # ...but the content the validator quoted never left the run.
+    assert secret not in caplog.text

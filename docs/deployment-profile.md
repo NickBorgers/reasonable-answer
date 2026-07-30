@@ -70,8 +70,8 @@ redirect is ever followed. The outbound user agent is fixed and is not configura
 ### What the proxy must not do
 
 Two requirements on the LiteLLM configuration itself. Neither is checkable from this repository —
-the application can only detect the first, after the fact, and pay for it. Both were observed in
-production on 2026-07-29 (D41).
+the application can only detect the first, after the fact, and pay for it. Both are failure modes RA
+guards against in code (RA-017, and the `_unparsed_tool_call` net in `llm.py`); see D41.
 
 **No fallback routing on any alias the roster names.** A LiteLLM fallback that quietly serves
 `gemma4` from `meta-llama/llama-4-scout` breaks every downstream identity claim at once: author
@@ -84,9 +84,9 @@ aliases outside the roster if you want them; never for one inside it.
 **Tool-call parsing must actually be configured for the served model.** DeepSeek emits tool calls in
 its own fullwidth-token syntax (`<｜tool▁calls▁begin｜>`); a proxy that does not parse it hands the
 raw markup back as message *content*, where it reads as a successful prose answer. `llm.py` carries
-a guard (`_unparsed_tool_call`) that catches this and retries, because one production run once
-shipped a final answer that was nothing but a tool-call block — but the guard is a net, not a fix,
-and every catch spends an attempt from the call budget.
+a guard (`_unparsed_tool_call`) that catches this and retries — a final answer that is nothing but a
+tool-call block is exactly what it is built for — but the guard is a net, not a fix, and every catch
+spends an attempt from the call budget.
 
 ## Source verification is on in production
 

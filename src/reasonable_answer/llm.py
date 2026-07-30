@@ -606,7 +606,18 @@ class LLMClient:
                 return parsed
             except (ValidationError, ValueError) as exc:
                 last_err = str(exc)[:800]
-                log.info("schema violation from %s (attempt %d): %s", alias, attempt + 1, last_err)
+                # RA-016: `last_err` can carry model output or report-derived validation
+                # input — a critic's `claim_span`, a rejected field value, the rationale a
+                # validator quotes back. It feeds the repair prompt below, which stays
+                # inside the run, but must never reach an ordinary log: `RA_LOG_LEVEL=INFO`
+                # is the container default (D41), and stdout/log aggregation lives outside
+                # the 0700 `runs/<id>/` tree. Log only the bounded, content-free class.
+                log.info(
+                    "schema violation from %s (attempt %d): %s",
+                    alias,
+                    attempt + 1,
+                    exc.__class__.__name__,
+                )
                 # Duck-typed rather than a shared base class: the validators that carry
                 # guidance live in `triage`, which is deliberately LLM-free and must not
                 # import this module to say so.
