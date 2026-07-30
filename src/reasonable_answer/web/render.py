@@ -124,7 +124,14 @@ def render_layout(
     base_path: str = "",
     extra_css: str = "",
     extra_script: str = "",
+    push: str = "",
 ) -> str:
+    # `push` is the VAPID public key, non-empty only when notifications are on *and* the
+    # caller is signed in. It lives in the shell rather than on the index because an
+    # installed standalone app has no browser chrome and no way to navigate back to a
+    # control buried on one page: wherever you are when you decide you want notifying,
+    # the control has to be there (D-header-optin). Empty for anonymous readers of a shared run —
+    # subscribing is a gated write, so a control they cannot use must not appear.
     # `extra_css`/`extra_script` default to "", so when neither is supplied this page
     # is byte-for-byte the non-refine build -- load-bearing for `render_index`'s promise
     # that `refine.enabled = false` renders an unchanged page (docs/question-refinement.md).
@@ -132,8 +139,16 @@ def render_layout(
     # (D-installable-pwa); the refine script, when enabled, is appended as its own separate tag.
     scripts = (
         f"<script>{_register_sw_js(base_path)}{LIVE_JS if live else ''}"
-        f"{COPY_JS if copyable else ''}</script>"
+        f"{COPY_JS if copyable else ''}{_push_js(base_path, push) if push else ''}</script>"
     ) + ("<script>" + extra_script + "</script>" if extra_script else "")
+    # Ships `hidden`; the script reveals it only on a browser that can deliver and only
+    # while this device has no subscription. Styled as a header link rather than a button
+    # so it sits in the same register as `how this works` beside it.
+    push_control = (
+        '<button type="button" class="notify" id="push-toggle" hidden>notify me</button>'
+        if push
+        else ""
+    )
     return f"""<!doctype html>
 <html lang="en">
 <head>
@@ -189,6 +204,7 @@ def render_layout(
        is in the shell, so without it a reader following it from a run page hands that run's
        id to an off-origin host. The CSP is unchanged — it has no directive governing
        navigation, and this is a link, not a fetch. -->
+  {push_control}
   <a class="docs" href="{DOCS_URL}" rel="noreferrer">how this works</a>
 </header>
 <main>{body}</main>
@@ -198,6 +214,23 @@ def render_layout(
 
 
 # ---------------------------------------------------------------------- index
+
+
+def render_index_rows(runs: list[RunSummary], public_base: str = "") -> str:
+    """The runs table's `<tbody>` contents, on their own so the page and the refresh
+    endpoint cannot disagree about how a run is shown (D-self-refreshing-index).
+
+    Returns the whole `<tbody>` element, not just its rows, so the client swaps one node and
+    reads the refreshed `data-live` off it in the same step. `data-live` is what tells the
+    client whether to keep polling, and it is computed here from the same `is_live` the rows
+    are rendered from — never inferred on the client by scraping status text.
+    """
+    body = (
+        "\n".join(_run_row(r, public_base) for r in runs)
+        or '<tr><td colspan="5" class="empty">No runs yet. Ask something above.</td></tr>'
+    )
+    live = "1" if any(r.is_live for r in runs) else "0"
+    return f'<tbody id="runs-body" data-live="{live}">{body}</tbody>'
 
 
 def render_index(
@@ -213,10 +246,7 @@ def render_index(
     # `base_path` keeps a single-door deployment — dev, the tailnet — emitting exactly
     # what it emitted before.
     public_base = base_path if public_base is None else public_base
-    rows = (
-        "\n".join(_run_row(r, public_base) for r in runs)
-        or '<tr><td colspan="5" class="empty">No runs yet. Ask something above.</td></tr>'
-    )
+    rows = render_index_rows(runs, public_base)
     # The list is yours alone, so say whose it is. It also makes a misconfigured
     # identity header visible immediately, rather than as a mysteriously empty table.
     signed_in = f'<span class="dim">signed in as {esc(viewer)}</span>' if viewer else ""
@@ -244,20 +274,6 @@ def render_index(
     <input type="hidden" id="refine_selected" name="refine_selected" value="">
     <div id="refine-chips" class="refine-chips" hidden></div>"""
         if config.refine.enabled
-        else ""
-    )
-    # Omitted entirely when push is off, so that page is byte-identical to a build without
-    # the feature (same promise refine makes above). The button ships `hidden` and the script
-    # reveals it: a browser that cannot do push, or an iOS tab that is not installed, must
-    # not show a control that would fail — and with scripting off, nothing here appears at
-    # all, which is the honest outcome for a feature that is entirely script-driven.
-    push_block = (
-        """
-  <p class="push-optin">
-    <button type="button" class="secondary" id="push-toggle" hidden>Notify me when runs finish</button>
-    <span class="hint" id="push-note"></span>
-  </p>"""
-        if config.push.enabled
         else ""
     )
     # "Fetched and checked against what the report says they say" is the D-source-verification verified-sourcing
@@ -301,9 +317,8 @@ def render_index(
   <h2>Your runs {signed_in}</h2>
   <table class="runs">
     <thead><tr><th>status</th><th>question</th><th>rounds</th><th>started</th><th></th></tr></thead>
-    <tbody>{rows}</tbody>
+    {rows}
   </table>
-  {push_block}
 </section>
 
 <section class="panel roster">
@@ -318,18 +333,18 @@ def render_index(
   </div>
 </section>
 """
-    # Both features share the one `extra_script` slot, concatenated. Each blob is a
-    # self-contained IIFE ending in a semicolon, which is what makes appending safe; the
-    # empty string is the identity, so any combination of the two off leaves the page as it
-    # was without them.
+    # The notification control moved to the shell (D-header-optin), so it is passed through `push`
+    # rather than assembled here — the index is no longer the page that owns it.
     return render_layout(
         "reasonable-answer",
         body,
         base_path=base_path,
-        extra_css=(REFINE_CSS if config.refine.enabled else "")
-        + (PUSH_CSS if config.push.enabled else ""),
+        extra_css=REFINE_CSS if config.refine.enabled else "",
+        # Unconditional, unlike refine and push: this is not a feature to opt into but the
+        # repair of a staleness the installed app cannot fix by hand (D-self-refreshing-index).
         extra_script=(_refine_js(base_path) if config.refine.enabled else "")
-        + (_push_js(base_path, vapid_key) if config.push.enabled else ""),
+        + _index_refresh_js(base_path),
+        push=vapid_key,
     )
 
 
@@ -391,6 +406,7 @@ def render_run(
     record: str = "",
     base_path: str = "",
     public_base: str | None = None,
+    vapid_key: str = "",
 ) -> str:
     # This is the pipeline view, not the report. The report is rendered in exactly one
     # place — `/runs/<id>/report` — so that the URL someone copies out of the address bar
@@ -471,6 +487,10 @@ def render_run(
         body,
         live=summary.is_live,
         base_path=base_path,
+        # The page you land on after starting a run, so it is where the offer belongs most
+        # (D-header-optin). Empty for an anonymous reader of a shared link, who has no runs to be told
+        # about and could not subscribe if they tried.
+        push=vapid_key,
     )
 
 
@@ -583,6 +603,7 @@ def render_report(
     copy_markdown: str = "",
     base_path: str = "",
     public_base: str | None = None,
+    vapid_key: str = "",
 ) -> str:
     """The report on its own page — the thing to hand to someone who wants to *read* it,
     rather than watch the pipeline that produced it. The *only* page that renders it:
@@ -619,6 +640,7 @@ def render_report(
         body,
         copyable=True,
         base_path=base_path,
+        push=vapid_key,
     )
 
 
@@ -654,8 +676,18 @@ def _register_sw_js(base_path: str = "") -> str:
     return _REGISTER_SW_JS.replace("__RA_BASE__", base_path)
 
 
-#: Opting a device in to notifications (D-stop-notification). Emitted only when `push.enabled`, so a build
-#: with the feature off renders the index byte-identically to before.
+#: Opting a device in to notifications (D-stop-notification, D-header-optin). Emitted only
+#: when `push.enabled` and only
+#: for a signed-in caller, so a build with the feature off, and every anonymous reader of a
+#: shared run, get a page with none of this in it.
+#:
+#: **The control is shown only while this device has no subscription.** Once notifications
+#: are on there is nothing to do, so a permanent "Notifications on" pill would be a header
+#: element that never changes and never helps — and turning them *off* belongs to the OS,
+#: which owns the permission and offers it in Settings on every platform. The one thing this
+#: script does about that is reconcile: a permission revoked outside the page leaves a
+#: subscription the server would keep pushing to, so on load a `denied` permission tells the
+#: server to forget the endpoint.
 #:
 #: Two rules are load-bearing and both come from the platforms rather than from taste.
 #:
@@ -666,41 +698,34 @@ def _register_sw_js(base_path: str = "") -> str:
 #:
 #: On iOS, push exists only for a web app added to the home screen. In a Safari tab
 #: `PushManager` is present but `subscribe()` rejects, so feature detection alone would show
-#: a button that cannot work. The standalone check turns that into an instruction instead.
+#: a button that cannot work. There, the control simply stays hidden: the header is not the
+#: place for an instruction, and D-installable-pwa's install affordance is what the browser already offers.
 #:
 #: MUST end in a semicolon, for the reason given on `_REGISTER_SW_JS`.
 _PUSH_JS = """
 (function () {
   var btn = document.getElementById('push-toggle');
-  var note = document.getElementById('push-note');
   if (!btn) return;
-
-  function say(text, disabled) {
-    btn.textContent = text;
-    btn.disabled = !!disabled;
-  }
-  function tell(text) {
-    if (note) note.textContent = text;
-  }
-
   if (!('serviceWorker' in navigator) || !('PushManager' in window) ||
       !('Notification' in window) || !window.isSecureContext) {
     return;
   }
+  // iOS gives push only to an installed app. In a tab `subscribe()` rejects, so showing the
+  // control there would offer something that cannot work.
   var standalone = window.navigator.standalone === true ||
     (window.matchMedia && window.matchMedia('(display-mode: standalone)').matches);
   var iOS = /iPad|iPhone|iPod/.test(navigator.userAgent) ||
     (navigator.platform === 'MacIntel' && navigator.maxTouchPoints > 1);
-  if (iOS && !standalone) {
-    tell('Add this to your home screen to enable notifications.');
-    return;
-  }
-  if (Notification.permission === 'denied') {
-    tell('Notifications are blocked for this site in your browser settings.');
-    return;
-  }
+  if (iOS && !standalone) return;
 
-  btn.hidden = false;
+  function post(url, payload) {
+    return fetch(url, {
+      method: 'POST',
+      headers: { 'Content-Type': 'application/json' },
+      credentials: 'same-origin',
+      body: JSON.stringify(payload)
+    }).then(function (r) { return r.ok; });
+  }
 
   function key() {
     // The VAPID public key, base64url, as `applicationServerKey` wants it: raw bytes.
@@ -714,77 +739,136 @@ _PUSH_JS = """
 
   navigator.serviceWorker.ready.then(function (reg) {
     return reg.pushManager.getSubscription().then(function (existing) {
-      if (existing) say('Notifications on', false);
-      else say('Notify me when runs finish', false);
+      if (Notification.permission === 'denied') {
+        // Revoked in OS or browser settings, outside this page. The server would go on
+        // pushing to an endpoint that can never display anything, so drop it now rather
+        // than waiting for the push service to start answering 410.
+        if (existing) {
+          var stale = existing.endpoint;
+          return existing.unsubscribe().then(function () {
+            return post('__RA_BASE__/push/unsubscribe', { endpoint: stale });
+          });
+        }
+        return null;
+      }
+      // Already set up: nothing to offer, so the header stays clean.
+      if (existing) return null;
 
+      btn.hidden = false;
       btn.addEventListener('click', function () {
-        say('\\u2026', true);
-        reg.pushManager.getSubscription().then(function (sub) {
-          if (sub) {
-            // Unsubscribing locally before telling the server keeps the browser from
-            // holding a subscription the server has already forgotten, which would leave
-            // the button reading "on" with nothing able to reach it.
-            var endpoint = sub.endpoint;
-            return sub.unsubscribe().then(function () {
-              return post('__RA_BASE__/push/unsubscribe', { endpoint: endpoint });
-            }).then(function () {
-              say('Notify me when runs finish', false);
-              tell('');
-            });
+        btn.disabled = true;
+        Notification.requestPermission().then(function (state) {
+          if (state !== 'granted') {
+            // A denial is final on iOS, so there is nothing to invite a second attempt at.
+            btn.hidden = true;
+            return null;
           }
-          return Notification.requestPermission().then(function (state) {
-            if (state !== 'granted') {
-              say('Notify me when runs finish', false);
-              tell(state === 'denied'
-                ? 'Notifications are blocked for this site in your browser settings.'
-                : '');
-              return null;
-            }
-            return reg.pushManager.subscribe({
-              userVisibleOnly: true,
-              applicationServerKey: key()
-            }).then(function (fresh) {
-              var raw = fresh.toJSON();
-              return post('__RA_BASE__/push/subscribe', {
-                endpoint: raw.endpoint,
-                keys: raw.keys
-              }).then(function (ok) {
-                if (!ok) {
-                  // The server refused to store it, so the browser must not keep it
-                  // either — otherwise this device is subscribed to a push service the
-                  // server will never send to.
-                  return fresh.unsubscribe().then(function () {
-                    say('Notify me when runs finish', false);
-                    tell('Could not enable notifications.');
-                  });
-                }
-                say('Notifications on', false);
-                tell('');
-              });
+          return reg.pushManager.subscribe({
+            userVisibleOnly: true,
+            applicationServerKey: key()
+          }).then(function (fresh) {
+            var raw = fresh.toJSON();
+            return post('__RA_BASE__/push/subscribe', {
+              endpoint: raw.endpoint,
+              keys: raw.keys
+            }).then(function (ok) {
+              if (!ok) {
+                // The server refused to store it, so the browser must not keep it either:
+                // otherwise this device holds a subscription nothing will ever send to.
+                return fresh.unsubscribe().then(function () {
+                  btn.disabled = false;
+                });
+              }
+              btn.hidden = true;
             });
           });
         }).catch(function () {
-          say('Notify me when runs finish', false);
-          tell('Could not enable notifications.');
+          btn.disabled = false;
         });
       });
+      return null;
     });
   }).catch(function () {});
-
-  function post(url, payload) {
-    return fetch(url, {
-      method: 'POST',
-      headers: { 'Content-Type': 'application/json' },
-      credentials: 'same-origin',
-      body: JSON.stringify(payload)
-    }).then(function (r) { return r.ok; });
-  }
 })();
 """
 
 
 def _push_js(base_path: str = "", vapid_key: str = "") -> str:
     return _PUSH_JS.replace("__RA_BASE__", base_path).replace("__RA_VAPID__", vapid_key)
+
+
+#: Keeping the index's runs table current without a reload (D-self-refreshing-index).
+#:
+#: **Why this is not optional.** Installed to a home screen the app has no browser chrome:
+#: no address bar, no reload button, and on iOS no pull-to-refresh inside the page. So the
+#: index had exactly one way to correct itself — the one the platform removed. A finished run
+#: shown as still running is the output D-installable-pwa says this interface must never produce, and in
+#: standalone mode a static index produced it indefinitely.
+#:
+#: **The visibility handler is the load-bearing half, not the interval.** The usual way this
+#: page is wrong is that the app was suspended in the background for an hour and then swiped
+#: back to. iOS freezes timers in a suspended PWA, so an interval alone resumes late and shows
+#: stale rows first; refreshing on `visibilitychange` means the app is current by the time it
+#: is looked at. `pageshow` covers the back-forward cache, which restores a page wholesale and
+#: runs no interval tick at all.
+#:
+#: The interval only runs while something is actually live, and stops itself when the refreshed
+#: `data-live` says nothing is — so an idle index sitting open costs nothing.
+_INDEX_REFRESH_JS = """
+(function () {
+  var table = document.getElementById('runs-body');
+  if (!table || !window.fetch) return;
+  var url = '__RA_BASE__/runs-table';
+  var timer = null;
+  var inflight = false;
+
+  function live() {
+    var el = document.getElementById('runs-body');
+    return !!el && el.dataset.live === '1';
+  }
+
+  function refresh() {
+    if (inflight) return;
+    inflight = true;
+    fetch(url, { credentials: 'same-origin', headers: { 'Accept': 'text/html' } })
+      .then(function (r) { return r.ok ? r.text() : null; })
+      .then(function (html) {
+        if (html) {
+          var current = document.getElementById('runs-body');
+          // Swapping the whole tbody rather than rewriting rows in place: the fragment is
+          // the element, so its refreshed `data-live` arrives with the rows it describes and
+          // the two can never disagree.
+          if (current) current.outerHTML = html;
+        }
+      })
+      .catch(function () {})
+      .then(function () {
+        inflight = false;
+        schedule();
+      });
+  }
+
+  function schedule() {
+    if (timer) { clearTimeout(timer); timer = null; }
+    // Nothing moving means nothing to poll for. A new run arrives by navigation, and
+    // returning to the app re-checks below, so an idle page can stop entirely.
+    if (live()) timer = setTimeout(refresh, 5000);
+  }
+
+  document.addEventListener('visibilitychange', function () {
+    if (document.visibilityState === 'visible') refresh();
+  });
+  // The bfcache restores a page as it was, without running the interval that would have
+  // caught up. `persisted` is the restore case; a normal load already rendered fresh.
+  window.addEventListener('pageshow', function (e) { if (e.persisted) refresh(); });
+
+  schedule();
+})();
+"""
+
+
+def _index_refresh_js(base_path: str = "") -> str:
+    return _INDEX_REFRESH_JS.replace("__RA_BASE__", base_path)
 
 LIVE_JS = """
 (function () {
@@ -1111,6 +1195,21 @@ header {
    print stylesheet hides `header` wholesale, so this never reaches paper. */
 .docs { margin-left: auto; color: var(--dim); font-size: .8rem; text-decoration: underline; text-underline-offset: .2em; }
 .docs:hover, .docs:focus-visible { color: var(--ink); }
+/* The notification opt-in (D-header-optin). A small pill rather than a link: it does something, and a
+   header full of underlined text would not say which item is actionable. It takes over
+   `margin-left: auto` from `.docs` so the pair sits together at the far end — with both
+   claiming an auto margin, flex would split the free space and push them apart instead.
+   Present only when notifications are on and the caller is signed in, and revealed by
+   script only while this device has no subscription, so the steady state is an empty
+   header. Sized to match `.docs` so it cannot outweigh the brand. */
+.notify {
+  margin-left: auto; margin-top: 0; padding: .2rem .55rem; font: inherit; font-size: .8rem;
+  color: var(--ink); background: var(--chip); border: 1px solid var(--line);
+  border-radius: 999px; cursor: pointer;
+}
+.notify:hover, .notify:focus-visible { border-color: var(--ink); }
+.notify[disabled] { opacity: .6; cursor: default; }
+.notify + .docs { margin-left: 0; }
 main { max-width: 60rem; margin: 0 auto; padding: var(--gutter); display: grid; gap: 1.25rem; }
 /* A grid item defaults to `min-width: auto`, which means it refuses to shrink below the
    widest unbreakable thing inside it — and on a phone that silently widens the layout
@@ -1488,11 +1587,6 @@ main {
 #: and `.hint` and needs nothing else: the global `button` rule's top margin would otherwise
 #: push it a full line below the table, and the note has to sit beside the button rather than
 #: under it.
-PUSH_CSS = """
-.push-optin { display: flex; align-items: center; gap: .6rem; flex-wrap: wrap; margin: .9rem 0 0; }
-.push-optin button { margin-top: 0; }
-"""
-
 REFINE_CSS = """
 .refine-chips { display: flex; flex-direction: column; gap: .4rem; margin: .5rem 0 0; }
 /* margin-top resets the global `button` rule's 1rem, which would otherwise stack on

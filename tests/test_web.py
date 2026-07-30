@@ -2152,6 +2152,145 @@ def test_the_csp_is_unchanged_by_notifications(client):
         assert absent not in policy
 
 
+# ---------- the installed app: header control (D-header-optin), live index (D-self-refreshing-index)
+
+
+def _plant_finished(config, run_id: str, owner: str | None = WEB_IDENTITY) -> str:
+    store = RunStore(config.runs_dir, run_id)
+    store.question(f"What about {run_id}?")
+    if owner is not None:
+        store.owner(owner)
+    store.event("intake", path="question")
+    store.final("# a report", {"terminal_status": "accepted", "note": ""})
+    return run_id
+
+
+def _header_of(page: str) -> str:
+    return page.split("<header>", 1)[1].split("</header>", 1)[0]
+
+
+def test_the_notification_control_is_in_the_header_of_every_page(push_app):
+    """Installed to a home screen there is no browser chrome and no way back to a control
+    buried on one page — so wherever you are when you decide you want notifying, it is
+    there. Most of all on the run page, which is where starting a run lands you."""
+    app, config = push_app
+    _plant_finished(config, "run-hdr")
+    with web_client(app) as c:
+        for path in ("/", "/runs/run-hdr", "/runs/run-hdr/report"):
+            page = c.get(path).text
+            assert 'id="push-toggle"' in _header_of(page), path
+        # And no longer stranded under an arbitrarily long table.
+        index = c.get("/").text
+        assert "push-optin" not in index
+        assert 'id="push-toggle"' not in index.split("</header>", 1)[1]
+
+
+def test_an_anonymous_reader_of_a_shared_run_gets_no_control(push_app):
+    """A run is readable by anyone holding the id (D-id-as-credential). They have no runs to be told about
+    and could not subscribe if they tried — the route is a gated write — so offering it
+    would be an invitation to a 403."""
+    app, config = push_app
+    _plant_finished(config, "run-shared")
+    with web_client(app, identity=None) as anon:
+        for path in ("/runs/run-shared", "/runs/run-shared/report"):
+            response = anon.get(path)
+            assert response.status_code == 200, path
+            assert "push-toggle" not in response.text, path
+            assert "pushManager" not in response.text, path
+
+
+def test_the_control_is_offered_only_until_the_device_is_subscribed(push_app):
+    """Once notifications are on there is nothing left to do, so a permanent pill would be
+    a header element that never changes. Turning them off belongs to the OS, which owns the
+    permission — the page's only job there is to reconcile a revocation."""
+    app, _ = push_app
+    with web_client(app) as c:
+        page = c.get("/").text
+    script = page.split("<script>")[1].split("</script>")[0]
+    # No toggle: nothing claims notifications are on, and nothing unsubscribes on click.
+    assert "Notifications on" not in page
+    # Subscribed already => the control is never revealed; subscribing hides it.
+    assert "if (existing) return null;" in script
+    assert "btn.hidden = true;" in script
+    # The one unsubscribe path left is reconciliation after an out-of-band revocation.
+    assert "/push/unsubscribe" in script
+    assert "'denied'" in script
+
+
+def test_the_runs_table_fragment_is_gated_and_owner_scoped(push_app):
+    """It is the index's own body, so it inherits the index's rules: signed in, and only
+    your runs. Anything less would turn a per-viewer list into a public one."""
+    app, config = push_app
+    _plant_finished(config, "run-mine", WEB_IDENTITY)
+    _plant_finished(config, "run-theirs", FRIEND)
+
+    with web_client(app, identity=None) as anon:
+        assert anon.get("/runs-table").status_code == 403
+
+    with web_client(app) as c:
+        response = c.get("/runs-table")
+        assert response.status_code == 200
+        assert response.headers["cache-control"] == "no-store"
+        assert "run-mine" in response.text
+        assert "run-theirs" not in response.text
+
+
+def test_the_refresh_endpoint_is_not_inside_the_public_read_prefix():
+    """`_PUBLIC_GET_PREFIX` is the string `"/runs/"`, and everything under it answers an
+    anonymous caller (D-id-as-credential). A per-viewer list must not sit there, so the route is a sibling
+    name — asserted rather than trusted, because `/runs/table` would have looked natural and
+    silently published one person's index to anyone."""
+    from reasonable_answer.web.app import _PUBLIC_GET_PREFIX
+
+    assert not "/runs-table".startswith(_PUBLIC_GET_PREFIX)
+
+
+def test_the_page_and_the_refresh_endpoint_render_the_same_body(push_app):
+    """One renderer, so a run can never be shown one way on load and another on refresh."""
+    app, config = push_app
+    _plant_finished(config, "run-same")
+    with web_client(app) as c:
+        index = c.get("/").text
+        fragment = c.get("/runs-table").text
+    assert fragment.strip() in index
+
+
+def test_the_index_publishes_whether_anything_is_live_so_polling_can_stop(config, monkeypatch):
+    """The client must not scrape status text to decide whether to keep polling, and an idle
+    index left open must cost nothing."""
+    monkeypatch.setenv(SUBJECT_ENV, VAPID_SUBJECT)
+    worker = RunWorker(config, max_concurrent=1, runner=lambda *a, **k: None)
+    app = create_app(_push_config(config), worker=worker)
+    try:
+        _plant_finished(config, "run-done")
+        with web_client(app) as c:
+            assert 'data-live="0"' in c.get("/runs-table").text
+
+            # A queued run is live, and `worker.active()` is what says so.
+            RunStore(config.runs_dir, "run-live").question("Still going?")
+            RunStore(config.runs_dir, "run-live").owner(WEB_IDENTITY)
+            RunStore(config.runs_dir, "run-live").event("queued", attempt=1, auto=False)
+            monkeypatch.setattr(worker, "active", lambda: {"run-live": "running"})
+            assert 'data-live="1"' in c.get("/runs-table").text
+    finally:
+        worker.shutdown(timeout=0.1)
+
+
+def test_the_index_refreshes_itself_when_the_app_comes_back_into_view(client):
+    """The load-bearing half, and the reason the interval alone is not enough: iOS freezes
+    timers in a suspended standalone app, so the usual way this page is wrong is that it was
+    backgrounded for an hour and then swiped back to. `pageshow` covers the back-forward
+    cache, which restores a page without running a tick at all."""
+    page = client.get("/").text
+    assert "visibilitychange" in page
+    assert "pageshow" in page
+    assert "e.persisted" in page
+    # Present with the feature off too: this is not an opt-in, it is the repair of a
+    # staleness the installed app has no manual fix for.
+    assert "runs-table" in page
+    assert "push-toggle" not in page
+
+
 # ------------------------------------------------------ base path (reverse-proxy prefix)
 #
 # The deployment model is a *stripping* proxy: `location /app/ { proxy_pass .../; }` removes
@@ -2169,10 +2308,15 @@ _URL_ATTRS = re.compile(r'(?:href|src|action|data-stream)="(/[^"]*)"')
 
 def _absolute_urls(html: str) -> list[str]:
     """Every root-absolute URL the page emits, from the URL-bearing attributes and from the
-    service-worker `register(...)` call the attribute scan cannot see."""
+    inline scripts the attribute scan cannot see."""
     urls = _URL_ATTRS.findall(html)
     urls += re.findall(r"register\('(/[^']*)'", html)
     urls += re.findall(r"scope:\s*'(/[^']*)'", html)
+    # Script-only URLs: the index refresh endpoint and the two push routes. They are
+    # built by string concatenation inside an IIFE, so no attribute carries them and the
+    # prefix tests below would pass while the installed app 404'd behind a stripping proxy.
+    urls += re.findall(r"var url = '(/[^']*)'", html)
+    urls += re.findall(r"post\('(/[^']*)'", html)
     return urls
 
 
