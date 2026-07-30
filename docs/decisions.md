@@ -1966,8 +1966,10 @@ identity. Both a terminal completion and a stop-without-an-answer notify; a shut
 be open and foregrounded, which excludes every case worth notifying about. A suspended iOS PWA runs
 no JavaScript at all. Only a server-sent push reaches a locked phone, and only a service worker can
 receive one — which is why this decision is downstream of D27 rather than independent of it. On iOS
-push additionally exists *only* for a home-screen web app, so the install path D27 built is the
-literal precondition; without it there is no iPhone notification to have.
+push additionally exists *only* for a web app added to the Home Screen
+([WebKit, 2023](https://webkit.org/blog/13878/web-push-for-web-apps-on-ios-and-ipados/)), so the
+install path D27 built is the literal precondition; without it there is no iPhone notification to
+have.
 
 **The subscription endpoint is attacker-influenced, and that is the security core.** The browser
 mints a URL and hands it to the server, which then POSTs to it — the same shape as the seed-URL
@@ -1999,9 +2001,11 @@ the browser's own "site updated in the background" notice — a vague notificati
 worse.
 
 **The contact address is an environment variable, and there is deliberately no roster field for
-it.** RFC 8292 requires a `sub` claim — a `mailto:` or bare `https://host` a push service can use
-to reach the operator — and `py_vapid` refuses to sign without one, so an unset subject means every
-send raises before reaching the network. That exception would land in the notifier's best-effort
+it.** [RFC 8292 §2.1](https://datatracker.ietf.org/doc/html/rfc8292#section-2.1) *recommends*
+(`MAY` include the claim, `SHOULD` make its value a contact URI) a `sub` claim — a `mailto:` or
+bare `https://host` a push service can use to reach the operator; the hard requirement is
+`py_vapid`'s, whose `Vapid01._base_sign` raises `VapidException` when `sub` is absent or empty. So
+an unset subject means every send raises before reaching the network. That exception would land in the notifier's best-effort
 `except` and present as notifications that silently never arrive, so `push.enabled` with no subject
 is a boot failure instead. It is an env var for the same reason `SourcesConfig.contact_email` is:
 the value is somebody's personal address, the roster is committed to a public repository, and a
@@ -2032,16 +2036,21 @@ against a run measured in tens of minutes — which buys the absence of a second
 shutdown story. A `404` or `410` prunes the subscription; every other failure is a log line, because
 the run is already finished and durable and a courtesy must not cost the result.
 
-**The payload carries the question, which is a privacy decision.** Web Push bodies are encrypted to
-the subscription's own key (RFC 8291, aes128gcm), so Apple and Google relay ciphertext they cannot
+**The payload carries the question, which is a privacy decision.** Web Push bodies are encrypted
+under the `aes128gcm` content coding to a key pair the user agent binds to the subscription
+([RFC 8291](https://datatracker.ietf.org/doc/html/rfc8291)), so whichever push service relays the
+message — Apple, Google, Mozilla or Microsoft — carries ciphertext it cannot
 read. Truncated question text is what tells five concurrent runs apart on a lock screen, and without
 it the notification says only that *something* finished. The deep link uses the reader-facing base
 (D35), so it is the same URL every other run reference in the app emits; a finished run points at
 the report, one that stopped without shipping an answer points at the run page.
 
-**Permission is requested from a click and never on load.** On iOS a declined permission cannot be
-re-prompted — the only reset is deleting and reinstalling the home-screen app — so an auto-prompt
-spends that single chance on a page view, before the person knows what they are being asked. The
+**Permission is requested from a click and never on load.** iOS grants the prompt only in response
+to direct user interaction
+([WebKit, 2023](https://webkit.org/blog/13878/web-push-for-web-apps-on-ios-and-ipados/)), and a
+declined permission cannot be re-prompted — the only reset is deleting and reinstalling the
+home-screen app — so an auto-prompt spends that single chance on a page view, before the person
+knows what they are being asked. The
 control also ships `hidden` and is revealed only after the script has established the browser can
 deliver: an iOS Safari tab has `PushManager` and still cannot subscribe, so feature detection alone
 would show a button that fails, and the standalone check turns that into an instruction instead.

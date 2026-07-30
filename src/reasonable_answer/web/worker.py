@@ -27,7 +27,7 @@ from .. import shutdown
 from ..config import Config
 from ..graph import GracefulStop, ResumeMismatch
 from ..graph import run as run_graph
-from ..store import RunStore
+from ..store import RunStore, UnsafeRunId, safe_run_dir
 
 if TYPE_CHECKING:
     # Deferred: `refine.py` imports `RateLimiter` from this module, so a real
@@ -346,9 +346,12 @@ class RunWorker:
         if self._notifier is None:
             return
         try:
-            owner = (self._config.runs_dir / job.run_id / "owner.txt").read_text().strip()
-        except OSError:
+            owner = (safe_run_dir(self._config.runs_dir, job.run_id) / "owner.txt").read_text().strip()
+        except (OSError, UnsafeRunId):
             # No owner file: a CLI run without `--owner`, or a legacy run. Nobody to tell.
+            # `safe_run_dir` re-checks the RUN_ID alphabet and containment at the use site
+            # (the repo contract for every path built from a run id); an id that fails it is
+            # not a run we would notify about, so the same silent return covers both.
             return
         try:
             self._notifier.notify(

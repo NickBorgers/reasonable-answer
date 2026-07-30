@@ -623,10 +623,10 @@ class PushConfig(BaseModel):
     model_config = ConfigDict(extra="forbid")
 
     enabled: bool = False
-    #: Env var naming the `sub` claim for the VAPID assertion (RFC 8292): a `mailto:` or
-    #: bare `https://host` that a push service can use to reach whoever operates this
-    #: server. Required -- the spec mandates it, and `py_vapid` refuses to sign without one,
-    #: so an unset subject means every send raises before it reaches the network.
+    #: Env var naming the `sub` claim for the VAPID assertion (RFC 8292 recommends it with a
+    #: `SHOULD`): a `mailto:` or bare `https://host` that a push service can use to reach
+    #: whoever operates this server. Required in practice because `py_vapid` refuses to sign
+    #: without one, so an unset subject means every send raises before it reaches the network.
     #:
     #: An env var and not a roster key, for exactly the reason `SourcesConfig.contact_email`
     #: is one: this is somebody's personal address, the roster is committed to a public
