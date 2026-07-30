@@ -599,6 +599,46 @@ class AuthConfig(BaseModel):
     dev_identity: str | None = None
 
 
+#: Push services the server will POST a notification to. A bare entry matches that host
+#: exactly; a leading dot matches any subdomain of it. Lives here rather than in
+#: `web/push.py` because it is the default value of a config field and `config` must not
+#: import from the optional web layer -- `web/push.py` imports it back.
+DEFAULT_PUSH_ENDPOINT_HOSTS: tuple[str, ...] = (
+    "web.push.apple.com",
+    "fcm.googleapis.com",
+    ".push.services.mozilla.com",
+    ".notify.windows.com",
+)
+
+
+class PushConfig(BaseModel):
+    """Notifying a run's owner when it stops (D41, web/push.py).
+
+    Off by default, like every other feature that needs egress or a secret. Turning it on
+    generates a VAPID keypair under `runs_dir` on the next boot and adds an opt-in control
+    to the index; leaving it off means no key, no routes and a page byte-identical to a
+    build without the feature.
+    """
+
+    model_config = ConfigDict(extra="forbid")
+
+    enabled: bool = False
+    #: The `sub` claim in the VAPID assertion (RFC 8292) -- a `mailto:` or `https:` URL a
+    #: push service can use to reach whoever operates this server. Required by the spec and
+    #: by Apple; a send with an empty subject is rejected at the push service, so this is
+    #: validated at startup rather than discovered when the first run finishes.
+    subject: str = ""
+    #: Push services this server will POST to. The endpoint comes from the browser, so this
+    #: is the SSRF boundary for it -- see `web/push.validate_endpoint`.
+    endpoint_hosts: tuple[str, ...] = DEFAULT_PUSH_ENDPOINT_HOSTS
+    #: Per-send timeout. Sends happen on the worker thread between runs, so this bounds how
+    #: long a dead push service can delay the next queued run.
+    timeout_seconds: float = Field(default=5.0, gt=0, le=30)
+    #: Devices one person may register. A phone, a laptop and a tablet is three; the cap
+    #: exists so the store cannot grow without bound, not to ration anything.
+    max_subscriptions_per_identity: int = Field(default=10, ge=1, le=50)
+
+
 #: All transforms except the ideologically riskiest one (docs/question-refinement.md
 #: "the reframe taxonomy"). Computed once from the schema's canonical tuple so the two
 #: never drift apart.
@@ -673,6 +713,7 @@ class Config(BaseModel):
     seed: SeedConfig = Field(default_factory=SeedConfig)
     disputes: DisputeConfig = Field(default_factory=DisputeConfig)
     refine: RefineConfig = Field(default_factory=RefineConfig)
+    push: PushConfig = Field(default_factory=PushConfig)
     runs_dir: Path = Path("runs")
     retention_days: int = 14
     #: How often the web server's background sweep content-purges runs past
