@@ -440,7 +440,7 @@ class FlakyWriterClient(FakeClient):
 def test_the_only_eligible_writer_is_asked_again_rather_than_the_run_aborted(
     identities, config
 ):
-    """D41, and the shape of the three runs that aborted on 2026-07-29.
+    """D42, and the shape of the three runs that aborted on 2026-07-29.
 
     Author exclusion applies to writers, so from round two a two-writer roster leaves
     exactly ONE eligible model. `attempts` used to be `min(len(pool), writer_attempts)`,
@@ -468,7 +468,7 @@ def test_the_only_eligible_writer_is_asked_again_rather_than_the_run_aborted(
     assert "empty report" in failures[0]["reason"]
 
     # The sharp end: the draft that followed the failure was written by the SAME model,
-    # because it was the only eligible one. Before D41 there was no second attempt to
+    # because it was the only eligible one. Before D42 there was no second attempt to
     # make, and this was `terminal=aborted`.
     generated = [e for e in events if e["kind"] == "generate"]
     assert generated[1]["author"] == failures[0]["author"]

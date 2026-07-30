@@ -509,7 +509,7 @@ def _generate(state: State, rt: Runtime) -> dict:
             "max_tool_rounds": cfg.search.max_tool_rounds,
             # Withdraw the tool the moment its budget is gone. Otherwise the handler
             # keeps answering "budget exhausted" and a determined writer spends every
-            # remaining round asking again instead of writing (D41).
+            # remaining round asking again instead of writing (D42).
             "should_offer_tools": lambda: not searcher.budget.exhausted,
         }
 
@@ -519,7 +519,7 @@ def _generate(state: State, rt: Runtime) -> dict:
     # spaced, chance when there is not. On a revision round a two-writer roster leaves
     # exactly one eligible model (author exclusion already removed the other), so
     # bounding these attempts by the pool size made the whole budget 1 and one empty
-    # completion aborted the run (D41). Re-asking a pool member never re-asks the
+    # completion aborted the run (D42). Re-asking a pool member never re-asks the
     # previous author: `writer_pool` excluded them before this ran.
     attempts = cfg.budgets.writer_attempts
     alias = ""

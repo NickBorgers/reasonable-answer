@@ -122,7 +122,7 @@ Valid JSON conforming exactly to `.github/scripts/review/schema/reviewer-v1.json
   cycles reads as a brand-new blocker and stalls the merge.
 - `decision_ref` may be `null` for a docs finding — most stale-link and cross-doc-contradiction
   findings cite nothing in `docs/decisions.md`. Set it when a real decision or finding ID from
-  `docs/decisions.md` (`D1`–`D41`, `RA-*`, `RB-*`, `RC-*`, `RG-*`) or `docs/convergence.md`
+  `docs/decisions.md` (`D1`–`D42`, `RA-*`, `RB-*`, `RC-*`, `RG-*`) or `docs/convergence.md`
   (`RD-002`, `RH-001`, `RI-001`) is genuinely relevant.
 - Each blocker needs a matching `fix_suggestions[]` entry with the same `id`. Doc fixes are almost
   always `applicable: "manual"` — reserve `"mechanical"` for a literal rename or a dead-link

@@ -35,7 +35,7 @@ _WEB_EXTRA_MODULES = {"fastapi", "markdown_it", "uvicorn", "multipart", "starlet
 #: Names a level for `ra` itself, for a deployment that cannot pass `--verbose` — the
 #: container's CMD is fixed. Set because a night of aborted production runs left only
 #: WARNING lines behind: no run starts, no controller decisions, no search results, so
-#: the post-mortem was inference rather than reading (D41).
+#: the post-mortem was inference rather than reading (D42).
 LOG_LEVEL_ENV = "RA_LOG_LEVEL"
 
 

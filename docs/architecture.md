@@ -235,7 +235,7 @@ carried no headings is accepted with a warning; the warning rides the run's exis
   every alias in the roster (writers, critics, and the orchestrator), validates per-lens roster
   health, and checks the config invariant `0 < min_ticks < hard_cap` (fail closed) so no generating
   rule can fire at or beyond the cap.
-- **Writer-pool depth (D41):** author exclusion applies to writers too, so the pool the *next* draft
+- **Writer-pool depth (D42):** author exclusion applies to writers too, so the pool the *next* draft
   may come from is `writers \ {author(Rₙ)}`. Size the pool for **≥2 eligible writers on a revision
   round** — i.e. at least three writers — or one flaky response is an aborted run rather than a
   retry. This is a sizing recommendation, not a fail-closed check: a two-writer roster is legal and
@@ -243,7 +243,7 @@ carried no headings is accepted with a warning; the warning rides the run's exis
 - **Concurrency/limits:** bounded concurrency (the 3 lenses may run in parallel), per-call timeout +
   retry budget, token/context budgeting for the slow local model, backpressure so parallel lenses
   don't overload one proxy/model.
-- **Transient-failure posture (D41):** every retry waits — exponential with jitter, bounded by
+- **Transient-failure posture (D42):** every retry waits — exponential with jitter, bounded by
   `budgets.retry_backoff_seconds` / `retry_backoff_max_seconds`, and a provider's own `Retry-After`
   wins where it sends one. Failures whose status says the *request* is wrong (400/401/403/404/413/
   422) raise `PermanentCallError` immediately instead of consuming the budget. A completion is never

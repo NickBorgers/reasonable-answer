@@ -162,7 +162,7 @@ def test_budgets_fail_closed_on_a_cap_that_cannot_be_hard():
 
 def test_a_backoff_cap_below_its_base_is_rejected():
     """Otherwise every wait silently becomes the cap and the base reads as a setting
-    that does nothing (D41)."""
+    that does nothing (D42)."""
     with pytest.raises(ConfigError, match="retry_backoff_max_seconds"):
         Budgets(retry_backoff_seconds=10.0, retry_backoff_max_seconds=5.0)
 

@@ -100,7 +100,7 @@ class FakeClient:
     #: `attempt` values `_generate` asked to wait for between writer attempts. Recorded
     #: rather than served: this fake never sleeps, so a graph test that drives the
     #: writer fallback runs at full speed while still being able to assert the pause
-    #: happened (D41).
+    #: happened (D42).
     writer_backoffs: list[int] = field(default_factory=list)
 
     # ---- the LLMClient surface the graph uses -----------------------------

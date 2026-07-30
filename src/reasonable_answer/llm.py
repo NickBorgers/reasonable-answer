@@ -182,7 +182,7 @@ class LLMClient:
         Exponential with jitter, because the failures this exists for are correlated
         in time — a provider that just returned an empty completion is mid-something,
         and three requests inside five seconds are three samples of the same bad
-        moment (D41).
+        moment (D42).
         """
         budgets = self._config.budgets
         if retry_after is not None:
@@ -306,7 +306,7 @@ class LLMClient:
         answer withdraws `tools` for the rest of the call. It exists because a tool
         can run out of budget mid-loop — the search handler starts returning "budget
         exhausted" text — and a model handed a tool that cannot work will keep calling
-        it until the rounds are gone (D41). Withdrawing it forces the answer instead.
+        it until the rounds are gone (D42). Withdrawing it forces the answer instead.
 
         `timeout`, when given, overrides the client-wide `budgets.timeout_seconds`
         for this call only (passed straight through to the OpenAI SDK's per-request
@@ -362,7 +362,7 @@ class LLMClient:
                     # correctly, since a message carrying tool calls is not an empty
                     # completion — and this loop used to return it as a successful
                     # `text=""`, which the caller could only read as "the model wrote
-                    # nothing". Two production runs aborted on exactly that (D41).
+                    # nothing". Two production runs aborted on exactly that (D42).
                     # One more round, asked in words, is far cheaper than discarding a
                     # writer call that has already spent its whole search budget.
                     reply = self._answer_now(alias, base, messages, timeout)
@@ -610,7 +610,7 @@ class LLMClient:
                 # input — a critic's `claim_span`, a rejected field value, the rationale a
                 # validator quotes back. It feeds the repair prompt below, which stays
                 # inside the run, but must never reach an ordinary log: `RA_LOG_LEVEL=INFO`
-                # is the container default (D41), and stdout/log aggregation lives outside
+                # is the container default (D42), and stdout/log aggregation lives outside
                 # the 0700 `runs/<id>/` tree. Log only the bounded, content-free class.
                 log.info(
                     "schema violation from %s (attempt %d): %s",

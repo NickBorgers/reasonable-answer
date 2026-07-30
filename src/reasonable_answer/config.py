@@ -82,14 +82,14 @@ class Budgets(BaseModel):
     # deep on every revision round (author exclusion already removed the other), so
     # bounding this by the pool size made the retry budget 1 and one flaky response
     # killed the run. Re-asking a pool member is safe — `writer_pool` excluded the
-    # previous author before `_generate` ever saw it (D41).
+    # previous author before `_generate` ever saw it (D42).
     writer_attempts: int = Field(default=3, ge=1, le=10)
     timeout_seconds: float = Field(default=300.0, gt=0, le=7200)
     # Wait between retries, exponential with jitter: attempt N sleeps
     # min(base * 2**(N-1), max) * uniform(0.5, 1.0). Zero base disables the wait, which
     # is what the offline suite uses. Retrying a transient provider failure with no
     # pause at all is what three aborted production runs did — the whole budget was
-    # spent inside five seconds, before anything upstream could recover (D41).
+    # spent inside five seconds, before anything upstream could recover (D42).
     retry_backoff_seconds: float = Field(default=2.0, ge=0, le=60)
     retry_backoff_max_seconds: float = Field(default=30.0, ge=0, le=300)
     max_concurrency: int = Field(default=3, ge=1, le=16)

@@ -217,7 +217,7 @@ def test_audition_refine_rejects_unknown_transforms(doctor_config):
 
 
 def test_the_log_level_can_be_named_by_the_environment(monkeypatch):
-    """D41. The container's CMD is fixed, so `--verbose` is unreachable in production —
+    """D42. The container's CMD is fixed, so `--verbose` is unreachable in production —
     and a night of aborted runs left only WARNING lines to diagnose them from."""
     monkeypatch.setenv(cli.LOG_LEVEL_ENV, "info")
     captured: dict[str, object] = {}
