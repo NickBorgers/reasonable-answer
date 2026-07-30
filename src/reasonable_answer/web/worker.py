@@ -129,9 +129,14 @@ class RunWorker:
         runner: Callable[..., dict] | None = None,
         stop: threading.Event | None = None,
         rate_limiter: RateLimiter | None = None,
+        notifier: Any | None = None,
     ) -> None:
         self._config = config
         self._runner = runner or run_graph
+        # `web.push.Notifier`, or None when the feature is off. Typed loosely on purpose:
+        # this module must not import the push layer to construct a worker, and tests pass a
+        # stand-in. The only contract is `notify(**kwargs) -> int`.
+        self._notifier = notifier
         self._queue: queue.Queue[Job | None] = queue.Queue()
         self._status: dict[str, str] = {}
         self._lock = threading.Lock()
@@ -326,6 +331,38 @@ class RunWorker:
 
     # ----------------------------------------------------------------- worker
 
+    def _notify(self, job: Job, status: str, has_report: bool) -> None:
+        """Tell the run's owner it stopped (D41). Best-effort, and never fatal.
+
+        Sent inline on this thread rather than handed to another one. With
+        `RA_MAX_CONCURRENT_RUNS=1` that delays the next queued run by the push timeout —
+        seconds, against a run measured in tens of minutes — and it buys the absence of a
+        second thread with its own shutdown story and its own way to lose work.
+
+        The owner is read off disk rather than carried on the `Job`, because `recover()`
+        rebuilds jobs from disk at boot and `owner.txt` is the single record of ownership
+        (D32); a field on `Job` would be one more thing that has to survive a restart.
+        """
+        if self._notifier is None:
+            return
+        try:
+            owner = (self._config.runs_dir / job.run_id / "owner.txt").read_text().strip()
+        except OSError:
+            # No owner file: a CLI run without `--owner`, or a legacy run. Nobody to tell.
+            return
+        try:
+            self._notifier.notify(
+                run_id=job.run_id,
+                owner=owner,
+                question=job.question,
+                status=status,
+                has_report=has_report,
+            )
+        except Exception:
+            # A notification is a courtesy on top of a run that has already finished and is
+            # already durable on disk. Nothing here is allowed to cost the result.
+            log.warning("could not notify the owner of %s", job.run_id, exc_info=True)
+
     def _drain(self) -> None:
         while not self._stopping.is_set():
             try:
@@ -342,6 +379,14 @@ class RunWorker:
             with self._lock:
                 self._status[job.run_id] = "running"
             started = time.time()
+            # What to tell the owner, or None to tell them nothing. Assigned in the branches
+            # below and consumed in `finally`, rather than notifying from each branch
+            # directly: `finally` also runs on the `GracefulStop` `return`, and a shutdown
+            # pause is the one stop that is not news — the run resumes on the next boot, so
+            # a notification for it would be a false alarm. Leaving the sentinel None is what
+            # suppresses that case, which is harder to get wrong than remembering not to add
+            # a call to one branch out of four.
+            outcome: tuple[str, bool] | None = None
             try:
                 final = self._runner(
                     self._config,
@@ -360,6 +405,10 @@ class RunWorker:
                 log.info(
                     "%s finished in %.0fs (%s)", job.run_id, time.time() - started, status
                 )
+                # A run reaching here shipped a report unless it aborted, and the notification
+                # deep-links accordingly — the report page for something to read, the run page
+                # for something to inspect.
+                outcome = (status, status != "aborted")
             except GracefulStop:
                 # Expected during a deploy. The graph already wrote its `pause` event and
                 # the checkpoint is durable, so the next boot resumes from here.
@@ -374,12 +423,18 @@ class RunWorker:
                 RunStore(self._config.runs_dir, job.run_id).event(
                     "abandoned", reason="question, seed, roster or budgets changed since this run started"
                 )
+                outcome = ("abandoned", False)
             except Exception:
                 # The graph writes its own terminal state and audit trail; anything
                 # escaping to here is a crash, and the registry will show the run as
                 # `interrupted` — which is resumable, not lost.
                 log.exception("%s crashed", job.run_id)
+                outcome = ("interrupted", False)
             finally:
                 with self._lock:
                     self._status.pop(job.run_id, None)
+                # Before `task_done()`, so a test that waits on the queue sees the
+                # notification already attempted rather than racing it.
+                if outcome is not None:
+                    self._notify(job, *outcome)
                 self._queue.task_done()
