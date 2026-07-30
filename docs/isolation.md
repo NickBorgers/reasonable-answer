@@ -249,7 +249,14 @@ Mitigations, by boundary:
   check — the same violation still fails closed once the budget is gone — it stops a
   recoverable quoting slip from costing one of the run's `critique_attempts`.
 - **Loci are bounded structural references** (section/paragraph indices), not free text; quoted
-  spans are length-limited untrusted data — closing the critic→generator free-text channel.
+  spans are length-limited untrusted data — closing the critic→generator free-text channel. Each
+  category states **what its `claim_span` anchors to** (D41), because the anchor is not self-evident
+  for a defect of absence: `omitted_counterargument`, `unexamined_presupposition` and
+  `unclear_structure` describe something the report does *not* say, so there is no span of the
+  offending text and a critic asked only for "a verbatim quote" reaches for the material that is
+  missing — which fails the check, through the repair budget, and fails the lens. Those categories
+  anchor to the present text the gap bites into, and route the missing content to `instruction` or
+  `rationale`. This narrows what a critic may quote and never widens it: validation is unchanged.
 - **The orchestrator can't be injected** — it never sees free text, only integer counts.
 - **Confirmation is indistinguishable** from a normal critique (identical interface/prompt; the
   `confirm_state` label is applied after output, fresh context, no cache reuse — RB-010), so a
