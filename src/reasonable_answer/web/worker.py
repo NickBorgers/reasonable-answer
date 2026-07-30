@@ -332,7 +332,7 @@ class RunWorker:
     # ----------------------------------------------------------------- worker
 
     def _notify(self, job: Job, status: str, has_report: bool) -> None:
-        """Tell the run's owner it stopped (D41). Best-effort, and never fatal.
+        """Tell the run's owner it stopped (D43). Best-effort, and never fatal.
 
         Sent inline on this thread rather than handed to another one. With
         `RA_MAX_CONCURRENT_RUNS=1` that delays the next queued run by the push timeout —

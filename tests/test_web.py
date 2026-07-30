@@ -1708,7 +1708,7 @@ def test_service_worker_registration_is_guarded_and_cannot_break_the_live_script
     assert "isSecureContext" in client.get(f"/runs/{run_id}/report").text
 
 
-# --------------------------------------------------------- push notifications (D41)
+# --------------------------------------------------------- push notifications (D43)
 
 
 VAPID_SUBJECT = "mailto:ops@example.com"

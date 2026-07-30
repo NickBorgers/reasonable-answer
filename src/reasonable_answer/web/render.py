@@ -654,7 +654,7 @@ def _register_sw_js(base_path: str = "") -> str:
     return _REGISTER_SW_JS.replace("__RA_BASE__", base_path)
 
 
-#: Opting a device in to notifications (D41). Emitted only when `push.enabled`, so a build
+#: Opting a device in to notifications (D43). Emitted only when `push.enabled`, so a build
 #: with the feature off renders the index byte-identically to before.
 #:
 #: Two rules are load-bearing and both come from the platforms rather than from taste.
@@ -1484,7 +1484,7 @@ main {
 # Appended onto CSS only when refine.enabled (see render_index) so a disabled build's
 # <style> tag is unchanged. No motion is used, so there is nothing here for
 # @media (prefers-reduced-motion: reduce) to turn off (docs/question-refinement.md).
-#: The notification opt-in (D41). Two rules, because the control reuses `button.secondary`
+#: The notification opt-in (D43). Two rules, because the control reuses `button.secondary`
 #: and `.hint` and needs nothing else: the global `button` rule's top margin would otherwise
 #: push it a full line below the table, and the note has to sit beside the button rather than
 #: under it.

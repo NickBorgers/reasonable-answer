@@ -612,7 +612,7 @@ DEFAULT_PUSH_ENDPOINT_HOSTS: tuple[str, ...] = (
 
 
 class PushConfig(BaseModel):
-    """Notifying a run's owner when it stops (D41, web/push.py).
+    """Notifying a run's owner when it stops (D43, web/push.py).
 
     Off by default, like every other feature that needs egress or a secret. Turning it on
     generates a VAPID keypair under `runs_dir` on the next boot and adds an opt-in control

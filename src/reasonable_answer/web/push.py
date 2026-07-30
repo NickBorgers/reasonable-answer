@@ -1,4 +1,4 @@
-"""Web Push notification of a stopped run (D41).
+"""Web Push notification of a stopped run (D43).
 
 A run takes 10-25 minutes and the interface makes it easy to start several. Before this
 module the only way to learn one had finished was to be looking at its page, where the SSE

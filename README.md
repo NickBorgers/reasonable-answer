@@ -234,6 +234,30 @@ someone; every write stays behind the gate. Unset, it falls back to `RA_ROOT_PAT
 nothing changes. See [D35](./docs/decisions.md) and
 [authentication.md](./docs/authentication.md).
 
+**To be told when a run finishes**, set `push.enabled: true` and a `push.subject` contact in
+the roster:
+
+```yaml
+push:
+  enabled: true
+  subject: mailto:you@example.com   # required — the VAPID contact, RFC 8292
+```
+
+On the next boot the app generates a VAPID keypair at `<runs_dir>/.vapid-private.pem` and the
+index grows a **Notify me when runs finish** button. Tap it once per device and a run that
+stops — finished, or dead — pushes a notification naming the question and its status, which
+opens the report. There is nothing to register with anyone: no Firebase project, no APNs
+certificate, no app store. The server needs outbound HTTPS to the push services
+(`web.push.apple.com`, `fcm.googleapis.com`), and the page needs HTTPS, which installation
+already required.
+
+Two things to know. **Back up `.vapid-private.pem`** — every subscription is bound to the key
+it was minted under, so losing it invalidates all of them silently, with no channel left to
+ask the devices to re-subscribe. And **on an iPhone the app has to be on the home screen
+first**: iOS gives push only to installed web apps, and a declined permission prompt can only
+be reset by deleting and reinstalling, so the button appears only once it can actually work.
+See [D43](./docs/decisions.md).
+
 ## Configuration
 
 Everything lives in [config/roster.yaml](./config/roster.yaml). The roster is **role-structured**:

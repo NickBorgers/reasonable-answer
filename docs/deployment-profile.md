@@ -67,6 +67,13 @@ Credentialled requests are hardened the same way anonymous ones are: the same op
 redirects, a single allowed host, and an allowlist that strips `Authorization` and friends if a
 redirect is ever followed. The outbound user agent is fixed and is not configurable.
 
+One outbound destination is not a provider and not configured by a credential: with `push.enabled`
+the server POSTs a notification to the push service named by each subscription — Apple's or Google's
+(D43). That URL comes from the *browser*, so it is the one outbound request whose host is
+attacker-influenceable, and `web/push.validate_endpoint` is the boundary: HTTPS only, no credentials,
+no explicit port, and a label-anchored match against `push.endpoint_hosts`. It is checked when the
+subscription is stored and again before every send.
+
 ### What the proxy must not do
 
 Two requirements on the LiteLLM configuration itself. Neither is checkable from this repository —

@@ -175,7 +175,7 @@ def create_app(
             "auth.dev_identity is set: unauthenticated requests are treated as %s",
             config.auth.dev_identity,
         )
-    # Notifications (D41). Built before the worker because the worker holds the notifier:
+    # Notifications (D43). Built before the worker because the worker holds the notifier:
     # the send happens on the worker thread the moment a run stops, which is the only place
     # that knows a run stopped without a browser having to be watching. `push_key` is the
     # public half, embedded in the index for `pushManager.subscribe`; empty when the feature

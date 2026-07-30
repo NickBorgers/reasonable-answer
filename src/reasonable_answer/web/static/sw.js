@@ -99,7 +99,7 @@ self.addEventListener('fetch', function (event) {
 
 // ---------------------------------------------------------------- notifications
 
-// A run stops and the server pushes here (D41). Neither handler below touches `caches`,
+// A run stops and the server pushes here (D43). Neither handler below touches `caches`,
 // so the invariant at the top of this file is unaffected: `cache.put` still appears in
 // exactly one branch, reachable only for URLs in ASSETS.
 
