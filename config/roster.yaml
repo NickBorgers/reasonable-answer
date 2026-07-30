@@ -23,9 +23,16 @@ proxy:
   api_key_fallback: fake-key
 
 roster:
+  # Three, not two, because author exclusion applies to writers as well: on every
+  # revision round the previous author is removed, so a two-writer pool leaves exactly
+  # ONE eligible model and a single flaky response ends the run. Three leaves two
+  # (D42).
   writers:
     - mistral-large-3      # 675B/A41B Apache 2.0, ~340GB @4bit. Authors R1 and every odd round.
     - deepseek-v4-flash    # 284B/A13B MIT, ~145GB @4bit.
+    - nemotron-3-ultra     # 550B/A55B open, ~275GB @4bit. Writer-only: it shrinks no
+                           # critic pool, and its Western corpus decorrelates a pool
+                           # that is otherwise one Mistral and one DeepSeek.
 
   # Free, local (ollama), and pinned in memory. Its failure mode is a skipped polish
   # pass and nothing else: rule 9 is cap-gated and the LLM can only *enable* it.
@@ -267,10 +274,18 @@ budgets:
   # the 12 `critique_attempts` re-asking a fresh model the identical question.
   critic_repair_retries: 2
   call_retries: 2
-  # Distinct writers tried for one draft before the run gives up. A model that is
-  # down or answering with nothing gets routed around, not treated as a verdict.
+  # Attempts at one draft before the run gives up. They rotate through the eligible
+  # writer pool and wrap, so a model that is down or answering with nothing is routed
+  # around when there is somewhere to route to, and given another spaced chance when
+  # there is not. Wrapping never re-asks the previous author — exclusion removed them
+  # before the rotation started (D42).
   writer_attempts: 3
   timeout_seconds: 300
+  # Wait before each retry: min(base * 2^(n-1), max) seconds, times jitter in
+  # [0.5, 1.0]. Retrying instantly is what turned three transient empty completions
+  # into three aborted runs — the whole budget was spent inside five seconds (D42).
+  retry_backoff_seconds: 2.0
+  retry_backoff_max_seconds: 30.0
   max_concurrency: 3
 
 # Identity comes from a header set by whatever fronts the app — Cloudflare Access or

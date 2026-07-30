@@ -37,6 +37,7 @@ roster:
   writers:
     - mistral-large-3
     - deepseek-v4-flash
+    - nemotron-3-ultra
 
   orchestrator: gemma4-small
 

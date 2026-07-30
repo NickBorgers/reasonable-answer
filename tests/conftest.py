@@ -50,7 +50,13 @@ def config(roster: Roster, tmp_path) -> Config:
     return Config(
         proxy=ProxyConfig(),
         roster=roster,
-        budgets=Budgets(min_ticks=2, hard_cap=5, polish_cap=1),
+        # No retry backoff: the suite is offline, so every failure it scripts is
+        # instant and waiting out a real exponential delay would only make the run
+        # slower. Tests that are *about* the wait (test_llm_retry.py) set their own
+        # base and inject a recording sleep rather than serving one.
+        budgets=Budgets(
+            min_ticks=2, hard_cap=5, polish_cap=1, retry_backoff_seconds=0.0
+        ),
         runs_dir=tmp_path / "runs",
     )
 

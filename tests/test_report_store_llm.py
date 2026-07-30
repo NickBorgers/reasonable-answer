@@ -160,6 +160,13 @@ def test_budgets_fail_closed_on_a_cap_that_cannot_be_hard():
         Budgets(min_ticks=6, hard_cap=5)
 
 
+def test_a_backoff_cap_below_its_base_is_rejected():
+    """Otherwise every wait silently becomes the cap and the base reads as a setting
+    that does nothing (D42)."""
+    with pytest.raises(ConfigError, match="retry_backoff_max_seconds"):
+        Budgets(retry_backoff_seconds=10.0, retry_backoff_max_seconds=5.0)
+
+
 @pytest.mark.parametrize(
     "kwargs",
     [
@@ -168,6 +175,9 @@ def test_budgets_fail_closed_on_a_cap_that_cannot_be_hard():
         {"stagnation_limit": -1},  # terminates on tick one
         {"critique_attempts": -1},  # silently reads as exhausted
         {"timeout_seconds": 0},
+        {"retry_backoff_seconds": -1},  # a negative sleep is a crash or a no-op
+        {"retry_backoff_max_seconds": -1},
+        {"writer_attempts": 0},  # no attempt at all is an instantly fatal run
     ],
 )
 def test_out_of_range_budgets_are_rejected_at_load(kwargs):

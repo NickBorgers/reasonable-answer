@@ -502,21 +502,32 @@ def _generate(state: State, rt: Runtime) -> dict:
 
     search_kwargs: dict[str, Any] = {}
     if rt.search_enabled:
+        searcher = rt.searcher
         search_kwargs = {
             "tools": [search.SEARCH_TOOL],
-            "tool_handler": search.make_tool_handler(rt.searcher),
+            "tool_handler": search.make_tool_handler(searcher),
             "max_tool_rounds": cfg.search.max_tool_rounds,
+            # Withdraw the tool the moment its budget is gone. Otherwise the handler
+            # keeps answering "budget exhausted" and a determined writer spends every
+            # remaining round asking again instead of writing (D42).
+            "should_offer_tools": lambda: not searcher.budget.exhausted,
         }
 
-    # One dud model must not cost a run that has other writers. Each attempt asks the
-    # *next distinct* eligible writer, so a model that is down, rate-limited, or
-    # answering with nothing is routed around rather than treated as a verdict on the
-    # draft. Only an exhausted pool is fatal.
-    attempts = min(len(pool), cfg.budgets.writer_attempts)
+    # One flaky response must not cost the run. Attempts rotate through the eligible
+    # pool and wrap, so a model that is down, rate-limited, or answering with nothing
+    # is routed around when there is somewhere to route to — and simply given another,
+    # spaced, chance when there is not. On a revision round a two-writer roster leaves
+    # exactly one eligible model (author exclusion already removed the other), so
+    # bounding these attempts by the pool size made the whole budget 1 and one empty
+    # completion aborted the run (D42). Re-asking a pool member never re-asks the
+    # previous author: `writer_pool` excluded them before this ran.
+    attempts = cfg.budgets.writer_attempts
     alias = ""
     completion = None
     last_failure = ""
     for offset in range(attempts):
+        if offset > 0:
+            rt.client.backoff_between_writer_attempts(offset)
         alias = pool[(rotation + offset) % len(pool)]
         try:
             reply = rt.client.complete(

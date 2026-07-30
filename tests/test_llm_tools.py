@@ -44,7 +44,10 @@ def client(tmp_path) -> LLMClient:
                 "completeness": ["completeness-spec"],
             },
         ),
-        budgets=Budgets(min_ticks=1, hard_cap=3),
+        # No retry backoff: these tests are about the tool loop and the fail-closed
+        # guards, not about the wait between attempts (test_llm_retry.py owns that),
+        # and the scripted failures are instant so there is nothing to wait out.
+        budgets=Budgets(min_ticks=1, hard_cap=3, retry_backoff_seconds=0.0),
         runs_dir=tmp_path / "runs",
     )
     return LLMClient(config)
@@ -148,6 +151,79 @@ def test_a_model_that_never_stops_calling_tools_is_still_forced_to_answer(client
     assert len(rounds) == 4
     assert all("tools" in r for r in rounds[:3]), "tools offered while rounds remain"
     assert "tools" not in rounds[-1], "the exhausted round must drop tools"
+
+
+def test_a_tool_call_on_the_exhausted_round_is_asked_again_in_words(client):
+    """D42. Dropping `tools` is an instruction, not an enforcement — a model may answer
+    the final round with another tool call anyway. `_create` passes that message (one
+    carrying tool calls is not an empty completion), so the loop used to return
+    `text=""` as a *success*, and two production runs aborted reading it as "the writer
+    produced nothing"."""
+    rounds: list[dict] = []
+    _scripted(
+        client,
+        [_tool_message(), _tool_message(), _prose("LATE REPORT")],
+        record=rounds,
+    )
+
+    result = client.complete(
+        "writer-a", system="s", user="u",
+        tools=[{"type": "function", "function": {"name": "web_search"}}],
+        tool_handler=lambda n, a: "r",
+        max_tool_rounds=1,
+    )
+
+    assert result.text == "LATE REPORT"
+    # The nudge round carries no tools and ends in a user turn asking for the answer.
+    assert "tools" not in rounds[-1]
+    last = rounds[-1]["messages"][-1]
+    assert last["role"] == "user"
+    assert "final answer" in last["content"]
+    # The unanswered assistant message must NOT be replayed: it holds tool calls with
+    # no matching `role: tool` replies, which several providers reject outright.
+    assert not any(m.get("tool_calls") for m in rounds[-1]["messages"][-2:])
+
+
+def test_a_loop_that_never_produces_prose_raises_rather_than_returning_nothing(client):
+    """The backstop. One nudge, then the failure enters the caller's retry budget as a
+    `ModelCallError` instead of surfacing as a successful empty report (D42)."""
+    _scripted(client, [_tool_message(), _tool_message(), _tool_message()])
+
+    with pytest.raises(ModelCallError, match="ended without an answer"):
+        client.complete(
+            "writer-a", system="s", user="u",
+            tools=[{"type": "function", "function": {"name": "web_search"}}],
+            tool_handler=lambda n, a: "r",
+            max_tool_rounds=1,
+        )
+
+
+def test_a_tool_whose_budget_is_spent_is_withdrawn_mid_loop(client):
+    """D42. The search handler answers "budget exhausted" as *text* by design, so a
+    writer told nothing would read silence as "nothing exists" — but leaving the tool on
+    offer let a determined model spend every remaining round asking again and arrive at
+    the end with a tool call instead of a report."""
+    rounds: list[dict] = []
+    _scripted(client, [_tool_message(), _prose("WROTE IT")], record=rounds)
+
+    budget_left = [True]
+
+    def handler(name, arguments):
+        budget_left[0] = False  # this call drained it
+        return "budget exhausted"
+
+    result = client.complete(
+        "writer-a", system="s", user="u",
+        tools=[{"type": "function", "function": {"name": "web_search"}}],
+        tool_handler=handler,
+        max_tool_rounds=6,
+        should_offer_tools=lambda: budget_left[0],
+    )
+
+    assert result.text == "WROTE IT"
+    assert len(rounds) == 2, "no rounds wasted re-offering a tool that cannot work"
+    assert "tools" in rounds[0]
+    assert "tools" not in rounds[1]
 
 
 def test_a_model_that_answers_immediately_makes_no_tool_calls(client):

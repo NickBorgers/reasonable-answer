@@ -48,6 +48,13 @@ services:
       # Edit the roster without rebuilding the image.
       - ./config/roster.yaml:/etc/ra/roster.yaml:ro
     environment:
+      # The container's CMD is fixed, so `--verbose` is not reachable; this is how a
+      # deployment asks for INFO. Worth the volume: a night of aborted runs left only
+      # WARNING lines behind — no run starts, no controller decisions, no search
+      # results — and the post-mortem had to infer what the logs should have said
+      # (D42). Nothing at INFO carries run material: search logs query *lengths*
+      # (RA-016) and the controller is blind to the report by construction.
+      RA_LOG_LEVEL: "INFO"
       # Every concurrent run multiplies load on one proxy; the local models in the
       # roster are the bottleneck the design is built around.
       RA_MAX_CONCURRENT_RUNS: "1"

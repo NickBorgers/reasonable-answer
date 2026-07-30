@@ -240,8 +240,8 @@ Everything lives in [config/roster.yaml](./config/roster.yaml). The roster is **
 
 ```yaml
 roster:
-  writers: [mistral-large-3, deepseek-v4-flash]   # models that author reports
-  orchestrator: gemma4-small                      # blind referee (optional; default writers[0])
+  writers: [mistral-large-3, deepseek-v4-flash, nemotron-3-ultra]   # models that author reports
+  orchestrator: gemma4-small                                       # blind referee (optional; default writers[0])
   critics:
     logic:        [glm-5.2, minimax-m3, mistral-large-3]
     evidence:     [glm-5.2, minimax-m3, gemma4]

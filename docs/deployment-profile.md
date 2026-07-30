@@ -67,6 +67,27 @@ Credentialled requests are hardened the same way anonymous ones are: the same op
 redirects, a single allowed host, and an allowlist that strips `Authorization` and friends if a
 redirect is ever followed. The outbound user agent is fixed and is not configurable.
 
+### What the proxy must not do
+
+Two requirements on the LiteLLM configuration itself. Neither is checkable from this repository —
+the application can only detect the first, after the fact, and pay for it. Both are failure modes RA
+guards against in code (RA-017, and the `_unparsed_tool_call` net in `llm.py`); see D42.
+
+**No fallback routing on any alias the roster names.** A LiteLLM fallback that quietly serves
+`gemma4` from `meta-llama/llama-4-scout` breaks every downstream identity claim at once: author
+exclusion, distinct-reviewer counting, and the family-decorrelation warning all reason over the
+resolved `provider/model` that `/model/info` reported at startup. RA fails closed when the served
+model disagrees with the pinned alias (RA-017) — which is the right outcome, but the price is a
+burnt lens attempt and, if it lands on the writer, a burnt writer attempt. Configure fallbacks for
+aliases outside the roster if you want them; never for one inside it.
+
+**Tool-call parsing must actually be configured for the served model.** DeepSeek emits tool calls in
+its own fullwidth-token syntax (`<｜tool▁calls▁begin｜>`); a proxy that does not parse it hands the
+raw markup back as message *content*, where it reads as a successful prose answer. `llm.py` carries
+a guard (`_unparsed_tool_call`) that catches this and retries — a final answer that is nothing but a
+tool-call block is exactly what it is built for — but the guard is a net, not a fix, and every catch
+spends an attempt from the call budget.
+
 ## Source verification is on in production
 
 The committed roster ships `search.verify_sources: false` with the whole `sources:` block commented
@@ -115,6 +136,19 @@ the standard library and the container's log driver takes it from there. The rea
 on disk: per run, `events.jsonl`, `audit.json`, and `owner.txt` under the runs volume, with a
 startup event recording identities, modes, budgets, and which resolve tiers were enabled. A
 background sweeper enforces `retention_days`.
+
+`compose.yaml` sets **`RA_LOG_LEVEL: INFO`** (D42). The shipped code default is WARNING, and the
+container's CMD is fixed so `--verbose` cannot be passed; at WARNING a deployment records no run
+starts, no controller decisions and no search results, which leaves a failure reconstructable only
+from code. The level is safe to raise because no INFO site emits run material: search logs query
+*lengths* and counts (RA-016), controller decisions derive only from the blind `OrchestratorView`,
+and `structured()`'s schema-violation log names the exception class, never the rejected value.
+
+Two things stdout is still **not** a substitute for. The per-run `events.jsonl` remains the audit
+trail — logs are lossy, unowned, and outside the mode-0700 run tree. And a `MalformedOutputError`
+message still embeds the validator's own error text, which reaches container logs at WARNING via
+`critique`; that predates D42 and is unchanged by it, but it means the run tree is the only place
+whose privacy posture is actually enforced.
 
 ## Keeping this page true
 
