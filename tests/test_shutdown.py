@@ -285,7 +285,7 @@ def test_a_human_can_resume_a_run_that_recovery_gave_up_on(config, monkeypatch):
     app = create_app(config, worker=worker)
     try:
         with web_client(app) as c:
-            assert c.post("/runs/run-revived/resume", follow_redirects=False).status_code == 303
+            assert c.post("/resume/run-revived", follow_redirects=False).status_code == 303
     finally:
         worker.shutdown(timeout=1.0)
 
@@ -427,7 +427,7 @@ def test_resuming_a_run_that_is_not_interrupted_is_a_conflict(config, monkeypatc
     app = create_app(config, worker=worker)
     try:
         with web_client(app) as c:
-            assert c.post("/runs/run-finished/resume").status_code == 409
+            assert c.post("/resume/run-finished").status_code == 409
     finally:
         worker.shutdown(timeout=1.0)
 

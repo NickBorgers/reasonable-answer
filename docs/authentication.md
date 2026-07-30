@@ -120,13 +120,21 @@ the sign-in. So the URL a reader is looking at is the URL they can send to someo
 | surface | routes | identity |
 |---|---|---|
 | reads of a run | `GET /runs/<id>`, `/report`, `/report.md`, `/export.md`, `/export.html`, `/audit.json`, `/progress`, `/stream` | **not required** |
-| writes | `POST /runs`, `/runs/<id>/again`, `/runs/<id>/resume`, `/refine` | required |
+| writes | `POST /runs`, `/runs/<id>/again`, `POST /resume/<id>`, `/refine` | required |
 | the index | `GET /` | required (it is a per-viewer list) |
 | the app shell | `manifest.webmanifest`, `sw.js`, `offline.html`, icons | required |
 | healthcheck | `GET /healthz` | not required |
 
 The rule is method-scoped: a `POST` to a public read path is refused before it reaches
 routing. An owner-less run still 404s, so nothing that was unreadable becomes readable.
+
+**Resume is `POST /resume/<id>`, not `/runs/<id>/resume`** (D41). Method-scoping guards the
+app middleware, but the edge routes `/runs/*` open (it is the shareable read surface), so a
+`POST` on that path reaches the origin without meeting Access. Resuming spends the owner's
+tokens, so it lives *outside* the prefix — under `RA_ROOT_PATH`, where the edge gates it too,
+not only the app. Anything that spends tokens or attaches a device/subscription to an identity
+belongs top-level for the same reason; only `/runs/<id>/again` stays under the prefix, and it
+spends the *caller's* tokens on a new run, never an absent owner's.
 
 ### The two root paths
 

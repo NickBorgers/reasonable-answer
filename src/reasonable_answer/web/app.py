@@ -76,8 +76,10 @@ _UNAUTHENTICATED_PATHS = frozenset({"/healthz"})
 #:
 #: The rule is **method-scoped**, and that is what keeps it narrow: every route that
 #: spends tokens or changes state is a POST, so `POST /runs` (submit — no trailing slash,
-#: so it does not match), `POST /runs/{id}/resume` and `POST /runs/{id}/again` all fall
-#: through to the identity check unchanged, as do `/` and the app-shell assets. Matched
+#: so it does not match) and `POST /runs/{id}/again` fall through to the identity check
+#: unchanged, as do `/` and the app-shell assets. Resume does not live here at all: it
+#: spends the owner's tokens, so it sits *outside* this prefix at `POST /resume/{id}`
+#: where the edge gates it too, not just the app middleware (D41). Matched
 #: against the same `request.url.path` the proxy has already stripped `RA_ROOT_PATH` from,
 #: exactly as `_UNAUTHENTICATED_PATHS` is (D29). An owner-less run still 404s via
 #: `_require`, so nothing that was unreadable before becomes readable here.
@@ -438,7 +440,15 @@ def create_app(
         )
         return RedirectResponse(url=f"{public_base}/runs/{new_id}", status_code=303)
 
-    @app.post("/runs/{run_id}/resume")
+    # Not `/runs/<id>/resume` (D41). Everything under `/runs/` is the public read
+    # surface the edge leaves open (D35), so a `POST` arriving there reaches the origin
+    # without ever meeting Cloudflare Access — and resuming spends the owner's tokens.
+    # A token-spending route belongs *outside* the prefix, at a path under `RA_ROOT_PATH`
+    # the edge gates, so the deployment refuses an anonymous caller before the app's own
+    # ownership check even runs. The app-layer behaviour is unchanged: this `POST` always
+    # hit `resolve_identity` and 403'd without a header. The move is what puts the edge on
+    # the same side of the line as the middleware.
+    @app.post("/resume/{run_id}")
     def resume(run_id: str, request: Request) -> RedirectResponse:
         _reject_cross_site(request)
         summary = _require(registry, worker, run_id)

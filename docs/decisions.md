@@ -1258,9 +1258,11 @@ which a list of blessed paths is not.
 
 **What keeps it narrow is the method, not the path.** Every route that spends tokens or changes
 state is a `POST`: `POST /runs` (submit — no trailing slash, so it does not match the prefix),
-`/runs/<id>/resume`, `/runs/<id>/again`, `/refine`. All still hit `resolve_identity` and 403
-without a header, as do `/` — a per-viewer list, which needs a viewer — and the app-shell assets.
-A `POST` to a public *read* path is refused before it reaches routing.
+`/runs/<id>/again`, `/refine`, and — no longer under this prefix at all — `POST /resume/<id>`
+(moved out by D41, because method-scoping guards the app middleware but not the edge, which routes
+`/runs/*` open). All still hit `resolve_identity` and 403 without a header, as do `/` — a per-viewer
+list, which needs a viewer — and the app-shell assets. A `POST` to a public *read* path is refused
+before it reaches routing.
 
 A prefix does mean a future `GET` under `/runs/` is public the day it is written. That is a real
 cost, accepted with a guard rather than argued away:
@@ -1318,8 +1320,10 @@ needs no knowledge of who is reading, because it grants nothing a reader could n
 the question on the index. An anonymous reader who presses it meets the identity gate, which is the
 honest failure. The question and the seed are read off disk from the run id — nothing is taken from
 the request — so no client-supplied text reaches a model context and the seed does not have to ride
-into the DOM in a hidden field. `POST /runs/<id>/resume` remains as a route for the operator; it
-just no longer has a button.
+into the DOM in a hidden field. The resume route remains as a buttonless operator escape hatch —
+*(originally `POST /runs/<id>/resume`; D41 moved it to `POST /resume/<id>` so it sits outside the
+public prefix and the edge gates it, since a token-spending `POST` on the open `/runs/*` path
+reaches the origin without meeting Access)*.
 
 This is a deliberate trade: a run that crashed at minute 18 is now re-run from scratch rather than
 resumed from its checkpoint, at full token cost. It is narrow. Automatic recovery already handles
@@ -1787,3 +1791,52 @@ RA-010 and reaches only the evidence lens; provider names are a closed vocabular
 trail while their request URLs, which carry the key, are never logged (RA-016); the dispute channel
 still returns only `True` or `None`; and no tier can raise a defect the pipeline would not otherwise
 raise, only fail to suppress one.
+
+## D41 — a token-spending route may not live under the public `/runs/` prefix
+
+**The defect.** D35 made every `GET` under `/runs/` public and kept the writes gated *by method*: a
+`POST` to a `/runs/…` path still hit `resolve_identity` and `403`'d without an identity header. That
+reasoning is sound for the app **middleware** — but the middleware is not the only thing that routes
+by prefix. The production edge (docs/deployment-profile.md, docs/authentication.md) splits access
+**by capability, not by resource**: it applies Cloudflare Access to `RA_ROOT_PATH` (`/app`) and
+leaves `/runs/*` open and path-preserving, so a finished run is a shareable URL that needs no Access
+session. A `POST` arriving on that open path therefore reaches the origin **without ever meeting
+Access** — and `POST /runs/<id>/resume` sat on it. Its own comment said exactly why that was the
+wrong side of the line: reading a run costs nothing, but resuming one spends its owner's tokens for
+another 10–25 minutes, and a manual resume is deliberately not counted against `max_resume_attempts`,
+so nothing bounds the spend.
+
+Whether that was *exploitable* turned entirely on what identity the origin resolves for a request on
+the open path — undocumented, and precisely the kind of fact a route should never have to depend on.
+The handler's own ownership gate (`summary.owner != viewer → 404`) is a backstop, not the boundary;
+the boundary is supposed to be that a token-spending route is behind the gate **at all**.
+
+**Decision.** Anything that spends tokens or attaches something to an identity lives **outside** the
+`/runs/` prefix, so the edge — not only the app middleware — gates it. `resume` moves from
+`POST /runs/<id>/resume` to `POST /resume/<id>`: a plain top-level route under `RA_ROOT_PATH`, so
+under the two-door deployment it is emitted and reached at `/app/resume/…`, and Access refuses an
+anonymous caller before the request touches the origin. Behaviour at the app layer is **unchanged** —
+the middleware already gated this `POST` — so this is a routing-topology fix, not a new check: it
+makes the route table match the rule instead of relying on config to compensate.
+`tests/test_web.py::test_no_token_spending_route_lives_under_the_public_runs_prefix` enumerates the
+`POST` route table and fails if a spender reappears under `/runs/`, so a future regression is a
+deliberate edit with a red test, not a silent one.
+
+**Why `/runs/<id>/again` stays where it is.** It is the one `POST` left under the prefix, and it is
+safe there because it grants nothing a stranger could not already get by retyping the question on the
+index: it starts a *new* run owned by whoever clicks, rate-limited as their own submission, spending
+the caller's own tokens — never an absent owner's. The property this decision protects is precisely
+that no route lets an unauthenticated caller spend *someone else's* budget, and `again` cannot.
+
+**What this deliberately does not do.** It does not close the direct-to-origin forgery path the
+tailnet posture leaves open (D32): a peer that can reach the port can still set the identity header
+to any value. That still wants the `Cf-Access-Jwt-Assertion` JWKS check listed in the open items
+below, and this decision is **complementary** to it — narrowing which routes the open path exposes,
+not making identity unforgeable. Nor does it narrow the Cloudflare route for `/runs/*` to `GET`-only;
+that would enforce the invariant in a place this repository cannot test, where a later route could
+reintroduce the problem with nothing in CI to catch it.
+
+Supersedes the D35 note that "`POST /runs/<id>/resume` remains as a route for the operator": it is
+the same operator escape hatch — still buttonless, still owner-gated in the app — now at a path the
+edge can gate too. The route table and the two-door topology are documented in
+[authentication.md](./authentication.md) and [deployment-profile.md](./deployment-profile.md).

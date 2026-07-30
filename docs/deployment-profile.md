@@ -36,7 +36,10 @@ by the edge, in this order:
 both the run owner and the rate-limit key. Enforcement is HTTP middleware, so a request with no
 identity gets a bare `403` before routing. Two exemptions: `/healthz`, and **every `GET` under
 `/runs/`**, which is anonymous by design (D35 — holding the run id is the credential). `POST` to a
-public read path is still refused.
+public read path is still refused. But that method-scoping only guards the app: the **edge** routes
+`/runs/*` open, so a `POST` there reaches the origin without meeting Access. So no token-spending
+route is allowed under `/runs/` — resume is `POST /resume/<id>`, under `RA_ROOT_PATH` where Access
+gates it (D41).
 
 The consequence worth internalizing: **the security boundary is the deployment, not the code.**
 Anyone who can open a TCP connection to the published port can claim any identity. Binding to

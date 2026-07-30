@@ -191,7 +191,7 @@ def test_a_cross_site_resume_is_refused(client):
     """resume() is lower-risk than submit() but still state-changing, so it carries the
     same guard — and the guard fires before the run is even looked up."""
     response = client.post(
-        "/runs/run-anything/resume",
+        "/resume/run-anything",
         headers={"sec-fetch-site": "cross-site"},
         follow_redirects=False,
     )
@@ -487,7 +487,7 @@ def test_every_read_of_a_run_is_public_and_every_write_stays_gated(config, fake_
         # Every write is unchanged: still 403 with no identity.
         assert c.post("/runs", data={"question": "spend tokens?"}).status_code == 403
         assert c.post(f"/runs/{run_id}/again").status_code == 403
-        assert c.post(f"/runs/{run_id}/resume").status_code == 403
+        assert c.post(f"/resume/{run_id}").status_code == 403
         assert c.post("/refine", data={"question": "spend tokens?"}).status_code == 403
         # The index is a per-viewer list, so it needs a viewer.
         assert c.get("/").status_code == 403
@@ -516,6 +516,25 @@ def test_public_run_get_routes_are_the_expected_set(config, fake_client):
         "/runs/{run_id}/progress",
         "/runs/{run_id}/stream",
     }
+
+
+def test_no_token_spending_route_lives_under_the_public_runs_prefix(config, fake_client):
+    """`/runs/` is the surface the edge leaves open (D35), so a `POST` there reaches the
+    origin without meeting Access. A token-spending route must therefore sit *outside* the
+    prefix so the edge gates it (D41): resume lives at `/resume/{run_id}`, not
+    `/runs/{run_id}/resume`. `/runs/{run_id}/again` is the one POST left under the prefix,
+    and it is safe there because it spends the *caller's* tokens on a new run, never an
+    absent owner's. This fails if a later route reintroduces a spender under `/runs/`."""
+    with _running_app(config, fake_client) as app:
+        posts = {
+            route.path
+            for route in app.routes
+            if "POST" in getattr(route, "methods", set())
+        }
+    assert "/resume/{run_id}" in posts
+    assert "/runs/{run_id}/resume" not in posts
+    under_prefix = {p for p in posts if p.startswith("/runs/")}
+    assert under_prefix == {"/runs/{run_id}/again"}, under_prefix
 
 
 def test_a_public_run_page_names_nobody(config, fake_client):
@@ -768,7 +787,7 @@ def test_resuming_a_seeded_run_passes_the_seed_back(config, monkeypatch):
         store.event("intake", path="seed")
 
         with web_client(app) as c:
-            assert c.post("/runs/run-seeded/resume", follow_redirects=False).status_code == 303
+            assert c.post("/resume/run-seeded", follow_redirects=False).status_code == 303
 
         # Wait on the runner's own signal, not a wall clock: a busy full-suite run
         # can leave a worker thread unscheduled for well over the old 5s budget. The
@@ -1222,7 +1241,7 @@ def test_a_request_with_no_identity_is_refused(owned):
         assert c.get("/").status_code == 403
         assert c.post("/runs", data={"question": "Anonymous?"}).status_code == 403
         assert c.post("/runs/run-mine/again").status_code == 403
-        assert c.post("/runs/run-mine/resume").status_code == 403
+        assert c.post("/resume/run-mine").status_code == 403
         assert c.get("/manifest.webmanifest").status_code == 403
 
 
@@ -1373,9 +1392,9 @@ def test_only_the_owner_can_resume_a_run(config, monkeypatch):
     app = create_app(config, worker=worker)
     try:
         with web_client(app) as c:  # signed in as someone else
-            assert c.post("/runs/run-stalled/resume", follow_redirects=False).status_code == 404
+            assert c.post("/resume/run-stalled", follow_redirects=False).status_code == 404
         with web_client(app, identity=FRIEND) as c:
-            assert c.post("/runs/run-stalled/resume", follow_redirects=False).status_code == 303
+            assert c.post("/resume/run-stalled", follow_redirects=False).status_code == 303
     finally:
         worker.shutdown(timeout=0.1)
 
@@ -1391,7 +1410,7 @@ def test_an_owner_less_run_is_served_to_nobody(owned):
             assert c.get("/runs/run-legacy").status_code == 404
             assert c.get("/runs/run-legacy/report.md").status_code == 404
             assert c.get("/runs/run-legacy/audit.json").status_code == 404
-            assert c.post("/runs/run-legacy/resume", follow_redirects=False).status_code == 404
+            assert c.post("/resume/run-legacy", follow_redirects=False).status_code == 404
 
 
 def test_recovery_still_picks_up_an_owner_less_run(config, monkeypatch):
