@@ -5,20 +5,24 @@ from __future__ import annotations
 import json
 import os
 import re
+import stat
 import threading
 import time
 import urllib.request
 from contextlib import contextmanager
+from types import SimpleNamespace
 
 import pytest
 from conftest import WEB_IDENTITY, access_headers, web_client
 from fakes import FakeClient
 
+from reasonable_answer.config import DEFAULT_PUSH_ENDPOINT_HOSTS, PushConfig
 from reasonable_answer.export import STATUS_MEANING
+from reasonable_answer.graph import GracefulStop, ResumeMismatch
 from reasonable_answer.graph import run as run_graph
 from reasonable_answer.schemas import CritiqueOutput
-from reasonable_answer.store import RunStore, sweep_expired
-from reasonable_answer.web import assets
+from reasonable_answer.store import RunStore, expired_runs, sweep_expired
+from reasonable_answer.web import assets, push
 from reasonable_answer.web.app import create_app
 from reasonable_answer.web.registry import Registry
 from reasonable_answer.web.retention import RetentionSweeper
@@ -57,6 +61,18 @@ def client(config, fake_client):
     with web_client(app) as c:
         yield c
     worker.shutdown()
+
+
+def _drain(worker, timeout: float = 5.0) -> None:
+    """Block until the worker has finished every queued job.
+
+    Waits on the queue's own `join()` rather than polling `active()`: `_drain` marks a job
+    done only after it has attempted the notification, so this is an exact barrier for
+    "the send has happened" instead of a sleep that races it.
+    """
+    done = threading.Event()
+    threading.Thread(target=lambda: (worker._queue.join(), done.set()), daemon=True).start()
+    assert done.wait(timeout), "worker did not drain in time"
 
 
 def _wait_for_final(config, run_id: str, timeout: float = 20.0) -> dict:
@@ -1690,6 +1706,413 @@ def test_service_worker_registration_is_guarded_and_cannot_break_the_live_script
     # whichever page the user last had open.
     assert "isSecureContext" in client.get("/").text
     assert "isSecureContext" in client.get(f"/runs/{run_id}/report").text
+
+
+# --------------------------------------------------------- push notifications (D41)
+
+
+VAPID_SUBJECT = "mailto:ops@example.com"
+
+
+def _push_config(config):
+    """`config`, with notifications on. The key is generated on first boot, so nothing has
+    to be planted here."""
+    return config.model_copy(
+        update={"push": PushConfig(enabled=True, subject=VAPID_SUBJECT)}
+    )
+
+
+class RecordingSender:
+    """Stands in for `pywebpush.webpush`. The suite is offline, and a real send would need
+    a real push service; what matters here is which subscriptions were selected and what
+    the payload said, both of which this captures without a socket."""
+
+    def __init__(self, fail_with: int | None = None) -> None:
+        self.sent: list[tuple[str, dict]] = []
+        self._fail_with = fail_with
+
+    def __call__(self, *, subscription_info, data, **kwargs):
+        if self._fail_with is not None:
+            raise _GoneError(self._fail_with)
+        self.sent.append((subscription_info["endpoint"], json.loads(data)))
+        return None
+
+
+class _GoneError(Exception):
+    """Shaped like `WebPushException`: the status lives on a `response` attribute."""
+
+    def __init__(self, status: int) -> None:
+        super().__init__(f"push service said {status}")
+        self.response = SimpleNamespace(status_code=status)
+
+
+APPLE = "https://web.push.apple.com/dev/abc123"
+
+
+@pytest.fixture
+def push_app(config):
+    """An app with notifications enabled, plus its store and a recording sender."""
+    pushed = config = _push_config(config)
+    worker = RunWorker(config, max_concurrent=1, runner=lambda *a, **k: None)
+    app = create_app(pushed, worker=worker)
+    try:
+        yield app, config
+    finally:
+        worker.shutdown(timeout=0.1)
+
+
+def test_subscribing_needs_an_identity_and_binds_the_device_to_it(push_app):
+    """A subscription is a claim that *this* device should receive *that* person's
+    questions, so it is stored under the caller's identity and nobody else's."""
+    app, config = push_app
+    body = {"endpoint": APPLE, "keys": {"p256dh": "k", "auth": "a"}}
+
+    with web_client(app, identity=None) as anon:
+        assert anon.post("/push/subscribe", json=body).status_code == 403
+
+    with web_client(app) as c:
+        assert c.post("/push/subscribe", json=body).status_code == 200
+    with web_client(app, identity=FRIEND) as c:
+        other = dict(body, endpoint=APPLE + "-friend")
+        assert c.post("/push/subscribe", json=other).status_code == 200
+
+    store = push.PushStore(config.runs_dir / push.SUBSCRIPTIONS_FILE)
+    assert [s["endpoint"] for s in store.for_identity(WEB_IDENTITY)] == [APPLE]
+    assert [s["endpoint"] for s in store.for_identity(FRIEND)] == [APPLE + "-friend"]
+
+
+def test_a_device_that_changes_hands_stops_getting_the_old_owner_notifications(push_app):
+    """One browser profile, two people. The endpoint is the device, so re-subscribing has
+    to move it rather than leave it registered to whoever was signed in before."""
+    app, config = push_app
+    body = {"endpoint": APPLE, "keys": {"p256dh": "k", "auth": "a"}}
+    with web_client(app) as c:
+        c.post("/push/subscribe", json=body)
+    with web_client(app, identity=FRIEND) as c:
+        c.post("/push/subscribe", json=body)
+
+    store = push.PushStore(config.runs_dir / push.SUBSCRIPTIONS_FILE)
+    assert store.for_identity(WEB_IDENTITY) == []
+    assert [s["endpoint"] for s in store.for_identity(FRIEND)] == [APPLE]
+
+
+def test_unsubscribing_is_scoped_to_the_caller(push_app):
+    """Holding somebody else's endpoint string must not let you turn their notifications
+    off — the endpoint is a bearer credential for a device, not an authorisation to manage
+    it."""
+    app, config = push_app
+    with web_client(app) as c:
+        c.post("/push/subscribe", json={"endpoint": APPLE, "keys": {"p256dh": "k", "auth": "a"}})
+    with web_client(app, identity=FRIEND) as c:
+        assert c.post("/push/unsubscribe", json={"endpoint": APPLE}).status_code == 200
+
+    store = push.PushStore(config.runs_dir / push.SUBSCRIPTIONS_FILE)
+    assert [s["endpoint"] for s in store.for_identity(WEB_IDENTITY)] == [APPLE]
+
+    with web_client(app) as c:
+        assert c.post("/push/unsubscribe", json={"endpoint": APPLE}).status_code == 200
+    assert store.for_identity(WEB_IDENTITY) == []
+
+
+@pytest.mark.parametrize(
+    "endpoint",
+    [
+        "http://web.push.apple.com/x",  # not https
+        "https://web.push.apple.com:8443/x",  # explicit port
+        "https://user:pw@web.push.apple.com/x",  # embedded credentials
+        "https://evil.example.com/x",  # not a push service at all
+        "https://169.254.169.254/x",  # link-local metadata
+        # The two bypasses a substring test would wave through. The server POSTs to this
+        # URL, so this is the SSRF boundary for a browser-supplied string.
+        "https://evil-fcm.googleapis.com/x",
+        "https://fcm.googleapis.com.attacker.example/x",
+        "https://notpush.services.mozilla.com.attacker.example/x",
+    ],
+)
+def test_an_endpoint_that_is_not_a_known_push_service_is_refused(push_app, endpoint):
+    app, config = push_app
+    with web_client(app) as c:
+        response = c.post(
+            "/push/subscribe", json={"endpoint": endpoint, "keys": {"p256dh": "k", "auth": "a"}}
+        )
+    assert response.status_code == 400, endpoint
+    store = push.PushStore(config.runs_dir / push.SUBSCRIPTIONS_FILE)
+    assert store.endpoints() == set()
+
+
+@pytest.mark.parametrize(
+    "endpoint",
+    [
+        "https://web.push.apple.com/x",
+        "https://fcm.googleapis.com/x",
+        "https://updates.push.services.mozilla.com/x",
+    ],
+)
+def test_the_real_push_services_are_accepted(endpoint):
+    """The allowlist has to admit what browsers actually mint, or the feature is a
+    refusal with extra steps."""
+    assert push.validate_endpoint(endpoint, DEFAULT_PUSH_ENDPOINT_HOSTS) == endpoint
+    # A wildcard entry is a *subdomain* rule, not a match on the bare domain.
+    with pytest.raises(ValueError):
+        push.validate_endpoint("https://push.services.mozilla.com/x", (".push.services.mozilla.com",))
+
+
+def test_no_write_route_hides_inside_the_public_read_prefix(push_app):
+    """D35 opens every `GET` under `/runs/` to anonymous callers. A route that attaches a
+    device to an identity therefore may not live there — and `authenticate`'s method guard
+    is not the argument, because siting a write inside the public prefix and relying on it
+    is the thing this pins against."""
+    app, _ = push_app
+    paths = {r.path for r in app.routes if "POST" in getattr(r, "methods", ())}
+    assert "/push/subscribe" in paths
+    assert not [p for p in paths if p.startswith("/runs/") and "push" in p]
+
+
+def test_with_push_off_there_are_no_routes_and_the_page_is_unchanged(config):
+    """Same promise refine makes: off, the feature does not exist. No routes to refuse, no
+    key on disk, and an index byte-identical to a build without any of this."""
+    plain = RunWorker(config, max_concurrent=1, runner=lambda *a, **k: None)
+    app = create_app(config, worker=plain)
+    try:
+        with web_client(app) as c:
+            assert c.post("/push/subscribe", json={}).status_code == 404
+            page = c.get("/").text
+        assert "push-toggle" not in page
+        assert "pushManager" not in page
+        assert not (config.runs_dir / push.VAPID_FILE).exists()
+    finally:
+        plain.shutdown(timeout=0.1)
+
+
+def test_the_opt_in_ships_hidden_and_carries_the_key(push_app):
+    """The button is revealed by script only after it has established the browser can
+    actually deliver — an iOS Safari tab has `PushManager` and still cannot subscribe, so a
+    control that is visible before that check is a control that fails."""
+    app, _ = push_app
+    with web_client(app) as c:
+        page = c.get("/").text
+    assert 'id="push-toggle" hidden' in page
+    assert "'__RA_VAPID__'" not in page, "the key placeholder must be substituted"
+    key = re.search(r"var raw = '([A-Za-z0-9_-]+)'", page).group(1)
+    # The uncompressed P-256 point is 65 bytes, which is 87 base64url characters unpadded.
+    assert len(key) == 87
+    # Requested from a click handler, never on load: on iOS a declined permission can only
+    # be reset by deleting and reinstalling the app.
+    assert "addEventListener('click'" in page
+    assert "requestPermission" in page
+
+
+def test_the_vapid_key_is_generated_once_and_kept_private(push_app):
+    app, config = push_app
+    pem = config.runs_dir / push.VAPID_FILE
+    assert pem.exists()
+    assert stat.S_IMODE(pem.stat().st_mode) == 0o600
+    before = pem.read_bytes()
+
+    # A second boot must not mint a new key: every existing subscription is bound to the
+    # old one and would silently stop being deliverable.
+    _, again = push.load_or_create_vapid(pem)
+    assert pem.read_bytes() == before
+    with web_client(app) as c:
+        assert again in c.get("/").text
+
+
+def test_a_finished_run_notifies_its_owner_and_points_at_the_report(config):
+    """The whole point: the notification arrives without a browser having been open, and it
+    names the question so five concurrent runs are told apart on a lock screen."""
+    pushed = _push_config(config)
+    sender = RecordingSender()
+    store = push.PushStore(pushed.runs_dir / push.SUBSCRIPTIONS_FILE)
+    pushed.runs_dir.mkdir(parents=True, exist_ok=True)
+    store.add(WEB_IDENTITY, APPLE, "k", "a", now=0.0)
+    pem, _ = push.load_or_create_vapid(pushed.runs_dir / push.VAPID_FILE)
+    notifier = push.Notifier(
+        store=store, vapid_pem=pem, subject=VAPID_SUBJECT, public_base="", sender=sender
+    )
+
+    RunStore(pushed.runs_dir, "run-done").owner(WEB_IDENTITY)
+    worker = RunWorker(
+        pushed,
+        max_concurrent=1,
+        runner=lambda *a, **k: {"terminal_status": "accepted"},
+        notifier=notifier,
+    )
+    try:
+        worker.submit("Is remote work better for productivity?", None, identity=WEB_IDENTITY)
+        _drain(worker)
+    finally:
+        worker.shutdown(timeout=2.0)
+
+    assert len(sender.sent) == 1
+    endpoint, payload = sender.sent[0]
+    assert endpoint == APPLE
+    assert "accepted" in payload["title"]
+    assert "remote work" in payload["body"]
+    # A finished run deep-links to the report — the thing that was waited for — on the
+    # reader-facing base, which is the link every other run reference in the app uses.
+    assert payload["url"].endswith("/report")
+    assert payload["url"].startswith("/runs/")
+
+
+def test_a_run_that_dies_still_says_so_but_a_shutdown_pause_does_not(config):
+    """A run that silently died is the worst case to be left waiting on, so a crash and an
+    abandon both notify. A `GracefulStop` does not: it resumes on the next boot, so telling
+    someone it stopped would be a false alarm."""
+    pushed = _push_config(config)
+    pushed.runs_dir.mkdir(parents=True, exist_ok=True)
+    store = push.PushStore(pushed.runs_dir / push.SUBSCRIPTIONS_FILE)
+    store.add(WEB_IDENTITY, APPLE, "k", "a", now=0.0)
+    pem, _ = push.load_or_create_vapid(pushed.runs_dir / push.VAPID_FILE)
+
+    def run_once(raiser):
+        sender = RecordingSender()
+        notifier = push.Notifier(
+            store=store, vapid_pem=pem, subject=VAPID_SUBJECT, public_base="", sender=sender
+        )
+        worker = RunWorker(pushed, max_concurrent=1, runner=raiser, notifier=notifier)
+        try:
+            worker.submit("Did it stop?", None, identity=WEB_IDENTITY)
+            _drain(worker)
+        finally:
+            worker.shutdown(timeout=2.0)
+        return sender.sent
+
+    def crash(*a, **k):
+        raise RuntimeError("boom")
+
+    def mismatch(*a, **k):
+        raise ResumeMismatch("inputs changed")
+
+    def pausing(*a, **k):
+        raise GracefulStop("shutdown", "run-paused")
+
+    crashed = run_once(crash)
+    assert len(crashed) == 1
+    # No report was shipped, so it points at the run page, not the report page.
+    assert not crashed[0][1]["url"].endswith("/report")
+
+    assert len(run_once(mismatch)) == 1
+    assert run_once(pausing) == []
+
+
+def test_an_owner_less_run_notifies_nobody(config):
+    """`ra run` without `--owner` has no identity to attribute, and D32 already settled
+    that inventing one is how a stranger's run reaches someone else."""
+    pushed = _push_config(config)
+    pushed.runs_dir.mkdir(parents=True, exist_ok=True)
+    store = push.PushStore(pushed.runs_dir / push.SUBSCRIPTIONS_FILE)
+    store.add(WEB_IDENTITY, APPLE, "k", "a", now=0.0)
+    pem, _ = push.load_or_create_vapid(pushed.runs_dir / push.VAPID_FILE)
+    sender = RecordingSender()
+    notifier = push.Notifier(
+        store=store, vapid_pem=pem, subject=VAPID_SUBJECT, public_base="", sender=sender
+    )
+    assert notifier.notify(
+        run_id="run-orphan", owner=None, question="Whose?", status="accepted", has_report=True
+    ) == 0
+    assert sender.sent == []
+
+
+@pytest.mark.parametrize("status", [404, 410])
+def test_a_subscription_the_push_service_calls_gone_is_forgotten(config, status):
+    """Uninstall the app and the endpoint dies. Without pruning, the store grows forever
+    and every later send pays for devices that can never receive anything."""
+    pushed = _push_config(config)
+    pushed.runs_dir.mkdir(parents=True, exist_ok=True)
+    store = push.PushStore(pushed.runs_dir / push.SUBSCRIPTIONS_FILE)
+    store.add(WEB_IDENTITY, APPLE, "k", "a", now=0.0)
+    pem, _ = push.load_or_create_vapid(pushed.runs_dir / push.VAPID_FILE)
+    notifier = push.Notifier(
+        store=store,
+        vapid_pem=pem,
+        subject=VAPID_SUBJECT,
+        public_base="",
+        sender=RecordingSender(fail_with=status),
+    )
+
+    assert notifier.notify(
+        run_id="run-x", owner=WEB_IDENTITY, question="Gone?", status="accepted", has_report=True
+    ) == 0
+    assert store.for_identity(WEB_IDENTITY) == []
+
+
+def test_a_stored_endpoint_the_allowlist_no_longer_admits_is_dropped(config):
+    """Narrowing `endpoint_hosts` has to take effect for subscriptions already on disk —
+    otherwise the check at subscribe time is the only one that ever ran."""
+    pushed = _push_config(config)
+    pushed.runs_dir.mkdir(parents=True, exist_ok=True)
+    store = push.PushStore(pushed.runs_dir / push.SUBSCRIPTIONS_FILE)
+    store.add(WEB_IDENTITY, APPLE, "k", "a", now=0.0)
+    pem, _ = push.load_or_create_vapid(pushed.runs_dir / push.VAPID_FILE)
+    sender = RecordingSender()
+    notifier = push.Notifier(
+        store=store,
+        vapid_pem=pem,
+        subject=VAPID_SUBJECT,
+        public_base="",
+        endpoint_hosts=("fcm.googleapis.com",),
+        sender=sender,
+    )
+
+    assert notifier.notify(
+        run_id="run-x", owner=WEB_IDENTITY, question="Still?", status="accepted", has_report=True
+    ) == 0
+    assert sender.sent == []
+    assert store.for_identity(WEB_IDENTITY) == []
+
+
+def test_the_device_cap_drops_the_oldest_not_the_newest(config):
+    """A cap that evicted the newest would make the device you just enabled the one that
+    never gets a notification."""
+    config.runs_dir.mkdir(parents=True, exist_ok=True)
+    store = push.PushStore(config.runs_dir / push.SUBSCRIPTIONS_FILE, max_per_identity=2)
+    for n in range(3):
+        store.add(WEB_IDENTITY, f"{APPLE}-{n}", "k", "a", now=float(n))
+    assert [s["endpoint"] for s in store.for_identity(WEB_IDENTITY)] == [
+        f"{APPLE}-1",
+        f"{APPLE}-2",
+    ]
+
+
+def test_the_push_state_is_invisible_to_the_registry_and_the_retention_sweep(push_app):
+    """The reason both are files and not a `push/` directory: `expired_runs` filters on
+    `is_dir()` alone, so a directory here would eventually be swept as an expired run and
+    deleted — taking the VAPID key, and therefore every subscription, with it."""
+    app, config = push_app
+    with web_client(app) as c:
+        c.post("/push/subscribe", json={"endpoint": APPLE, "keys": {"p256dh": "k", "auth": "a"}})
+
+    for name in (push.VAPID_FILE, push.SUBSCRIPTIONS_FILE):
+        path = config.runs_dir / name
+        assert path.is_file(), f"{name} must be a file, not a directory"
+
+    assert Registry(config.runs_dir).list() == []
+    # Nothing here can be mistaken for a run id, so nothing can be swept as one.
+    assert expired_runs(config.runs_dir, 0) == []
+
+
+def test_the_service_worker_shows_and_opens_a_notification(client):
+    """The delivery mechanism. Both handlers are additive — neither touches `caches`, which
+    is what keeps the D27 invariant asserted next door intact."""
+    source = client.get("/sw.js").text
+    assert "addEventListener('push'" in source
+    assert "addEventListener('notificationclick'" in source
+    assert "showNotification" in source
+    # The icon is a real precached URL, so a notification shown offline still has artwork.
+    icon = re.search(r"var ICON = '([^']*)'", source).group(1)
+    assert icon in client.app.state.assets.precache
+
+
+def test_the_csp_is_unchanged_by_notifications(client):
+    """Push needs no new directive: the browser talks to the push service out of band, and
+    the only page-originated request is a POST to this origin, already covered by
+    `connect-src 'self'`. Restated here so a future edit that *does* widen the policy has to
+    argue with this test as well as the one that pins the literal."""
+    page = client.get("/").text
+    policy = re.search(r'Content-Security-Policy" content="([^"]+)"', page).group(1)
+    assert "connect-src 'self'" in policy
+    for absent in ("push.apple.com", "googleapis", "*"):
+        assert absent not in policy
 
 
 # ------------------------------------------------------ base path (reverse-proxy prefix)
