@@ -76,7 +76,7 @@ def test_doctor_reports_a_healthy_roster(doctor_config):
 def test_doctor_says_so_when_enforcement_is_on_with_nothing_measured(doctor_config):
     """`enforce: true` on an empty cache blocks nothing. Reporting that roster as simply
     healthy is how a setting comes to read as a safety control while being inert — the
-    reason `audition.enabled` was deleted rather than wired up (D20)."""
+    reason `audition.enabled` was deleted rather than wired up (D-critic-audition)."""
     data = yaml.safe_load(doctor_config.read_text())
     data["audition"] = {"enforce": True}
     doctor_config.write_text(yaml.safe_dump(data))
@@ -184,7 +184,7 @@ def test_the_graph_receives_converted_markdown_not_the_original(doctor_config, t
 
 def test_doctor_shows_refine_verdict_line_when_refinement_is_enabled(doctor_config, tmp_path):
     """An enabled refine channel must appear in doctor's output, and an unmeasured
-    one must read as unmeasured — never as a pass (D33)."""
+    one must read as unmeasured — never as a pass (D-refine-audition)."""
     data = yaml.safe_load(doctor_config.read_text())
     data["refine"] = {"enabled": True}
     data["audition"] = {"refine": {"cache_path": str(tmp_path / "refine-cache.json")}}
@@ -217,7 +217,7 @@ def test_audition_refine_rejects_unknown_transforms(doctor_config):
 
 
 def test_the_log_level_can_be_named_by_the_environment(monkeypatch):
-    """D42. The container's CMD is fixed, so `--verbose` is unreachable in production —
+    """D-provider-retry. The container's CMD is fixed, so `--verbose` is unreachable in production —
     and a night of aborted runs left only WARNING lines to diagnose them from."""
     monkeypatch.setenv(cli.LOG_LEVEL_ENV, "info")
     captured: dict[str, object] = {}

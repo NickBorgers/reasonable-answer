@@ -21,7 +21,7 @@ from typing import Any
 from pydantic import BaseModel
 
 #: purged by `ra purge --content`; retained longer than the signal record. `refinements`
-#: (D26) has to live here rather than as a root-level `refinement.json` because `purge`
+#: (D-question-refinement) has to live here rather than as a root-level `refinement.json` because `purge`
 #: (below) only sweeps directories on a content-only purge -- a root file would silently
 #: survive it and outlive the reports/critiques it was meant to retire alongside.
 CONTENT_DIRS = ("reports", "critiques", "disputes", "refinements")
@@ -41,7 +41,7 @@ class CorruptRun(ValueError):
     Distinct from "absent" on purpose. A missing `final.json` means the run never
     reached a verdict; an unreadable one means the verdict is *unknown*. Collapsing the
     second into the first would let an export state a terminal status no rule ever
-    produced — the same failure D12/RA-012 keeps `abandoned` out of `final.json` for.
+    produced — the same failure D-evidence-bearing-fields/RA-012 keeps `abandoned` out of `final.json` for.
     """
 
 
@@ -134,12 +134,12 @@ class RunStore:
     def dispute(self, round_no: int, sequence: int, payload: dict[str, Any]) -> None:
         """Dispute grounds and claim spans are report-derived content, so they live
         in a purgeable content dir — never in events.jsonl, which survives
-        `purge --content-only` (D25)."""
+        `purge --content-only` (D-writer-disputes)."""
         name = f"r{round_no:02d}-{sequence:02d}.json"
         self._write(Path("disputes") / name, json.dumps(payload, indent=2, default=str))
 
     def refinement(self, payload: dict[str, Any]) -> None:
-        """The full pre-run refinement record (D26): question at offer, suggestions
+        """The full pre-run refinement record (D-question-refinement): question at offer, suggestions
         offered, chosen text. Content-bearing, so it lives in `refinements/` -- a
         `CONTENT_DIRS` entry -- rather than `events.jsonl`, which survives
         `purge --content-only` and must carry only non-content signal."""

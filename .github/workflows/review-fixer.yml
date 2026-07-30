@@ -9,7 +9,7 @@ name: Review pipeline — fixer
 # reviewed again in the normal case: the Push step below claims it before the
 # `synchronize` event it fires can start a second pipeline, so this one panel plus the
 # fixer's own gates (schema, lint, marker gate, remote-head check) is the whole review
-# — see docs/decisions.md D28. Grading a tree nobody reviewed would let a fixer clear
+# — see docs/decisions.md D-fixer-merges-not-rebases. Grading a tree nobody reviewed would let a fixer clear
 # its own work; that risk is now accepted rather than defended against, and the gates
 # below are what stand in its place.
 #
@@ -20,7 +20,7 @@ name: Review pipeline — fixer
 #                   the code and can push back on a misread instead of patching it.
 #   cold          — no session available; a fresh agent applies fixes it can ground in
 #                   the repository's existing content, the PR's reconstructed intent,
-#                   and the reviewer's finding (D23), and skips what would be invention.
+#                   and the reviewer's finding (D-fixer-grounded-judgment), and skips what would be invention.
 #
 # Falling back from the first to the second is always safe and always logged. The cold
 # path stays the more conservative one: it works from recorded intent rather than
@@ -44,7 +44,7 @@ on:
       cycle:
         required: true
         type: string
-      # Set by the caller's sync-only path (D34): the reviewer panel was guarded off, so
+      # Set by the caller's sync-only path (D-unguarded-sync): the reviewer panel was guarded off, so
       # nothing on this SHA has been validated by PR Validation or read by a reviewer.
       #
       # It makes this workflow non-agentic. The fixer agent runs on the self-hosted runner
@@ -167,7 +167,7 @@ jobs:
       #   conflicts markers left in the working tree for the agent to resolve as ordinary
       #             file edits; the commit step below seals it or aborts
       #   blocked   conflicts, but `sync_only` forbids an agent — the merge is abandoned
-      #             and the PR is left for a human (D34)
+      #             and the PR is left for a human (D-unguarded-sync)
       - name: Sync with the base branch
         id: sync
         working-directory: ${{ env.PR_WORKSPACE }}
@@ -242,7 +242,7 @@ jobs:
         run: |
           set -euo pipefail
 
-          # The sync-only path is non-agentic by construction, not by circumstance (D34).
+          # The sync-only path is non-agentic by construction, not by circumstance (D-unguarded-sync).
           # It is reached only when every reviewer guard refused, so `agent=false` here does
           # not depend on the blocker count happening to be zero: the guarantee holds even
           # if an artifact were somehow present. `Sync with the base branch` has already
@@ -374,7 +374,7 @@ jobs:
 
       # ── Context reconstruction ───────────────────────────────────────────────
       # For a resumed author this is redundant — it already holds all of it. For a cold
-      # fixer it is load-bearing: reconstructed intent is one of the grounds (D23) its
+      # fixer it is load-bearing: reconstructed intent is one of the grounds (D-fixer-grounded-judgment) its
       # judgment is required to anchor in, and the difference between patching blind and
       # understanding what this PR was for.
       #
@@ -1139,10 +1139,10 @@ jobs:
           # This repo previously suppressed this claim on the theory that the fix
           # itself needed review; the owner has since confirmed that was an invented
           # divergence from the design being ported here, not an intended safety
-          # property. See docs/decisions.md D28.
+          # property. See docs/decisions.md D-fixer-merges-not-rebases.
           #
           # The sync-only path is the one exception, and for the reason that justifies
-          # the claim everywhere else (D34). The claim is licensed by "the pre-fix panel
+          # the claim everywhere else (D-unguarded-sync). The claim is licensed by "the pre-fix panel
           # is the review" — but a sync-only pass runs precisely because there was no
           # panel: every guard refused and nothing was read. Claiming here would leave a
           # successor SHA that has no verdict of its own, cannot earn one because dedup
@@ -1151,7 +1151,7 @@ jobs:
           # further along. Not claiming lets the merged SHA do what it was synced to do:
           # earn its event, get validated, and become reachable by a panel. Reachable,
           # not guaranteed — a merge-from-base successor can still take gather's inherit
-          # short-circuit, and `/review` is the override for that. See D34.
+          # short-circuit, and `/review` is the override for that. See D-unguarded-sync.
           if [ "${SYNC_ONLY}" = "true" ]; then
             echo "sync-only: not claiming ${NEW_SHA}; it needs the panel this pass could not run."
           else

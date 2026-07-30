@@ -21,7 +21,7 @@ web = [
     # Renders the report markdown for the browser. Declared even though `rich` already
     # pulls it in: the web layer uses it directly and must not depend on that accident.
     "markdown-it-py>=3.0",
-    # Web Push notification of a stopped run (D43). Carries both halves of the protocol:
+    # Web Push notification of a stopped run (D-stop-notification). Carries both halves of the protocol:
     # the VAPID assertion (RFC 8292) and the aes128gcm payload encryption (RFC 8291), the
     # second of which is not something to hand-roll. Pulls `cryptography`, which ships
     # manylinux wheels for both architectures the release build targets. In the `web` extra

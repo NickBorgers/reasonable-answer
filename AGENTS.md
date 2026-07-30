@@ -38,7 +38,7 @@ NO-GO from CI review.
 | [docs/architecture.md](./docs/architecture.md) | module layout and data flow |
 | [docs/isolation.md](./docs/isolation.md) | author exclusion, blind orchestrator, what may enter a context |
 | [docs/convergence.md](./docs/convergence.md) | the 14-rule controller table, termination, terminal statuses |
-| [docs/decisions.md](./docs/decisions.md) | the numbered decision log (D1–) and adversarial findings |
+| [docs/decisions.md](./docs/decisions.md) | the slug-identified decision log (`D-<slug>` sections) and adversarial findings |
 | [docs/quality-principles.md](./docs/quality-principles.md) | the `QP<n>` evidence register CI audits against |
 | [docs/bias.md](./docs/bias.md) | the observable-text social-bias rules |
 | [docs/authentication.md](./docs/authentication.md) | who the web interface believes you are |
@@ -51,18 +51,26 @@ floors clamping up only, termination, untrusted text never reaching a generator 
 are stated in full in `.github/ci/prompts/resolve-issue.md` and audited by
 `.github/scripts/review/prompts/invariant.md`.
 
-## Decision numbers
+## Decision identifiers
 
-`docs/decisions.md` is the registry. Allocate the next free `## D<n> — …` section at authoring
-time, not at merge time. Gaps are legal (a PR in flight); duplicates fail the required `Decision
-Numbers` check. Decisions are superseded in place, never deleted. Adding a `D<n>` also means
-bumping the stated ID ranges in `.github/scripts/review/prompts/{invariant,docs,quality}.md`, or
-`tests/test_reviewer_prompt_ranges.py` goes red.
+`docs/decisions.md` is the registry. Each decision is identified by a **slug derived from its
+subject** — `## D-<slug> — …` — not by a number from a shared counter (D-decision-slugs supersedes
+D-decision-gate). Coin a slug that describes the decision (`D-source-verification`, not an opaque number); two
+concurrently-open PRs cannot collide, because neither needs to know what the other chose. Append the
+new `## D-<slug> — …` section immediately **before** `## Open items for a future round`, which is
+the file's tail marker. Ordering is carried by position in the file, not by the identifier — so a
+slug never implies a sequence, and a range of slugs is meaningless (enumerate them instead).
+
+Duplicates — the same slug defined twice, in the prose-heading *or* the top-table form — fail the
+required `Decision Numbers` check (`scripts/validate-decision-numbers.sh`). Decisions are superseded
+in place, never deleted. The reviewer prompts describe the slug scheme rather than a numeric range,
+so adding a decision no longer requires widening any hand-written range;
+`tests/test_reviewer_prompt_ranges.py` now asserts every cited slug *exists* in the registry.
 
 ## Commits and PRs
 
 Conventional Commits, lowercase, declarative subject (`feat(resolve): render a page, never
-disguise who is asking for it (D40)`). Cite the decision ID in the subject when the commit
+disguise who is asking for it (D-paid-tier-page)`). Cite the decision ID in the subject when the commit
 introduces or implements one. PRs are required; fill in every section of
 `.github/pull_request_template.md` — the invariant reviewer diffs your "Invariants touched" list
 against the code, so an inaccurate list is worse than an empty one.

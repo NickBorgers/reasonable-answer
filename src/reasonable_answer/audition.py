@@ -708,7 +708,7 @@ def enforce_fitness(
 ) -> None:
     """Under `audition.enforce`, refuse to start with an `unfit` critic assigned.
 
-    Off by default (D20: warn by default, enforce opt-in). The asymmetry inside the
+    Off by default (D-critic-audition: warn by default, enforce opt-in). The asymmetry inside the
     gate is deliberate. `unfit` is a positive measurement that the model cannot perform
     the lens, so a run staffed by one is not reviewing that lens whatever its counters
     say — that is exactly the case fail-closed exists for. `marginal`, `stale` and

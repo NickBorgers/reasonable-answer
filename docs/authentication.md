@@ -1,7 +1,7 @@
 # Authentication — Cloudflare Access in front, a trusted header behind
 
 The app does not authenticate anyone. It reads a header, believes it, and treats the
-value as both the rate-limit key and the run's owner (D32). Everything that makes that
+value as both the rate-limit key and the run's owner (D-identity-header). Everything that makes that
 safe is deployment: the port must not be reachable except through a proxy that sets the
 header and strips any the client supplied.
 
@@ -14,7 +14,7 @@ Two proxies are supported, checked in this order:
 
 A request carrying neither is refused with `403` on every route except `/healthz` — the
 container healthcheck runs inside the container with nothing in front of it to attach a
-header — and every `GET` under `/runs/`, which is the public read surface (D35,
+header — and every `GET` under `/runs/`, which is the public read surface (D-id-as-credential,
 [below](#sharing-a-run-publicly)). `Tailscale-User-Name` sits beside the login header and
 is deliberately **not** read: it carries a display name, which is a different namespace
 from the address Access reports.
@@ -92,7 +92,7 @@ A run belongs to whoever submitted it, recorded in `runs/<run-id>/owner.txt`.
 
 - The index lists **only your own** runs.
 - **Anyone** who has a run id can open that run, its report and its `audit.json` —
-  signed in or not (D35). Sharing a link is the intended way to show someone a report.
+  signed in or not (D-id-as-credential). Sharing a link is the intended way to show someone a report.
 - **No public route names a person.** No byline on the run page, no `owner` in
   `audit.json`: a shared link reaches strangers, and the owner's address is not evidence
   about the run.
@@ -113,7 +113,7 @@ ra run -q "your question" --owner you@example.com
 
 ## Sharing a run publicly
 
-**Every `GET` under `/runs/` answers an unauthenticated caller** (D35). Holding the run
+**Every `GET` under `/runs/` answers an unauthenticated caller** (D-id-as-credential). Holding the run
 id is the credential — which is what ownership already said for signed-in callers, minus
 the sign-in. So the URL a reader is looking at is the URL they can send to someone.
 
@@ -128,7 +128,7 @@ the sign-in. So the URL a reader is looking at is the URL they can send to someo
 The rule is method-scoped: a `POST` to a public read path is refused before it reaches
 routing. An owner-less run still 404s, so nothing that was unreadable becomes readable.
 
-The push routes sit at the top level rather than under `/runs/` on purpose (D43).
+The push routes sit at the top level rather than under `/runs/` on purpose (D-stop-notification).
 Subscribing attaches a *device* to an *identity*, which is the gated half of the rule
 above; putting it inside the public read prefix and leaning on the method guard would make
 that placement a coincidence rather than a decision. A test enumerates the route table, so

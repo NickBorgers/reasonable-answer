@@ -118,7 +118,7 @@ def test_defects_carry_no_provenance():
         "related_span",
         "citation_id",
         "expected_support",
-        # D25: a bare boolean — "this task was independently reviewed and stands".
+        # D-writer-disputes: a bare boolean — "this task was independently reviewed and stands".
         # It carries no verdict prose and no provenance; anything beyond a bool
         # here needs a new decision entry.
         "adjudicated",
@@ -178,7 +178,7 @@ def test_signal_signature_ignores_minor_noise():
     assert signal_signature(a) == signal_signature(b)
 
 
-# ------------------------------------------------------- social-bias categories (D24)
+# ------------------------------------------------------- social-bias categories (D-social-bias)
 
 
 def test_bias_category_floors_clamp_up():
@@ -212,7 +212,7 @@ def test_bias_categories_are_lens_scoped():
 
 
 def test_bias_related_spans_may_describe_a_pattern_not_a_quote():
-    """D24: the bias categories are excluded from IN_ARTIFACT_RELATED, because
+    """D-social-bias: the bias categories are excluded from IN_ARTIFACT_RELATED, because
     their related_span describes a pattern (a source cluster, the question's
     framing) rather than a second quotable span. An honest finding whose
     related_span is not artifact text must validate cleanly — on every lens."""

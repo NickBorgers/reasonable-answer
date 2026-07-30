@@ -85,7 +85,7 @@ class RunSummary:
     terminal_note: str = ""
     #: The identity that submitted the run, or None for a run that predates ownership
     #: or was started from the CLI without `--owner`. None means the web layer will
-    #: not serve it at all (D26); the run itself is untouched and still resumes.
+    #: not serve it at all (D-question-refinement); the run itself is untouched and still resumes.
     owner: str | None = None
 
     @property

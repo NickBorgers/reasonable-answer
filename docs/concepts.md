@@ -99,7 +99,7 @@ this," and no way to raise an objection about the author's *intent*. If a critic
 finding in the text, the finding doesn't exist.
 
 The bias-shaped categories (loaded language, one-sided sourcing, unexamined presuppositions) are
-governed by an explicit rulebook, [bias.md](./bias.md) (D24) — including what critics must *not*
+governed by an explicit rulebook, [bias.md](./bias.md) (D-social-bias) — including what critics must *not*
 do, like demanding false balance where the evidence genuinely points one way.
 
 ## Multi-model: different minds, decorrelated blind spots
@@ -220,7 +220,7 @@ it — each one, again, a guard against a known LLM failure mode:
   import exactly the failure modes the audition is supposed to detect.
 - **The dispute channel.** Critics can be wrong, and a false positive is otherwise
   indistinguishable from a real defect — floors escalate it, the blind referee counts it, and a
-  compliant writer would "fix" the report into falsehood. An opt-in channel (D25) lets the writer
+  compliant writer would "fix" the report into falsehood. An opt-in channel (D-writer-disputes) lets the writer
   dispute a finding with evidence; mechanically verifiable disputes (the quote really is on the
   cited page) are upheld by plain code, and the rest go to a fresh-context arbiter that defaults
   to the finding under uncertainty. Nothing is ever suppressed without an explicit verdict.

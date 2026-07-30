@@ -113,7 +113,7 @@ class Job:
     seed_format: str | None = None
     seed_source: str | None = None
     seed_warnings: tuple[str, ...] = ()
-    #: Already written to disk by `submit()` before this job was queued (D26) -- carried
+    #: Already written to disk by `submit()` before this job was queued (D-question-refinement) -- carried
     #: here for parity with the job's other provenance fields, not re-written by
     #: `resume()`/`recover()`/`_drain()`, which never touch it.
     refinement: Refinement | None = None
@@ -213,7 +213,7 @@ class RunWorker:
             # Written right alongside the question, for the same reason: the run must be
             # auditable the instant it is queued, not only once it starts. Content goes to
             # the purgeable `refinements/` dir; `events.jsonl` (survives purges) gets only
-            # the non-content fields (D26).
+            # the non-content fields (D-question-refinement).
             store.refinement(refinement.content())
             store.event("refinement", **refinement.event_fields())
         with self._lock:
@@ -332,7 +332,7 @@ class RunWorker:
     # ----------------------------------------------------------------- worker
 
     def _notify(self, job: Job, status: str, has_report: bool) -> None:
-        """Tell the run's owner it stopped (D43). Best-effort, and never fatal.
+        """Tell the run's owner it stopped (D-stop-notification). Best-effort, and never fatal.
 
         Sent inline on this thread rather than handed to another one. With
         `RA_MAX_CONCURRENT_RUNS=1` that delays the next queued run by the push timeout —
@@ -341,7 +341,7 @@ class RunWorker:
 
         The owner is read off disk rather than carried on the `Job`, because `recover()`
         rebuilds jobs from disk at boot and `owner.txt` is the single record of ownership
-        (D32); a field on `Job` would be one more thing that has to survive a restart.
+        (D-identity-header); a field on `Job` would be one more thing that has to survive a restart.
         """
         if self._notifier is None:
             return

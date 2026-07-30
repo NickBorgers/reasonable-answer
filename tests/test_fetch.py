@@ -157,7 +157,7 @@ def _pdf_fetcher(**kwargs):
 
 
 def test_a_cited_pdf_is_read_rather_than_refused(monkeypatch):
-    """The gap this closes: `_pdf_to_markdown` shipped with D24, and until now every
+    """The gap this closes: `_pdf_to_markdown` shipped with D-seed-conversion, and until now every
     cited PDF still came back `unreadable content type (application/pdf)`."""
     pytest.importorskip("pypdf")
     from fakes import minimal_pdf
@@ -617,7 +617,7 @@ def test_a_post_body_reaches_the_wire_intact(monkeypatch):
 def test_http_get_still_follows_a_cross_host_redirect(monkeypatch):
     """`http_get` names no allowlist, and must not acquire one by default: a cited page
     redirecting to another domain is ordinary web behaviour, and refusing it would
-    report a live source as unreachable — which D38 now reads as fabrication."""
+    report a live source as unreachable — which D-notfound-fabrication now reads as fabrication."""
     from reasonable_answer.fetch import http_get
 
     sent = _transport(
@@ -747,7 +747,7 @@ def test_a_blocked_source_keeps_the_on_its_face_bar():
 
 
 def test_a_not_found_source_is_not_offered_to_the_critic_to_raise_again():
-    """D38 mints that `fabricated_citation` mechanically in
+    """D-notfound-fabrication mints that `fabricated_citation` mechanically in
     `triage.mechanical_citation_issues`. Asking the critic for it as well would
     double-report one defect, and both copies carry the blocking floor."""
     missing = FetchedSource(url="https://example.org/a", status=404, error="HTTP 404")
@@ -843,7 +843,7 @@ class _Fetcher:
     """One readable page and one source proven real by a registry but never read.
 
     Both are third-party text in a critic's context, and registry metadata is a class of
-    it that did not exist before D39 — a different vendor, a different shape, and the
+    it that did not exist before D-existence-vs-body — a different vendor, a different shape, and the
     same isolation rule.
     """
 
@@ -943,7 +943,7 @@ def test_the_audit_trail_records_what_was_fetched(tmp_path, identities, config):
 def test_the_audit_trail_tallies_which_tier_produced_each_source(
     tmp_path, identities, config
 ):
-    """Across ALL sources, not just the failures (D39). A source the open-access tier
+    """Across ALL sources, not just the failures (D-existence-vs-body). A source the open-access tier
     rescued is a success and leaves no trace in the failure tally, so without this an
     operator cannot tell whether a tier is earning the calls it spends."""
     import json
@@ -1066,7 +1066,7 @@ def test_a_report_with_no_sources_section_fetches_nothing(tmp_path, identities, 
     assert "PAGES CITED BY THE REPORT" not in client.calls[-1].user
 
 
-# ------------------------------------------- a definitive not-found is fabrication (D38)
+# ------------------------------------------- a definitive not-found is fabrication (D-notfound-fabrication)
 
 
 def test_not_found_status_is_unresolvable():
@@ -1145,7 +1145,7 @@ class _AllNotFound:
 
 def test_twelve_of_twelve_404_does_not_clear_the_evidence_lens(tmp_path, identities, config):
     """The `run-d3bb2e4d2d94` regression: a wholly-fabricated bibliography every page of
-    which 404s must not produce a clean evidence lens (D38)."""
+    which 404s must not produce a clean evidence lens (D-notfound-fabrication)."""
     from reasonable_answer import triage
     from reasonable_answer.graph import _critique_one
     from reasonable_answer.taxonomy import Category

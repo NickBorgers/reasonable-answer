@@ -1,10 +1,10 @@
-# Quality principles — the evidence register (D37)
+# Quality principles — the evidence register (D-quality-reviewer)
 
 > **Status:** normative. This document is the register the `quality` CI reviewer audits
 > pull requests against. The `invariant` reviewer asks whether code and spec moved
 > *together*; the `quality` reviewer asks whether the position the spec now takes is still
 > the position the published evidence supports. A change to a principle here without the
-> procedure in [§4](#4-retiring-or-weakening-a-principle) is a graded violation. See D37 in
+> procedure in [§4](#4-retiring-or-weakening-a-principle) is a graded violation. See D-quality-reviewer in
 > [decisions.md](./decisions.md).
 
 Evidence base last verified: 2026-07-28
@@ -41,7 +41,7 @@ review findings the way `D<n>` ids are.
 | QP7 | **Every loop is capped, and the cap is honored at every entry point.** More iterations do not monotonically improve output; refinement loops adapt to their evaluator. | `controller.py`, `config.py::Budgets`; CI: `MAX_CYCLES`, the dispute budget, agent timeouts | Huang et al. 2024; RG-001/RH-001 lineage in [decisions.md](./decisions.md) |
 | QP8 | **Verdicts come from deterministic aggregation of structured findings, never an LLM grading prose.** Expert reviewer agreement is low even among humans; the remedy is structure and mechanical aggregation, not a smarter holistic judge. | `controller.py`, the blind orchestrator; CI: the judge, run from `main` | Grove et al. 2000; Beygelzimer et al. 2021; Verga et al. 2024 |
 | QP9 | **Empirical claims in `docs/` carry citations that support them as stated.** A claim strengthened beyond its source, or left standing after its citation is removed, is drift. | every `docs/*.md`; the [References table](#5-references) | the register itself |
-| QP10 | **Verification means fetched text, never parametric memory.** A model's recollection of a source is testimony from the component whose reliability is in question. | `dispute.py` mechanical adjudication, `search.verify_sources` and the opt-in `sources.*` reader tiers that widen what counts as fetched text (`config.SourcesConfig`, `fetch.SourceFetcher`, `graph._pdf_reading_enabled`, and the paid `resolve.extraction` renderer tier — `ResolutionTier.EXTRACTION` — whose markdown is the cited URL's own body and so carries no `body_source_url`); the `quality` prompt's own fetch rule | D25, D17/D18, D40 in [decisions.md](./decisions.md) |
+| QP10 | **Verification means fetched text, never parametric memory.** A model's recollection of a source is testimony from the component whose reliability is in question. | `dispute.py` mechanical adjudication, `search.verify_sources` and the opt-in `sources.*` reader tiers that widen what counts as fetched text (`config.SourcesConfig`, `fetch.SourceFetcher`, `graph._pdf_reading_enabled`, and the paid `resolve.extraction` renderer tier — `ResolutionTier.EXTRACTION` — whose markdown is the cited URL's own body and so carries no `body_source_url`); the `quality` prompt's own fetch rule | D-writer-disputes, D-retrieval-opt-in/D-source-verification, D-paid-tier-page in [decisions.md](./decisions.md) |
 | QP11 | **Evidence-base freshness is checked mechanically and is never blocking.** See the marker line above and [§3](#3-refreshing-the-evidence-base). | this file | — |
 | QP12 | **Principles-as-spec drift is blocking, in both directions.** Behavior governed by QP1–QP10 changing without this file and `decisions.md` moving too — or a principle here weakening with no new fetchable evidence in the diff — is the `quality` reviewer's row-12 analogue. See [§4](#4-retiring-or-weakening-a-principle). | this file + every surface above | — |
 

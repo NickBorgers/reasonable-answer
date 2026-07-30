@@ -35,7 +35,7 @@ _WEB_EXTRA_MODULES = {"fastapi", "markdown_it", "uvicorn", "multipart", "starlet
 #: Names a level for `ra` itself, for a deployment that cannot pass `--verbose` — the
 #: container's CMD is fixed. Set because a night of aborted production runs left only
 #: WARNING lines behind: no run starts, no controller decisions, no search results, so
-#: the post-mortem was inference rather than reading (D42).
+#: the post-mortem was inference rather than reading (D-provider-retry).
 LOG_LEVEL_ENV = "RA_LOG_LEVEL"
 
 
@@ -465,7 +465,7 @@ def audition_refine(
     as_json: bool = typer.Option(False, "--json", help="Emit the report as JSON."),
     verbose: bool = typer.Option(False, "--verbose", "-v"),
 ) -> None:
-    """Measure whether the refine model respects the D26 guardrails (D33).
+    """Measure whether the refine model respects the D-question-refinement guardrails (D-refine-audition).
 
     Graded mechanically against the fixture corpus: scope narrowing, disallowed
     transforms, dropped subjects, and chips manufactured for well-posed questions.
@@ -585,7 +585,7 @@ def _render_refine_audition(alias, metrics, judgement, asymmetries) -> None:
         console.print(f"[yellow]{alias}:[/yellow] {reason}")
     for pair, spread in sorted(asymmetries.items()):
         # Diagnostic only, never a gate — the number the question_behind_the_question
-        # enablement decision (D26) was waiting on.
+        # enablement decision (D-question-refinement) was waiting on.
         console.print(f"[dim]mirror pair '{pair}': fire-rate spread {spread:.2f}[/dim]")
 
 
@@ -620,7 +620,7 @@ def _refine_doctor_line(config: Config, client: LLMClient) -> str | None:
     line = f"refine ('{alias}'): [{style}]{judgement.verdict.value}[/{style}]"
     if judgement.verdict is audition_mod.Verdict.UNFIT:
         line += (
-            " — suggestions may steer; refinement stays enabled (warn-only, D33): "
+            " — suggestions may steer; refinement stays enabled (warn-only, D-refine-audition): "
             "re-roster refine.alias or re-measure with `ra audition-refine --force`"
         )
     return line

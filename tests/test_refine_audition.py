@@ -1,4 +1,4 @@
-"""The refine audition harness (D33), fully offline — no network, no proxy.
+"""The refine audition harness (D-refine-audition), fully offline — no network, no proxy.
 
 Grading is deliberately a pure function (`grade_refine` takes a fixture and a tuple
 of suggestions, nothing else), so most of this file needs no client at all. The
@@ -76,7 +76,7 @@ def test_shipped_corpus_loads_and_covers_both_directions():
 
 def test_every_default_enabled_transform_has_a_positive_fixture():
     # A transform with no fixture is a transform whose firing behaviour is
-    # unmeasured — the exact gap D33 exists to close.
+    # unmeasured — the exact gap D-refine-audition exists to close.
     corpus = load_refine_fixtures()
     expected = {f.expected_transform for f in corpus.fixtures if f.expected_transform}
     covered = expected | {

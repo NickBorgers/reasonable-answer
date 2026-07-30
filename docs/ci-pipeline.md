@@ -29,18 +29,23 @@ GitHub-hosted runners with read-only permissions and no secrets: nothing in that
 Preserving that property is a reviewer's explicit job. A test that needs the real proxy
 must carry the `live` marker, and CI always passes `-m "not live"`.
 
-## Decision numbers are checked at the gate, not allocated at merge
+## Decision identifiers are slugs, and duplicates are refused at the gate
 
-Each `## D<n>` section in [decisions.md](./decisions.md) is allocated by whoever writes the
-PR, and the number is echoed across `config/`, `src/`, `tests/` and docs — so a collision
-costs a repo-wide rename. Two PRs open at once each pick the same next-free number against
-main and collide when both merge (D31, issue #71). `scripts/validate-decision-numbers.sh`
-refuses a `decisions.md` in which any number is defined twice; on a `pull_request` event the
-checked-out file is the merge result, so a duplicate there is a collision that would
-otherwise land on main. It is pure and offline — one file, no git, no network — so it fits
-the secret-free gate and is unit-tested by `tests/test_decision_numbers.py`. The `tests`
-job skips docs-only PRs, so the collision check runs as its own path-filtered job to cover
-a PR that touches nothing but `decisions.md`.
+Each decision in [decisions.md](./decisions.md) is identified by a slug derived from its
+subject (`## D-source-verification`), coined by the authoring PR rather than allocated from a
+shared counter (D-decision-slugs supersedes D-decision-gate). Because a slug comes from the
+decision's own content, two concurrently-open PRs cannot pick the same identifier, so the
+merge-time collision the old numbering produced — two PRs racing for the same next-free number,
+each rename costing a repo-wide edit and a fresh review cycle — cannot arise.
+`scripts/validate-decision-numbers.sh` still runs at the gate, now guarding the one thing slugs
+do not prevent: the *same* slug defined twice. It reads **both** definition forms — the
+`## D-<slug> —` prose sections and the `| D-<slug> | … |` top-table rows — so a duplicate
+hiding in the table form (as four reused numbers once did) is caught, which the predecessor
+gate could not do. It is pure and offline — one file, no git, no network — so it fits the
+secret-free gate and is unit-tested by `tests/test_decision_numbers.py`, while
+`tests/test_citation_resolution.py` additionally fails any PR that cites a decision slug the
+registry does not define. The `tests` job skips docs-only PRs, so the collision check runs as
+its own path-filtered job to cover a PR that touches nothing but `decisions.md`.
 
 ## The review graph
 
@@ -56,7 +61,7 @@ review-entry            authorize · fork-reject · resolve SHA · prior-GO chec
        ├─ fix           the ONLY branch-writing stage; syncs with the base branch and
        │                addresses blockers; skipped on the last cycle, but still runs a
        │                non-agentic, clean-merge-only sync pass when the panel was guarded
-       │                off and the branch is behind the base (D34)
+       │                off and the branch is behind the base (D-unguarded-sync)
        ├─ judge         deterministic, from main, contents: read
        └─ finalize      labels · summary comment · merge gate
 ```
@@ -112,7 +117,7 @@ from an idle one.
 What the verdict covers is worth being precise about. The reviewers read the **pre-fix**
 tree and so does the verdict; `addressed[]` only records which of their blockers the fixer
 claims to have closed. Nothing in the judge inspects the fixer's diff — so the fixer cannot
-clear its own work on the strength of this file, but it does not need to: by design (D28),
+clear its own work on the strength of this file, but it does not need to: by design (D-fixer-merges-not-rebases),
 the fixed SHA is not reviewed again. The fixer claims its own post-push SHA before a second
 pipeline can start, and the merge gate is written on that SHA from this verdict plus the
 fixer's own gates (schema, lint, marker gate, remote-head check), not from a fresh reading
@@ -178,7 +183,7 @@ it holds `contents: read`, so it could not push if it tried.
   fixed SHA earns its own cycle" was a property worth enforcing here. That was an agent's
   invention, not the owner's intent: the owner has since confirmed fixer output is meant to
   reach main without a further review cycle, matching the design this repository borrows
-  from, and the per-author check has been removed. See D28's residual: a fixer-authored
+  from, and the per-author check has been removed. See D-fixer-merges-not-rebases's residual: a fixer-authored
   merge whose conflict resolutions are wrong-but-clean can still reach main unread, in the
   same way any other wrong-but-clean fixer output can (below).
 - **A run that reviewed nothing does not consume a cycle.** `review/cycle` is written by
@@ -186,7 +191,7 @@ it holds `contents: read`, so it could not push if it tried.
   guard cleared. Every guard refusing — PR Validation red on the reviewed SHA, the branch
   moved on mid-run, an untrusted author — means no code was read, and the next push starts
   from the same cycle number. This is fail-open on the counter and safe because the only
-  way `fix` can push on an unrecorded cycle is the **sync-only** path (D34), which
+  way `fix` can push on an unrecorded cycle is the **sync-only** path (D-unguarded-sync), which
   addresses no blockers and writes no `review/cycle` of its own: it commits a clean merge of
   the base and nothing else, so it cannot advance the review → fix → push → review loop the
   cap bounds. Every *blocker-fixing* run still needs `record-cycle` to have succeeded. PR
@@ -199,7 +204,7 @@ it holds `contents: read`, so it could not push if it tried.
   claims its own SHA" below), so the `synchronize` event that push fires is normally
   suppressed and no second pipeline reviews the fix at all — the owner's intent is that
   the fix reaches main on the strength of the pre-fix panel plus the fixer's own gates,
-  without a fresh cycle (D28). A genuine cycle 2 now only happens if that claim loses its
+  without a fresh cycle (D-fixer-merges-not-rebases). A genuine cycle 2 now only happens if that claim loses its
   race against GitHub scheduling the event; `fix_allowed` is false by cycle 2, so that
   accidental re-review cannot also re-fix, and a third cycle is capped and finalizes
   NO-GO. Day to day, this cap bounds repeated NO-GO iterations on a PR a human keeps
@@ -235,7 +240,7 @@ reviewers actually read — the pre-fix tree — so the fixer cannot clear its o
 The fixed SHA itself is **not** reviewed again in the normal case: the fixer claims its own
 post-push SHA so no second panel runs, and the fix reaches main on the strength of that
 pre-fix verdict plus the fixer's own gates (see "The fixer claims its own SHA" below, and
-D28 in `docs/decisions.md`).
+D-fixer-merges-not-rebases in `docs/decisions.md`).
 
 It does two jobs: it syncs the branch with the base, and it addresses reviewer blockers.
 Either one alone is enough to make it run.
@@ -270,9 +275,9 @@ does not burn a cycle. The conflicted-path list travels in a file rather than an
 environment variable: paths are contributor-controlled, and the agent's environment is
 assembled from an `--env-file`, where a newline in a path would inject arbitrary variables.
 
-**The sync still runs when the panel was guarded off (D34).** Every reviewer guard refusing
+**The sync still runs when the panel was guarded off (D-unguarded-sync).** Every reviewer guard refusing
 normally means the fixer does not run either, because `fix` was gated on `record-cycle`
-having written a cycle. That left the D28 sync unreachable on any PR whose guards refuse for
+having written a cycle. That left the D-fixer-merges-not-rebases sync unreachable on any PR whose guards refuse for
 a reason a sync would repair — most sharply a PR whose `PR Validation Required` check is
 absent or red while the base has moved underneath it. So `fix` has a second way in: when
 `record-cycle` was skipped *and* `gather` reports the reviewed SHA is behind the base, the
@@ -295,14 +300,14 @@ The consequence is worth stating plainly: this does **not** rescue a PR that alr
 conflicts with its base. Such a PR has no computable merge ref, so GitHub fires no
 `pull_request` event, PR Validation never runs, every guard refuses, and the sync-only pass
 it reaches then hits conflicts and blocks. Clearing a true conflict still takes a human
-merging the base in by hand (as #54 and #56 did). What D34 fixes is the strictly larger,
+merging the base in by hand (as #54 and #56 did). What D-unguarded-sync fixes is the strictly larger,
 non-conflicting case: a behind-the-base PR whose panel was guarded off for any reason gets
 its sync, becomes mergeable, earns its `pull_request` event, gets validated, and becomes
 reachable by a panel — see the residual below for why that is "reachable" and not "reviewed".
 
 **And the sync-only successor is the one SHA the fixer does not claim.** Normally the fixer
 claims `review/pipeline` on the SHA it pushes, so dedup suppresses the `synchronize` event and
-no second panel re-reads the fix (D28) — licensed by "the pre-fix panel plus the fixer's own
+no second panel re-reads the fix (D-fixer-merges-not-rebases) — licensed by "the pre-fix panel plus the fixer's own
 gates *are* the review". A sync-only pass has no pre-fix panel to point at: it runs because
 every guard refused and nothing was read. Claiming there would leave a successor SHA with no
 verdict, no way to earn one, and therefore no way through the merge gate — the original
@@ -331,7 +336,7 @@ It runs in one of two modes.
 **`cold`** — the fallback, and still the one to optimise for. `author-resume` can only fire
 on a PR that `resolve-issue.yml` opened. Now that filing an issue starts an agent, those
 are no longer rare — but any PR opened by hand, or by a coding agent on a laptop, carries
-no session and lands here. A cold fixer exercises **grounded judgment** (D23): it may apply
+no session and lands here. A cold fixer exercises **grounded judgment** (D-fixer-grounded-judgment): it may apply
 any fix it can anchor in the repository's existing content and structure, the PR's
 reconstructed intent, and the reviewer's own finding — including work that spans files no
 reviewer named, such as writing a missing test by mirroring the tests beside it or adopting
@@ -346,7 +351,7 @@ finding by clarifying the PR body instead of changing code. A cold fixer may **n
 not a claim an agent without that intent can make.
 
 `author-resume` is best-effort, and a resumed session that wedges must fall through to the
-cold fixer rather than fail the PR (D36). That containment lives in `run-in-container.sh`,
+cold fixer rather than fail the PR (D-resume-timeout). That containment lives in `run-in-container.sh`,
 not in a `continue-on-error` on the composite step — which does not reliably stop an inner
 composite-step failure from aborting the job. On a resume the script captures the `timeout`
 exit code (adding `--kill-after` so a CLI that ignores SIGTERM is still killed at the
@@ -372,7 +377,7 @@ before triaging anything, into `$PR_CONTEXT_PATH`:
   have been *opened* by an agent to say `Resolves #N`, so this is the context-from-issue
   path for PRs that have no session.
 
-The record cuts both ways (D23). It can make the fixer **skip** — flagged behaviour it
+The record cuts both ways (D-fixer-grounded-judgment). It can make the fixer **skip** — flagged behaviour it
 shows to be deliberate is skipped with a citation — and it can supply the intent that
 grounds a fix, telling the fixer which of two plausible resolutions serves the change.
 What it can never do is widen scope: the fixer answers reviewer findings only, and
@@ -481,9 +486,9 @@ the pre-fix panel plus the fixer's own gates (schema validation, `ruff`, the mar
 the remote-head check), without a further cycle reading the post-fix tree. This repo
 previously suppressed the claim on the theory that the fix itself needed its own review
 cycle; that was an agent's invention, not a decision the owner had made, and it has been
-reverted (see D28 in `docs/decisions.md`).
+reverted (see D-fixer-merges-not-rebases in `docs/decisions.md`).
 
-The **sync-only** pass (D34) is the single exception, and it does not weaken the rule — it
+The **sync-only** pass (D-unguarded-sync) is the single exception, and it does not weaken the rule — it
 turns on it. The claim is licensed by "the pre-fix panel is the review", and a sync-only pass
 runs precisely because there was no panel. Claiming there would produce a successor SHA with
 no verdict and no event left to earn one. So `sync_only: true` suppresses the claim; every
@@ -513,7 +518,7 @@ always for anything under `.github/`, `src/`, or the dependency and container fi
 `src/`, `config/`, every `docs/*.md` (empirical claims live there), and the review
 pipeline's own files (`.github/workflows/review-*`, `.github/scripts/review/`,
 `.github/actions/review-*`) — the surfaces where the design could drift off its evidence
-base ([quality-principles.md](./quality-principles.md), D37). Unlike `invariant` and
+base ([quality-principles.md](./quality-principles.md), D-quality-reviewer). Unlike `invariant` and
 `docs` it **may abstain**, because it is conditionally selected and those two remain the
 never-abstain backstop; its prompt bounds abstention to diffs where no principle row has
 surface.

@@ -97,7 +97,7 @@ class Defect(BaseModel):
     citation_id: str | None = None
     expected_support: str | None = None
     #: True when a writer disputed this finding and adjudication overruled the
-    #: dispute (D25). A bare boolean by design: it tells the writer "this task was
+    #: dispute (D-writer-disputes). A bare boolean by design: it tells the writer "this task was
     #: independently reviewed and stands — apply it, do not dispute it again",
     #: carrying no verdict prose and no provenance.
     adjudicated: bool = False
@@ -105,7 +105,7 @@ class Defect(BaseModel):
 
 class Dispute(BaseModel):
     """A writer's challenge to one fix-task: a claim that the task is factually
-    wrong. Writer-authored, therefore untrusted; strictly bounded (D25)."""
+    wrong. Writer-authored, therefore untrusted; strictly bounded (D-writer-disputes)."""
 
     model_config = ConfigDict(extra="forbid")
 
@@ -147,7 +147,7 @@ AdjudicationMethod = Literal[
 
 
 class AdjudicationRecord(BaseModel):
-    """One entry in the per-run adjudicated-facts registry (D25). Lives in
+    """One entry in the per-run adjudicated-facts registry (D-writer-disputes). Lives in
     checkpointed graph state; only `upheld` records ever suppress anything."""
 
     model_config = ConfigDict(extra="forbid")
@@ -288,7 +288,7 @@ class Decision(BaseModel):
 #: The six bounded reframe transforms (docs/question-refinement.md's taxonomy table).
 #: `question_behind_the_question` ships disabled (RefineConfig default) — it is the
 #: only transform that authorizes the model to infer an unstated concern, so it stays
-#: off until a paired-fixture audition passes (D26).
+#: off until a paired-fixture audition passes (D-question-refinement).
 REFINE_TRANSFORMS = (
     "split_the_either_or",
     "check_the_premise_first",

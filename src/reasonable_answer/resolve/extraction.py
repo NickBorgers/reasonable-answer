@@ -1,4 +1,4 @@
-"""Tier 2: a rendering service reads the cited URL when this process cannot (D40).
+"""Tier 2: a rendering service reads the cited URL when this process cannot (D-paid-tier-page).
 
 **What this buys, precisely.** A rendering provider runs a real browser, so it reads a
 page whose text arrives via JavaScript, and it is not refused by the bot walls that turn
@@ -11,7 +11,8 @@ stop at this paragraph.
 also sells a stealth mode — residential IP rotation, fingerprint randomisation, anti-bot
 defeat — and on Firecrawl it is one string away (`proxy: "stealth"`, or `"auto"`, which
 escalates into it silently on failure). That is the industrial form of the browser
-impersonation `fetch.py` has refused since D18, and D39 records as doctrine: a system
+impersonation `fetch.py` has refused since D-source-verification, and D-existence-vs-body
+records as doctrine: a system
 whose whole claim is that its citations are checkable cannot obtain them by circumventing
 the access controls of the people who published them.
 
@@ -23,7 +24,7 @@ only the first is in scope.
 
 The body this returns is the cited URL's *own* body, not a copy from somewhere else, so
 it carries no `body_source_url` and may settle a dispute — unlike an open-access mirror
-(D39). It is the same page, read by a better client.
+(D-existence-vs-body). It is the same page, read by a better client.
 """
 
 from __future__ import annotations

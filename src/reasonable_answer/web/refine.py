@@ -1,4 +1,4 @@
-"""Pre-run question refinement (D26, docs/question-refinement.md).
+"""Pre-run question refinement (D-question-refinement, docs/question-refinement.md).
 
 `RefinementService` is the whole engine: the LLM call, deterministic validation, the
 TTL cache, offer records, and the concurrency semaphore. It lives entirely at the web
@@ -297,7 +297,7 @@ class RefinementService:
         structured-output probing (`graph.build_runtime`) — a bad or
         schema-incapable refine alias fails here, not on a user's first pause.
 
-        No-op when refinement is disabled, matching the D17/D25 opt-in pattern.
+        No-op when refinement is disabled, matching the D-retrieval-opt-in/D-writer-disputes opt-in pattern.
 
         Caution for whoever wires this into `web/app.py` (part 2): the real
         `LLMClient.resolve_identities` *replaces* its whole identity map rather than
@@ -317,10 +317,10 @@ class RefinementService:
 
     def _warn_if_unfit(self, identity: str) -> None:
         """Warn — never block — when the refine model's cached audition verdict is
-        `unfit` (D33). Blocking would invert this feature's own doctrine: every
+        `unfit` (D-refine-audition). Blocking would invert this feature's own doctrine: every
         refine failure degrades to silence, and a chip-suggester's fitness must not
         gate serving runs. Under `audition.enforce` the warning is the whole
-        enforcement; auto-disabling refinement was rejected in D33 because a stale
+        enforcement; auto-disabling refinement was rejected in D-refine-audition because a stale
         cache could silently turn a feature off."""
         if not self._config.audition.enforce:
             return
@@ -337,7 +337,7 @@ class RefinementService:
         if judgement is not None and judgement.verdict is Verdict.UNFIT:
             log.warning(
                 "refine model '%s' (%s) graded unfit on the refine audition: %s — "
-                "refinement stays enabled (warn-only, D33); re-roster refine.alias "
+                "refinement stays enabled (warn-only, D-refine-audition); re-roster refine.alias "
                 "or re-measure with `ra audition-refine --force`",
                 self._alias,
                 identity,

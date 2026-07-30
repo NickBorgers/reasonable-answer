@@ -5,7 +5,8 @@ the real opener, the real redirect handler and `fetch._request`'s credential han
 stay on the path under test.
 
 The file exists chiefly for one test. `test_the_renderer_is_never_asked_to_disguise_itself`
-is the doctrine of D39/D40 expressed as something CI fails on rather than as a comment
+is the doctrine of D-existence-vs-body/D-paid-tier-page expressed as something CI fails on
+rather than as a comment
 somebody can delete: rendering a page is in scope, impersonating a browser to defeat a bot
 wall is not, and the difference is one string in a request body.
 """
@@ -135,7 +136,7 @@ def test_a_rendered_body_can_settle_a_dispute_because_it_is_the_cited_page(monke
 
 def test_extraction_is_not_attempted_against_a_definitive_not_found(monkeypatch):
     """Nothing to render at a URL the server says is not there — and a success against a
-    soft-404 landing page would overwrite D38's mechanical finding."""
+    soft-404 landing page would overwrite D-notfound-fabrication's mechanical finding."""
     seen = _capture(monkeypatch, lambda: json_stub({"data": {"markdown": "text"}}))
     missing = FetchedSource(url=URL, status=404, error="HTTP 404")
     resolver = SourceResolver(
@@ -145,7 +146,7 @@ def test_extraction_is_not_attempted_against_a_definitive_not_found(monkeypatch)
 
     assert seen == [], "no paid call for a URL that does not exist"
     assert result.outcome is SourceOutcome.NOT_FOUND
-    assert result.unresolvable, "D38 must still mint fabricated_citation"
+    assert result.unresolvable, "D-notfound-fabrication must still mint fabricated_citation"
 
 
 def test_budget_exhaustion_reads_as_itself_not_as_a_bot_wall(monkeypatch):
@@ -276,12 +277,12 @@ def test_the_call_ceiling_is_derived_from_the_run_s_own_shape(config):
     assert _extraction_call_ceiling(pinned) == 7, "an explicit number still wins"
 
 
-# ---------------------------------------------------------- the delivery seam (D40)
+# ---------------------------------------------------------- the delivery seam (D-paid-tier-page)
 
 
 def test_enabling_delivery_without_a_provider_is_fatal():
     """The seam ships with no provider behind it, so enabling it while naming none can
-    never make a call. D40 says that is fatal at load — inert rather than half-built —
+    never make a call. D-paid-tier-page says that is fatal at load — inert rather than half-built —
     and here that promise is enforced rather than merely written down."""
     from reasonable_answer.config import (
         ConfigError,

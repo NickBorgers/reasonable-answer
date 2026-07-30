@@ -23,7 +23,7 @@ misrepresented sources, missing counterarguments). What remains is only cosmetic
 which point we stop.
 
 *Eligible* here is both **structural** — non-author, distinct resolved identity, distinct family —
-and **demonstrated**: D20 added a measured capability term, because a structurally-eligible model
+and **demonstrated**: D-critic-audition added a measured capability term, because a structurally-eligible model
 that reports nothing satisfies the predicate while performing no review. `ra audition` grades each
 rostered critic `fit` / `marginal` / `unfit` and caches the verdict; `ra doctor` surfaces it and
 `audition.enforce` fails startup closed on a cached `unfit`. The controller's stop logic below
@@ -35,7 +35,7 @@ locally: high quality, abysmal token rate. Resumability and a full audit trail m
 more than latency.
 
 That anti-goal is what makes the roster affordable. The whole roster is **open-weight only**
-(D18), and because a 60-90s model load off SSD is negligible against a 10-25 minute run, models
+(D-open-weight-roster), and because a 60-90s model load off SSD is negligible against a 10-25 minute run, models
 may be **swapped** between roles rather than held resident. The budget is therefore the *largest
 single model*, not the sum — roughly **450GB** on a shared 768GB box. Approximate 4-bit
 footprints (MoE needs the whole model resident, since the router can reach any expert on any
@@ -47,7 +47,7 @@ token, so active-parameter counts do not reduce this):
 | `deepseek-v4-pro` | 1.6T/A49B | ~800GB | no — cannot load |
 | `glm-5.2` | 744B/A40B | ~375GB | yes — critic-only, all lenses |
 | `mistral-large-3` | 675B/A41B | ~340GB | yes — writer + completeness |
-| `nemotron-3-ultra` | 550B/A55B | ~275GB | yes — writer (D42) |
+| `nemotron-3-ultra` | 550B/A55B | ~275GB | yes — writer (D-provider-retry) |
 | `deepseek-v4-flash` | 284B/A13B | ~145GB | yes — writer |
 | `minimax-m3` | 230B/A10B | ~115GB | yes — logic, evidence |
 | `gemma4-small` | 26B-A4B q8 | ~28GB | yes — orchestrator |
@@ -76,7 +76,7 @@ which may be the writer of *that* report. A model can be a **critic-only special
 the strongest model in the roster, never authors — so it reviews every tick without ever violating
 author-exclusion. Had it been a writer instead, it would have been barred from reviewing its own
 drafts and the roster would have lost its best reviewer on half of all rounds. For a strong `accepted`, each lens pool holds **≥2 eligible non-author
-models** so every dimension gets a second, distinct reviewer (see D15/D16 in
+models** so every dimension gets a second, distinct reviewer (see D-per-lens-critics/D-critic-only-specialists in
 [decisions.md](./decisions.md) and [architecture.md](./architecture.md)).
 
 Invariants that make this work:
@@ -191,11 +191,11 @@ and the docs reviewer blocks on the first.
 - **[decisions.md](./decisions.md)** — design decisions, the Codex review, and how each of the
   20 findings was resolved.
 - **[question-refinement.md](./question-refinement.md)** — the edge-side, ambient
-  pre-run reframing suggestions (D26): what they are, the reframe taxonomy, and the
+  pre-run reframing suggestions (D-question-refinement): what they are, the reframe taxonomy, and the
   provenance/retention mechanism.
-- **[bias.md](./bias.md)** — the observable-text social-bias rulebook (D24): the three
+- **[bias.md](./bias.md)** — the observable-text social-bias rulebook (D-social-bias): the three
   categories, what a bias finding may not be, and the residual the rules do not catch.
-- **[quality-principles.md](./quality-principles.md)** — the evidence register (D37): the
+- **[quality-principles.md](./quality-principles.md)** — the evidence register (D-quality-reviewer): the
   twelve principles the `quality` CI reviewer audits PRs against, the literature each one
   rests on, and the procedures for refreshing the evidence base or retiring a principle.
 - **[ssrf-egress-isolation.md](./ssrf-egress-isolation.md)** — the infrastructure half of the
@@ -206,7 +206,7 @@ and the docs reviewer blocks on the first.
 - **[ci-setup.md](./ci-setup.md)** — the manual, admin-only setup: runners, secrets, repo
   variables, Pages, branch protection.
 - **[src/reasonable_answer/web/static/icons/README.md](https://github.com/NickBorgers/reasonable-answer/blob/main/src/reasonable_answer/web/static/icons/README.md)**
-  — the icon-replacement contract for the installable app (D27): which file each platform
+  — the icon-replacement contract for the installable app (D-installable-pwa): which file each platform
   reads, what each one has to be, and why nothing needs clearing on an installed device
   afterwards. It lives beside the files it describes because that is where an operator
   replacing them will look, and it is indexed here because the main README sends them to it.

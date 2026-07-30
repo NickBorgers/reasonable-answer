@@ -1,4 +1,4 @@
-"""The resolver ladder (D39): identifiers, the free tiers, and what each outcome licenses.
+"""The resolver ladder (D-existence-vs-body): identifiers, the free tiers, and what each outcome licenses.
 
 Offline throughout, like `test_fetch.py` — `urllib.request.OpenerDirector.open` is
 stubbed, so the real opener and redirect handler stay on the path and the suite needs no
@@ -498,7 +498,7 @@ def test_a_confirmed_source_that_merely_would_not_read_is_metadata_only():
 def test_registry_confirmation_outranks_a_404_on_the_cited_url():
     """The insight the whole feature rests on, in its sharpest form: the citation names
     an identifier a registry holds, so the source is real and a dead link is a dead link.
-    `unresolvable` must go false, or D38 mints a blocking defect against a real paper."""
+    `unresolvable` must go false, or D-notfound-fabrication mints a blocking defect against a real paper."""
     r = resolver(metadata=[FakeProvider(Provider.CROSSREF, record=RECORD)])
     result = r.resolve(DOI_URL, MISSING, never_fetched)
 
@@ -511,7 +511,7 @@ def test_an_identifier_no_authoritative_registry_holds_is_not_found():
     result = r.resolve(DOI_URL, UNREACHABLE, never_fetched)
 
     assert result.outcome is SourceOutcome.NOT_FOUND
-    assert result.unresolvable, "this is what D38 mints fabricated_citation from"
+    assert result.unresolvable, "this is what D-notfound-fabrication mints fabricated_citation from"
 
 
 def test_a_denial_never_overrides_a_live_server():
@@ -663,7 +663,7 @@ def test_budget_exhaustion_says_so_instead_of_blaming_the_site():
 
 
 def test_budget_exhaustion_never_suppresses_a_mechanical_not_found():
-    """Otherwise a run that exhausts a tier at source five silently stops reporting D38's
+    """Otherwise a run that exhausts a tier at source five silently stops reporting D-notfound-fabrication's
     finding for sources six through twelve — turning a tier on would weaken a defect the
     pipeline raises without it."""
     r = resolver(metadata=[FakeProvider(Provider.CROSSREF, record=RECORD)], metadata_budget=0)

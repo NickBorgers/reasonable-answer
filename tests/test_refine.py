@@ -1,4 +1,4 @@
-"""`RefinementService` (D26, docs/question-refinement.md), driven entirely offline.
+"""`RefinementService` (D-question-refinement, docs/question-refinement.md), driven entirely offline.
 
 `StubClient` below is a minimal, local stand-in for `LLMClient` — `FakeClient` in
 `tests/fakes.py` is built around the graph's schemas (`CritiqueOutput`,
@@ -203,7 +203,7 @@ def _seed_refine_cache(config: Config, identity: str, *, obvious_violation_runs:
 
 
 def test_start_warns_but_never_blocks_on_unfit_refine_verdict(roster, tmp_path, caplog):
-    """D33's load-bearing invariant: an `unfit` cached refine verdict WARNS at
+    """D-refine-audition's load-bearing invariant: an `unfit` cached refine verdict WARNS at
     startup and refinement stays enabled — blocking would invert this feature's own
     degrade-to-silence doctrine. This is the regression `_warn_if_unfit` exists to
     prevent, previously unguarded."""

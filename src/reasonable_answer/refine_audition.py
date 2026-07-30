@@ -1,8 +1,8 @@
 """Refine-prompt auditioning — does the refine model respect the guardrails it holds?
 
 `audition.py` measures whether a rostered critic can find a planted defect. This
-module is its sibling for the D26 refine surface, born from a production incident
-(D33): "is fluoride in tap water a net positive for public health?" was rewritten to
+module is its sibling for the D-question-refinement refine surface, born from a production incident
+(D-refine-audition): "is fluoride in tap water a net positive for public health?" was rewritten to
 a dental-only question — the model silently narrowed the user's scope, which is
 precisely the steering the prompt-policy guardrails exist to prevent. Nothing
 mechanical could have caught it: the guardrails were prompt text, and the known-gaps
@@ -14,7 +14,7 @@ and a verdict per (identity, enabled-transform set).
 The two design commitments are inherited from `audition.py` verbatim — the grader is
 never an LLM, and both directions gate — but the asymmetry between the directions is
 refine-specific and inverted. For a critic, silence is the measured failure; for
-refinement, silence is the designed default (D26: most well-posed questions get no
+refinement, silence is the designed default (D-question-refinement: most well-posed questions get no
 chips), so a *violation* — a suggestion that narrows scope, fires a disallowed
 transform, or drops the subject — gates, while a low fire rate only ever warns. A
 model can always pass by saying nothing; what it must never do is say the wrong thing.
@@ -148,8 +148,8 @@ class RefineFixture(BaseModel):
     require_terms: tuple[str, ...] = ()
     #: Per-fixture additions to `GLOBAL_FORBID_TERMS`.
     forbid_terms: tuple[str, ...] = ()
-    #: Mirror-symmetry diagnostic group (the D24 paired-fixture pattern). Reported,
-    #: never gated — the enablement decision it informs stays a human one (D26).
+    #: Mirror-symmetry diagnostic group (the D-social-bias paired-fixture pattern). Reported,
+    #: never gated — the enablement decision it informs stays a human one (D-question-refinement).
     pair: str | None = None
 
     @model_validator(mode="after")
@@ -417,7 +417,7 @@ def pair_asymmetries(
     """Fire-rate spread within each mirror pair: max rate minus min rate.
 
     Diagnostic only — never enters `judge_refine`. A large spread on an
-    ideologically mirrored pair is the signal the D24-deferred audition was designed
+    ideologically mirrored pair is the signal the audition D-social-bias deferred was designed
     to produce for the `question_behind_the_question` enablement decision.
     """
     groups: dict[str, list[float]] = {}

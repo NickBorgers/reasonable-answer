@@ -3,7 +3,7 @@
 Separate from the providers because this is the only part of the ladder that can be
 wrong in the dangerous direction. A *mangled* identifier is not a harmless miss: it is
 an identifier no registry has heard of, and "no registry has heard of it" is the input
-to D38's mechanical `fabricated_citation`, which floors at blocking. So the rules here
+to D-notfound-fabrication's mechanical `fabricated_citation`, which floors at blocking. So the rules here
 are deliberately narrow — a pattern that is not confidently an identifier yields None,
 and the ladder then leaves the direct fetch's verdict exactly as it found it.
 

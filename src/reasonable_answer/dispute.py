@@ -1,4 +1,4 @@
-"""Writer disputes and their adjudication (D25).
+"""Writer disputes and their adjudication (D-writer-disputes).
 
 A writer that believes a fix-task is factually wrong may dispute it instead of
 falsifying the report to satisfy it. Adjudication is **mechanical-first** — a
@@ -84,7 +84,7 @@ def adjudicate_mechanical(
         return None
     if page.body_source_url is not None:
         # The body came from an open-access mirror, not from the URL the report cites
-        # (D39). A preprint routinely differs from the version of record, so a quote
+        # (D-existence-vs-body). A preprint routinely differs from the version of record, so a quote
         # present in arXiv v1 and absent from the published paper would uphold a dispute
         # about a page nobody read. Inconclusive, which leaves the finding standing.
         return None

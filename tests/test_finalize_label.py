@@ -1,4 +1,4 @@
-"""The finalize label states the run's actual sourcing posture (D22).
+"""The finalize label states the run's actual sourcing posture (D-run-date-grounding).
 
 The label in `final.json` is a user- and audit-facing claim about how the report's
 citations were grounded — the recalled-vs-retrieved-vs-verified distinction that

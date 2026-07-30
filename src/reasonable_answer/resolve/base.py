@@ -74,7 +74,7 @@ class MetadataProvider(Protocol):
     def authoritative(self, kind: IdKind) -> bool:
         """Whether this provider's *denial* is worth anything for that kind.
 
-        The distinction that keeps D38 honest. Europe PMC will happily answer a DOI
+        The distinction that keeps D-notfound-fabrication honest. Europe PMC will happily answer a DOI
         query and will find nothing for a particle-physics paper, because its coverage is
         biomedical — its silence there is a coverage gap, not evidence of absence. Only a
         provider that is authoritative for the kind may contribute to the conclusion that
@@ -136,7 +136,7 @@ def json_post(
     timeout: float,
     max_bytes: int = MAX_RESPONSE_BYTES,
 ) -> dict | None:
-    """A credentialled POST to a provider, through the same hardened opener (D40).
+    """A credentialled POST to a provider, through the same hardened opener (D-paid-tier-page).
 
     The paid tiers need what `json_get` cannot express: a request body and an
     `Authorization` header. `fetch._request` is where that lives, so this stays inside

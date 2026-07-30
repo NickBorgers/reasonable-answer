@@ -1,12 +1,15 @@
-"""The reviewer prompts enumerate the valid decision/finding ID ranges so the
-invariant and docs reviewers reject invented IDs while accepting real ones. Those
-ranges are hand-written prose, so they drift behind ``docs/decisions.md`` every time
-a decision is added — issue #69: the invariant prompt still said ``D1``–``D26`` after
-D27–D30 had landed, so it could block or mis-flag a PR citing a newer decision.
+"""The reviewer prompts must cite the decision scheme actually in use.
 
-This check derives the authoritative ID set from ``docs/decisions.md`` and fails when
-any range a reviewer prompt states no longer covers it. It is fully offline: it only
-reads files already in the repo.
+They used to enumerate a numeric ID *range* (`D1`-`D43`) so the invariant and docs reviewers
+could reject invented IDs — but a range is hand-written prose that drifted behind
+``docs/decisions.md`` every time a decision was added (issue #69), and under subject slugs a
+range is meaningless anyway: slugs have no order, so a span cannot say which ids exist
+(D-decision-slugs).
+
+The check is therefore inverted from coverage to membership, which is strictly stronger: it
+catches a reviewer prompt citing a decision that was never written — something the range check
+could not do. It also fails if a prompt still states a numeric `D<lo>`-`D<hi>` decision range,
+so the drift hazard cannot come back. Fully offline: it only reads files already in the repo.
 """
 
 from __future__ import annotations
@@ -24,63 +27,39 @@ PROMPTS = [
     REPO_ROOT / ".github" / "scripts" / "review" / "prompts" / "quality.md",
 ]
 
-# Prefixes tabulated in decisions.md. RD-/RH-/RI- live only in convergence.md and are
-# handled separately by the prompts, so they are deliberately excluded here.
-_PREFIXES = ("D", "RA", "RB", "RC", "RG")
-_ID_RE = re.compile(r"\b(" + "|".join(_PREFIXES) + r")-?(\d+)\b")
-# A stated range in a prompt: `<PREFIX><lo>`<sep>`<PREFIX><hi>`, same prefix both ends.
-_RANGE_RE = re.compile(
-    r"`(?P<p>" + "|".join(_PREFIXES) + r")-?(?P<lo>\d+)`[^`]*`(?P=p)-?(?P<hi>\d+)`"
-)
+_SLUG_CITE_RE = re.compile(r"\bD-[a-z][a-z0-9-]*\b")
+# A numeric decision range in backticks, e.g. `D1`-`D43` — the drift-prone form now banned.
+_NUM_RANGE_RE = re.compile(r"`D\d+`\s*[–—-]\s*`D\d+`")
 
 
-def _actual_ids() -> dict[str, set[int]]:
-    """Every decision/finding number in decisions.md, grouped by prefix."""
+def _defined_slugs() -> set[str]:
     text = DECISIONS.read_text(encoding="utf-8")
-    ids: dict[str, set[int]] = {p: set() for p in _PREFIXES}
-    for prefix, num in _ID_RE.findall(text):
-        ids[prefix].add(int(num))
-    return ids
+    slugs = set(re.findall(r"^## (D-[a-z0-9-]+) —", text, re.M))
+    slugs |= set(re.findall(r"^\| (D-[a-z0-9-]+) \|", text, re.M))
+    return slugs
 
 
-def _stated_ranges(prompt: Path) -> dict[str, tuple[int, int]]:
-    """Numeric ID ranges the prompt declares, by prefix (last one wins if repeated)."""
+def test_registry_has_slugs() -> None:
+    """Guard the guard: if the parser stops finding slugs, membership checks are vacuous."""
+    slugs = _defined_slugs()
+    assert len(slugs) >= 40, f"only {len(slugs)} slugs parsed from decisions.md — parser broken"
+
+
+@pytest.mark.parametrize("prompt", PROMPTS, ids=lambda p: p.name)
+def test_prompt_cites_only_real_slugs(prompt: Path) -> None:
+    """Every decision slug a reviewer prompt cites must exist in docs/decisions.md, so a
+    reviewer populating `decision_ref` from the prompt cites something real."""
+    defined = _defined_slugs()
+    cited = set(_SLUG_CITE_RE.findall(prompt.read_text(encoding="utf-8")))
+    unknown = sorted(cited - defined)
+    assert not unknown, f"{prompt.name} cites undefined decision slugs: {unknown}"
+
+
+@pytest.mark.parametrize("prompt", PROMPTS, ids=lambda p: p.name)
+def test_prompt_states_no_numeric_range(prompt: Path) -> None:
+    """No prompt may re-introduce a numeric `D<lo>`-`D<hi>` decision range — the form that
+    drifted behind the registry and that slugs make meaningless."""
     text = prompt.read_text(encoding="utf-8")
-    ranges: dict[str, tuple[int, int]] = {}
-    for m in _RANGE_RE.finditer(text):
-        ranges[m.group("p")] = (int(m.group("lo")), int(m.group("hi")))
-    return ranges
-
-
-def test_decisions_has_ids() -> None:
-    """Guard the guard: if the parser stops finding IDs, coverage checks are vacuous."""
-    actual = _actual_ids()
-    assert actual["D"], "no D<n> decisions parsed from decisions.md — parser is broken"
-    assert max(actual["D"]) >= 30, "expected at least D30 in decisions.md"
-
-
-@pytest.mark.parametrize("prompt", PROMPTS, ids=lambda p: p.name)
-def test_prompt_declares_decision_range(prompt: Path) -> None:
-    """Each reviewer prompt must still declare a numeric D range at all — catches a
-    silent deletion that would leave the reviewer with no bound to check against."""
-    assert "D" in _stated_ranges(prompt), (
-        f"{prompt.name} no longer states a `D<lo>`-`D<hi>` decision-ID range"
+    assert not _NUM_RANGE_RE.search(text), (
+        f"{prompt.name} states a numeric decision-id range; decisions are slug-identified now"
     )
-
-
-@pytest.mark.parametrize("prompt", PROMPTS, ids=lambda p: p.name)
-def test_prompt_ranges_cover_decisions(prompt: Path) -> None:
-    """Every numeric range a prompt states must cover all real IDs of that prefix in
-    decisions.md. Widening only: adding D31 must fail here until the prompt catches up."""
-    actual = _actual_ids()
-    stated = _stated_ranges(prompt)
-    for prefix, (lo, hi) in stated.items():
-        real = actual[prefix]
-        if not real:
-            continue
-        lo_real, hi_real = min(real), max(real)
-        assert lo <= lo_real and hi >= hi_real, (
-            f"{prompt.name}: stated {prefix} range {prefix}{lo}-{prefix}{hi} does not "
-            f"cover decisions.md {prefix}{lo_real}-{prefix}{hi_real}. Update the range "
-            f"in {prompt.name} to match docs/decisions.md."
-        )

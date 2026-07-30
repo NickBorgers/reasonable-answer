@@ -7,12 +7,12 @@ report, and it is bounded so it **always terminates**.
 > **Isolation unit = the context window, not the model** (see [isolation.md](./isolation.md)).
 > Fresh, blind contexts defeat the *primary* bias (social/context drift) regardless of model;
 > a diverse roster is a *secondary* layer that decorrelates model blind spots and enables strong
-> same-artifact acceptance. The roster is **role-structured** (D15/D16): a writer pool plus
+> same-artifact acceptance. The roster is **role-structured** (D-per-lens-critics/D-critic-only-specialists): a writer pool plus
 > per-lens critic pools headed by the model best matched to each lens, sized to give **≥2
 > eligible non-author models per lens** for strong acceptance.
 >
 > *Eligible* throughout this document means **structurally** eligible — non-author, distinct
-> identity, distinct family — which is all the controller reads. D20 adds a separate
+> identity, distinct family — which is all the controller reads. D-critic-audition adds a separate
 > **demonstrated-capability** term (`ra audition` grades each critic `fit` / `marginal` / `unfit`);
 > under `audition.enforce` a cached `unfit` verdict fails startup closed *before* the graph runs, so
 > it never reaches the stop decision below. It gates whether the roster may run, not what any lens
@@ -41,16 +41,16 @@ but **triage clamps it up to a mechanical, category-specific floor** — the cri
 `material == 0`; `minor`/`stylistic` never block. (Flooring `overstated_claim`/
 `omitted_counterargument` at `major` is deliberately conservative and config-tunable.)
 
-### Evidence handling (RA-011, D5, D17)
+### Evidence handling (RA-011, D-in-artifact-citations, D-retrieval-opt-in)
 
 The report **carries its own citations**; the evidence lens challenges any material `uncited_claim`,
 any on-its-face `misrepresented_source`, and any `fabricated_citation`. Citations must be
 well-formed/resolvable in format.
 
-**Retrieval is opt-in and off by default in code (D17); the shipped `config/roster.yaml` opts in
-(D22).** The two postures differ in what a citation *is*:
+**Retrieval is opt-in and off by default in code (D-retrieval-opt-in); the shipped `config/roster.yaml` opts in
+(D-run-date-grounding).** The two postures differ in what a citation *is*:
 
-* **`search.enabled: false` (default)** — no external retrieval, exactly as D5 specifies. A diverse
+* **`search.enabled: false` (default)** — no external retrieval, exactly as D-in-artifact-citations specifies. A diverse
   roster can still share a factual blind spot — error correlation survives differences in training
   data, architecture, and provider ([Kim et al. 2025](https://arxiv.org/abs/2506.07962)) — and a
   citation is whatever the writer recalled. Output is labeled *consensus-reviewed with in-artifact
@@ -69,8 +69,8 @@ a preregistered study of commercial legal-research tools built on retrieval stil
 hallucination rates of 17–33%, against vendor claims of being hallucination-free
 ([Magesh et al. 2024](https://arxiv.org/abs/2405.20362)).
 
-**Source verification (D18), also opt-in and off by default — including in the shipped roster,
-which enables retrieval only (D22): verification fetches model-chosen URLs, and the egress
+**Source verification (D-source-verification), also opt-in and off by default — including in the shipped roster,
+which enables retrieval only (D-run-date-grounding): verification fetches model-chosen URLs, and the egress
 boundary that makes that safe is a deployment concern outside this repo
 (docs/ssrf-egress-isolation.md).** With `search.verify_sources: true`
 the pages the report cites are fetched and handed to the **evidence lens only**, as untrusted data.
@@ -84,7 +84,7 @@ Two categories change character:
 Only the evidence lens receives them. Logic and completeness cannot raise a citation category, so
 page text would widen what those lenses see without widening what they may report.
 
-**A definitive not-found is resolution; every other failed fetch is not (D38).** An HTTP 404 or 410
+**A definitive not-found is resolution; every other failed fetch is not (D-notfound-fabrication).** An HTTP 404 or 410
 (Gone) establishes that the cited URL does not exist — which is exactly what the table above calls
 `fabricated_citation` under verification. That case is settled **mechanically**, in the fetch path
 (`triage.mechanical_citation_issues`, raised from `graph._critique_one`), so the finding is a fact
@@ -103,7 +103,7 @@ unreadable content type — so "a body this cannot read" narrows to formats no c
 text is truncated and the critic is told so, so a claim it cannot see is not read as a claim the page
 contradicts.
 
-**Existence is checkable even when the body is not (D39, off by default).** With `sources.enabled`
+**Existence is checkable even when the body is not (D-existence-vs-body, off by default).** With `sources.enabled`
 and `sources.identifiers.enabled` both true, a cited URL that carries a DOI or PMID and would not
 hand over its body is asked about at a bibliographic registry (Crossref, OpenAlex by default; arXiv
 ids and PMCIDs are covered when arXiv and Europe PMC are added to the tier's provider list). A
@@ -120,7 +120,7 @@ finding is blocking. With `sources.open_access.enabled` also true a free copy ma
 is marked as coming from a mirror rather than the cited URL, and can never settle a dispute about
 that URL, because a preprint is not the version of record.
 
-**Every prompt carries the run's date (D22).** A date-plausibility judgement ("this citation is
+**Every prompt carries the run's date (D-run-date-grounding).** A date-plausibility judgement ("this citation is
 future-dated, so it must be fabricated") is only as good as the judge's sense of what day it is —
 and without grounding, that sense is the critic model's training-data recency. Run
 `run-75eb136b9bfb` stagnated to `needs_human_review` because the evidence lens repeatedly flagged
@@ -179,7 +179,7 @@ Identifiers live here, never in the LLM's view. **Noninterference** (RB-008) is 
 
 ## Acceptance evidence — immutable, hash-keyed records (RC-001, RC-002)
 
-Records are **per-lens** (D15): each lens can be assigned its own critic model (the evidence lens
+Records are **per-lens** (D-per-lens-critics): each lens can be assigned its own critic model (the evidence lens
 takes the lowest-hallucination model, since a fabricated citation is an attribution failure). A **per-lens
 clean record** is created only when *that lens* completes (not failed) and finds no material issue
 for its categories. Each record is immutable and keyed by:
@@ -275,7 +275,7 @@ force early exit. So the machine always halts.
 deterministic and overrides the orchestrator; the LLM can never skip `min_ticks`, pass the cap, or
 accept with material issues.
 
-### Disputes do not touch the decision table (D25)
+### Disputes do not touch the decision table (D-writer-disputes)
 
 The writer dispute channel adds an `adjudicate` node on the one-way `generate → critique` edge
 and **nothing else**: no new `ControllerInput` or `OrchestratorView` field, no new rule, no rule

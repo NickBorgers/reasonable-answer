@@ -376,7 +376,7 @@ def test_the_report_page_carries_the_audit_trail_link(client, config):
 def test_report_md_stays_reachable_but_unlinked(client, config):
     """The raw shipped artifact keeps its route — anything that hashes or diffs a report
     wants it — but as a button beside `Download .md` it offered what looked like the same
-    file minus the review record, which is the thing that must stay attached (D30)."""
+    file minus the review record, which is the thing that must stay attached (D-verdict-attached)."""
     response = client.post("/runs", data={"question": "Still there?"}, follow_redirects=False)
     run_id = response.headers["location"].rsplit("/", 1)[-1]
     _wait_for_final(config, run_id)
@@ -472,7 +472,7 @@ def _running_app(config, fake_client):
 
 def test_every_read_of_a_run_is_public_and_every_write_stays_gated(config, fake_client):
     """Holding the run id is the credential: every GET under `/runs/` answers an
-    anonymous caller, and every write still refuses one (#80, D35).
+    anonymous caller, and every write still refuses one (#80, D-id-as-credential).
 
     This is the whole point of the change — the URL a reader is looking at, not one
     particular download, is what they can send to someone."""
@@ -537,7 +537,7 @@ def test_public_run_get_routes_are_the_expected_set(config, fake_client):
 
 def test_a_public_run_page_names_nobody(config, fake_client):
     """A shared link reaches strangers, so nothing under `/runs/` carries the owner's
-    address: no byline on the page, no `owner` in the audit trail (D35)."""
+    address: no byline on the page, no `owner` in the audit trail (D-id-as-credential)."""
     with _running_app(config, fake_client) as app, web_client(app, identity=None) as c:
         resp = c.post(
             "/runs",
@@ -568,7 +568,7 @@ def test_an_owner_less_run_export_is_a_404_even_anonymously(config, fake_client)
 def test_run_urls_are_emitted_at_the_public_base(config, fake_client, monkeypatch):
     """The reader-facing URLs come from `RA_PUBLIC_ROOT_PATH` and the gated ones from
     `RA_ROOT_PATH`, so the address bar after a run already holds the shareable link
-    (D35). Unset, the public base falls back to `RA_ROOT_PATH` and nothing moves."""
+    (D-id-as-credential). Unset, the public base falls back to `RA_ROOT_PATH` and nothing moves."""
     monkeypatch.setenv("RA_ROOT_PATH", "/app")
     monkeypatch.setenv("RA_PUBLIC_ROOT_PATH", "/")
     with _running_app(config, fake_client) as app, web_client(app) as c:
@@ -602,7 +602,7 @@ def test_run_urls_are_emitted_at_the_public_base(config, fake_client, monkeypatc
 def test_the_stream_ends_when_a_run_stops_without_a_final(config, monkeypatch):
     """A run that stopped without writing `final.json` — a crash, or `abandoned` — used to
     hold the poll loop open forever: the exit condition wanted a final that would never
-    arrive. Anonymous callers (D35) make an endless 1s file poll something a stranger can
+    arrive. Anonymous callers (D-id-as-credential) make an endless 1s file poll something a stranger can
     start, so `not is_live` is now the whole condition."""
     monkeypatch.setenv("RA_RESUME_ON_BOOT", "0")  # or recovery re-enqueues it as live
     store = RunStore(config.runs_dir, "run-crashed")
@@ -633,7 +633,7 @@ def test_the_stream_ends_when_a_run_stops_without_a_final(config, monkeypatch):
 
 
 def test_open_streams_are_capped(config, monkeypatch):
-    """The connection count is the only cost an anonymous caller can impose here (D35),
+    """The connection count is the only cost an anonymous caller can impose here (D-id-as-credential),
     so it has a ceiling and the answer past it is a refusal, not a queue."""
     monkeypatch.setenv("RA_MAX_LIVE_STREAMS", "0")
     worker = RunWorker(config, max_concurrent=1, runner=lambda *a, **k: None)
@@ -656,7 +656,7 @@ def test_open_streams_are_capped(config, monkeypatch):
 def test_ask_this_again_starts_a_new_run_owned_by_whoever_asked(config, fake_client):
     """The replacement for the resume button: a new run of the same question, owned by
     the caller, leaving the original alone. It needs an identity, so an anonymous reader
-    who presses it meets the gate (D35)."""
+    who presses it meets the gate (D-id-as-credential)."""
     with _running_app(config, fake_client) as app, web_client(app) as c:
         resp = c.post("/runs", data={"question": "Again?"}, follow_redirects=False)
         run_id = resp.headers["location"].rsplit("/", 1)[-1]
@@ -1073,7 +1073,7 @@ def test_the_sweeper_is_disabled_when_the_interval_is_not_positive(config):
 
 def test_url_seeds_are_refused_by_default(client):
     """The gate itself: `seed.allow_url` defaults to off, because a URL seed turns the
-    web UI into a read proxy for whatever the host can reach. D32 narrows *who* can ask
+    web UI into a read proxy for whatever the host can reach. D-identity-header narrows *who* can ask
     for that fetch, not what the host reaches, so a deployment still enables it only
     behind a network-layer egress boundary."""
     response = client.post(
@@ -1232,7 +1232,7 @@ def owned(config):
 def test_a_request_with_no_identity_is_refused(owned):
     """The middleware is the whole boundary: with no header and no dev identity there is
     nobody to serve, so nothing but the healthcheck and the public reads under `/runs/`
-    answers (D35). The reads are covered by their own test; this pins the refusals."""
+    answers (D-id-as-credential). The reads are covered by their own test; this pins the refusals."""
     app, plant = owned
     plant("run-mine", WEB_IDENTITY)
     with web_client(app, identity=None) as c:
@@ -1330,7 +1330,7 @@ def test_a_submitted_run_is_owned_by_its_submitter(config):
 
 def test_the_access_email_is_lowercased(owned, config):
     """An identity that varies by case would split one person's runs across two owners
-    (D32): `Viewer@Example.com` submitting a run and `viewer@example.com` returning for
+    (D-identity-header): `Viewer@Example.com` submitting a run and `viewer@example.com` returning for
     it must be the same person. `resolve_identity` lower-cases the Access email, so the
     run is filed under — and the owner-scoped index queried by — the lower-cased form
     whatever casing the header arrives in. Drop the `.lower()` and this run would be
@@ -1362,7 +1362,7 @@ def test_anyone_signed_in_can_read_a_run_they_hold_the_id_for(owned):
 
 def test_a_shared_run_names_nobody(owned):
     """A run page used to carry a byline for a run that was not yours. It cannot now: the
-    page is public (D35), so that byline would publish the submitter's address to whoever
+    page is public (D-id-as-credential), so that byline would publish the submitter's address to whoever
     the link reached. Reaching a run you did not submit still works; it is just anonymous
     in both directions."""
     app, plant = owned
@@ -1484,7 +1484,7 @@ def test_the_same_person_is_one_owner_at_either_door(config):
 
 def test_the_tailscale_display_name_is_not_an_identity(config):
     """`Tailscale-User-Name` carries a display name, a different namespace from the
-    address Access reports. It was a fine rate-limit key under D21, where any stable
+    address Access reports. It was a fine rate-limit key under D-bounded-submission, where any stable
     string worked; as an ownership key it would file one person under two owners."""
     worker = RunWorker(config, max_concurrent=1, runner=lambda *a, **k: None)
     app = create_app(config, worker=worker)
@@ -1498,12 +1498,12 @@ def test_the_tailscale_display_name_is_not_an_identity(config):
 
 def test_the_app_shell_is_behind_the_same_gate_as_everything_else(owned):
     """The manifest, the worker and the icons are routes like any other: no identity, no
-    asset (D32). Nothing about them is secret, but an exemption list is a thing that
+    asset (D-identity-header). Nothing about them is secret, but an exemption list is a thing that
     grows, and `/healthz` stays the only entry on it.
 
     The cost of that is paid in the `<head>`, not here: a manifest is fetched with
     credentials *omitted* by default, so `crossorigin="use-credentials"` on the link is
-    what keeps the app installable (D27) once its manifest needs an identity."""
+    what keeps the app installable (D-installable-pwa) once its manifest needs an identity."""
     app, _ = owned
     with web_client(app, identity=None) as c:
         for path in ("/manifest.webmanifest", "/sw.js", "/offline.html"):
@@ -1669,7 +1669,7 @@ def test_the_header_does_not_claim_a_sourcing_level_it_cannot_know(client):
 
 def test_the_csp_admits_the_manifest_and_the_worker_and_nothing_off_origin(client, config):
     """Pinned as an exact literal on purpose. Widening this policy is a decision recorded
-    in docs/decisions.md (D27), not a tidy-up — so it should not be possible to widen it
+    in docs/decisions.md (D-installable-pwa), not a tidy-up — so it should not be possible to widen it
     without a test turning red and asking why."""
     expected = (
         "default-src 'none'; img-src 'self'; style-src 'unsafe-inline'; "
@@ -1709,7 +1709,7 @@ def test_service_worker_registration_is_guarded_and_cannot_break_the_live_script
     assert "isSecureContext" in client.get(f"/runs/{run_id}/report").text
 
 
-# --------------------------------------------------------- push notifications (D43)
+# --------------------------------------------------------- push notifications (D-stop-notification)
 
 
 VAPID_SUBJECT = "mailto:ops@example.com"
@@ -1870,7 +1870,7 @@ def test_the_real_push_services_are_accepted(endpoint):
 
 
 def test_no_write_route_hides_inside_the_public_read_prefix(push_app):
-    """D35 opens every `GET` under `/runs/` to anonymous callers. A route that attaches a
+    """D-id-as-credential opens every `GET` under `/runs/` to anonymous callers. A route that attaches a
     device to an identity therefore may not live there — and `authenticate`'s method guard
     is not the argument, because siting a write inside the public prefix and relying on it
     is the thing this pins against."""
@@ -2033,7 +2033,7 @@ def test_a_run_that_dies_still_says_so_but_a_shutdown_pause_does_not(config):
 
 
 def test_an_owner_less_run_notifies_nobody(config):
-    """`ra run` without `--owner` has no identity to attribute, and D32 already settled
+    """`ra run` without `--owner` has no identity to attribute, and D-identity-header already settled
     that inventing one is how a stranger's run reaches someone else."""
     pushed = _push_config(config)
     pushed.runs_dir.mkdir(parents=True, exist_ok=True)
@@ -2130,7 +2130,7 @@ def test_the_push_state_is_invisible_to_the_registry_and_the_retention_sweep(pus
 
 def test_the_service_worker_shows_and_opens_a_notification(client):
     """The delivery mechanism. Both handlers are additive — neither touches `caches`, which
-    is what keeps the D27 invariant asserted next door intact."""
+    is what keeps the D-installable-pwa invariant asserted next door intact."""
     source = client.get("/sw.js").text
     assert "addEventListener('push'" in source
     assert "addEventListener('notificationclick'" in source
@@ -2158,7 +2158,7 @@ def test_the_csp_is_unchanged_by_notifications(client):
 # `/app/` before the request reaches the app, so the app serves at its normal stripped
 # routes. The TestClient stands in for that proxy by requesting those stripped paths — the
 # thing under test is that every URL the app *emits* carries the prefix and nothing escapes
-# back to the origin root, past the Access policy scoped to the prefix. See D29.
+# back to the origin root, past the Access policy scoped to the prefix. See D-base-path.
 
 BASE = "/app"
 
@@ -2191,7 +2191,7 @@ def _prefixed_client(config, fake_client, base_path=BASE):
     worker = RunWorker(config, max_concurrent=1, runner=runner)
     try:
         app = create_app(config, worker=worker)
-        # Signed in as the default viewer: the auth middleware (D32) refuses every
+        # Signed in as the default viewer: the auth middleware (D-identity-header) refuses every
         # route but /healthz, and these tests assert URL-prefixing behaviour that is
         # only reachable past that gate.
         with web_client(app) as c:
@@ -2252,13 +2252,14 @@ def test_the_index_stays_entirely_under_the_prefix(config, fake_client):
 def test_refinement_posts_under_the_prefix(config):
     """The refine POST is issued by inline JS, so `_absolute_urls` above cannot see it —
     it is not an attribute, not `register(...)`, not a scope. That blind spot is how it
-    shipped addressing the origin root: D26 (refinement) and D29 (the base path) landed in
+    shipped addressing the origin root: D-question-refinement (refinement) and
+    D-base-path (the base path) landed in
     separate PRs, collided in a merge nobody reviewed, and every URL on the page was
     prefixed except this one. Behind a stripping proxy the request leaves the prefix and
     404s, and the only symptom is that suggestion chips never appear.
 
     Rendered directly rather than through a client: enabling refinement makes the proxy a
-    boot dependency (D26), and this is a question about a string the renderer emits."""
+    boot dependency (D-question-refinement), and this is a question about a string the renderer emits."""
     from reasonable_answer.web.render import render_index
 
     cfg = config.model_copy(update={"refine": config.refine.model_copy(update={"enabled": True})})

@@ -10,7 +10,7 @@
 # Aliases are LiteLLM proxy aliases; their resolved provider/model is fetched from
 # the proxy at startup and distinctness is enforced at that level (RA-017).
 #
-# Every entry is open-weight and loadable on the target local box (D18). The ceiling is
+# Every entry is open-weight and loadable on the target local box (D-open-weight-roster). The ceiling is
 # ~450GB for a single model, with swapping — see docs/DESIGN.md for the footprint table.
 
 proxy:
@@ -26,7 +26,7 @@ roster:
   # Three, not two, because author exclusion applies to writers as well: on every
   # revision round the previous author is removed, so a two-writer pool leaves exactly
   # ONE eligible model and a single flaky response ends the run. Three leaves two
-  # (D42).
+  # (D-provider-retry).
   writers:
     - mistral-large-3      # 675B/A41B Apache 2.0, ~340GB @4bit. Authors R1 and every odd round.
     - deepseek-v4-flash    # 284B/A13B MIT, ~145GB @4bit.
@@ -126,7 +126,7 @@ search:
 #   # The value lives in the environment, never in this file (compose.yaml passes it in).
 #   contact_email_env: RA_CONTACT_EMAIL
 #
-#   # D39. Ask a bibliographic registry whether the cited source EXISTS, when the cited
+#   # D-existence-vs-body. Ask a bibliographic registry whether the cited source EXISTS, when the cited
 #   # URL would not hand over its body. This is the cheapest and largest win available:
 #   # most good academic and newspaper citations fail the direct fetch precisely because
 #   # they are paywalled, and until a registry confirms the DOI a real paywalled paper
@@ -137,7 +137,7 @@ search:
 #   # make the claim, and the prompt says so wherever it renders metadata.
 #   #
 #   # It is also the only tier that can RAISE a defect. An identifier every authoritative
-#   # registry denies is NOT_FOUND, which D38 mints as a blocking `fabricated_citation` —
+#   # registry denies is NOT_FOUND, which D-notfound-fabrication mints as a blocking `fabricated_citation` —
 #   # so the escalation is gated twice over (see resolve/__init__.py) and the tier is off
 #   # by default like every other retrieval affordance.
 #   identifiers:
@@ -150,7 +150,7 @@ search:
 #     # with the round count.
 #     max_calls_per_run: 60
 #
-#   # D39. Find a free copy of the body and read it exactly once. A separate switch from
+#   # D-existence-vs-body. Find a free copy of the body and read it exactly once. A separate switch from
 #   # the tier above because it is a materially different act: that one asks a registry a
 #   # question, this one fetches a DIFFERENT document and shows its text to a critic.
 #   # Such a body is marked `body_source_url` all the way through, the critic is told it
@@ -164,7 +164,7 @@ search:
 #     providers: [openalex, unpaywall, europe_pmc, arxiv]
 #     timeout_seconds: 10.0
 #     max_calls_per_run: 40
-#   # Tier 2 (D40): a rendering service reads the cited URL when this process cannot.
+#   # Tier 2 (D-paid-tier-page): a rendering service reads the cited URL when this process cannot.
 #   #
 #   # What it buys: JavaScript-rendered pages, and the bot walls that refuse an unknown
 #   # HTTP client. What it does NOT buy, and no setting here changes: a hard paywall. A
@@ -172,7 +172,7 @@ search:
 #   #
 #   # There is no stealth option, deliberately. Every vendor in this market also sells
 #   # residential-IP rotation and fingerprint randomisation to defeat bot detection —
-#   # the industrial form of the browser impersonation fetch.py has refused since D18.
+#   # the industrial form of the browser impersonation fetch.py has refused since D-source-verification.
 #   # The request is pinned to `proxy: basic` in code and a test asserts no stealth mode
 #   # appears in the body, so this is not a default someone can flip.
 #   #
@@ -187,7 +187,7 @@ search:
 #     provider: firecrawl
 #     timeout_seconds: 45.0
 #
-#   # Tier 3 (D40): licensed document delivery — CCC RightFind, Reprints Desk. A seam
+#   # Tier 3 (D-paid-tier-page): licensed document delivery — CCC RightFind, Reprints Desk. A seam
 #   # with nothing behind it. Those services do lawfully deliver paywalled bodies, per
 #   # article, under copyright-cleared single-use terms; reasoning about what those
 #   # terms permit when the document is spliced into a model's context is a licensing
@@ -196,7 +196,7 @@ search:
 #   delivery:
 #     enabled: false
 
-# Writer dispute channel (D25, docs/decisions.md). Lets a writer challenge a fix-task
+# Writer dispute channel (D-writer-disputes, docs/decisions.md). Lets a writer challenge a fix-task
 # it believes is factually wrong instead of falsifying the report to satisfy it —
 # the failure mode of run-75eb136b9bfb, where critics with stale knowledge demanded
 # "corrections" of true recent dates. Adjudication is mechanical-first (the cited
@@ -278,18 +278,18 @@ budgets:
   # writer pool and wrap, so a model that is down or answering with nothing is routed
   # around when there is somewhere to route to, and given another spaced chance when
   # there is not. Wrapping never re-asks the previous author — exclusion removed them
-  # before the rotation started (D42).
+  # before the rotation started (D-provider-retry).
   writer_attempts: 3
   timeout_seconds: 300
   # Wait before each retry: min(base * 2^(n-1), max) seconds, times jitter in
   # [0.5, 1.0]. Retrying instantly is what turned three transient empty completions
-  # into three aborted runs — the whole budget was spent inside five seconds (D42).
+  # into three aborted runs — the whole budget was spent inside five seconds (D-provider-retry).
   retry_backoff_seconds: 2.0
   retry_backoff_max_seconds: 30.0
   max_concurrency: 3
 
 # Identity comes from a header set by whatever fronts the app — Cloudflare Access or
-# `tailscale serve` — and a request carrying neither is refused (D32,
+# `tailscale serve` — and a request carrying neither is refused (D-identity-header,
 # docs/authentication.md). `dev_identity` gives such a request an identity instead:
 # what local development needs, and a public login anywhere else. $RA_DEV_IDENTITY
 # overrides it and is how `make serve` sets it, so this stays unset in the file a
@@ -297,7 +297,7 @@ budgets:
 # auth:
 #   dev_identity: you@example.com
 
-# Pre-run question refinement (D26, docs/question-refinement.md). While the asker
+# Pre-run question refinement (D-question-refinement, docs/question-refinement.md). While the asker
 # pauses after typing, a small model is asked whether the question as worded encodes a
 # framing that will fight the pipeline — a false either/or, an unverified premise, an
 # unscoped "net positive?" verdict — and up to three reframe chips appear under the
@@ -326,7 +326,7 @@ budgets:
 # local, free, already resolved and probed at startup, and orchestrator-class judgment
 # is exactly the shape of this task. Naming a different alias here would only buy real
 # isolation from run traffic if that alias is routed to a dedicated backend/resource
-# pool — the name alone proves nothing (see D26's isolation accounting).
+# pool — the name alone proves nothing (see D-question-refinement's isolation accounting).
 refine:
   enabled: true
   alias: ""

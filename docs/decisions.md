@@ -1,46 +1,120 @@
 # Design decisions & adversarial-review log
 
+## Identifiers: decision slugs, and the old-number mapping
+
+Every decision in this log is named by a **slug derived from its subject** — `D-source-verification`,
+`D-decision-slugs` — not by a number from a shared counter. A slug is coined by the PR that writes the
+decision and describes what the decision does, so two concurrently-open PRs cannot pick the same
+identifier by construction and no PR needs to read another to choose one. Ordering is carried by
+**position in this file**, not by the identifier: a new decision is appended as a `## D-<slug> — …`
+section immediately before `## Open items for a future round`, the file's tail marker. Because slugs
+have no order, a *range* of them is meaningless — cite a group by enumerating it (`D-per-lens-critics`
+and `D-critic-only-specialists`), never as a span.
+
+Decisions carry two surface forms: rows in the "Key design decisions" tables (`| D-<slug> | … |`) and
+`## D-<slug> — …` prose sections. Either form is a definition, and `scripts/validate-decision-numbers.sh`
+refuses a slug defined twice across **both** forms, so one decision cannot be silently defined in a
+table and a section at once.
+
+This scheme replaced a numeric one (see D-decision-slugs, which supersedes D-decision-gate). Historical
+PR bodies, review comments and past reviewer artifacts cite the old `D<n>` numbers, so the mapping below
+keeps them readable. **It is the only place an old numeric identifier is retained on purpose**; a bare
+`D<n>` anywhere else in the tree is stale. Four numbers named two different decisions each — the reused
+number the old gate could not see, and the plainest evidence the counter had failed — so those four are
+disambiguated by subject below and split into two slugs apiece. The 43 old numbers therefore map onto 47
+decisions.
+
+| old id | new slug |
+|---|---|
+| D1 | `D-alternating-refine-game` |
+| D2 | `D-structured-handoff` |
+| D3 | `D-blind-orchestrator` |
+| D4 | `D-observable-categories` |
+| D5 | `D-in-artifact-citations` |
+| D6 | `D-isolation-boundary` |
+| D7 | `D-cross-model-confirmation` |
+| D8 | `D-min-ticks-floor` |
+| D9 | `D-two-clean-critiques` |
+| D10 | `D-severity-floors` |
+| D11 | `D-split-view-input` |
+| D12 | `D-evidence-bearing-fields` |
+| D13 | `D-context-window-unit` |
+| D14 | `D-three-model-roster` |
+| D15 | `D-per-lens-critics` |
+| D16 | `D-critic-only-specialists` |
+| D17 | `D-retrieval-opt-in` |
+| D18 (open-weight roster) | `D-open-weight-roster` |
+| D18 (source verification) | `D-source-verification` |
+| D19 | `D-orchestrator-roster-entry` |
+| D20 (redeploy durability) | `D-redeploy-survival` |
+| D20 (critic audition) | `D-critic-audition` |
+| D21 (proxy base_url override) | `D-proxy-base-url` |
+| D21 (bounded submission) | `D-bounded-submission` |
+| D22 | `D-run-date-grounding` |
+| D23 | `D-fixer-grounded-judgment` |
+| D24 (seed conversion) | `D-seed-conversion` |
+| D24 (social-bias categories) | `D-social-bias` |
+| D25 | `D-writer-disputes` |
+| D26 | `D-question-refinement` |
+| D27 | `D-installable-pwa` |
+| D28 | `D-fixer-merges-not-rebases` |
+| D29 | `D-base-path` |
+| D30 | `D-verdict-attached` |
+| D31 | `D-decision-gate` |
+| D32 | `D-identity-header` |
+| D33 | `D-refine-audition` |
+| D34 | `D-unguarded-sync` |
+| D35 | `D-id-as-credential` |
+| D36 | `D-resume-timeout` |
+| D37 | `D-quality-reviewer` |
+| D38 | `D-notfound-fabrication` |
+| D39 | `D-existence-vs-body` |
+| D40 | `D-paid-tier-page` |
+| D41 | `D-absence-anchor` |
+| D42 | `D-provider-retry` |
+| D43 | `D-stop-notification` |
+
 ## Key design decisions (from the design dialogue)
 
 | # | Decision | Rationale |
 |---|----------|-----------|
-| D1 | **Alternating refine game.** A report is written by one model and critiqued only by models that did not write it; the next report is written by a different writer. *(Roster later generalized to a writer pool + per-lens critic pools by D14–D16.)* | Dissolves the corroboration-vs-specialization conflict; guarantees `critic ≠ producer`; convergence becomes temporal. |
-| D2 | **Structured defect-list handoff**, not raw critiques. | Keeps principles #1 (artifact-first) and #6 (fresh context) fully intact while still telling the generator what to fix. |
-| D3 | **Blind LLM orchestrator inside a deterministic controller.** | The user wants the AI to add judgment on the signal summary (its main value); the controller guarantees termination the LLM cannot. |
-| D4 | **Observable-category taxonomy** (no intent tags). | A critic can't infer intent from text; `uncited_claim`/`contradicted_claim`/`fabricated_citation` are checkable. |
-| D5 | **Report carries its own citations; no external retrieval in v1.** Uncited material claims are challenged. *(Amended by D17: retrieval is now implemented as an opt-in, off by default. With `search.enabled: false` this decision holds exactly as written.)* | Matches "the argument is sound" via in-artifact sourcing; output labeled *consensus-reviewed*, not fact-checked. |
-| D6 | **Structural isolation boundary** for the orchestrator (`OrchestratorView` DTO only; superseded the earlier `SignalReport` name — see D11). | Makes blindness real, not a coding convention over shared state. |
-| D7 | **Cross-model confirmation** before `accepted` (refined by D9/D14). | A single clean critique is one model's opinion; strong acceptance needs **two distinct non-author models** clean on the identical artifact (≥3-model roster). |
-| D8 | **min_ticks floor.** | "The first tick should never be accepted." |
+| D-alternating-refine-game | **Alternating refine game.** A report is written by one model and critiqued only by models that did not write it; the next report is written by a different writer. *(Roster later generalized to a writer pool + per-lens critic pools by D-three-model-roster, D-per-lens-critics and D-critic-only-specialists.)* | Dissolves the corroboration-vs-specialization conflict; guarantees `critic ≠ producer`; convergence becomes temporal. |
+| D-structured-handoff | **Structured defect-list handoff**, not raw critiques. | Keeps principles #1 (artifact-first) and #6 (fresh context) fully intact while still telling the generator what to fix. |
+| D-blind-orchestrator | **Blind LLM orchestrator inside a deterministic controller.** | The user wants the AI to add judgment on the signal summary (its main value); the controller guarantees termination the LLM cannot. |
+| D-observable-categories | **Observable-category taxonomy** (no intent tags). | A critic can't infer intent from text; `uncited_claim`/`contradicted_claim`/`fabricated_citation` are checkable. |
+| D-in-artifact-citations | **Report carries its own citations; no external retrieval in v1.** Uncited material claims are challenged. *(Amended by D-retrieval-opt-in: retrieval is now implemented as an opt-in, off by default. With `search.enabled: false` this decision holds exactly as written.)* | Matches "the argument is sound" via in-artifact sourcing; output labeled *consensus-reviewed*, not fact-checked. |
+| D-isolation-boundary | **Structural isolation boundary** for the orchestrator (`OrchestratorView` DTO only; superseded the earlier `SignalReport` name — see D-split-view-input). | Makes blindness real, not a coding convention over shared state. |
+| D-cross-model-confirmation | **Cross-model confirmation** before `accepted` (refined by D-two-clean-critiques/D-three-model-roster). | A single clean critique is one model's opinion; strong acceptance needs **two distinct non-author models** clean on the identical artifact (≥3-model roster). |
+| D-min-ticks-floor | **min_ticks floor.** | "The first tick should never be accepted." |
 
 ## Codex adversarial review — round 1 (verdict: CHANGES_REQUESTED, 20 findings)
 
 | ID | Sev | Finding | Resolution |
 |----|-----|---------|------------|
 | RA-001 | crit | Blocking issues route to REVISE before the cap check → infinite loop; "guaranteed termination" false | **Fixed.** Controller checks `fatal` → `cap` **before** any revise; ordered stop-decision in [convergence.md](./convergence.md). |
-| RA-002 | crit | Artifact-blindness is only a convention over shared state | **Fixed (D6).** Orchestrator invoked with a SignalReport DTO built outside nodes; noninterference test; redacted telemetry. |
-| RA-003 | high | 2-model corroboration = brittle unanimity; 3 = silent majority | **Superseded by D1/D7.** No per-defect voting; agreement is temporal + whole-artifact cross-confirmation. |
-| RA-004 | high | Orthogonal critics can't corroborate each other | **Superseded by D1.** Corroboration no longer required within a tick. |
+| RA-002 | crit | Artifact-blindness is only a convention over shared state | **Fixed (D-isolation-boundary).** Orchestrator invoked with a SignalReport DTO built outside nodes; noninterference test; redacted telemetry. |
+| RA-003 | high | 2-model corroboration = brittle unanimity; 3 = silent majority | **Superseded by D-alternating-refine-game/D-cross-model-confirmation.** No per-defect voting; agreement is temporal + whole-artifact cross-confirmation. |
+| RA-004 | high | Orthogonal critics can't corroborate each other | **Superseded by D-alternating-refine-game.** Corroboration no longer required within a tick. |
 | RA-005 | high | Lone blocking issue ignored as a nitpick (unsafe) | **Fixed.** Single critic per tick; **any** ≥ major issue forces another tick. Lone blocking is never ignored. |
-| RA-006 | high | `dishonest` requires intent inference | **Fixed (D4).** Replaced with observable categories. |
+| RA-006 | high | `dishonest` requires intent inference | **Fixed (D-observable-categories).** Replaced with observable categories. |
 | RA-007 | high | No handling of malformed/timeout/partial-critic failure | **Fixed.** Failure table in [architecture.md](./architecture.md); incomplete review never counts as clean. |
 | RA-008 | high | Triage semantic dedup ill-defined; LLM triage = unblinded bias | **Fixed.** Triage is mechanical (tally structured findings), no LLM; canonical locus normalization; provenance kept in audit. |
 | RA-009 | high | "Content-free" undefined; SignalReport could leak/covert-channel | **Fixed.** Closed schema (bounded enums/ints), metadata allowlist, noninterference test. |
 | RA-010 | high | Prompt injection via seed/report/critique text | **Fixed.** Threat model in [isolation.md](./isolation.md): all such text untrusted; structured-output boundaries; validation; adversarial tests. |
-| RA-011 | high | No evidence layer; models can agree on a plausible falsehood | **Scoped (D5), then addressed (D17 + D18).** In-artifact citations required; uncited claims challenged; output relabeled. Retrieval is no longer deferred: with `search.enabled: true` writers cite only URLs a live search returned, and with `search.verify_sources: true` the evidence lens reads those pages and can falsify `misrepresented_source` against them. Both off by default *in code*, so the D5 posture remains the default posture for a bare checkout; the shipped `config/roster.yaml` opts into retrieval only — verification stays off until a deployment provides the network-layer egress boundary (D22). The residual blind spot is narrower but real: verification shows a page exists and is compatible with the claim, not that the page is correct. |
+| RA-011 | high | No evidence layer; models can agree on a plausible falsehood | **Scoped (D-in-artifact-citations), then addressed (D-retrieval-opt-in + D-source-verification).** In-artifact citations required; uncited claims challenged; output relabeled. Retrieval is no longer deferred: with `search.enabled: true` writers cite only URLs a live search returned, and with `search.verify_sources: true` the evidence lens reads those pages and can falsify `misrepresented_source` against them. Both off by default *in code*, so the D-in-artifact-citations posture remains the default posture for a bare checkout; the shipped `config/roster.yaml` opts into retrieval only — verification stays off until a deployment provides the network-layer egress boundary (D-run-date-grounding). The residual blind spot is narrower but real: verification shows a page exists and is compatible with the claim, not that the page is correct. |
 | RA-012 | high | "Finalize" conflates accepted with known-unacceptable | **Fixed.** Four terminal statuses: `accepted` / `exhausted_unresolved` / `needs_human_review` / `aborted`. |
 | RA-013 | med | Plateau/oscillation/best-scoring undefined | **Fixed.** Precise definitions in [convergence.md](./convergence.md). |
 | RA-014 | med | No round-identity/reducer contract; replay can fake convergence | **Fixed.** Keys `(run_id, round, artifact_hash, models, lens, attempt)`; idempotent reducers; stale-hash rejection. |
 | RA-015 | med | Single endpoint / no concurrency, timeout, capability checks | **Fixed.** Ops section: bounded concurrency, per-call timeout/retry, startup structured-output capability check, roster health check. |
 | RA-016 | med | Audit trail may hold sensitive data; no retention/access policy | **Fixed.** Data classification, least-privilege perms, retention/deletion, redaction; note LiteLLM proxy logging. |
-| RA-017 | med | "Distinct models" ≠ independent (aliases, fallback, same family) | **Fixed.** Enforce distinctness at resolved provider/model/version; no duplicate fallback; roster requirements generalized to per-lens eligibility by D16 (≥2 eligible non-author models per lens for strong acceptance); fail closed. |
+| RA-017 | med | "Distinct models" ≠ independent (aliases, fallback, same family) | **Fixed.** Enforce distinctness at resolved provider/model/version; no duplicate fallback; roster requirements generalized to per-lens eligibility by D-critic-only-specialists (≥2 eligible non-author models per lens for strong acceptance); fail closed. |
 | RA-018 | med | Input routing for question/seed combinations undefined | **Fixed.** Intake routing table + validation in [architecture.md](./architecture.md). |
 | RA-019 | med | Only one isolation test mentioned | **Fixed.** Test matrix below. |
-| RA-020 | low | Orchestrator/triage trust models inconsistent (agent vs pure logic) | **Fixed (D3).** Orchestrator = blind LLM inside a deterministic controller; triage = mechanical. |
+| RA-020 | low | Orchestrator/triage trust models inconsistent (agent vs pure logic) | **Fixed (D-blind-orchestrator).** Orchestrator = blind LLM inside a deterministic controller; triage = mechanical. |
 
 ## Operational requirements (RA-015 / RA-016 / RA-017)
 
-- **Roster (role-structured, superseded by D15/D16):** a **writer pool** plus **per-lens critic
+- **Roster (role-structured, superseded by D-per-lens-critics/D-critic-only-specialists):** a **writer pool** plus **per-lens critic
   pools** (each ≥2 eligible non-author models for strong acceptance; critic-only specialists
   allowed). Resolve/record provider/model/version behind each LiteLLM alias; enforce distinctness at
   that level; no silent fallback to a duplicate; **fail closed** (abort) if the writer pool is empty
@@ -67,15 +141,15 @@
 | Failure handling | malformed/timeout/partial-lens → not counted clean; repeated → abort |
 | Resume/replay | checkpoint replay idempotency; stale-hash rejection |
 | Redeploy survival (`tests/test_shutdown.py`) | a stop flag pauses the graph at a **node boundary**, never mid-node: work completed before the pause survives and is not re-run on resume, and the run reaches its normal terminal status; the pause is recorded as an event and is not logged as a crash; `shutdown()` returns within its budget while a job is in flight; queued-but-unstarted work is durable on disk, not only in the in-memory queue; boot recovery re-enqueues `queued`/`interrupted` runs and skips finished ones, and can be switched off; a run that makes no progress across `max_resume_attempts` **consecutive** auto-resumes is abandoned, while any progress event resets the count; `ResumeMismatch` (e.g. a roster change under an in-flight run) abandons rather than retrying every boot; abandonment writes an event and **never** a `final.json` — the audit trail must not claim a terminal status the controller never issued; `abandoned` is terminal for the UI yet still manually resumable; the grace budget is read from the platform and falls back rather than crashing on a bad value |
-| Retrieval / web search (D17) | offline-when-off (no `tools` offered, prompt byte-identical to the pre-retrieval path); startup fails closed on a missing credential **and** on a tool-incapable writer; `probe_tool_calling` returns False for a model that accepts `tools` and never calls one, and for a probe that raises; per-**run** query budget (not per-call) enforced under concurrency; budget exhaustion and fetch failure surfaced to the model as text, never as silence; results fenced as untrusted (RA-010); the agentic tool loop terminates — the exhausted round drops `tools` and forces prose — and `Completion.tool_calls` matches the number executed; the query string never reaches a log (RA-016) |
-| Source verification (D18, D38) | citation URLs extracted from the `## Sources` section only (a URL mentioned in passing is not fetched); **only the evidence lens** receives page text — logic and completeness never do; each fetch carries a closed `SourceOutcome` (FULL_TEXT / NOT_FOUND / BLOCKED / UNREADABLE / EMPTY / ERROR) rendered to the critic as its own label (`NOT FOUND` / `BLOCKED` / `COULD NOT READ` …) rather than one flat "could not fetch", and the audit tally counts the enum, never the free-text `error` (RA-016); a cited URL that returns a definitive not-found (HTTP 404/410) yields a mechanical `fabricated_citation` at its `blocking` floor, independent of any critic (D38); every other failed fetch (403 and the other blocked codes, connection error/timeout, unreadable content type, empty body) yields **no** defect and keeps the on-its-face bar, never read as evidence of fabrication, each class pinned by a test; a twelve-of-twelve-404 fetch leaves the evidence lens **not** clean while a twelve-of-twelve-403 stays clean; truncation disclosed; a cited **PDF is read rather than refused** when `sources.enabled` **and** `sources.pdf.enabled` are both on — both switches required so enabling one tier never enables another (`test_a_cited_pdf_is_read_rather_than_refused`, `test_both_switches_are_required_to_read_pdfs`), fail-closed with a startup error when `pypdf` is absent (`test_pdf_reading_without_pypdf_refuses_to_start`), a truncated PDF refused not parsed (`test_a_truncated_pdf_is_refused_not_parsed`), a scanned/no-text-layer PDF reported `UNREADABLE` distinctly from `EMPTY` (`test_a_scanned_pdf_says_so_rather_than_looking_empty`), and the larger 25 MB PDF byte cap applying to PDFs only, never buying back HTML's 400 KB cap (`test_the_larger_pdf_cap_applies_only_to_pdfs`); with that tier off a PDF is still reported honestly as an unreadable content type; pages fetched once per run and cached across rounds; bounded by timeout, byte cap, redirect cap and http(s)-only; verification off ⇒ the evidence prompt is byte-identical to the D17 path |
-| Seed ingest / format conversion (D24) | every converter meets the output contract (blank-line-separated blocks, headings alone on their line) so `report.parse` loci survive; PDF/`.docx`/HTML/`.txt` conversion each covered offline (urllib's opener stubbed — no network, no keys); one bounded http(s)-only egress point reused from `fetch.http_get`; `file:`/`ftp:`/`data:` schemes refused before any opener exists; the `.docx` zip-bomb guard (`seed.docx_max_uncompressed_bytes`) trips **before** decompression; truncation is fatal for binary formats and a warning for text; a heading-less format yields one section plus a warning, never a failure; URL seeds refused when `seed.allow_url` is off (the default) — the form field disappears and the parameter 400s; the web layer never constructs a `Path` from request data; converted markdown is byte-identical between what is hashed, stored and critiqued (resume fingerprint) |
+| Retrieval / web search (D-retrieval-opt-in) | offline-when-off (no `tools` offered, prompt byte-identical to the pre-retrieval path); startup fails closed on a missing credential **and** on a tool-incapable writer; `probe_tool_calling` returns False for a model that accepts `tools` and never calls one, and for a probe that raises; per-**run** query budget (not per-call) enforced under concurrency; budget exhaustion and fetch failure surfaced to the model as text, never as silence; results fenced as untrusted (RA-010); the agentic tool loop terminates — the exhausted round drops `tools` and forces prose — and `Completion.tool_calls` matches the number executed; the query string never reaches a log (RA-016) |
+| Source verification (D-source-verification, D-notfound-fabrication) | citation URLs extracted from the `## Sources` section only (a URL mentioned in passing is not fetched); **only the evidence lens** receives page text — logic and completeness never do; each fetch carries a closed `SourceOutcome` (FULL_TEXT / NOT_FOUND / BLOCKED / UNREADABLE / EMPTY / ERROR) rendered to the critic as its own label (`NOT FOUND` / `BLOCKED` / `COULD NOT READ` …) rather than one flat "could not fetch", and the audit tally counts the enum, never the free-text `error` (RA-016); a cited URL that returns a definitive not-found (HTTP 404/410) yields a mechanical `fabricated_citation` at its `blocking` floor, independent of any critic (D-notfound-fabrication); every other failed fetch (403 and the other blocked codes, connection error/timeout, unreadable content type, empty body) yields **no** defect and keeps the on-its-face bar, never read as evidence of fabrication, each class pinned by a test; a twelve-of-twelve-404 fetch leaves the evidence lens **not** clean while a twelve-of-twelve-403 stays clean; truncation disclosed; a cited **PDF is read rather than refused** when `sources.enabled` **and** `sources.pdf.enabled` are both on — both switches required so enabling one tier never enables another (`test_a_cited_pdf_is_read_rather_than_refused`, `test_both_switches_are_required_to_read_pdfs`), fail-closed with a startup error when `pypdf` is absent (`test_pdf_reading_without_pypdf_refuses_to_start`), a truncated PDF refused not parsed (`test_a_truncated_pdf_is_refused_not_parsed`), a scanned/no-text-layer PDF reported `UNREADABLE` distinctly from `EMPTY` (`test_a_scanned_pdf_says_so_rather_than_looking_empty`), and the larger 25 MB PDF byte cap applying to PDFs only, never buying back HTML's 400 KB cap (`test_the_larger_pdf_cap_applies_only_to_pdfs`); with that tier off a PDF is still reported honestly as an unreadable content type; pages fetched once per run and cached across rounds; bounded by timeout, byte cap, redirect cap and http(s)-only; verification off ⇒ the evidence prompt is byte-identical to the D-retrieval-opt-in path |
+| Seed ingest / format conversion (D-seed-conversion) | every converter meets the output contract (blank-line-separated blocks, headings alone on their line) so `report.parse` loci survive; PDF/`.docx`/HTML/`.txt` conversion each covered offline (urllib's opener stubbed — no network, no keys); one bounded http(s)-only egress point reused from `fetch.http_get`; `file:`/`ftp:`/`data:` schemes refused before any opener exists; the `.docx` zip-bomb guard (`seed.docx_max_uncompressed_bytes`) trips **before** decompression; truncation is fatal for binary formats and a warning for text; a heading-less format yields one section plus a warning, never a failure; URL seeds refused when `seed.allow_url` is off (the default) — the form field disappears and the parameter 400s; the web layer never constructs a `Path` from request data; converted markdown is byte-identical between what is hashed, stored and critiqued (resume fingerprint) |
 | End-to-end | labeled fixtures where a known-flawed seed must reach `accepted` with the flaw fixed |
 
 Real-proxy integration tests are **marker-gated**: they carry the `live` pytest marker declared in
 `pyproject.toml`, and CI deselects them with `-m "not live"`. The proxy endpoint comes from
 `proxy.base_url` in the roster — or, when set, the environment variable named by
-`proxy.base_url_env` (`RA_PROXY_BASE_URL` by default; see D21) — and its key from the environment
+`proxy.base_url_env` (`RA_PROXY_BASE_URL` by default; see D-proxy-base-url) — and its key from the environment
 variable named by `proxy.api_key_env` (`LITELLM_API_KEY` by default). The full suite passes with no
 keys and no network, honoring "clone → run tests."
 
@@ -83,23 +157,23 @@ keys and no network, honoring "clone → run tests."
 
 | # | Decision | Rationale |
 |---|----------|-----------|
-| D9 | **Acceptance = two clean critiques by two distinct non-author models.** *(Generalized to **per-lens** by D15; the 2-model consecutive-clean fallback was later **removed** — weak acceptance is now the per-lens `roster_limited` case, current-hash-only.)* | A two-model "confirm the same artifact" would be the author reviewing its own draft (RB-001). Preserves #7 and is honest about roster limits. |
-| D10 | **Mechanical, category-specific severity floors; fail-closed on invalid output.** Triage clamps severity up to the floor; unknown/invalid fields fail the whole lens. | Stops a critic gaming severity (RB-006) or an adversarial/invalid critique collapsing into a fake-clean empty result (RB-007). |
-| D11 | **Split `OrchestratorView` (content-free, LLM-facing) from `ControllerInput` (identifiers, deterministic).** | The blind LLM must not see hashes/ids (correlation handles); the deterministic controller may. Makes noninterference testable (RB-004, RB-008). |
-| D12 | **Evidence-bearing defect fields** (`claim_span`, `related_span`, `citation_id`, `expected_support`, bounded `rationale`). | `{locus,category,severity,instruction}` can't convey which propositions contradict etc., so a blocking defect could survive (RB-005). Fields are bounded/untrusted/validated. |
+| D-two-clean-critiques | **Acceptance = two clean critiques by two distinct non-author models.** *(Generalized to **per-lens** by D-per-lens-critics; the 2-model consecutive-clean fallback was later **removed** — weak acceptance is now the per-lens `roster_limited` case, current-hash-only.)* | A two-model "confirm the same artifact" would be the author reviewing its own draft (RB-001). Preserves #7 and is honest about roster limits. |
+| D-severity-floors | **Mechanical, category-specific severity floors; fail-closed on invalid output.** Triage clamps severity up to the floor; unknown/invalid fields fail the whole lens. | Stops a critic gaming severity (RB-006) or an adversarial/invalid critique collapsing into a fake-clean empty result (RB-007). |
+| D-split-view-input | **Split `OrchestratorView` (content-free, LLM-facing) from `ControllerInput` (identifiers, deterministic).** | The blind LLM must not see hashes/ids (correlation handles); the deterministic controller may. Makes noninterference testable (RB-004, RB-008). |
+| D-evidence-bearing-fields | **Evidence-bearing defect fields** (`claim_span`, `related_span`, `citation_id`, `expected_support`, bounded `rationale`). | `{locus,category,severity,instruction}` can't convey which propositions contradict etc., so a blocking defect could survive (RB-005). Fields are bounded/untrusted/validated. |
 
 ## Codex adversarial review — round 2 (verdict: CHANGES_REQUESTED; 6 resolved / 14 partial / 0 unresolved + 10 new)
 
 | ID | Sev | Finding | Resolution |
 |----|-----|---------|------------|
-| RB-001 | crit | Cross-model confirmation on a 2-model roster = the author reviewing its own draft | **Fixed (D9; generalized per-lens by D15).** Acceptance requires clean reviews by distinct non-author models; the 2-model consecutive-clean idea was later removed in favor of per-lens `roster_limited` weak acceptance. |
+| RB-001 | crit | Cross-model confirmation on a 2-model roster = the author reviewing its own draft | **Fixed (D-two-clean-critiques; generalized per-lens by D-per-lens-critics).** Acceptance requires clean reviews by distinct non-author models; the 2-model consecutive-clean idea was later removed in favor of per-lens `roster_limited` weak acceptance. |
 | RB-002 | crit | At cap, a first clean critique could be labeled `accepted` without confirmation | **Fixed.** The cap never accepts a single clean review; clean-but-unconfirmed at cap → `exhausted_unresolved`, and per-lens top-up stays reachable at the cap (see RG-001). |
 | RB-003 | high | Confirmation bypassed the critique→triage→controller path (undefined failure/budget/identity) | **Fixed.** Confirmation is an ordinary critique attempt, triaged and returned through the controller. |
-| RB-004 | high | Controller's declared inputs insufficient for its deterministic decisions | **Fixed (D11).** `ControllerInput` schema + exhaustive ordered decision table; LLM authority scoped to minor-polish. |
-| RB-005 | high | `{locus,category,severity,instruction}` too lossy to fix blocking defects | **Fixed (D12).** Evidence-bearing bounded fields added. |
-| RB-006 | high | Critic-selected severity lets a critic downgrade a material defect to `minor` | **Fixed (D10).** Mechanical per-category floors; critic may only escalate. |
-| RB-007 | high | "Unknown categories dropped" (isolation) vs "failed lens" (architecture) — dropping can fake-clean | **Fixed (D10).** Unified fail-closed: unknown/invalid ⇒ whole lens fails; loci are bounded structural refs. |
-| RB-008 | med | `SignalReport` carried hash/ids (correlation handle); noninterference test impossible as written | **Fixed (D11).** `OrchestratorView` excludes ids/hash; noninterference defined over it. |
+| RB-004 | high | Controller's declared inputs insufficient for its deterministic decisions | **Fixed (D-split-view-input).** `ControllerInput` schema + exhaustive ordered decision table; LLM authority scoped to minor-polish. |
+| RB-005 | high | `{locus,category,severity,instruction}` too lossy to fix blocking defects | **Fixed (D-evidence-bearing-fields).** Evidence-bearing bounded fields added. |
+| RB-006 | high | Critic-selected severity lets a critic downgrade a material defect to `minor` | **Fixed (D-severity-floors).** Mechanical per-category floors; critic may only escalate. |
+| RB-007 | high | "Unknown categories dropped" (isolation) vs "failed lens" (architecture) — dropping can fake-clean | **Fixed (D-severity-floors).** Unified fail-closed: unknown/invalid ⇒ whole lens fails; loci are bounded structural refs. |
+| RB-008 | med | `SignalReport` carried hash/ids (correlation handle); noninterference test impossible as written | **Fixed (D-split-view-input).** `OrchestratorView` excludes ids/hash; noninterference defined over it. |
 | RB-009 | med | Plateau/oscillation as dotted branches; `==0` vs `≈0`; count-multiset "semantic" oscillation misnamed | **Fixed.** Exhaustive ordered table; exact predicates; renamed to `signal-stagnation`. |
 | RB-010 | med | Confirmation could be gamed if the critic infers it is confirming | **Fixed.** Identical interface/prompt; `confirm_state` labeled post-hoc, invisible to the model; no cache reuse. |
 
@@ -113,30 +187,30 @@ and confirmation-indistinguishability tests.
 
 | # | Decision | Rationale |
 |---|----------|-----------|
-| D13 | **The isolation unit is the context window, not the model.** Fresh, blind contexts defeat the *primary* bias (social/context drift) regardless of model; model diversity is a *secondary* layer that decorrelates blind spots. | The dominant threat (sycophancy, contextual drag, in-session self-review) is caused by *shared context*, not model identity — so principle #7 is fundamentally "not the same context." (User insight.) |
-| D14 | **Default roster = ≥3 distinct models.** Strong `accepted` = two distinct non-author models clean on the identical final artifact. 2-model rosters can only reach `converged_unconfirmed`. | Two models cannot give the final artifact two independent non-author reviews (RC-001); a third model closes it and adds blind-spot decorrelation. User confirmed 3 models is easy. |
+| D-context-window-unit | **The isolation unit is the context window, not the model.** Fresh, blind contexts defeat the *primary* bias (social/context drift) regardless of model; model diversity is a *secondary* layer that decorrelates blind spots. | The dominant threat (sycophancy, contextual drag, in-session self-review) is caused by *shared context*, not model identity — so principle #7 is fundamentally "not the same context." (User insight.) |
+| D-three-model-roster | **Default roster = ≥3 distinct models.** Strong `accepted` = two distinct non-author models clean on the identical final artifact. 2-model rosters can only reach `converged_unconfirmed`. | Two models cannot give the final artifact two independent non-author reviews (RC-001); a third model closes it and adds blind-spot decorrelation. User confirmed 3 models is easy. |
 
 ## Additional decisions (post-review design extension)
 
 | # | Decision | Rationale |
 |---|----------|-----------|
-| D15 | **Per-lens critic models + per-lens acceptance.** Each lens gets its own critic pool, headed by the model best matched to that lens (evidence → the lowest-hallucination model, since `fabricated_citation`/`misrepresented_source` are attribution-fidelity failures); `CleanRecord` is keyed per-lens; strong `accepted` requires **each lens** strongly-cleared (≥2 distinct non-author models). | Matches the best model to each dimension and raises within-tick blind-spot decorrelation. A lens with only one eligible model honestly degrades that dimension to `converged_unconfirmed`, naming the under-reviewed lens. **Correction:** the evidence lens was originally headed by Llama 4 Scout for "huge context to scan citations". That rationale never held — `max_report_chars: 60_000` caps critic input at ~15k tokens, so context length was never the binding constraint. The lens wants attribution *fidelity*, not capacity. |
-| D16 | **Role-structured roster with critic-only specialists.** A writer pool plus per-lens critic pools; a model may be pinned as a lens reviewer that never authors. | Cleanly satisfies author-exclusion (author of Rₙ never critiques Rₙ on any lens). Its sharpest use is pinning the roster's *strongest* model as critic-only: as a writer it would be barred from reviewing its own drafts, losing the best reviewer on half of all rounds. `glm-5.2` is critic-only on all three lenses for exactly this reason. |
-| D17 | **External retrieval, opt-in and off by default.** Amends D5 and resolves RA-011's deferral. With `search.enabled: true` writers get a `web_search` tool (Brave API) and cite only URLs a search returned; startup fails closed on a missing credential **or** on a writer that cannot emit tool calls. With `search.enabled: false` (the default) D5 holds unchanged and the suite stays offline. | RA-011's blind spot was that a diverse roster can agree on a plausible falsehood, and in-artifact sourcing cannot catch an invented citation. Retrieval makes citations *real*; it is opt-in because a credential is required and the default posture must remain "clone → run tests" with no keys. Failing closed on a tool-incapable writer is load-bearing: such a writer still emits a `## Sources` section, and nothing downstream distinguishes a remembered citation from a retrieved one. |
-| D18 | **The roster is open-weight only, bounded by what the target box can load.** Every alias resolves to downloadable weights, and none exceeds ~450GB at 4-bit — the single-model ceiling on a shared ~768GB machine, with swapping between roles. | Two independent reasons. (1) `docs/DESIGN.md` commits to a local runtime; a roster containing models that cannot load there is not a dry run of it, it is a surprise deferred. (2) No role is locked to a vendor. Consequences: `deepseek-v4-pro` (~800GB) and `kimi-k3` (~1.4TB) are excluded by arithmetic, not preference; `qwen3.7-max` is excluded because Alibaba closed the 3.7 weights (the open Qwen line stops at 3.6); `nemotron-3-ultra` fits but was excluded by choice, which costs the evidence lens the only open model with an independent long-context score (RULER 0.947). Both writers report tool-call support, so D17's fail-closed check passes if search is ever enabled. |
-| D19 | **The orchestrator has its own roster entry**, optional, defaulting to `writers[0]`. It runs on the free local model. | It was hardcoded to `writers[0]`, so reordering the writer pool silently changed who refereed polish decisions — a coupling with no reason behind it. Its job is bounded ints in, one boolean out (`OrchestratorView`), so it needs neither reach nor a writer's capability, and D17's tool-call requirement does not apply to it. Its blast radius is one skipped polish pass: `_orchestrate_call` swallows call and schema errors and returns `False`, and rule 9 is cap-gated, so the LLM can only ever *enable* polish. The alias joins `all_aliases` so startup resolves and probes it — without that, an identity mismatch would disable rule 9 permanently and silently. |
-| D20 | **The checkpointer is the durability guarantee; the SIGTERM grace period is only an optimisation.** A redeploy stops the graph at the next *node* boundary, never mid-node and never "after the round". Boot re-enqueues whatever was owed. A run that makes no progress across N **consecutive** auto-resumes becomes `abandoned` — a registry-inferred lifecycle state that is terminal for the UI but is deliberately **never** written to `final.json`. | A run is 10–25 minutes, so no grace period can wait for one to finish; designing around that would make correctness depend on a number the platform owns and can change without telling us. Since LangGraph persists at every node boundary, a SIGKILL already costs at most the node in flight — so the grace window buys the chance to *land* that node rather than re-pay for it, and shortening it wastes work without risking corruption. The cap counts consecutive rather than total attempts so a restart storm cannot spend the budget on runs it never actually executed; any progress event resets it. `abandoned` avoids `final.json` because that file means the controller reached a verdict (D12/RA-012), and giving up is not a verdict — inventing one would let the audit trail claim a terminal status no rule ever fired. A human can always resume past it, so the cap bounds automation, not the run. |
-| D21 | **`proxy.base_url` is overridable by an environment variable, named by `proxy.base_url_env` (default `RA_PROXY_BASE_URL`).** Precedence: env value > roster file value > built-in default. The roster's `base_url` becomes the *fallback*, not necessarily the effective value; the override is applied once in a `ProxyConfig` after-validator so every reader (`LLMClient`, `_fetch_model_info`) sees the resolved URL with no call-site change. Unset or empty env leaves the file value untouched. | Mirrors the existing `api_key_env` hook so the config surface stays consistent. Before this, `base_url` was readable only from the file, so a containerized deployment on a Docker bridge network — which cannot resolve the baked Tailscale MagicDNS URL and reaches the LiteLLM proxy by container DNS name (`http://litellm-proxy:4000/v1`) — had to mount a whole override `roster.yaml` just to change one line, shadowing every upstream roster change (model retunes, new critics, search defaults) and forcing a manual re-sync each time. Injecting one env var lets the baked roster stay authoritative for models, critics, search, and budgets. Kept backward-compatible: a roster with a plain `base_url:` and no env set behaves exactly as before. Applied in a validator rather than as an `api_key`-style lazy property because `base_url` is a plain field read across the codebase as an attribute, and a property cannot share its name; resolving at load also means nothing ever reads a URL the env was meant to override. No invariant is touched — this is a deployment-config affordance, not a change to isolation, author-exclusion, the orchestrator's blindness, or the controller. |
-| D22 | **Critics and writers are grounded in the run's date, and the shipped roster opts into retrieval (D17); source verification (D18) stays off everywhere by default.** A `run_date` (UTC) is captured once at intake, stored in graph state, and injected into every writer and critic prompt as trusted context outside the data fence. The code defaults for `search.enabled` and `search.verify_sources` stay `false`; `config/roster.yaml` flips on `search.enabled` only. The completeness brief and the critic `instruction` contract now require that every demanded fix be resolvable within the report itself (add the perspective, weaken the claim, or state the limitation) — a critic may not make a specific external document the only acceptable resolution. | Run `run-75eb136b9bfb` stagnated to `needs_human_review` with good output: the evidence lens, judging "on its face" plausibility from its training-data recency, flagged legitimate current-year citations (one dated the previous day) as future-dated `fabricated_citation` — a blocking defect with a severity floor the writer can never argue down and, without retrieval, never fix. Simultaneously the completeness lens demanded a specific budget-vote record the writer had no way to retrieve, while `writer_revision` (correctly) forbids inventing sources — an unsatisfiable demand. One date per run (not per call) keeps RB-010's byte-identical confirmation critiques across midnight; old checkpoints without `run_date` resume dateless, i.e. with the prior behavior. The date is excluded from the audition prompt-hash surface because it is run context, not lens semantics. Enabling search makes citation demands satisfiable, and retrieval-grounded citations carry real, current dates — closing the false-`fabricated_citation` loop even without verification. Verification would go further (URL resolves, page matches), but it fetches model-chosen URLs, and the egress boundary that makes that safe is a network-layer deployment concern deliberately not implemented in this repo (docs/ssrf-egress-isolation.md documents the pattern); the shipped roster therefore leaves `verify_sources: false`, to be enabled per-deployment behind such a boundary. Search itself is not that exposure: it talks only to the fixed public Brave endpoint. |
+| D-per-lens-critics | **Per-lens critic models + per-lens acceptance.** Each lens gets its own critic pool, headed by the model best matched to that lens (evidence → the lowest-hallucination model, since `fabricated_citation`/`misrepresented_source` are attribution-fidelity failures); `CleanRecord` is keyed per-lens; strong `accepted` requires **each lens** strongly-cleared (≥2 distinct non-author models). | Matches the best model to each dimension and raises within-tick blind-spot decorrelation. A lens with only one eligible model honestly degrades that dimension to `converged_unconfirmed`, naming the under-reviewed lens. **Correction:** the evidence lens was originally headed by Llama 4 Scout for "huge context to scan citations". That rationale never held — `max_report_chars: 60_000` caps critic input at ~15k tokens, so context length was never the binding constraint. The lens wants attribution *fidelity*, not capacity. |
+| D-critic-only-specialists | **Role-structured roster with critic-only specialists.** A writer pool plus per-lens critic pools; a model may be pinned as a lens reviewer that never authors. | Cleanly satisfies author-exclusion (author of Rₙ never critiques Rₙ on any lens). Its sharpest use is pinning the roster's *strongest* model as critic-only: as a writer it would be barred from reviewing its own drafts, losing the best reviewer on half of all rounds. `glm-5.2` is critic-only on all three lenses for exactly this reason. |
+| D-retrieval-opt-in | **External retrieval, opt-in and off by default.** Amends D-in-artifact-citations and resolves RA-011's deferral. With `search.enabled: true` writers get a `web_search` tool (Brave API) and cite only URLs a search returned; startup fails closed on a missing credential **or** on a writer that cannot emit tool calls. With `search.enabled: false` (the default) D-in-artifact-citations holds unchanged and the suite stays offline. | RA-011's blind spot was that a diverse roster can agree on a plausible falsehood, and in-artifact sourcing cannot catch an invented citation. Retrieval makes citations *real*; it is opt-in because a credential is required and the default posture must remain "clone → run tests" with no keys. Failing closed on a tool-incapable writer is load-bearing: such a writer still emits a `## Sources` section, and nothing downstream distinguishes a remembered citation from a retrieved one. |
+| D-open-weight-roster | **The roster is open-weight only, bounded by what the target box can load.** Every alias resolves to downloadable weights, and none exceeds ~450GB at 4-bit — the single-model ceiling on a shared ~768GB machine, with swapping between roles. | Two independent reasons. (1) `docs/DESIGN.md` commits to a local runtime; a roster containing models that cannot load there is not a dry run of it, it is a surprise deferred. (2) No role is locked to a vendor. Consequences: `deepseek-v4-pro` (~800GB) and `kimi-k3` (~1.4TB) are excluded by arithmetic, not preference; `qwen3.7-max` is excluded because Alibaba closed the 3.7 weights (the open Qwen line stops at 3.6); `nemotron-3-ultra` fits but was excluded by choice, which costs the evidence lens the only open model with an independent long-context score (RULER 0.947). Both writers report tool-call support, so D-retrieval-opt-in's fail-closed check passes if search is ever enabled. |
+| D-orchestrator-roster-entry | **The orchestrator has its own roster entry**, optional, defaulting to `writers[0]`. It runs on the free local model. | It was hardcoded to `writers[0]`, so reordering the writer pool silently changed who refereed polish decisions — a coupling with no reason behind it. Its job is bounded ints in, one boolean out (`OrchestratorView`), so it needs neither reach nor a writer's capability, and D-retrieval-opt-in's tool-call requirement does not apply to it. Its blast radius is one skipped polish pass: `_orchestrate_call` swallows call and schema errors and returns `False`, and rule 9 is cap-gated, so the LLM can only ever *enable* polish. The alias joins `all_aliases` so startup resolves and probes it — without that, an identity mismatch would disable rule 9 permanently and silently. |
+| D-redeploy-survival | **The checkpointer is the durability guarantee; the SIGTERM grace period is only an optimisation.** A redeploy stops the graph at the next *node* boundary, never mid-node and never "after the round". Boot re-enqueues whatever was owed. A run that makes no progress across N **consecutive** auto-resumes becomes `abandoned` — a registry-inferred lifecycle state that is terminal for the UI but is deliberately **never** written to `final.json`. | A run is 10–25 minutes, so no grace period can wait for one to finish; designing around that would make correctness depend on a number the platform owns and can change without telling us. Since LangGraph persists at every node boundary, a SIGKILL already costs at most the node in flight — so the grace window buys the chance to *land* that node rather than re-pay for it, and shortening it wastes work without risking corruption. The cap counts consecutive rather than total attempts so a restart storm cannot spend the budget on runs it never actually executed; any progress event resets it. `abandoned` avoids `final.json` because that file means the controller reached a verdict (D-evidence-bearing-fields/RA-012), and giving up is not a verdict — inventing one would let the audit trail claim a terminal status no rule ever fired. A human can always resume past it, so the cap bounds automation, not the run. |
+| D-proxy-base-url | **`proxy.base_url` is overridable by an environment variable, named by `proxy.base_url_env` (default `RA_PROXY_BASE_URL`).** Precedence: env value > roster file value > built-in default. The roster's `base_url` becomes the *fallback*, not necessarily the effective value; the override is applied once in a `ProxyConfig` after-validator so every reader (`LLMClient`, `_fetch_model_info`) sees the resolved URL with no call-site change. Unset or empty env leaves the file value untouched. | Mirrors the existing `api_key_env` hook so the config surface stays consistent. Before this, `base_url` was readable only from the file, so a containerized deployment on a Docker bridge network — which cannot resolve the baked Tailscale MagicDNS URL and reaches the LiteLLM proxy by container DNS name (`http://litellm-proxy:4000/v1`) — had to mount a whole override `roster.yaml` just to change one line, shadowing every upstream roster change (model retunes, new critics, search defaults) and forcing a manual re-sync each time. Injecting one env var lets the baked roster stay authoritative for models, critics, search, and budgets. Kept backward-compatible: a roster with a plain `base_url:` and no env set behaves exactly as before. Applied in a validator rather than as an `api_key`-style lazy property because `base_url` is a plain field read across the codebase as an attribute, and a property cannot share its name; resolving at load also means nothing ever reads a URL the env was meant to override. No invariant is touched — this is a deployment-config affordance, not a change to isolation, author-exclusion, the orchestrator's blindness, or the controller. |
+| D-run-date-grounding | **Critics and writers are grounded in the run's date, and the shipped roster opts into retrieval (D-retrieval-opt-in); source verification (D-source-verification) stays off everywhere by default.** A `run_date` (UTC) is captured once at intake, stored in graph state, and injected into every writer and critic prompt as trusted context outside the data fence. The code defaults for `search.enabled` and `search.verify_sources` stay `false`; `config/roster.yaml` flips on `search.enabled` only. The completeness brief and the critic `instruction` contract now require that every demanded fix be resolvable within the report itself (add the perspective, weaken the claim, or state the limitation) — a critic may not make a specific external document the only acceptable resolution. | Run `run-75eb136b9bfb` stagnated to `needs_human_review` with good output: the evidence lens, judging "on its face" plausibility from its training-data recency, flagged legitimate current-year citations (one dated the previous day) as future-dated `fabricated_citation` — a blocking defect with a severity floor the writer can never argue down and, without retrieval, never fix. Simultaneously the completeness lens demanded a specific budget-vote record the writer had no way to retrieve, while `writer_revision` (correctly) forbids inventing sources — an unsatisfiable demand. One date per run (not per call) keeps RB-010's byte-identical confirmation critiques across midnight; old checkpoints without `run_date` resume dateless, i.e. with the prior behavior. The date is excluded from the audition prompt-hash surface because it is run context, not lens semantics. Enabling search makes citation demands satisfiable, and retrieval-grounded citations carry real, current dates — closing the false-`fabricated_citation` loop even without verification. Verification would go further (URL resolves, page matches), but it fetches model-chosen URLs, and the egress boundary that makes that safe is a network-layer deployment concern deliberately not implemented in this repo (docs/ssrf-egress-isolation.md documents the pattern); the shipped roster therefore leaves `verify_sources: false`, to be enabled per-deployment behind such a boundary. Search itself is not that exposure: it talks only to the fixed public Brave endpoint. |
 
-| D18 | **Source verification for the evidence lens, opt-in and off by default.** With `search.verify_sources: true` the pages a report cites are fetched and handed to the **evidence lens only**, as untrusted data. `fabricated_citation` and `misrepresented_source` become checkable against the page instead of judgements about plausibility. A failed fetch is explicitly *not* evidence of fabrication — **except** a definitive not-found (HTTP 404/410), which D38 later carves out as a mechanical `fabricated_citation` because that status proves the URL does not resolve rather than that it could not be read. Each fetch now carries a closed `SourceOutcome` (fetch.py) rather than one flat "could not fetch" string, so the evidence prompt names the failure class and only a not-found sharpens `fabricated_citation`; PR #96 added this vocabulary and, on top of it, an opt-in tier that **reads** a cited PDF instead of refusing it as an unreadable content type — gated by both `sources.enabled` and `sources.pdf.enabled` (`config.SourcesConfig`/`PdfSourceConfig`), fatal at startup if `pypdf` is missing, and off by default like verification itself. Not an SSRF boundary — egress is constrained at the network layer, not here. | D17 constrained where citations come from; it did not establish that a cited page supports the claim attached to it, because no critic could open one. Evidence-lens-only is an isolation requirement, not an optimization: logic and completeness cannot raise a citation category, so page text would widen what they see without widening what they may report. Off by default because fetching model-chosen URLs is exposure a deployment must opt into. |
+| D-source-verification | **Source verification for the evidence lens, opt-in and off by default.** With `search.verify_sources: true` the pages a report cites are fetched and handed to the **evidence lens only**, as untrusted data. `fabricated_citation` and `misrepresented_source` become checkable against the page instead of judgements about plausibility. A failed fetch is explicitly *not* evidence of fabrication — **except** a definitive not-found (HTTP 404/410), which D-notfound-fabrication later carves out as a mechanical `fabricated_citation` because that status proves the URL does not resolve rather than that it could not be read. Each fetch now carries a closed `SourceOutcome` (fetch.py) rather than one flat "could not fetch" string, so the evidence prompt names the failure class and only a not-found sharpens `fabricated_citation`; PR #96 added this vocabulary and, on top of it, an opt-in tier that **reads** a cited PDF instead of refusing it as an unreadable content type — gated by both `sources.enabled` and `sources.pdf.enabled` (`config.SourcesConfig`/`PdfSourceConfig`), fatal at startup if `pypdf` is missing, and off by default like verification itself. Not an SSRF boundary — egress is constrained at the network layer, not here. | D-retrieval-opt-in constrained where citations come from; it did not establish that a cited page supports the claim attached to it, because no critic could open one. Evidence-lens-only is an isolation requirement, not an optimization: logic and completeness cannot raise a citation category, so page text would widen what they see without widening what they may report. Off by default because fetching model-chosen URLs is exposure a deployment must opt into. |
 
 ## Codex adversarial review — round 3 (verdict: CHANGES_REQUESTED; 5 resolved / 4 partial / 1 unresolved + 6 new)
 
 | ID | Sev | Finding | Resolution |
 |----|-----|---------|------------|
-| RC-001 | crit | Two-model "faithful regeneration" launders authorship → a model reviews its own content; the final artifact gets only one non-author review | **Fixed (D13, D14).** Reframed isolation unit; default ≥3 models with same-artifact `accepted`; honest weaker `converged_unconfirmed` tier for 2 models; "faithful regen" language removed. |
-| RC-002 | high | Clean-review evidence not keyed to the accepted artifact; stale attestations could satisfy acceptance | **Fixed** (record now **per-lens**, D15): immutable `CleanRecord{artifact_hash, lens, critic_identity, author_identity}`; any generation/polish resets the set; `strong_met` needs two distinct non-author records **per lens** for the exact current hash. |
+| RC-001 | crit | Two-model "faithful regeneration" launders authorship → a model reviews its own content; the final artifact gets only one non-author review | **Fixed (D-context-window-unit, D-three-model-roster).** Reframed isolation unit; default ≥3 models with same-artifact `accepted`; honest weaker `converged_unconfirmed` tier for 2 models; "faithful regen" language removed. |
+| RC-002 | high | Clean-review evidence not keyed to the accepted artifact; stale attestations could satisfy acceptance | **Fixed** (record now **per-lens**, D-per-lens-critics): immutable `CleanRecord{artifact_hash, lens, critic_identity, author_identity}`; any generation/polish resets the set; `strong_met` needs two distinct non-author records **per lens** for the exact current hash. |
 | RC-003 | high | Ordered table wasn't the whole controller function (omitted lenses_failed, polish, cycle, thresholds) | **Fixed.** The single ordered table (now 14 rules after the per-lens reorder) includes lens-failure, polish (+counter/cap), and cycle rules; totality/termination argued explicitly. |
 | RC-004 | high | Cap rules preceded the incomplete-review check → partial counts could be classified clean | **Fixed.** `lenses_failed > 0` is now rules 2–3, before any clean/material/cap conclusion; partial counts never satisfy a clean predicate; no retry budget ⇒ `aborted`. |
 | RC-005 | high | `overstated_claim`/`omitted_counterargument` relied on critic-supplied materiality | **Fixed.** Both floored mechanically at `major`; the materiality-downgrade path is removed. |
@@ -145,7 +219,7 @@ and confirmation-indistinguishability tests.
 ## Codex adversarial review — round 8 (per-lens extension; verdict: CHANGES_REQUESTED, 0 crit / 2 high / 1 med / 1 low)
 
 Rounds 4–7 drove the pre-extension design to 0 critical / 0 high / 0 medium (table verified total
-and terminating; 3-model acceptance trace confirmed). Round 8 reviewed the D15/D16 per-lens
+and terminating; 3-model acceptance trace confirmed). Round 8 reviewed the D-per-lens-critics/D-critic-only-specialists per-lens
 extension:
 
 | ID | Sev | Finding | Resolution |
@@ -153,10 +227,10 @@ extension:
 | RG-001 | high | At the cap, terminal rules fired before per-lens top-up could run | **Fixed.** Clean-artifact rules (7–11) are no longer `round`-gated; only `material>0` cap terminals (rules 5–6) are. Top-up (rule 8) stays reachable at the cap (it doesn't generate or advance `round`). |
 | RG-002 | high | The "2-model consecutive-clean fallback" was referenced but never represented in state | **Fixed by removal.** `weak_met` is now purely the per-lens `roster_limited` case (current-hash-only); all consecutive-clean language deleted. |
 | RG-003 | med | Tick/sequence/DESIGN diagrams still showed one critic for three lenses | **Fixed.** Diagrams relabeled to per-lens critics (each ≠ author); DESIGN core-loop reframed from "two-model ping-pong" to a role-structured alternating game. |
-| RG-004 | low | Stale `lens_set` / rule-number / flat-roster wording in the review log | **Fixed.** RC-002 → per-lens `CleanRecord`; RB-002 de-numbered; D9 annotated as superseded by D15; roster contract restated as per-lens eligibility. |
-| D24 | **Seed reports are converted to markdown at the edge; URL seeds are opt-in and off by default.** `--seed` and the web form accept PDF, `.docx`, HTML and `.txt`; `ingest` converts them before `graph.run` is called, which continues to require markdown. http(s) URL seeds exist behind `seed.allow_url`, default `false` (the D17/D18 posture): a URL seed makes the server fetch a caller-chosen URL and expose the body back through the run's report endpoints — on the web UI that is a read proxy into whatever the host can reach, and the egress boundary that makes it acceptable is a network-layer deployment concern outside this repo (docs/ssrf-egress-isolation.md). *(Written when the UI was unauthenticated. D32 identifies callers, which narrows who can submit a URL but not what the host can reach — the egress boundary remains the prerequisite.)* Turning it off hides the form field and rejects the parameter. A format that yields no headings is accepted with a warning, not rejected. | Markdown is not a preference here, it is load-bearing: `report.parse` builds the `[S<n>.P<m>]` loci critics must cite from `#` headings, and `extract_source_urls` reads only a markdown `## Sources` section, so an unconverted seed silently costs the evidence lens its fetch-backed checks. Converting at the **edge** rather than inside `_intake` keeps one artifact and one identity — `_run_fingerprint` and `artifact_hash` would otherwise hash different things (a URL vs. its converted text), letting a resume pass the fingerprint check while the checkpoint held different prose. It also keeps network I/O out of the graph, where every other fetch is injected through `Runtime` so tests stay offline. Accepting a heading-less seed reflects what the formats actually carry: PDF has no recoverable heading semantics without font heuristics, and refusing would block the most common real-world case to protect locus precision the source never had. PDF is the only format needing a dependency (`pypdf`, optional extra); `.docx` is a zip of XML and HTML is an `HTMLParser`, both standard library. |
+| RG-004 | low | Stale `lens_set` / rule-number / flat-roster wording in the review log | **Fixed.** RC-002 → per-lens `CleanRecord`; RB-002 de-numbered; D-two-clean-critiques annotated as superseded by D-per-lens-critics; roster contract restated as per-lens eligibility. |
+| D-seed-conversion | **Seed reports are converted to markdown at the edge; URL seeds are opt-in and off by default.** `--seed` and the web form accept PDF, `.docx`, HTML and `.txt`; `ingest` converts them before `graph.run` is called, which continues to require markdown. http(s) URL seeds exist behind `seed.allow_url`, default `false` (the D-retrieval-opt-in/D-source-verification posture): a URL seed makes the server fetch a caller-chosen URL and expose the body back through the run's report endpoints — on the web UI that is a read proxy into whatever the host can reach, and the egress boundary that makes it acceptable is a network-layer deployment concern outside this repo (docs/ssrf-egress-isolation.md). *(Written when the UI was unauthenticated. D-identity-header identifies callers, which narrows who can submit a URL but not what the host can reach — the egress boundary remains the prerequisite.)* Turning it off hides the form field and rejects the parameter. A format that yields no headings is accepted with a warning, not rejected. | Markdown is not a preference here, it is load-bearing: `report.parse` builds the `[S<n>.P<m>]` loci critics must cite from `#` headings, and `extract_source_urls` reads only a markdown `## Sources` section, so an unconverted seed silently costs the evidence lens its fetch-backed checks. Converting at the **edge** rather than inside `_intake` keeps one artifact and one identity — `_run_fingerprint` and `artifact_hash` would otherwise hash different things (a URL vs. its converted text), letting a resume pass the fingerprint check while the checkpoint held different prose. It also keeps network I/O out of the graph, where every other fetch is injected through `Runtime` so tests stay offline. Accepting a heading-less seed reflects what the formats actually carry: PDF has no recoverable heading semantics without font heuristics, and refusing would block the most common real-world case to protect locus precision the source never had. PDF is the only format needing a dependency (`pypdf`, optional extra); `.docx` is a zip of XML and HTML is an `HTMLParser`, both standard library. |
 
-## D20 — critic eligibility becomes structural *and* demonstrated
+## D-critic-audition — critic eligibility becomes structural *and* demonstrated
 
 Observed in `run-d5934276fafd`. Two critics returned zero issues on every call they made
 across the whole run: `llama-4-scout` on 6 evidence calls, `gemma-4-31b-it` on 6
@@ -247,9 +321,9 @@ satisfies `strong_met`, and terminates the run `accepted`. #10 kept `gemma-4-31b
 
 | ID | Sev | Finding | Resolution |
 |----|-----|---------|------------|
-| RC-007 | med | Run submission is unbounded in both queue depth and disk footprint. `RunWorker.submit()` enqueued onto a `queue.Queue()` with no `maxsize` and no rate limit, and each submission immediately wrote a persistent run directory. Concurrency bounds token *spend* but not the number of queued runs, the memory they hold, or the run dirs they leave on disk; `recover()` re-enqueues them all on boot. A single burst — a script, or the companion CSRF vector — could create thousands of runs and directories, and `Registry.list()` reads every run dir on each `GET /`. | **Fixed (D21).** `submit()` refuses with HTTP 429 past `max_queue_depth`, and a fixed-window per-identity limiter (`submit_rate_max`/`submit_rate_window_seconds`) throttles bursts. Both checks precede any disk write, so a refusal costs nothing. The web server also runs an automatic content-only retention sweep so disk reclamation no longer waits on a manual `purge`. |
+| RC-007 | med | Run submission is unbounded in both queue depth and disk footprint. `RunWorker.submit()` enqueued onto a `queue.Queue()` with no `maxsize` and no rate limit, and each submission immediately wrote a persistent run directory. Concurrency bounds token *spend* but not the number of queued runs, the memory they hold, or the run dirs they leave on disk; `recover()` re-enqueues them all on boot. A single burst — a script, or the companion CSRF vector — could create thousands of runs and directories, and `Registry.list()` reads every run dir on each `GET /`. | **Fixed (D-bounded-submission).** `submit()` refuses with HTTP 429 past `max_queue_depth`, and a fixed-window per-identity limiter (`submit_rate_max`/`submit_rate_window_seconds`) throttles bursts. Both checks precede any disk write, so a refusal costs nothing. The web server also runs an automatic content-only retention sweep so disk reclamation no longer waits on a manual `purge`. |
 
-## D21 — submission is bounded, and a refusal costs nothing
+## D-bounded-submission — submission is bounded, and a refusal costs nothing
 
 The soundness machinery all sits *downstream* of a run existing. Nothing upstream limited
 how many runs could be created: the queue was a `queue.Queue()` with no `maxsize`, no
@@ -278,12 +352,12 @@ not also burn its own per-identity allowance on the attempt.
 The rate limiter is keyed by the caller's resolved identity — Cloudflare Access email
 first, then the Tailscale header, then `auth.dev_identity` — the same identity the auth
 middleware enforces. *(Written when the UI was unauthenticated: the limiter then keyed on
-the Tailscale header when present and a single global bucket otherwise. D32 superseded that
+the Tailscale header when present and a single global bucket otherwise. D-identity-header superseded that
 — every request now carries a resolved identity or is refused by the middleware before it
 reaches `submit()`, so there is no shared global fallback bucket left.)* On the tailnet
 posture the header is trustworthy; a caller reaching the app directly could forge it, but
 such a caller could equally vary it to defeat any per-identity scheme. This is backpressure
-against bursts, not itself the access boundary — that is D32's trusted-header gate, with
+against bursts, not itself the access boundary — that is D-identity-header's trusted-header gate, with
 Tailscale ACLs / Cloudflare Access in front of it.
 
 Retention gains an automatic **content-only** sweep on a timer (`purge --content-only`,
@@ -295,9 +369,9 @@ skipped, so an in-flight run cannot lose its drafts mid-run.
 This touches none of the isolation invariants: it is upstream of run creation and moves no
 new data toward any model context. `OrchestratorView` and the controller are untouched.
 
-## D23 — the cold review fixer exercises grounded judgment, not a mechanical checklist
+## D-fixer-grounded-judgment — the cold review fixer exercises grounded judgment, not a mechanical checklist
 
-*(D22 is allocated to run-scoped date grounding, landed separately.)*
+*(D-run-date-grounding is allocated to run-scoped date grounding, landed separately.)*
 
 The cold fixer's original gate was mechanical by design: a fix had to name a file and line,
 be fully determined by the blocker's own description, stay inside reviewer-named files, and
@@ -329,10 +403,10 @@ fixer still cannot claim `body_clarification` (schema-enforced — recorded inte
 author's own); the docs-coupling rule for invariant-touching fixes still applies; and the
 verification run before exit matters *more* under a wider reach, not less. The safety story
 is not "the fixer cannot do much" but that the judge grades the pre-fix reviewed SHA, not the
-fixer's output: the fixed SHA is not reviewed again (D28), so the pre-fix panel, the fixer's own
+fixer's output: the fixed SHA is not reviewed again (D-fixer-merges-not-rebases), so the pre-fix panel, the fixer's own
 gates, and this verification run are the backstop.
 
-## D24 — social-bias categories on existing lenses, governed by docs/bias.md
+## D-social-bias — social-bias categories on existing lenses, governed by docs/bias.md
 
 The user intent this system serves includes *avoiding social biases with rules defined in the
 repo as documentation* — and until this decision, no such rules existed: every "bias" the docs
@@ -384,7 +458,7 @@ describe passes through.
 `audition.prompt_hash()` changes and every cached audition verdict is invalidated by design —
 operators re-run `ra audition` after upgrading.
 
-## D25 — writers may dispute fix-tasks; adjudication is mechanical-first, identity-blind, and fail-closed toward the finding
+## D-writer-disputes — writers may dispute fix-tasks; adjudication is mechanical-first, identity-blind, and fail-closed toward the finding
 
 **The problem.** Critics were structurally unaccountable. A critic false positive is
 indistinguishable from a real defect everywhere downstream: triage counts it, severity floors
@@ -397,7 +471,7 @@ fix-tasks (*"correct the date to a factual historical date"*) would have made a 
 round and audits critic *positives* not at all.
 
 **The mechanism** (opt-in, `disputes.enabled: false` by default — with it off, every prompt and
-transition is byte-identical to a build without the feature, the D17 pattern):
+transition is byte-identical to a build without the feature, the D-retrieval-opt-in pattern):
 
 1. **Elicitation.** After a non-polish revision, one *separate* structured call to the same
    writer collects `WriterDisputes`: per dispute a `task_index`, bounded `grounds`, and optional
@@ -461,10 +535,10 @@ and every citation dispute rides on the arbiter; the dispute config deliberately
 the resume fingerprint, so toggling it mid-run changes only whether the *privilege* exists going
 forward.
 
-## D26 — question refinement is offered at the edge, ambient and never blocking
+## D-question-refinement — question refinement is offered at the edge, ambient and never blocking
 
 **The problem.** The pipeline already knows questions arrive loaded: `unexamined_presupposition`
-(D24, completeness lens, major floor) exists precisely to catch a writer who accepts a contested
+(D-social-bias, completeness lens, major floor) exists precisely to catch a writer who accepts a contested
 framing as settled. But that machinery fires only after a run is already underway, and the
 production run history shows what waiting until then costs. Six runs motivated this decision, and
 they fall into four shapes. Two posed a **false either/or** — a political "does X back A or
@@ -479,7 +553,7 @@ real energy went to the adjacent and more interesting question of why the belief
 
 The questions themselves are paraphrased here rather than quoted, and the run IDs left out: they
 are a private operator's own queries, and this repository is public. In every case the category
-was already nameable — `unexamined_presupposition` (D24) would tag some of these on sight — but
+was already nameable — `unexamined_presupposition` (D-social-bias) would tag some of these on sight — but
 the finding lands 10–25 minutes and several critique rounds after the one party who could cheaply
 reframe the question, the asker, has already walked away from the keyboard. The
 fix that costs nothing is upstream: catch the same framing before the run starts, while the asker
@@ -494,7 +568,7 @@ is still there to accept, ignore, or edit it.
    The sixth — the only transform that lets the model infer an unstated concern rather than
    rephrase what is already on the page — ships **disabled** and is enabled only after a
    paired-fixture audition (mirror questions posed from opposing framings must yield mirror
-   suggestions) passes, the same deferred-audition pattern D24 uses for its own cross-critic
+   suggestions) passes, the same deferred-audition pattern D-social-bias uses for its own cross-critic
    bias-correlation check.
 2. **Edge-only placement.** Refinement lives entirely in `web/refine.py`, never inside the graph.
    `_intake` (RA-018) is unchanged; the graph still receives exactly one question and never knows
@@ -569,7 +643,7 @@ a user's pause), and it is why the roster baked into the image and the wheel is
 and no credential; `config/roster.yaml`, mounted over it by `compose.yaml`, is where this
 deployment opts in.
 
-## D27 — installable on a phone, without letting anything cacheable be wrong
+## D-installable-pwa — installable on a phone, without letting anything cacheable be wrong
 
 **The problem.** The web interface was a page, not an app: no manifest, no icons, no way to keep
 it on a home screen. Making it installable is mostly additive, but two parts of it are not, and
@@ -609,7 +683,7 @@ widening it further fails a test rather than passing quietly.
 
 **A service worker is the first persistent client-side execution surface this project ships** —
 code that keeps running after the tab closes, on an interface whose only authentication is a
-trusted header (D32). Three
+trusted header (D-identity-header). Three
 properties bound it:
 
 1. **Its cache is an inclusion allowlist, not an exclusion list.** It precaches the icons, the
@@ -650,7 +724,7 @@ media-query mechanism and the OS caches it at install time, so the Android splas
 even in dark mode. Serving the manifest dynamically would fix one frame at the cost of making it
 non-static; not worth it.
 
-## D28 — the fixer syncs the branch and resolves conflicts; it merges, it never rebases
+## D-fixer-merges-not-rebases — the fixer syncs the branch and resolves conflicts; it merges, it never rebases
 
 **The problem.** Almost every PR in this repository is agent-authored, and no agent goes back to
 a PR it already opened. When `main` moves, the branch drifts, and there is nobody in the loop to
@@ -717,7 +791,7 @@ written on a SHA that is no longer the PR's head protects nothing. `review-final
 `post_fix_sha` as an explicit input and writes `review/cycle`, `review/verdict`, and the merge gate
 on it.
 
-## D29 — servable under a URL base path, without relaxing the same-origin posture
+## D-base-path — servable under a URL base path, without relaxing the same-origin posture
 
 **The problem.** RA was a root-origin app: every URL it emitted was root-absolute
 (`/static/*`, `/manifest.webmanifest`, `href="/runs/<id>"`, `action="/runs"`, the brand
@@ -738,9 +812,9 @@ exactly the places a browser resolves against the origin: the server-rendered li
 form actions, the `303` `Location` after a submit or resume, the manifest's `id`,
 `start_url`, `scope` and icon `src`s, the worker's precache list, its `OFFLINE` fallback and
 its registration scope, the `Service-Worker-Allowed` header, and — when refinement is
-enabled (D26) — the `fetch()` the inline refinement script issues to `/refine`. That last
+enabled (D-question-refinement) — the `fetch()` the inline refinement script issues to `/refine`. That last
 one is a browser-origin URL like the rest and carries the prefix for the same reason; it was
-missed when D26 and D29 landed in separate PRs and is corrected in PR #66.
+missed when D-question-refinement and D-base-path landed in separate PRs and is corrected in PR #66.
 
 **A stripping proxy, so the routes do not move.** The proxy removes `/app/` before the
 request arrives, so the app still serves at `/runs`, `/sw.js`, `/manifest.webmanifest`. The
@@ -751,16 +825,16 @@ generation is explicit, so setting it would add a second, silent mechanism that 
 disagree with the explicit one.
 
 **Why an env and not `X-Forwarded-Prefix`.** The manifest and the service worker are
-resolved to bytes once at startup (D27: "read once, at startup"), with the worker's cache
+resolved to bytes once at startup (D-installable-pwa: "read once, at startup"), with the worker's cache
 version hashed over the precached URLs. Reading the prefix from a per-request header would
 force those to be rebuilt per request, or cached per distinct header value — turning a
-static, hashed artifact into a request-varying one. A single startup value keeps D27's
+static, hashed artifact into a request-varying one. A single startup value keeps D-installable-pwa's
 "these files do not change while the process runs" true. One process serves one prefix;
 that is the residual, and it matches the one-deployment-one-mount reality.
 
 **The CSP does not change, and that is the point.** Every URL the app *fetches from or
 submits to* stays same-origin, so `connect-src 'self'` / `form-action 'self'` /
-`base-uri 'none'` are exactly as D27 pinned them, and that test stays green. (There is a
+`base-uri 'none'` are exactly as D-installable-pwa pinned them, and that test stays green. (There is a
 single off-origin URL the app emits — the static "how this works" navigation link to the
 published docs site, added later. It is an anchor `href`, not a subresource fetch or a form
 submit, so no CSP directive here governs it; it carries `rel="noreferrer"` so following it
@@ -772,7 +846,7 @@ single `<base href="/app/">` tag — so each URL is prefixed individually instea
 is the application naming its own same-origin paths, which is what `'self'` already permits;
 it opens nothing.
 
-**What D27's three service-worker properties cost.** All three hold under a prefix. The
+**What D-installable-pwa's three service-worker properties cost.** All three hold under a prefix. The
 cache is still an inclusion allowlist: the precache list is the same fixed set of icons,
 manifest and offline page, now carrying the prefix, and still contains no run URL — the
 `no /runs in the worker` assertion is unchanged. The cache key is still a hash of the asset
@@ -784,14 +858,14 @@ prefixes key their caches distinctly, which is correct. Registration is still
 **Invariants.** None of the pipeline invariants are in reach: this is URL generation in the
 web layer, which is a window onto the audit trail and touches no model context, no
 `OrchestratorView`, no author-exclusion, no controller rule. The web-layer posture this
-does touch is D27's, and it is generalized, not relaxed: "served from the root so its scope
+does touch is D-installable-pwa's, and it is generalized, not relaxed: "served from the root so its scope
 is the whole origin" becomes "served from the mount point so its scope is the app," with the
 root case as `base = ''`.
 
-## D30 — a report leaves the system with its verdict attached, or it does not leave
+## D-verdict-attached — a report leaves the system with its verdict attached, or it does not leave
 
 **The problem.** There was no export. `final.md` and `GET /runs/<id>/report.md` served the report
-alone, and the deployment posture (tailnet-only, and — until D32 — unauthenticated) means
+alone, and the deployment posture (tailnet-only, and — until D-identity-header — unauthenticated) means
 sharing a result is
 handing over a *file* — the recipient has no run page, no badge, no event log. As prose, an
 `accepted` report and a `needs_human_review` report shipped with blocking defects outstanding are
@@ -815,17 +889,17 @@ report is unaffected by the record being added elsewhere. It is a *route*, not a
 next to `Download .md` it advertised what reads like the same file, differing only by the review
 record — the one thing this decision exists to keep attached — so the link was removed and the
 route left in place for the tooling that wants bytes. All three export surfaces are offered from
-`GET /runs/<id>/report`, the single page that renders a report (D35).
+`GET /runs/<id>/report`, the single page that renders a report (D-id-as-credential).
 
 **Why these three and not a share link.** A hosted link is the obvious answer and the wrong one
 here: it needs public exposure and an account for the recipient, which is well past the trusted-header
-identity D32 gives a handful of invited people, and past the posture D22 and the README take on.
+identity D-identity-header gives a handful of invited people, and past the posture D-run-date-grounding and the README take on.
 Files need neither. PDF is generated by the browser rather
 than by a server-side engine — the alternative costs a large dependency to reproduce a rendering
 path every reader already has, and the print stylesheet is the same stylesheet as the screen, so
 the printed page cannot drift from the page it was printed from.
 
-> Superseded in part by **D35**, which serves every `GET` under `/runs/` without an identity, so a
+> Superseded in part by **D-id-as-credential**, which serves every `GET` under `/runs/` without an identity, so a
 > run page *is* now a share link that needs no account for the recipient. The export files stay for
 > the reasons above — the review record travels attached, PDF needs no server-side engine, and a
 > file reaches a recipient who cannot reach the host or outlives the retention sweep — but a link is
@@ -841,7 +915,7 @@ trustworthy.
 **Three states, not two: absent, unreadable, known.** A missing `final.json` means the controller
 never reached a verdict. An *unreadable* one means a verdict may exist and cannot be recovered —
 a different fact, and reading it as the first would make an export state `aborted`, a terminal
-status no rule produced (the failure D12/RA-012 keeps `abandoned` out of `final.json` for). So
+status no rule produced (the failure D-evidence-bearing-fields/RA-012 keeps `abandoned` out of `final.json` for). So
 `store.load_final` raises `CorruptRun` rather than returning `None`, `Registry.final_strict` asks
 that question where `Registry.final` stays lenient for the pages that already depend on it, and
 the export routes **refuse** with 409 rather than shipping a file whose verdict line is invented.
@@ -871,7 +945,9 @@ the run page already showed, but it now leaves the host. A `purge --content-only
 `final.md`, so exporting is the thing that outlives retention; the CLI says so rather than
 reporting a corrupt run.
 
-## D31 — decision numbers are checked for collision at the gate, not renamed after merge
+## D-decision-gate — decision numbers are checked for collision at the gate, not renamed after merge
+
+*(Superseded by D-decision-slugs: the offline, secret-free duplicate gate survives; authoring-time numeric allocation and the "not renamed after merge" stance do not.)*
 
 **The problem.** A decision number (`## D<n>`) is allocated by whoever writes the PR, against
 the highest number on main at authoring time. The number is not just prose: it appears in
@@ -879,7 +955,7 @@ the highest number on main at authoring time. The number is not just prose: it a
 allocated without a lock. Two PRs open at once each pick the same next-free number and collide
 when both merge; worse, when a subagent notices the clash and *independently* renumbers, both
 land on the same replacement. This happened three times, most visibly with #54 and #56 both
-claiming D30 (issue #71). Every collision costs a repo-wide rename.
+claiming D-verdict-attached (issue #71). Every collision costs a repo-wide rename.
 
 **The decision.** Keep authoring-time allocation — it is simple, and the number wants to be
 chosen while the decision is being written, not minted by machinery at merge — but refuse the
@@ -919,7 +995,7 @@ open PRs pick the same number, one simply moves up and leaves a hole until the o
 reader who finds a missing `D<n>` in this file is looking at a number allocated to a PR still
 in flight, not at a deleted decision — decisions are never deleted, only superseded in place.
 
-## D32 — the interface has users: a trusted identity header, and runs that belong to someone
+## D-identity-header — the interface has users: a trusted identity header, and runs that belong to someone
 
 Every prior version of this document says there is no authentication and that Tailscale ACLs are
 the access control. That was true and deliberate for a single operator. Opening the interface to
@@ -928,7 +1004,7 @@ app shares one index onto everyone's questions, seed material and audit trails.
 
 **Decision.** Identity comes from a request header set by whatever fronts the app —
 `Cf-Access-Authenticated-User-Email` from Cloudflare Access, or the `Tailscale-User-*` headers
-D21 already read — and every route but `/healthz` refuses a request that carries none. Runs
+D-bounded-submission already read — and every route but `/healthz` refuses a request that carries none. Runs
 record their submitter in `owner.txt`. The index is owner-scoped.
 
 **The header is trusted, not verified — and that is the accepted risk.** Cloudflare Access also
@@ -948,7 +1024,7 @@ operator reaches the app by both doors, so the same person must resolve to one i
 way — every source is lower-cased, and a value that is blank, over 320 characters, or carries
 control characters is treated as absent rather than truncated into an ownership key its own
 submitter could never match. Only `Tailscale-User-Login` is read; `Tailscale-User-Name` was
-fine as D21's rate-limit key, where any *stable* string worked, but an ownership key must be
+fine as D-bounded-submission's rate-limit key, where any *stable* string worked, but an ownership key must be
 the *same* string the other door produces, and a display name is a different namespace from an
 address. What normalization cannot fix is a tailnet whose identity provider reports a different
 address than the Access policy lists — that is two people as far as this system can tell, and
@@ -959,7 +1035,7 @@ the top of each mutating handler, and that idiom is right for CSRF — it is a p
 specific routes. Authentication is a property of the app, and the failure mode of an opt-in
 check is a future route that forgets it. The middleware is the only fail-closed shape.
 
-**`/healthz` stays the only exemption, including for D27's app shell.** The manifest, service
+**`/healthz` stays the only exemption, including for D-installable-pwa's app shell.** The manifest, service
 worker, offline page and icons are static files that hold nothing private, so exempting them
 would have been defensible — and it is still declined, because an exemption list is a thing that
 grows and every future entry is argued against a precedent rather than against this decision. The
@@ -970,7 +1046,7 @@ cookie and is bounced at the edge — where an app-level exemption could not hav
 and the only symptom is that the app quietly stops being installable. The container smoke test
 asserts both halves: `/` with no header is a 403, and the shell is there once a header is set.
 
-> Superseded in part by **D35**, which serves every `GET` under `/runs/` without an identity. The
+> Superseded in part by **D-id-as-credential**, which serves every `GET` under `/runs/` without an identity. The
 > reasoning above is why that is a method-scoped rule with a route-table test rather than a second
 > entry in `_UNAUTHENTICATED_PATHS` — which still holds `/healthz` alone. The app shell stays gated
 > exactly as argued here.
@@ -986,7 +1062,7 @@ someone a report, with export/publish to follow. Resume is the one exception: re
 nothing, but resuming spends the owner's tokens for another 10–25 minutes, so it stays with the
 person who started it.
 
-> **D35** kept this and dropped the "signed in": holding the id is the whole credential. Resume
+> **D-id-as-credential** kept this and dropped the "signed in": holding the id is the whole credential. Resume
 > stays owner-only but loses its button, since a page served without an identity cannot tell an
 > owner from a stranger.
 
@@ -999,7 +1075,7 @@ interrupted run is work already owed and whether anyone can currently *see* it h
 whether it should finish. `owner.txt` sits outside `CONTENT_DIRS` so that a retention sweep
 cannot silently retire a run from its owner's index.
 
-**D21's rate limiter is unchanged in mechanism and stronger in effect.** Its key was already the
+**D-bounded-submission's rate limiter is unchanged in mechanism and stronger in effect.** Its key was already the
 identity header; the difference is that there is no longer a shared `global` bucket to spill
 into, because an unauthenticated request never reaches the queue. The CSRF guard also matters
 more than it did: Access sets a `CF_Authorization` cookie, so a cross-site form POST would now
@@ -1014,9 +1090,9 @@ can make the server fetch a URL, but not what the host can reach, so the egress 
 
 Deployment is documented in [authentication.md](./authentication.md).
 
-## D33 — refine prompts are auditioned with fixtures, and scope narrowing is a graded violation
+## D-refine-audition — refine prompts are auditioned with fixtures, and scope narrowing is a graded violation
 
-D26 shipped its guardrails in two layers: three enforced mechanically, five as prompt policy
+D-question-refinement shipped its guardrails in two layers: three enforced mechanically, five as prompt policy
 whose adherence was "tested statistically with fixtures" — except no fixtures existed, and the
 known-gaps section of [question-refinement.md](./question-refinement.md) said so. The gap
 stopped being hypothetical in production: "Is fluoride in tap water a net positive for public
@@ -1057,7 +1133,7 @@ rather than single shots, and anything speculative belongs in `tier: subtle`, wh
 gates.
 
 **The gating asymmetry is inverted from the critic audition, deliberately.** For a critic,
-silence is the measured failure; for refinement, silence is the designed default (D26), so a
+silence is the measured failure; for refinement, silence is the designed default (D-question-refinement), so a
 low fire rate only warns while an obvious-tier violation gates. On `tier: obvious` fixtures the
 tolerance is zero — the fluoride fixture is obvious precisely because it is the pinned
 regression, and a model that narrows even once when silence was freely available is doing the
@@ -1075,12 +1151,12 @@ chip-suggester's verdict would invert the feature's own doctrine. Under `auditio
 `unfit` refine verdict is a loud warning at service start and in `ra doctor` — never a refusal.
 Auto-disabling refinement on an `unfit` verdict was rejected: config-behavior coupling where a
 stale cache file can silently turn a feature off is the same shape as the inert
-`audition.enabled` flag D20 deleted.
+`audition.enabled` flag D-critic-audition deleted.
 
 **The mirror-pair skeleton exists, and it gates nothing.** The corpus carries one ideologically
 mirrored pair (`pair: qbq-01`) for `question_behind_the_question`, skipped under the default
 transform set and runnable via `ra audition-refine --transforms`. The harness reports the
-pair's fire-rate asymmetry as a diagnostic number — the measurement D24 deferred and D26 made
+pair's fire-rate asymmetry as a diagnostic number — the measurement D-social-bias deferred and D-question-refinement made
 the condition for enabling that transform — but the enablement decision itself stays a human
 one; no threshold on the asymmetry is wired into any verdict.
 
@@ -1090,9 +1166,9 @@ whole-word rule for short terms, which is deliberately dumb and will need corpus
 grows; and the harness measures the refine *model*, not the client-side JS, whose gaps remain
 listed in question-refinement.md.
 
-## D34 — the base-branch sync runs even when the panel was guarded off, and stays non-agentic when it does
+## D-unguarded-sync — the base-branch sync runs even when the panel was guarded off, and stays non-agentic when it does
 
-**The problem.** The base-branch sync D28 built to keep agent-authored PRs mergeable was
+**The problem.** The base-branch sync D-fixer-merges-not-rebases built to keep agent-authored PRs mergeable was
 unreachable in a family of cases it exists for. `fix` was gated on `record-cycle` succeeding, and
 `record-cycle` only writes when at least one reviewer's guard cleared. Every reviewer's guard
 requires a completed, successful `PR Validation Required` check on the reviewed SHA. So whenever
@@ -1159,11 +1235,11 @@ unvalidated tree driving a credentialed agent, which is a worse trade than a hum
 What it does fix is the strictly larger non-conflicting case: any behind-the-base PR whose panel was
 guarded off — validation red, the branch moved mid-run, an untrusted author — now gets its sync,
 becomes mergeable, earns its `pull_request` event, gets validated, and is reachable by its own panel
-like every other D28 sync. A conflicted PR at least now fails visibly, with `merge_state=blocked`
+like every other D-fixer-merges-not-rebases sync. A conflicted PR at least now fails visibly, with `merge_state=blocked`
 and the conflicting paths in the run log, instead of silently doing nothing.
 
 **The sync-only successor is the one SHA the fixer does not claim.** The second thing review caught
-was a contradiction between this decision and D28. Normally the fixer claims `review/pipeline` on
+was a contradiction between this decision and D-fixer-merges-not-rebases. Normally the fixer claims `review/pipeline` on
 the SHA it pushes so that dedup swallows the `synchronize` event and no second panel re-reads the
 fix — licensed by "the pre-fix panel plus the fixer's own gates *are* the review". A sync-only pass
 has no pre-fix panel to point at; it runs because every guard refused and nothing was read. Claiming
@@ -1218,7 +1294,7 @@ different place.
 
 **Invariants.** No blocker-fixing code lands unreviewed: the sync-only path pushes a clean merge and
 nothing else — no blocker fix rides it, so there is no unreviewed *fix* to land. The merge itself is
-reviewable, on the same "reachable, not guaranteed" terms as any D28 sync (above); what makes it safe
+reviewable, on the same "reachable, not guaranteed" terms as any D-fixer-merges-not-rebases sync (above); what makes it safe
 is that its content is the base branch, already reviewed on its way to main, plus a PR-side delta of
 zero. Author
 exclusion, the blind orchestrator, fail-closed lenses, severity floors, controller termination, and
@@ -1229,18 +1305,18 @@ contents to a generator no longer exists. The judge still fails closed on the sy
 empty reviewer set (pre-existing behaviour when guards refuse), publishing a NO-GO on the pre-sync
 SHA that the mergeable successor supersedes.
 
-## D35 — reading a run is public; holding the id is the credential
+## D-id-as-credential — reading a run is public; holding the id is the credential
 
-D32 made every route but `/healthz` refuse a caller with no identity, which is the right default:
+D-identity-header made every route but `/healthz` refuse a caller with no identity, which is the right default:
 the failure mode of an opt-in check is a new route that forgets it, and seed material, questions
 and audit trails are exactly what must not leak. But it also closed the one thing the interface
-most wants to do — hand a finished report to someone who is not invited. Under D32 sharing works
+most wants to do — hand a finished report to someone who is not invited. Under D-identity-header sharing works
 only *between signed-in callers* (reads are share-by-id, not owner-scoped); a link sent to anyone
 outside the Access policy 403s at the app.
 
 **Decision.** Every `GET` under `/runs/` is served without an identity. Every write stays gated
-exactly as D32 left it. Holding the run id *is* the credential for reading that run — which is
-what D32 already said, minus the sign-in.
+exactly as D-identity-header left it. Holding the run id *is* the credential for reading that run — which is
+what D-identity-header already said, minus the sign-in.
 
 **Why the line is read/write and not one filename.** The first shape of this change made a single
 route public, `GET /runs/<id>/export.html`, on the argument that the export is the safest possible
@@ -1269,7 +1345,7 @@ fails when the set changes, so widening the public surface is a deliberate edit 
 update, not a side effect of adding a handler.
 
 **An owner-less run stays a 404, anonymously as much as before.** `_require` 404s a run with no
-owner (D32) and every route under `/runs/` passes through it, so this shares nothing that was
+owner (D-identity-header) and every route under `/runs/` passes through it, so this shares nothing that was
 unshareable: legacy and `ra run`-without-`--owner` runs remain served to nobody. `viewer` may now
 be `None` on these handlers, and none of them scope a read by it — the identity is still resolved
 when a header happens to be present, because the same pages are reachable through the gated door
@@ -1282,7 +1358,7 @@ middleware allows. `RA_ROOT_PATH` keeps the gated surface — the index, form ac
 `RA_PUBLIC_ROOT_PATH` carries the reader-facing surface — the run page, everything linked from it,
 the SSE stream, and the `303` a submission lands on. Setting `RA_PUBLIC_ROOT_PATH=/` in production
 puts every run URL at the origin root. Unset, it falls back to `RA_ROOT_PATH`, so a single-door
-deployment — dev, the tailnet — emits byte-identical URLs to before (D29 is unchanged; this adds a
+deployment — dev, the tailnet — emits byte-identical URLs to before (D-base-path is unchanged; this adds a
 second base, it does not alter how either is joined).
 
 **One page renders the report, and the run page points at it.** Making `/runs/<id>` public solved
@@ -1298,7 +1374,7 @@ page that gets shared, and a verdict a recipient cannot check is not much of a c
 
 **A status is a marker until it is labelled.** `exhausted unresolved` as a bare badge is a word in
 a vocabulary the recipient of a shared link has never seen. Both pages now show `Run status`, the
-badge, and the `STATUS_MEANING` sentence — the same words the export carries (D30), from the same
+badge, and the `STATUS_MEANING` sentence — the same words the export carries (D-verdict-attached), from the same
 table, so the page and the file explain the verdict identically. The label is print-hidden along
 with the badge; on paper the print header already states it.
 
@@ -1338,7 +1414,7 @@ on `not is_live` alone: it previously also required a `final.json`, which meant 
 *without* one — a crash, or `abandoned` — polled forever, and those are exactly the states the page
 most needs to repaint into.
 
-**The forgery caveat is the same one D32 already carries, no wider.** The tailnet path lets any peer
+**The forgery caveat is the same one D-identity-header already carries, no wider.** The tailnet path lets any peer
 set the identity header and read or submit as anyone; that is the accepted risk whose fix is the
 deferred JWT check below. This decision removes the identity *requirement* for reads that every
 signed-in caller could already perform by holding the id, so the set of things an anonymous tailnet
@@ -1348,13 +1424,13 @@ peer can reach does not grow by anything they could not reach by claiming an ide
 model's context and downstream of every run. Author exclusion, the blind orchestrator
 (`OrchestratorView`), fail-closed lenses, severity-floor clamping, controller termination and the
 untrusted-text boundary all live in the Python review core and the convergence controller, none of
-which this changes. Showing a report to an anonymous human is the same act D32 already sanctioned
+which this changes. Showing a report to an anonymous human is the same act D-identity-header already sanctioned
 for a signed-in one; blindness is about what a *model* may read, and this moves no data toward any
 model.
 
 Deployment and the route table are documented in [authentication.md](./authentication.md).
 
-## D36 — a hung author-resume is contained at the container boundary, not by `continue-on-error`
+## D-resume-timeout — a hung author-resume is contained at the container boundary, not by `continue-on-error`
 
 **The problem.** The fixer runs in two modes (docs/ci-pipeline.md): `author-resume`, which resumes
 the agent that wrote the PR, and `cold`, a fresh agent. `author-resume` was designed as best-effort —
@@ -1418,7 +1494,7 @@ boundary all live in the Python core, and this is CI gating in `run-in-container
 main's schema, `input_sha`/`cycle`/`mode` match, ruff, marker and race gates) are unchanged, so a cold
 fix produced by the now-reachable fallback clears exactly the same bar it always had to.
 
-## D37 — a `quality` CI reviewer guards the design's evidence base, which is itself dated and refreshable
+## D-quality-reviewer — a `quality` CI reviewer guards the design's evidence base, which is itself dated and refreshable
 
 **The problem.** The `invariant` reviewer audits conformance: code moving against the current
 spec, or either side moving alone (its row 12). A PR that coherently updates code, the normative
@@ -1461,9 +1537,9 @@ the prompt-ranges test; `quality-principles.md` added to `is_spec_critical`, the
 the DESIGN.md document map. Judge, aggregator, and fixer are untouched — they treat role names as
 opaque strings, and needing to change them would have been a design smell.
 
-## D38 — a definitive not-found is `fabricated_citation`, settled mechanically; every other failed fetch is not
+## D-notfound-fabrication — a definitive not-found is `fabricated_citation`, settled mechanically; every other failed fetch is not
 
-**The problem.** Source verification (D18) fetches the pages a report cites and hands them to the
+**The problem.** Source verification (D-source-verification) fetches the pages a report cites and hands them to the
 evidence lens so `fabricated_citation` can mean *the URL does not resolve* rather than *implausible
 on its face* (the convergence table). But the prompt rendered **every** failed fetch identically —
 `COULD NOT FETCH: <error>` — and then told the critic, correctly for a 403/timeout/paywall,
@@ -1508,12 +1584,12 @@ status in the prompt and let the critic raise it. Rejected as the primary route 
 leave to a critic model choosing to make it, when the fetch already proves it. The not-found
 escalation is therefore the pipeline's job, not the model's — the critic still judges
 misrepresentation and on-its-face plausibility and must not double-raise on a fetch failure.
-*(At D38 this was expressed as "the critic prompt is left unchanged: 'never raise a defect on the
+*(At D-notfound-fabrication this was expressed as "the critic prompt is left unchanged: 'never raise a defect on the
 basis of a failed fetch' stays correct." PR #96 reconciled the wording: because triage now mints the
 finding, the evidence-lens prompt stops sharpening `fabricated_citation` toward the critic at all —
 inviting the critic to raise it as well would double-report one defect, both copies at the blocking
 floor — and instead tells the critic a not-found has already been recorded mechanically and must not
-be raised again. The safety property D38 established, that mechanical minting never depends on a
+be raised again. The safety property D-notfound-fabrication established, that mechanical minting never depends on a
 critic electing to act, is unchanged and is pinned by
 `test_a_not_found_source_is_not_offered_to_the_critic_to_raise_again`; `misrepresented_source` still
 sharpens, and only when a source's body actually arrived.)*
@@ -1521,7 +1597,7 @@ sharpens, and only when a source's body actually arrived.)*
 **Spec.** `docs/convergence.md` no longer contradicts itself: the not-found row of the verification
 table is now explained as mechanical, and the "a failed fetch is never evidence of fabrication"
 paragraph is scoped to the failure classes it was written for — the `run-75eb136b9bfb`
-future-dated-citation failure mode it guards against (a *judgement* about date plausibility, D22) is
+future-dated-citation failure mode it guards against (a *judgement* about date plausibility, D-run-date-grounding) is
 untouched and must not return. The RA-019 test matrix row is updated and populated: 404/410 →
 mechanical blocking finding; 403/timeout/unreadable/empty → no defect (each pinned); the
 twelve-of-twelve-404 regression asserts the evidence lens does not come back clean.
@@ -1531,9 +1607,9 @@ exclusion are all preserved: the mechanical finding is a normal `fabricated_cita
 existing floor, its text reaches only the writer-facing `Defect` and the audit store (never
 `OrchestratorView`, which stays counts-only), and it never touches who may critique what.
 
-## D39 — a citation's *existence* is verifiable for free; its body usually is not, and the two must never be confused
+## D-existence-vs-body — a citation's *existence* is verifiable for free; its body usually is not, and the two must never be confused
 
-**The problem.** D18 fetches the URLs a report cites so the evidence lens can check them, and D38
+**The problem.** D-source-verification fetches the URLs a report cites so the evidence lens can check them, and D-notfound-fabrication
 mints `fabricated_citation` mechanically when one of those fetches returns a definitive not-found.
 Both are sound, and both share a blind spot: **a direct fetch can fail for reasons that have
 nothing to do with whether the source is real.** A paywalled journal or a newspaper that refuses an
@@ -1546,7 +1622,7 @@ URL 404s) and weakest exactly where a source is refused rather than absent.
 ways of faking one are all off the table. This system does not spoof a browser user agent to defeat
 a bot wall, does not solve CAPTCHAs, does not launder paywalled text through archive.org, and does
 not replay a cookie jar or an institutional credential to impersonate a subscriber. `fetch.py` has
-carried the reason since D18 — *"pretending to be a browser to get around that would be the wrong
+carried the reason since D-source-verification — *"pretending to be a browser to get around that would be the wrong
 kind of clever"* — and that comment is doctrine, not decoration: a system whose whole claim is that
 its citations are checkable cannot obtain them by circumventing the access controls of the people
 who published them. Where a body is not lawfully readable, the honest answer is to say so.
@@ -1565,7 +1641,7 @@ not make the claim. So `misrepresented_source` still sharpens only when some sou
 actually arrived, `prompts.fetched_sources_block` gains a third entry shape that announces
 existence before anything else and labels an abstract as explicitly not the full text, and the
 rules list forbids raising `misrepresented_source` against a source shown only as metadata.
-`fabricated_citation` is likewise not sharpened toward the critic — D38 mints it mechanically, and
+`fabricated_citation` is likewise not sharpened toward the critic — D-notfound-fabrication mints it mechanically, and
 a second copy would double-report one defect at its blocking floor.
 
 **Decision.** A new `resolve/` package (a peer of `web/`) runs a two-rung ladder, and only when a
@@ -1592,7 +1668,7 @@ fail-closed startup validation) that this change does not take on.
 `fetch` does **not** import `resolve` — the tiers need `search.QueryBudget`, which sits downstream
 of `fetch`, so the dependency would close a cycle. The resolver is built in `graph._build_resolver`
 and injected into `SourceFetcher`, exactly as `_build_searcher` builds the searcher: network
-clients are assembled at startup, so the graph performs no I/O and the suite stays offline (D24).
+clients are assembled at startup, so the graph performs no I/O and the suite stays offline (D-seed-conversion).
 
 **The new outcomes, and how conservative each is.** `METADATA_ONLY` means existence confirmed and
 no body. `PAYWALLED` requires *both* a registry corroborating existence *and* a direct fetch that
@@ -1600,11 +1676,11 @@ was refused — it is never guessed from a status code, because HTTP 402 is vani
 real paywall usually answers 200 with a teaser. `BUDGET_EXHAUSTED` says a tier that could have
 answered was out of per-run calls, so an operator does not read a column of `blocked` and blame the
 sites; it deliberately never overwrites `NOT_FOUND`, since a run that exhausted its budget at
-source five would otherwise silently stop reporting D38's finding for sources six through twelve —
+source five would otherwise silently stop reporting D-notfound-fabrication's finding for sources six through twelve —
 turning a tier on must never weaken a defect the pipeline raises without it.
 
 The one path that can *raise* a defect is gated hardest. An identifier no registry has heard of is
-`NOT_FOUND`, which D38 mints as a blocking `fabricated_citation`, so it requires all of: a
+`NOT_FOUND`, which D-notfound-fabrication mints as a blocking `fabricated_citation`, so it requires all of: a
 confidently-extracted identifier (a mangled one is an identifier no registry holds, which is why
 `identifiers.py` prefers to return nothing); a denial from **every consulted provider that is
 authoritative for that identifier kind** (Europe PMC answers DOI queries but is authoritative only
@@ -1671,7 +1747,7 @@ not regressed to free text.
 every private / loopback / link-local / tailnet destination and then `http_access allow all`, with
 an explicit note that there is deliberately no domain allowlist because arbitrary public fetching is
 the feature. These five fixed first-party hosts therefore need no new rule, and they are
-categorically *narrower* than what D18 already permits: model-chosen URLs. The bounds that do apply
+categorically *narrower* than what D-source-verification already permits: model-chosen URLs. The bounds that do apply
 are the ones already in `fetch.http_get` — timeout, byte cap, http(s)-only opener — plus a redirect
 cap of zero for provider calls specifically, on `search.py`'s reasoning that an endpoint which is a
 constant has no business being redirectable when its querystring carries something personal.
@@ -1682,30 +1758,15 @@ correct, and it does not show the report characterises it fairly. That remains t
 spot RA-011 names, now materially smaller: the class of citation that cannot be checked at all has
 shrunk from "everything paywalled" to "everything paywalled and carrying no identifier".
 
-## Open items for a future round
+## D-paid-tier-page — the paid tiers render a page, and never disguise who is asking for it
 
-- Whether `misrepresented_source` can be meaningfully checked without fetching the source
-  (v1 only checks on-its-face support); a later evidence layer (RA-011) would strengthen this.
-- Calibration of `K` (plateau window), the hard cap, and defect-score weights against real runs.
-- Verifying `Cf-Access-Jwt-Assertion` against the team's JWKS with an `aud` check, replacing the
-  trusted email header (D32). The prerequisite for exposing the service beyond a small invited
-  group, or for closing the direct-to-origin forgery path the tailnet posture leaves open.
-- Detecting an *unresumable* author session before spending a resume attempt on it (D36, #85
-  defect 3). `validate` proves only that a non-empty transcript exists; it cannot tell a session
-  `claude --continue` loads from one it wedges on, and there is no cross-run memory on the
-  ephemeral runners to record that a given `run-id` has already hung. A durable signal (a marker
-  committed to the PR, or a per-`run-id` "hung" note surviving between runs) would let the fixer
-  skip straight to cold instead of re-paying the bounded resume timeout each cycle.
-
-## D40 — the paid tiers render a page, and never disguise who is asking for it
-
-**The problem.** D39 made a citation's *existence* verifiable for free, which stops a paywalled
+**The problem.** D-existence-vs-body made a citation's *existence* verifiable for free, which stops a paywalled
 paper looking like a fabricated one. It did nothing for the other half: a body that never arrives
 because the page needs JavaScript, or because a bot wall refuses an unknown HTTP client. Those are
 not paywalls and they are not fabrications — they are a client capability gap, and the honest fix is
 a better client.
 
-**The decision.** Two more rungs on D39's ladder, both off by default and both fail-closed at
+**The decision.** Two more rungs on D-existence-vs-body's ladder, both off by default and both fail-closed at
 startup. `sources.extraction` sends the cited URL to a rendering service (Firecrawl is the one
 reference implementation; the registry is open) and takes back markdown. `sources.delivery` is a
 config shape and a registry entry with **no provider behind it**.
@@ -1716,7 +1777,7 @@ residential IP rotation, fingerprint randomisation. On the provider integrated h
 second is a `proxy` mode, and `resolve/extraction.py` pins the request to `proxy: "basic"` while
 naming `"stealth"` and `"auto"` in `FORBIDDEN_PROXY_MODES` as values it must never send — `"auto"`
 because it starts basic and escalates into stealth silently when a site refuses. That is the
-industrial form of the browser impersonation `fetch.py` has refused since D18 and D39 records as
+industrial form of the browser impersonation `fetch.py` has refused since D-source-verification and D-existence-vs-body records as
 doctrine, bought by the page instead of coded by hand. **Rendering a page is not disguising who is
 asking for it, and only the first is in scope.**
 
@@ -1748,9 +1809,9 @@ fix for a news citation and still runs after the free rungs, because a registry 
 having even on a source whose body later arrives: it is what lets a critic check the *title* the
 report attributes rather than only its prose. Extraction is skipped entirely against a definitive
 not-found — there is nothing to render at a URL the server says is not there, and a success against
-a soft-404 landing page would overwrite D38's mechanical `fabricated_citation`.
+a soft-404 landing page would overwrite D-notfound-fabrication's mechanical `fabricated_citation`.
 
-**A rendered body may settle a dispute; a mirror may not.** D39 refuses adjudication on anything
+**A rendered body may settle a dispute; a mirror may not.** D-existence-vs-body refuses adjudication on anything
 carrying `body_source_url`, because an open-access preprint is a *different document* from the
 version of record. A rendered page is the cited URL itself read by a better client, so it carries no
 such marker and stays usable. That distinction is the reason `ResolutionTier.EXTRACTION` exists
@@ -1758,13 +1819,13 @@ separately from `OPEN_ACCESS` rather than both being "we got the body somehow".
 
 **Credentials.** `FIRECRAWL_API_KEY` and `CORE_API_KEY`, resolved through `search.resolve_token` —
 environment first, gitignored file second — and both passed into the container explicitly in
-`compose.yaml`. A tier enabled without its key refuses to start, unlike D39's contact email, which
+`compose.yaml`. A tier enabled without its key refuses to start, unlike D-existence-vs-body's contact email, which
 is a courtesy and only warns: a keyed provider with no key makes no successful call ever, so
 starting would spend the tier's whole budget on 401s and report them as coverage. An enabled tier
 naming no provider is fatal for the same reason a default would be wrong — a paid call must never go
 to a vendor nobody chose.
 
-CORE joins the open-access tier here rather than in D39 because it is keyed, and inherits this
+CORE joins the open-access tier here rather than in D-existence-vs-body because it is keyed, and inherits this
 fail-closed posture for that reason alone. It is deliberately absent from the default provider list,
 so that enabling open access does not silently become "and also supply a CORE key or fail to boot".
 
@@ -1788,7 +1849,7 @@ trail while their request URLs, which carry the key, are never logged (RA-016); 
 still returns only `True` or `None`; and no tier can raise a defect the pipeline would not otherwise
 raise, only fail to suppress one.
 
-## D41 — a defect of absence anchors its `claim_span` to text that is present
+## D-absence-anchor — a defect of absence anchors its `claim_span` to text that is present
 
 **The problem.** `triage.validate_issue` requires `claim_span` to be a verbatim quote from the
 paragraph the critic cited — the anchor that keeps a critic's findings to words the report already
@@ -1859,11 +1920,11 @@ is the intended behavior — the hash exists because editing a lens prompt chang
 With the shipped `audition.enforce: false` a stale cache warns rather than failing startup.
 
 **Invariants.** Untouched. Untrusted text still never reaches a generator as instruction: spans stay
-verbatim-anchored and validated, defects still cross to the writer only as fenced data (RA-010/D12),
+verbatim-anchored and validated, defects still cross to the writer only as fenced data (RA-010/D-evidence-bearing-fields),
 the fail-closed lens contract (RB-007) is unchanged, severity floors are not involved, and the
 controller's inputs and rule ordering are not touched.
 
-## D42 — a transient provider failure costs minutes, never the run
+## D-provider-retry — a transient provider failure costs minutes, never the run
 
 **The finding.** A single flaky provider response — an empty completion, a transient error, or a
 tool call arriving where prose was due — could abort a whole run as
@@ -1948,7 +2009,7 @@ configuration rather than application code: silent fallback routing on the LiteL
 cost of a burnt lens attempt, and DeepSeek tool-call syntax arriving unparsed as message content.
 Both are written up in `docs/deployment-profile.md`.
 
-## D43 — a run that stops says so, on a device that was not watching
+## D-stop-notification — a run that stops says so, on a device that was not watching
 
 **The problem.** A run is 10–25 minutes and the index makes it easy to start several. The only
 mechanism that ever said a run had finished was `GET /runs/<id>/stream`, which pushes progress into
@@ -1957,7 +2018,7 @@ background the installed app on a phone and iOS suspends it, so nothing *can*. T
 affordance — queue several questions and go and do something else — was the one it could not
 support, and the workaround was to come back and poll the index by hand.
 
-**Decision.** Web Push, delivered through the service worker D27 already ships, sent from the
+**Decision.** Web Push, delivered through the service worker D-installable-pwa already ships, sent from the
 worker thread the moment a run stops. Opt-in is per device, one tap, stored against the caller's
 identity. Both a terminal completion and a stop-without-an-answer notify; a shutdown pause does not.
 
@@ -1965,10 +2026,10 @@ identity. Both a terminal completion and a stop-without-an-answer notify; a shut
 `done` handler is thirty lines and no dependency, and it cannot do the job: it requires the page to
 be open and foregrounded, which excludes every case worth notifying about. A suspended iOS PWA runs
 no JavaScript at all. Only a server-sent push reaches a locked phone, and only a service worker can
-receive one — which is why this decision is downstream of D27 rather than independent of it. On iOS
+receive one — which is why this decision is downstream of D-installable-pwa rather than independent of it. On iOS
 push additionally exists *only* for a web app added to the Home Screen
 ([WebKit, 2023](https://webkit.org/blog/13878/web-push-for-web-apps-on-ios-and-ipados/)), so the
-install path D27 built is the literal precondition; without it there is no iPhone notification to
+install path D-installable-pwa built is the literal precondition; without it there is no iPhone notification to
 have.
 
 **The subscription endpoint is attacker-influenced, and that is the security core.** The browser
@@ -1980,17 +2041,17 @@ bare `endswith` test admits `evil-fcm.googleapis.com` and `fcm.googleapis.com.at
 which are pinned as refusals. The check runs at subscribe time **and again before every send**, so
 narrowing the allowlist takes effect on subscriptions already stored rather than only on new ones.
 
-**The routes are top-level, and specifically not under `/runs/`.** D35 opens every `GET` under
+**The routes are top-level, and specifically not under `/runs/`.** D-id-as-credential opens every `GET` under
 `/runs/` to anonymous callers, so that prefix is where reads of a finished run live. Subscribing is
 the opposite: it attaches a device to an identity. `authenticate`'s method guard would refuse a
 `POST` there anyway, but siting a write inside the public read prefix and relying on that guard
-inverts the rule D35 states — reads public, writes gated — into a coincidence. A test enumerates the
+inverts the rule D-id-as-credential states — reads public, writes gated — into a coincidence. A test enumerates the
 route table rather than these two handlers, so a future push route cannot drift into `/runs/`
 either.
 
 **The CSP is unchanged.** Subscribing is not a page fetch: the browser negotiates with the push
 service out of band, and the only page-originated request is a POST to this origin, already covered
-by `connect-src 'self'`. Nothing here needed a new directive, which is worth recording because D27
+by `connect-src 'self'`. Nothing here needed a new directive, which is worth recording because D-installable-pwa
 had to widen the policy and a reader may reasonably expect this to as well.
 
 **The service worker's cache invariant survives by construction.** `push` and `notificationclick`
@@ -2042,7 +2103,7 @@ under the `aes128gcm` content coding to a key pair the user agent binds to the s
 message — Apple, Google, Mozilla or Microsoft — carries ciphertext it cannot
 read. Truncated question text is what tells five concurrent runs apart on a lock screen, and without
 it the notification says only that *something* finished. The deep link uses the reader-facing base
-(D35), so it is the same URL every other run reference in the app emits; a finished run points at
+(D-id-as-credential), so it is the same URL every other run reference in the app emits; a finished run points at
 the report, one that stopped without shipping an answer points at the run page.
 
 **Permission is requested from a click and never on load.** iOS grants the prompt only in response
@@ -2057,10 +2118,74 @@ would show a button that fails, and the standalone check turns that into an inst
 
 **Off by default.** Like every feature needing egress or a secret. With `push.enabled: false` there
 are no routes, no key on disk, and an index byte-identical to a build without any of this — the same
-promise D26 makes for refinement, and asserted the same way.
+promise D-question-refinement makes for refinement, and asserted the same way.
 
 **Invariants.** Untouched. This is entirely downstream of a finished run and moves no new data
 toward any model context: nothing here reaches a critic, a writer or the arbiter. Ownership is read
-from `owner.txt`, the single record D32 established, so an owner-less run notifies nobody rather than
+from `owner.txt`, the single record D-identity-header established, so an owner-less run notifies nobody rather than
 having an identity invented for it. Isolation, the dispute channel, the convergence controller and
 the fail-closed lenses are not touched.
+
+## D-decision-slugs — decisions are identified by a subject slug, not a shared counter
+
+**The problem.** A decision identifier was a number allocated from a single sequence on `main`, so
+choosing one meant knowing what every in-flight PR had chosen. Two PRs open at once reliably picked the
+same next-free number and only found out at merge. It was not rare: `D26`–`D33` all landed on one day,
+and the sequence kept turning over at roughly two a day after. #74 merged `D31` while #75 already carried
+`D31`; #75 renumbered to `D33`, which #76 then merged first, forcing #75 to `D34` — two of one PR's
+review cycles spent on numbering rather than the change under review. Later three consecutive PRs all
+authored `D41` (#102, #104, #106); two renumbered on the way in and neither commit subject was corrected,
+so `main`'s history still misstates which decision two of those merges introduced. Each renumber is a
+push, which resets the review cycle and spends a full panel run — the identifier's cost was paid in the
+one place a rename is most expensive, because the number is echoed into the commit subject, the PR title
+and body, and `config/`, `src/`, `tests/` and docs.
+
+The counter had also failed silently in this very file: four numbers each named **two** different
+decisions — `D18` (open-weight roster *and* source verification), `D20` (redeploy durability *and* critic
+audition), `D21` (proxy-URL override *and* bounded submission), and `D24` (seed conversion *and*
+social-bias categories). The gate could not see it, because it read only `^## D<n>` prose headings and
+never the table rows, so "is this identifier defined twice?" was a question it could not answer for the
+table-form half of the decisions.
+
+**The decision.** Identify each decision by a **slug derived from its subject** (`D-source-verification`),
+coined by the authoring PR. Two concurrent PRs cannot collide, because a slug is chosen from the
+decision's own content, not from a global maximum — neither PR needs to read the other. Ordering moves
+into file position, and the append point is fixed: immediately before `## Open items for a future round`.
+Every existing decision was renamed once, on purpose, and the old→new mapping is published at the top of
+this file so historical citations stay resolvable. The duplicate gate survives but is rebuilt to read
+**both** definition forms, closing the blind spot above; a companion test
+(`tests/test_citation_resolution.py`) asserts that every decision-shaped citation across `docs/`, `src/`,
+`tests/`, `config/` and the reviewer prompts names a slug this file actually defines, so a citation to a
+decision that does not exist now fails CI — a property the numeric scheme never had.
+
+**What D-decision-gate got right, and what changed.** D-decision-gate's premise was that a decision
+identifier "is echoed across `config/`, `src/`, `tests/` and docs — so a collision costs a repo-wide
+rename," and it chose to refuse collisions at an offline, secret-free gate rather than pay that rename.
+The premise was correct and the gate is kept: a duplicate identifier is still refused at the same
+secret-free PR job, now in both surface forms. What changed is the rest. D-decision-gate kept
+authoring-time *numeric* allocation and explicitly declined to rename after merge, judging the rename too
+expensive to pay. This decision pays it once, deliberately, to make the collision impossible by
+construction instead of merely caught after the fact — trading a single bounded rename for the removal of
+a recurring, unbounded one. Its "a gap in the sequence is legal" caveat is now moot: slugs have no
+sequence, so there are no gaps to leave.
+
+**Invariants.** None of the tabulated safety invariants is in reach — author exclusion, the blind
+`OrchestratorView`, fail-closed lenses, severity floors, controller termination and the untrusted-text
+boundary all live in the pipeline core and are untouched. This is repository governance: it constrains
+how a *document* is identified, not what enters any model's context. The rename itself is mechanical —
+each decision's body says exactly what it said before, under its new name.
+
+## Open items for a future round
+
+- Whether `misrepresented_source` can be meaningfully checked without fetching the source
+  (v1 only checks on-its-face support); a later evidence layer (RA-011) would strengthen this.
+- Calibration of `K` (plateau window), the hard cap, and defect-score weights against real runs.
+- Verifying `Cf-Access-Jwt-Assertion` against the team's JWKS with an `aud` check, replacing the
+  trusted email header (D-identity-header). The prerequisite for exposing the service beyond a small invited
+  group, or for closing the direct-to-origin forgery path the tailnet posture leaves open.
+- Detecting an *unresumable* author session before spending a resume attempt on it (D-resume-timeout, #85
+  defect 3). `validate` proves only that a non-empty transcript exists; it cannot tell a session
+  `claude --continue` loads from one it wedges on, and there is no cross-run memory on the
+  ephemeral runners to record that a given `run-id` has already hung. A durable signal (a marker
+  committed to the PR, or a per-`run-id` "hung" note surviving between runs) would let the fixer
+  skip straight to cold instead of re-paying the bounded resume timeout each cycle.

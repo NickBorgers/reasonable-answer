@@ -25,7 +25,7 @@ on:
           Equals reviewed_sha except when the fixer pushed a new commit, in which case
           it is that commit's SHA (see review-pipeline.yml's `finalize` job). Required,
           not defaulted to reviewed_sha here, so a caller cannot forget to wire it and
-          silently stamp the pre-fix SHA (see docs/decisions.md D28).
+          silently stamp the pre-fix SHA (see docs/decisions.md D-fixer-merges-not-rebases).
         required: true
         type: string
       cycle:
@@ -71,7 +71,7 @@ jobs:
       # inspecting it directly, instead of relying on a one-hop walk to its parent.
       #
       # That reasoning is load-bearing, so note where it does not apply: the sync-only
-      # path (D34) suppresses the fixer's claim so its successor CAN earn a panel, and
+      # path (D-unguarded-sync) suppresses the fixer's claim so its successor CAN earn a panel, and
       # a SHA another run will review must not arrive pre-stamped with this run's cycle
       # and verdict. review-pipeline.yml keeps it out by passing the pre-sync SHA as
       # post_fix_sha there, so nothing below ever sees a sync-only successor.

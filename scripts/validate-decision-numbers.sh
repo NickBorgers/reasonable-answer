@@ -1,20 +1,23 @@
 #!/usr/bin/env bash
 #
-# Fails when docs/decisions.md gives the same decision number to two sections.
+# Fails when docs/decisions.md defines the same decision identifier twice.
 #
-# A decision number (`## D<n>`) is allocated by whoever writes the PR, and the number is
-# not just prose: it appears in config/, src/, tests/ and several docs, so a collision
-# costs a repo-wide rename. Two PRs open at once each pick the same next-free number
-# against main and then collide when both merge (issue #71).
+# A decision is identified by a slug derived from its subject (`D-source-verification`),
+# not by a number from a shared counter (D-decision-slugs, which supersedes D-decision-gate).
+# Slugs are collision-free by construction: two concurrently-open PRs cannot pick the same
+# identifier, because each is coined from its own decision's content rather than from the
+# highest number on main. So this gate no longer exists to catch a numbering race — it exists
+# to catch the one thing slugs do not prevent: the *same* slug defined twice.
 #
-# The fix keeps authoring-time allocation but refuses the collision at the gate. On a
-# `pull_request` event GitHub checks out the *merge ref* — the PR already merged into its
-# base branch — so the file this script sees is the file that will exist on main once the
-# PR lands. A duplicate here is therefore a collision that would otherwise reach main, and
-# the required check goes red before it can. Two simultaneously-open PRs that both add
-# D<n> do not collide against each other's unmerged branches; the first to merge advances
-# main, and the second's merge ref then carries two D<n> and fails — which is why branch
-# protection should require branches to be up to date before merging.
+# A decision has two surface forms, and both are definitions:
+#   * a prose section  `## D-<slug> — <title>`
+#   * a top-table row  `| D-<slug> | … |`   (first cell is the slug)
+# The predecessor gate read only `^## D<n>` and never the table rows, so it could not answer
+# "is this defined twice?" for the table half — and four numbers had in fact each named two
+# different decisions there, unseen (D-decision-slugs). This check reads BOTH forms and refuses
+# a slug that appears as a definition more than once across their union. The old-number mapping
+# table at the top of the file is not a definition (its first cell is an old numeric id, not a
+# slug), so it is ignored.
 #
 # Pure and offline: it reads one file and nothing else — no git, no network, no token, no
 # secret — so the tests drive it with fixtures and it fits the secret-free PR gate.
@@ -24,28 +27,34 @@ set -euo pipefail
 FILE="${1:-docs/decisions.md}"
 
 if [[ ! -f "$FILE" ]]; then
-  echo "decision-number check: '$FILE' not found" >&2
+  echo "decision-identifier check: '$FILE' not found" >&2
   exit 2
 fi
 
-# A decision section is `## D<n>` alone at the start of a line. Everything else is a
-# reference, not an allocation, and is ignored: prose mentioning D26, and the D1–D19
-# summary rows in the top table (`| D1 | … |`), are matched by neither the anchor nor
-# the heading level.
-numbers="$(grep -oE '^## D[0-9]+' "$FILE" | grep -oE '[0-9]+' || true)"
+# Definitions in either form. A slug is `D-` followed by lowercase letters, digits and
+# dashes. The prose anchor requires the heading level and a following ` —`; the table anchor
+# requires the slug to be the row's first cell. A bare `D-<slug>` mentioned in prose, or the
+# slug sitting in the *second* column of the mapping table, matches neither.
+slugs="$(
+  {
+    grep -oE '^## D-[a-z0-9-]+ ' "$FILE" || true
+    grep -oE '^\| D-[a-z0-9-]+ \|' "$FILE" || true
+  } | grep -oE 'D-[a-z0-9-]+'
+)"
 
-dupes="$(printf '%s\n' "$numbers" | sed '/^$/d' | sort -n | uniq -d)"
+dupes="$(printf '%s\n' "$slugs" | sed '/^$/d' | sort | uniq -d)"
 
 if [[ -n "$dupes" ]]; then
-  echo "Duplicate decision numbers in $FILE:" >&2
-  while IFS= read -r n; do
-    count="$(grep -cE "^## D${n}([^0-9]|$)" "$FILE")"
-    echo "  D${n} is defined ${count} times" >&2
+  echo "Duplicate decision identifiers in $FILE:" >&2
+  while IFS= read -r s; do
+    prose="$(grep -cE "^## ${s} " "$FILE" || true)"
+    table="$(grep -cE "^\| ${s} \|" "$FILE" || true)"
+    echo "  ${s} is defined $((prose + table)) times (prose: ${prose}, table: ${table})" >&2
   done <<< "$dupes"
   echo >&2
-  echo "Each '## D<n>' must be unique. Renumber the new section to the next free number" >&2
-  echo "(and update its references in config/, src/, tests/ and docs)." >&2
+  echo "Each decision slug must be defined once, in one form. Rename the new section, or" >&2
+  echo "fold a stray table row into the prose section that supersedes it." >&2
   exit 1
 fi
 
-echo "Decision numbers in $FILE are unique."
+echo "Decision identifiers in $FILE are unique."

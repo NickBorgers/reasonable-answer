@@ -1,8 +1,8 @@
-"""The tier ladder: what to try when the cited URL itself yields no body (D39).
+"""The tier ladder: what to try when the cited URL itself yields no body (D-existence-vs-body).
 
-Source verification (D18) fetches the pages a report cites so the evidence lens can check
+Source verification (D-source-verification) fetches the pages a report cites so the evidence lens can check
 them. Most *good* citations fail that fetch — paywalled journals and newspapers refuse
-automated clients as a matter of course — and D38 then leaves them looking identical to
+automated clients as a matter of course — and D-notfound-fabrication then leaves them looking identical to
 citations that could not be checked for any other reason.
 
 The asymmetry this package is built on: **for citation verification you usually do not
@@ -14,7 +14,7 @@ need the paywalled body.** Two questions matter, and they are not equally expens
    non-clever way to get one.
 
 So tier 0 always answers (1); tier 1 tries for (2) where a free copy genuinely exists; and
-tier 2 (D40) pays a rendering service to read the cited URL when this process cannot —
+tier 2 (D-paid-tier-page) pays a rendering service to read the cited URL when this process cannot —
 which buys JavaScript and bot walls, and buys nothing at all against a hard paywall.
 
 Ordered by cost rather than by likelihood. Extraction is the likelier fix for a news
@@ -22,7 +22,8 @@ citation, and still runs last, because a registry answer is worth having even on
 whose body later arrives: it is what lets a critic check the *title* the report attributes
 rather than only its prose.
 
-What this package will **not** do is listed in D39 and D40 and is not negotiable: no
+What this package will **not** do is listed in D-existence-vs-body and D-paid-tier-page
+and is not negotiable: no
 browser-user-agent spoofing, no CAPTCHA solving, no archive.org paywall laundering, no
 cookie-jar credential replay — and, for the rendering tier specifically, no stealth mode,
 which is that same impersonation bought by the page. `fetch.py`'s "the wrong kind of
@@ -193,7 +194,7 @@ class SourceResolver:
             )
 
         if known.exists is False and direct.outcome in _UNESTABLISHED:
-            # The only path in this package that can raise a blocking defect (D38 mints
+            # The only path in this package that can raise a blocking defect (D-notfound-fabrication mints
             # `fabricated_citation` from `unresolvable`), so it is gated twice over: every
             # authoritative registry consulted denied the identifier, AND the direct fetch
             # established nothing either. A refusal or an unreadable 200 keeps its own
@@ -208,7 +209,7 @@ class SourceResolver:
 
         if (known.starved or oa_starved) and direct.outcome is not SourceOutcome.NOT_FOUND:
             # NOT_FOUND is deliberately exempt. Overwriting it here would let a run that
-            # exhausts a tier's budget at source five silently stop reporting D38's
+            # exhausts a tier's budget at source five silently stop reporting D-notfound-fabrication's
             # mechanical finding for sources six through twelve — turning a tier on would
             # weaken a defect the pipeline already raises without it.
             return replace(
@@ -227,7 +228,7 @@ class SourceResolver:
         Tried on every outcome the free ladder could not resolve except `NOT_FOUND`:
         there is nothing for a renderer to render at a URL the server says is not there,
         and spending a paid call to confirm that would also risk a success overwriting
-        D38's mechanical finding on the strength of a soft-404 landing page.
+        D-notfound-fabrication's mechanical finding on the strength of a soft-404 landing page.
         """
         if resolved.outcome is SourceOutcome.NOT_FOUND:
             return resolved
@@ -257,7 +258,7 @@ class SourceResolver:
             outcome=SourceOutcome.FULL_TEXT,
             # No `body_source_url`. This *is* the cited page, read by a client that can
             # run its JavaScript — not a copy from somewhere else. So unlike an
-            # open-access mirror it may settle a dispute (D39's guard in `dispute.py`
+            # open-access mirror it may settle a dispute (D-existence-vs-body's guard in `dispute.py`
             # keys off exactly that field), and saying so here is the whole distinction.
             metadata=resolved.metadata,
             tier=ResolutionTier.EXTRACTION,

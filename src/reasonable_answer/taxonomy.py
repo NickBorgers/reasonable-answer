@@ -59,7 +59,7 @@ SEVERITY_FLOOR: dict[Category, Severity] = {
     Category.CONTRADICTED_CLAIM: Severity.BLOCKING,
     Category.INVALID_INFERENCE: Severity.MAJOR,
     Category.OVERSTATED_CLAIM: Severity.MAJOR,
-    # Deliberately minor (D24): the most judgment-laden bias category; a material
+    # Deliberately minor (D-social-bias): the most judgment-laden bias category; a material
     # floor would let a noisy critic force revisions round after round. A critic
     # that finds pervasive, verdict-carrying framing may propose `major` and the
     # clamp keeps it — escalation is allowed, only downgrades are not (RC-005).

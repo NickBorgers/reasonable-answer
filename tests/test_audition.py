@@ -591,7 +591,7 @@ def test_failed_lens_counts_as_schema_failure_not_as_silence():
 def test_audition_warns_by_default_and_has_no_inert_enabled_flag():
     """Two properties, both load-bearing.
 
-    Enforcement is off by default (D20). And there is no `enabled` flag: it existed,
+    Enforcement is off by default (D-critic-audition). And there is no `enabled` flag: it existed,
     gated nothing — `ra audition` measures, everything else only reads the cache — and
     a config knob that cannot change behaviour reads as a safety control while being
     inert. Re-adding one should mean re-arguing that.

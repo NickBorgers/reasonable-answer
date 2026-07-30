@@ -52,7 +52,7 @@ env:
   # `synchronize` event that push fires is normally suppressed and no second pipeline
   # reviews the fix — the owner's intent is that fixer output reaches main on the
   # pre-fix panel plus the fixer's own gates (schema, lint, marker gate, remote-head
-  # check), without a further cycle. See docs/decisions.md D28.
+  # check), without a further cycle. See docs/decisions.md D-fixer-merges-not-rebases.
   #
   # That means this is now mostly a race-window backstop, not a normal-path loop
   # breaker. A genuine cycle 2 only happens if the claim loses the race against GitHub
@@ -105,9 +105,9 @@ jobs:
           base_sha: ${{ inputs.base_sha }}
           github_token: ${{ secrets.WORKFLOW_PAT }}
 
-      # Whether the reviewed SHA is behind the base branch, i.e. a base-branch sync (D28)
+      # Whether the reviewed SHA is behind the base branch, i.e. a base-branch sync (D-fixer-merges-not-rebases)
       # is needed. This is the one thing that lets `fix` run when every reviewer guard
-      # refused (D34, issue #70).
+      # refused (D-unguarded-sync, issue #70).
       #
       # A reviewer's guard requires a completed `PR Validation Required` on the reviewed
       # SHA. Whenever that check is absent or red while the base has moved underneath the
@@ -118,7 +118,7 @@ jobs:
       # state, but with the panel guarded off the run did nothing. A sync consumes no
       # reviewer findings, so it does not need the reviewers to have run; `fix` keys its
       # sync-only path on this output. That path is non-agentic, so it repairs a
-      # behind-the-base PR but not an already-conflicting one — see D34.
+      # behind-the-base PR but not an already-conflicting one — see D-unguarded-sync.
       #
       # `merge-base --is-ancestor origin/<base> HEAD` is exactly the test the fixer's own
       # sync step uses, so the two agree on when a sync is due. Deliberately not a shallow
@@ -356,7 +356,7 @@ jobs:
       role: quality
       # Codex on purpose: this role deconflicts most heavily with `invariant`
       # (Claude), and the guard on the spec's direction should not share a model
-      # family with the guard on the spec's conformance (QP3, D37).
+      # family with the guard on the spec's conformance (QP3, D-quality-reviewer).
       agent: codex
       pr_number: ${{ inputs.pr_number }}
       reviewed_sha: ${{ inputs.reviewed_sha }}
@@ -422,7 +422,7 @@ jobs:
   # post-push SHA (review-fixer.yml's Push step) specifically so the next pipeline never
   # starts. The owner's intent is that this ONE panel run, plus the fixer's own gates
   # (schema, lint, marker gate, remote-head check), is the whole review. See
-  # docs/decisions.md D28.
+  # docs/decisions.md D-fixer-merges-not-rebases.
   #
   # Skipped on the final permitted cycle. A fix pushed there would land on a SHA that a
   # claim race (see MAX_CYCLES above) could still route to a fresh review this run's own
@@ -441,13 +441,13 @@ jobs:
   #       path, unchanged. The fixer addresses blockers and, if the base moved, syncs in
   #       the same commit.
   #   (b) reviewers did NOT run (`record-cycle` was skipped: every guard refused) but the
-  #       branch is behind the base — the sync-only path (D34, issue #70). A base-branch
+  #       branch is behind the base — the sync-only path (D-unguarded-sync, issue #70). A base-branch
   #       sync consumes no reviewer findings, so it does not need `record-cycle` to have
   #       written a cycle. It is passed `sync_only: true`, which makes the fixer
   #       **non-agentic**: it commits a clean host-side merge and nothing else, and a
   #       merge that conflicts is abandoned rather than handed to the fixer agent. That
   #       restriction is the whole safety argument — see review-fixer.yml's `sync_only`
-  #       input, and D34 for why an unvalidated, unreviewed tree must never reach a
+  #       input, and D-unguarded-sync for why an unvalidated, unreviewed tree must never reach a
   #       credentialed agent on the self-hosted runner.
   #
   #       Path (b) deliberately does NOT require `fix_allowed`. `fix_allowed` bars a
@@ -518,7 +518,7 @@ jobs:
       # e.g. the last permitted cycle — so its outputs.new_sha can be empty even on this
       # success path. Fall back to reviewed_sha in that case, same as a no-op push.
       #
-      # A sync-only push (D34) is deliberately NOT a post-fix SHA either, which is why
+      # A sync-only push (D-unguarded-sync) is deliberately NOT a post-fix SHA either, which is why
       # `record-cycle` is tested here. Everywhere else, finalize stamps review/cycle and
       # review/verdict on the pushed SHA because the fixer's claim guarantees no other run
       # ever will. The sync-only path suppresses that claim precisely so the successor gets

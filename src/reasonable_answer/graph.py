@@ -86,7 +86,7 @@ class State(TypedDict, total=False):
     clean_records: list[dict]
     defects: list[dict]
 
-    # Dispute channel (D25). The registry lives here — checkpointed state — so it
+    # Dispute channel (D-writer-disputes). The registry lives here — checkpointed state — so it
     # survives resume, and a content purge cannot break a live run.
     pending_disputes: list[dict]
     adjudications: list[dict]
@@ -147,7 +147,7 @@ def build_runtime(
     identities = client.resolve_identities(config.roster.all_aliases)
     warnings = validate_roster_health(config, identities)
     # Structural eligibility says a lens *has* a reviewer; this says the reviewer can
-    # actually find a defect (D20). Cache-read only, so it costs nothing and stays put
+    # actually find a defect (D-critic-audition). Cache-read only, so it costs nothing and stays put
     # ahead of the probes below — a roster with an unfit critic should not get as far
     # as spending tokens on structured-output detection.
     audition_mod.enforce_fitness(config.audition, config.roster, identities)
@@ -229,7 +229,7 @@ def _enabled_tiers(config: Config) -> set[str]:
 
 
 def _extraction_call_ceiling(config: Config) -> int:
-    """The configured cap, or the structural one when none is set (D40).
+    """The configured cap, or the structural one when none is set (D-paid-tier-page).
 
     `max_sources * hard_cap` is the most distinct URLs a run could ever cite — every
     citation replaced in every round. Derived rather than written down so that raising
@@ -246,11 +246,11 @@ def _extraction_call_ceiling(config: Config) -> int:
 
 
 def _build_resolver(config: Config, warnings: list[str]):
-    """Construct the resolver ladder (D39), or return None when no tier is on.
+    """Construct the resolver ladder (D-existence-vs-body), or return None when no tier is on.
 
     A sibling of `_build_searcher` and `_pdf_reading_enabled` for the same reason both of
     those live here: network clients are assembled at startup and injected, so the graph
-    itself performs no I/O and the test suite stays offline (D24).
+    itself performs no I/O and the test suite stays offline (D-seed-conversion).
 
     Two failure modes, deliberately graded differently. An unrecognised provider name is
     **fatal**: it silently disables a tier the operator believes they enabled, which is
@@ -509,7 +509,7 @@ def _generate(state: State, rt: Runtime) -> dict:
             "max_tool_rounds": cfg.search.max_tool_rounds,
             # Withdraw the tool the moment its budget is gone. Otherwise the handler
             # keeps answering "budget exhausted" and a determined writer spends every
-            # remaining round asking again instead of writing (D42).
+            # remaining round asking again instead of writing (D-provider-retry).
             "should_offer_tools": lambda: not searcher.budget.exhausted,
         }
 
@@ -519,7 +519,7 @@ def _generate(state: State, rt: Runtime) -> dict:
     # spaced, chance when there is not. On a revision round a two-writer roster leaves
     # exactly one eligible model (author exclusion already removed the other), so
     # bounding these attempts by the pool size made the whole budget 1 and one empty
-    # completion aborted the run (D42). Re-asking a pool member never re-asks the
+    # completion aborted the run (D-provider-retry). Re-asking a pool member never re-asks the
     # previous author: `writer_pool` excluded them before this ran.
     attempts = cfg.budgets.writer_attempts
     alias = ""
@@ -605,7 +605,7 @@ def _generate(state: State, rt: Runtime) -> dict:
 def _elicit_disputes(
     state: State, rt: Runtime, alias: str, revised: str, defects: list[Defect], polish: bool
 ) -> list[dict]:
-    """The dispute-elicitation pass (D25): one separate structured call to the
+    """The dispute-elicitation pass (D-writer-disputes): one separate structured call to the
     writer that just revised. Self-contained entries (full Defect + Dispute) so a
     resume between generate and adjudicate loses nothing when `defects` resets.
 
@@ -631,7 +631,7 @@ def _elicit_disputes(
         # message is built from schema-validation text that echoes the REJECTED INPUT
         # (the writer's dispute grounds and evidence quotes), which is report-derived
         # (private) content; a ModelCallError message can likewise carry model I/O.
-        # events.jsonl is RETAINED by `ra purge --content-only` (D25), so any
+        # events.jsonl is RETAINED by `ra purge --content-only` (D-writer-disputes), so any
         # exception-derived string here would leak artifact text past a content purge.
         rt.store.event("dispute_pass_failed", error_type=type(exc).__name__)
         return []
@@ -659,7 +659,7 @@ def _paragraph_containing(structure, span: str) -> str:
 
 
 def _adjudicate(state: State, rt: Runtime) -> dict:
-    """Rule on the writer's disputes (D25). A passthrough when there are none.
+    """Rule on the writer's disputes (D-writer-disputes). A passthrough when there are none.
 
     Every path that is not an explicit `upheld` leaves the finding standing; only
     upheld records ever suppress anything downstream. This node re-runs cleanly on
@@ -789,7 +789,7 @@ def _failure_reasons(failed: list) -> dict[str, int]:
 
 def _resolution_tiers(sources: list) -> dict[str, int]:
     """Tally which rung of the ladder produced each source — **all** of them, not just
-    the failures (D39).
+    the failures (D-existence-vs-body).
 
     A tier that never fires costs calls and buys nothing, and the failure tally cannot
     show that: a source the open-access tier rescued is a *success* and leaves no trace
@@ -894,7 +894,7 @@ def _critique_one(
     # `fabricated_citation` as a matter of fact, not a critic's judgement — so raise it
     # mechanically here, in the fetch path, rather than trusting a critic model to elect
     # to make the finding. This closes the launder that let a wholly-404 bibliography
-    # clear the evidence lens (issue #92, D38). Attached only to a *completed* review: a
+    # clear the evidence lens (issue #92, D-notfound-fabrication). Attached only to a *completed* review: a
     # failed lens is discarded and re-critiqued (rule 2), and because the fetch is cached
     # the finding is simply re-derived on the next attempt, so nothing is lost.
     if sources and not result.failed:
@@ -966,7 +966,7 @@ def _triage(state: State, rt: Runtime) -> dict:
     results = [LensResult.model_validate(r) for r in state["lens_results"].values()]
     artifact_hash = state["artifact_hash"]
 
-    # Suppression (D25) is applied ONCE, here, before anything is counted — so
+    # Suppression (D-writer-disputes) is applied ONCE, here, before anything is counted — so
     # tally, clean records, defects and the stagnation signature all see the same
     # filtered stream. Only `upheld` adjudications suppress.
     adjudications = [
@@ -1065,7 +1065,7 @@ def _triage(state: State, rt: Runtime) -> dict:
         "stagnation_count": stagnation,
         "scoreboard": scoreboard,
         # Audit-side raiser identities per surviving material issue: consumed only
-        # by arbiter *eligibility* (deterministic code), never by any prompt (D25).
+        # by arbiter *eligibility* (deterministic code), never by any prompt (D-writer-disputes).
         "defect_provenance": triage.defect_provenance(results),
     }
 
@@ -1315,7 +1315,7 @@ def build_graph(rt: Runtime):
     )
     # A dead generator still terminates *through* the controller, so the run gets a
     # recorded rule-1 decision and a normal audit trail rather than a silent exit.
-    # The adjudicate node sits on the one-way generate→critique edge (D25): it
+    # The adjudicate node sits on the one-way generate→critique edge (D-writer-disputes): it
     # introduces no new cycle, and a shutdown between the two nodes resumes here
     # with `pending_disputes` intact.
     graph.add_conditional_edges(

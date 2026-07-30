@@ -14,13 +14,13 @@ concerns the PR did not touch.
 
 The threat model you are defending is unusual, so internalize it before flagging anything:
 
-**The web interface authenticates on a trusted header, not a verified one (D32).** Identity comes
+**The web interface authenticates on a trusted header, not a verified one (D-identity-header).** Identity comes
 from `Cf-Access-Authenticated-User-Email` or the `Tailscale-User-*` headers, resolved in
 `web/identity.py`; every route refuses a request that carries none **except** `/healthz` and the
-`GET`s under `/runs/`, which are deliberately public (D35) — holding a run id is the credential
+`GET`s under `/runs/`, which are deliberately public (D-id-as-credential) — holding a run id is the credential
 for reading that run, and every write still resolves an identity. Runs belong
 to their submitter. The header being trusted rather than JWT-verified — so any peer that can reach
-the port directly can claim to be anyone — is a **documented accepted risk** in D32 and
+the port directly can claim to be anyone — is a **documented accepted risk** in D-identity-header and
 `docs/authentication.md`, with JWKS verification listed as the named follow-up. "Verify the Access
 JWT" and "the header is forgeable" are therefore **not** findings. Underneath it the posture is
 still tailnet-only: `ra serve` defaults to binding `127.0.0.1` and warns when given anything else
@@ -33,7 +33,7 @@ Each is a hard contract. Violations are blocking unless the PR body explicitly j
 
 | # | Area | The contract | Blocking when |
 |---|------|--------------|---------------|
-| 1 | **Exposure widening** | `ra serve --host` defaults to `127.0.0.1`; the non-loopback warning in `cli.py` stays; `RA_MAX_CONCURRENT_RUNS` (`web/app.py`) bounds concurrent runs. | The default bind changes to `0.0.0.0`/`::`; the loopback warning is removed or downgraded; the concurrency ceiling is raised or removed; a new route is mounted outside the auth middleware, or joins `/healthz` as a path exemption, or a **write** becomes reachable without an identity. Note the D35 exception before flagging: `GET`s under `/runs/` are public by design, so a new *read* of one run's own audit trail there is in scope of an existing decision — flag it only if it leaks something beyond that run (an identity, another run, server state) or if `RA_MAX_LIVE_STREAMS`-style bounds on an unauthenticated route are removed. |
+| 1 | **Exposure widening** | `ra serve --host` defaults to `127.0.0.1`; the non-loopback warning in `cli.py` stays; `RA_MAX_CONCURRENT_RUNS` (`web/app.py`) bounds concurrent runs. | The default bind changes to `0.0.0.0`/`::`; the loopback warning is removed or downgraded; the concurrency ceiling is raised or removed; a new route is mounted outside the auth middleware, or joins `/healthz` as a path exemption, or a **write** becomes reachable without an identity. Note the D-id-as-credential exception before flagging: `GET`s under `/runs/` are public by design, so a new *read* of one run's own audit trail there is in scope of an existing decision — flag it only if it leaks something beyond that run (an identity, another run, server state) or if `RA_MAX_LIVE_STREAMS`-style bounds on an unauthenticated route are removed. |
 | 2 | **Audit-trail privacy** | `runs/<id>/` is mode `0700` and holds seed material, questions, drafts, and critique text (`store.py`). `ra purge <id> --content-only` must still remove `reports/` and `critiques/` (`CONTENT_DIRS`) while keeping the decision record. Retention is `retention_days`. | Directory/file modes are widened; `CONTENT_DIRS` shrinks so purge stops removing report or critique content; a retention or purge path is bypassed; artifact text is copied somewhere outside the 0700 tree. |
 | 3 | **Secret handling** | The proxy key is read from `$LITELLM_API_KEY` via `ProxyConfig.api_key_env` (`config.py`), with `api_key_fallback` for offline use. It must never reach logs, `events.jsonl` (`store.py::_append`), the SSE stream, `audit.json`, or a reviewer artifact. | A key, `Authorization` header, or whole `ProxyConfig`/`Config` object is logged, serialized into an event, or echoed in an error message. Note `llm.py` builds `Bearer {api_key}` — exception text from that path must not carry the header. |
 | 4 | **SSRF / egress** | `proxy.base_url` is user-configurable via `config/roster.yaml`, `$RA_CONFIG`, or a mounted `/etc/ra/roster.yaml`. | The diff broadens what a hostile `base_url` can reach, follows redirects into new contexts, or adds a second URL-taking config field with no bounds. Reason about what a hostile value reaches *now* — the config is operator-supplied, so rate this on real reachability, not on "config could be malicious." |
@@ -94,7 +94,7 @@ documented posture, secret leak). `high` = significant impact under specific con
 
 ## Exclusion list — do NOT report
 
-- "The identity header is trusted, not verified." Documented accepted risk (see Role, D32). Only
+- "The identity header is trusted, not verified." Documented accepted risk (see Role, D-identity-header). Only
   *widening* — or weakening the gate that does exist — is a finding.
 - The UI showing reports and critiques to a human. Blindness is about what enters a **model's**
   context, not a human's — `README.md` states this explicitly. It is not an isolation break.
