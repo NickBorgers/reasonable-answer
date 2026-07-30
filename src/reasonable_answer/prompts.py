@@ -475,18 +475,18 @@ _CATEGORY_MEANING: dict[Category, str] = {
 #: contains: the overstated wording, the uncited sentence, the claim a citation is
 #: misdescribed as supporting. Quote the offending text and you are done.
 #:
-#: Every material completeness category is the opposite. `omitted_counterargument` and
-#: `unexamined_presupposition` are defects of *absence*, and `unclear_structure` is a
-#: property of arrangement rather than of any span — so "quote the offending text" has no
-#: obvious referent, and a critic reaches for the material that is missing. That material
-#: is by construction not in the paragraph, so it fails `_require_quote`, fails it again
+#: The completeness categories are the opposite. `omitted_counterargument` and
+#: `unexamined_presupposition` are defects of *absence* (both material); `unclear_structure`
+#: is a property of arrangement rather than of any span (and stays minor) — so for all three
+#: "quote the offending text" has no obvious referent, and a critic reaches for material that
+#: is not in the paragraph. That material by construction fails `_require_quote`, fails it again
 #: on both repair attempts (the hint hands back the paragraph, which is the right text but
 #: not the missing answer the critic is looking for), and takes the entire lens down.
 #:
-#: Four of the five lens failures observed in production over a 48-hour window were this
-#: exact violation, all on the completeness lens, across two different critic models — so
-#: it is a gap in the contract, not one weak model. `related_span` already gets per-category
-#: guidance in `critic_user` for the same reason; `claim_span` never did.
+#: The failure is structural, not a single model's weakness: any critic asked only for "a
+#: verbatim quote" of an absent view has nothing valid to quote, so it is a gap in the contract
+#: rather than a weak model. `related_span` already gets per-category guidance in `critic_user`
+#: for the same reason; `claim_span` never did.
 #:
 #: This narrows what a critic may quote and never widens it. `triage.validate_issue` is
 #: untouched and still fails the lens closed on a span that is not really there.

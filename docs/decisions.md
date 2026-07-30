@@ -1800,33 +1800,41 @@ That line is self-evident for every logic and evidence category, because those d
 text the report contains: the overstated wording, the uncited sentence, the claim a citation is
 misdescribed as supporting. Quote the offending text and you are done.
 
-All three material completeness categories are the opposite. `omitted_counterargument` is defined as
-"a material opposing view … is absent"; `unexamined_presupposition` as adopting a presupposition
-"without stating or examining it"; `unclear_structure` is a property of arrangement rather than of
-any span. For these, "quote the offending text" has **no referent** — so a critic reaches for the
-material that is missing, which by construction is not in the paragraph. It fails `_require_quote`,
-fails it again on both repair attempts (the hint hands back the paragraph, which is the right text
-but not the missing answer the critic went looking for), and fails the whole lens closed.
+The completeness categories are the opposite, in two distinct ways. Two are defects of *absence*:
+`omitted_counterargument` is defined as "a material opposing view … is absent" and
+`unexamined_presupposition` as adopting a presupposition "without stating or examining it" — both
+material (a `major` floor). The third, `unclear_structure`, is neither absent nor material: it sits
+at a `minor` floor and is a property of *arrangement* rather than of any one span. For all three,
+"quote the offending text" has **no referent** — an absent view has no span to quote, and a
+structural defect is a property of the passage as a whole rather than of a locatable phrase — so a
+critic reaches for material that is not in the paragraph (the missing view, or a paraphrase of the
+structural problem). It fails `_require_quote`, fails it again on both repair attempts (the hint
+hands back the paragraph, which is the right text but not the missing answer the critic went looking
+for), and fails the whole lens closed.
 
-Production, over the 48 hours of log retention: **four of five lens failures were this exact
-violation, all on the completeness lens, across two different critic models** (`mistral-large-3`
-×3, `gemma4` ×1) — `claim_span at S1.P2 is not a verbatim quote from the cited paragraph` and three
-like it. Each one costs a controller rule-2 re-critique out of the run's 12 `critique_attempts`.
-Two models failing the same way on the same lens is a gap in the contract, not a weak model.
+The failure is structural: it follows from the category shape, not from any one model's weakness, so
+any critic asked only for "a verbatim quote" of an absent view has nothing valid to quote and fails
+the same way. Each such failure surfaces as a `claim_span … is not a verbatim quote from the cited
+paragraph` violation, and costs a controller re-critique out of the run's bounded `critique_attempts`
+budget. That it is a gap in the contract rather than a weak model is why the fix is to the prompt and
+not to the roster.
 
 The in-call repair loop (`budgets.critic_repair_retries`) was the earlier response to the same
-symptom, after `run-3b4fe4760289` and `run-5d4b1d9cb08b` burned `critique_attempts` on it. Repair
-stopped a *recoverable* slip from costing an attempt. It cannot help a critic that does not know
-what the anchor is for, which is why the failure survived it.
+symptom; `tests/test_critique_repair.py` exercises it against exactly this violation, using
+`omitted_counterargument` as its fixture. Repair stopped a *recoverable* slip from costing an
+attempt. It cannot help a critic that does not know what the anchor is for, which is why the failure
+survived it.
 
 **The decision.** `prompts._CATEGORY_ANCHOR` gives every category an explicit statement of what
 `claim_span` anchors to, rendered into the critic prompt for that lens's in-scope categories only —
 the same closed scope the meanings table already follows. The prompt body states the general rule
 once: *where the defect is something the report does NOT say, `claim_span` still quotes what it DOES
-say — the passage the gap bites into.* The three absence categories each name the present text they
-anchor to, and the two whose missing element is *content* redirect that content to a field which is
-not span-validated (`instruction` for the omitted view, `rationale` for the presupposition), so the
-advice is not "drop the issue" by implication.
+say — the passage the gap bites into.* Each of the three names the present text it anchors to: the
+two absence categories point at the claim the missing element bears on, and `unclear_structure`
+points at the opening words of the passage whose arrangement is the defect. The two whose missing
+element is *content* redirect that content to a field which is not span-validated (`instruction` for
+the omitted view, `rationale` for the presupposition), so the advice is not "drop the issue" by
+implication.
 
 `related_span` has carried per-category guidance in this prompt since it was written, for exactly
 this reason. `claim_span` never did.
