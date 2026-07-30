@@ -270,6 +270,9 @@ def critic_user(
             "it, or states something materially different"
         )
     table = "\n".join(f"- `{c.value}` — {meanings[c]}" for c in categories)
+    # Only the in-scope categories, so the lens's own anchors are not buried under nine
+    # others it may not raise — the same closed-scope discipline as the meanings table.
+    anchors = "\n".join(f"  - `{c.value}` — quote {_CATEGORY_ANCHOR[c]}" for c in categories)
     return (
         f"{UNTRUSTED_NOTE}\n\n"
         f"{date_line(current_date)}"
@@ -282,7 +285,12 @@ def critic_user(
         "Each paragraph is prefixed with its locus marker [S<section>.P<paragraph>]. For "
         "every issue you raise:\n"
         "- `locus` must be the section and paragraph numbers of an EXISTING marker.\n"
-        "- `claim_span` must be a short verbatim quote from that paragraph (<=400 chars).\n"
+        "- `claim_span` must be a short quote (<=400 chars) copied character-for-character "
+        "from that paragraph. Where the defect is something the report does NOT say, "
+        "`claim_span` still quotes what it DOES say — the passage the gap bites into. Never "
+        "quote or compose the missing material there; a span that is not in the paragraph "
+        "fails the whole review. Per category, quote:\n"
+        f"{anchors}\n"
         "- `related_span` is the other text implicated, if any. For a contradiction, an "
         "invalid inference or an overstatement it must be another VERBATIM quote from "
         "the report — the claim being contradicted, or the premise that does not carry "
@@ -457,6 +465,60 @@ _CATEGORY_MEANING: dict[Category, str] = {
     ),
     Category.UNCLEAR_STRUCTURE: "organization or clarity impedes evaluating the argument",
     Category.STYLISTIC: "cosmetic preference only",
+}
+
+
+#: What `claim_span` anchors to, per category.
+#:
+#: The generic rule — "a verbatim quote from the paragraph you cited" — is self-evident
+#: for every logic and evidence category, because those defects live *in* text the report
+#: contains: the overstated wording, the uncited sentence, the claim a citation is
+#: misdescribed as supporting. Quote the offending text and you are done.
+#:
+#: The completeness categories are the opposite. `omitted_counterargument` and
+#: `unexamined_presupposition` are defects of *absence* (both material); `unclear_structure`
+#: is a property of arrangement rather than of any span (and stays minor) — so for all three
+#: "quote the offending text" has no obvious referent, and a critic reaches for material that
+#: is not in the paragraph. That material by construction fails `_require_quote`, fails it again
+#: on both repair attempts (the hint hands back the paragraph, which is the right text but
+#: not the missing answer the critic is looking for), and takes the entire lens down.
+#:
+#: The failure is structural, not a single model's weakness: any critic asked only for "a
+#: verbatim quote" of an absent view has nothing valid to quote, so it is a gap in the contract
+#: rather than a weak model. `related_span` already gets per-category guidance in `critic_user`
+#: for the same reason; `claim_span` never did.
+#:
+#: This narrows what a critic may quote and never widens it. `triage.validate_issue` is
+#: untouched and still fails the lens closed on a span that is not really there.
+_CATEGORY_ANCHOR: dict[Category, str] = {
+    Category.FABRICATED_CITATION: "the claim the questionable citation is attached to",
+    Category.MISREPRESENTED_SOURCE: "the claim the report attributes to the cited source",
+    Category.UNCITED_CLAIM: "the claim that carries no citation",
+    Category.ONE_SIDED_SOURCING: (
+        "one of the material claims that rests on the narrowly drawn sourcing"
+    ),
+    Category.CONTRADICTED_CLAIM: (
+        "the claim you are raising the issue against (put the claim it collides with in "
+        "`related_span`)"
+    ),
+    Category.INVALID_INFERENCE: "the conclusion that does not follow",
+    Category.OVERSTATED_CLAIM: "the wording that overstates",
+    Category.LOADED_LANGUAGE: "the loaded descriptor or framing, in the report's own words",
+    # The three below are the reason this table exists: each names the present text a
+    # missing thing is missing *from*, because there is no span of the missing thing.
+    Category.OMITTED_COUNTERARGUMENT: (
+        "the claim in the report that the absent opposing view bears on — NOT the opposing "
+        "view itself, which is not in the report; put what is missing in `instruction`"
+    ),
+    Category.UNEXAMINED_PRESUPPOSITION: (
+        "the wording that treats the contested presupposition as settled — NOT the "
+        "presupposition as you would phrase it; put that in `rationale`"
+    ),
+    Category.UNCLEAR_STRUCTURE: (
+        "the opening words of the passage whose organization impedes evaluation — the "
+        "arrangement is the defect, so quote where it starts"
+    ),
+    Category.STYLISTIC: "the text you would change",
 }
 
 

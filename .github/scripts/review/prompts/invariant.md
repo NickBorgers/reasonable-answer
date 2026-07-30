@@ -15,7 +15,7 @@ diff preserve the design's safety properties, and if it changes one, did it chan
 
 A blocker you cannot tie to a decision or finding ID is usually an opinion. Populate
 `decision_ref` on every `blocking_issues[]` entry. Valid IDs live in `docs/decisions.md`
-(`D1`–`D40`, `RA-001`–`RA-020`, `RB-001`–`RB-010`, `RC-001`–`RC-007`, `RG-001`–`RG-004`) and in
+(`D1`–`D41`, `RA-001`–`RA-020`, `RB-001`–`RB-010`, `RC-001`–`RC-007`, `RG-001`–`RG-004`) and in
 `docs/convergence.md` (`RD-002`, `RH-001`, `RI-001` — cited normatively there but **not** tabulated
 in `decisions.md`; citing them is fine, inventing new ones is not).
 
