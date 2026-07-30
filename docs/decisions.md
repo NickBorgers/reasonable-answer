@@ -2116,6 +2116,12 @@ control also ships `hidden` and is revealed only after the script has establishe
 deliver: an iOS Safari tab has `PushManager` and still cannot subscribe, so feature detection alone
 would show a button that fails, and the standalone check turns that into an instruction instead.
 
+> The last clause is superseded in part by **D-header-optin**, which moved this control into the
+> layout shell. A header has no room for an inline sentence, so on iOS in a browser tab the control
+> now stays hidden rather than rendering an instruction; the install affordance is the one the
+> browser already offers. Everything else here — click-gated permission, `hidden` until the browser
+> is known to deliver — stands.
+
 **Off by default.** Like every feature needing egress or a secret. With `push.enabled: false` there
 are no routes, no key on disk, and an index byte-identical to a build without any of this — the same
 promise D-question-refinement makes for refinement, and asserted the same way.
@@ -2216,9 +2222,10 @@ genuinely is unavailable until the app is installed.
 
 **The problem.** The index is a snapshot. A run finishes, and the table goes on saying `running` until
 something reloads the page. In a browser tab that is a non-issue - the reader hits reload. Installed
-to a home screen it is a defect with no user-side fix: there is no reload button, no address bar, and
-on iOS no pull-to-refresh inside the page. The one mechanism the index relied on is the one the
-platform removes.
+to a home screen it is a defect with no user-side fix: a standalone app has no address bar, no reload
+button and no pull-to-refresh inside the page — the removed browser chrome D-installable-pwa and
+D-header-optin already record as what `display: standalone` means. The one mechanism the index relied
+on is the one the platform removes.
 
 That is not cosmetic. D-installable-pwa states the rule this violates outright - *a finished run
 displayed as still running is the one output this interface must not produce* - and spends its whole
@@ -2230,8 +2237,9 @@ fragment, `GET /runs-table` serves it, and the page swaps the element in place.
 
 **The visibility handler is the load-bearing half, not the interval.** The realistic failure is not a
 page left open in the foreground for five minutes; it is an app backgrounded for an hour and then
-swiped back to. iOS freezes timers in a suspended standalone app, so an interval alone resumes late
-and shows stale rows for a beat first - precisely at the moment of maximum attention. Refreshing on
+swiped back to. A suspended iOS PWA runs no JavaScript at all — the platform behavior D-stop-notification
+already rests on — so an interval alone is frozen while backgrounded, resumes late on return
+and shows stale rows for a beat first, precisely at the moment of maximum attention. Refreshing on
 `visibilitychange` means the list is current *before* it is looked at. `pageshow` with `persisted`
 covers the back-forward cache, which restores a page wholesale and runs no tick at all.
 
@@ -2253,8 +2261,10 @@ published one person's index to anyone holding any run id. A test asserts the pa
 prefix.
 
 **Unconditional, unlike refine and notifications.** This is not a feature to opt into; it is the
-repair of a staleness the installed app cannot fix by hand. It needs no credential, makes no outbound
-request and reveals nothing the index does not already show its own viewer.
+repair of a staleness the installed app cannot fix by hand. It needs no new opt-in, no external-service
+credential and no outbound request. `/runs-table` stays authenticated and owner-scoped exactly like the
+index whose body it is — identity-required in `authentication.md`, gated by construction outside the
+public `/runs/` prefix — so it reveals nothing the index does not already show its own viewer.
 
 
 ## Open items for a future round
