@@ -15,7 +15,9 @@ from __future__ import annotations
 
 import json
 import logging
+import random
 import re
+import time
 import urllib.request
 from collections.abc import Callable
 from dataclasses import dataclass
@@ -68,6 +70,63 @@ class ModelCallError(RuntimeError):
     """Transport/API failure — retryable within budget."""
 
 
+class PermanentCallError(ModelCallError):
+    """The request itself is wrong; asking again cannot help.
+
+    A malformed request, a rejected credential, or a model the proxy does not serve
+    answers identically however many times it is sent. Retrying one burns the whole
+    call budget — and, for a writer, the run's only eligible author — on a verdict
+    that was already final. Still a `ModelCallError` so every existing `except`
+    clause keeps catching it; the subclass only tells `_create` not to sleep and
+    try again.
+    """
+
+
+#: HTTP statuses where the fault is in the request, not the moment. 408 (timeout) and
+#: 429 (rate limit) are deliberately absent — those are exactly what backoff is for,
+#: and so is every 5xx.
+_PERMANENT_STATUSES = frozenset({400, 401, 403, 404, 413, 422})
+
+#: Ceiling on a server-supplied `Retry-After`. A provider asking us to wait ten minutes
+#: has effectively failed the call; the caller's own rotation is the better move.
+_MAX_RETRY_AFTER_SECONDS = 120.0
+
+
+def _permanent(exc: Exception) -> bool:
+    """Is this failure final? Read the status code the SDK carries, never the message."""
+    status = getattr(exc, "status_code", None)
+    if status is None:
+        response = getattr(exc, "response", None)
+        status = getattr(response, "status_code", None)
+    return isinstance(status, int) and status in _PERMANENT_STATUSES
+
+
+def _retry_after(exc: Exception) -> float | None:
+    """The provider's own `Retry-After`, in seconds, when it sent a usable one.
+
+    Only the delta-seconds form is honoured. The HTTP-date form would need a trusted
+    clock comparison against a header we already treat as advisory, and every provider
+    in this roster sends seconds.
+    """
+    response = getattr(exc, "response", None)
+    headers = getattr(response, "headers", None)
+    if headers is None:
+        return None
+    try:
+        raw = headers.get("retry-after")
+    except Exception:  # pragma: no cover - defensive: header maps vary by SDK version
+        return None
+    if raw is None:
+        return None
+    try:
+        seconds = float(str(raw).strip())
+    except ValueError:
+        return None
+    if seconds <= 0:
+        return None
+    return min(seconds, _MAX_RETRY_AFTER_SECONDS)
+
+
 class MalformedOutputError(RuntimeError):
     """The model answered, but not in the closed schema. Repairable, then fail-closed."""
 
@@ -95,7 +154,13 @@ class _Reply:
 
 
 class LLMClient:
-    def __init__(self, config: Config) -> None:
+    def __init__(
+        self,
+        config: Config,
+        *,
+        sleep: Callable[[float], None] = time.sleep,
+        jitter: Callable[[], float] = lambda: random.uniform(0.5, 1.0),  # noqa: S311 - not crypto
+    ) -> None:
         self._config = config
         self._client = OpenAI(
             base_url=config.proxy.base_url,
@@ -103,15 +168,47 @@ class LLMClient:
             timeout=config.budgets.timeout_seconds,
             max_retries=0,  # retries are ours, so they stay inside the budget
         )
+        # Injected for the same reason `BraveSearch` injects its clock: the offline
+        # suite must be able to assert the wait without serving it.
+        self._sleep = sleep
+        self._jitter = jitter
         self._identities: dict[str, str] = {}
         self._modes: dict[str, str] = {}
         self._tool_capable: dict[str, bool] = {}
+
+    def _backoff(self, attempt: int, retry_after: float | None = None) -> None:
+        """Wait before retry number `attempt` (1-based). Server hint beats our guess.
+
+        Exponential with jitter, because the failures this exists for are correlated
+        in time — a provider that just returned an empty completion is mid-something,
+        and three requests inside five seconds are three samples of the same bad
+        moment (D41).
+        """
+        budgets = self._config.budgets
+        if retry_after is not None:
+            delay = retry_after
+        else:
+            if budgets.retry_backoff_seconds <= 0:
+                return
+            uncapped = budgets.retry_backoff_seconds * (2 ** (attempt - 1))
+            delay = min(uncapped, budgets.retry_backoff_max_seconds) * self._jitter()
+        if delay > 0:
+            self._sleep(delay)
 
     @property
     def budgets(self) -> Budgets:
         """The budgets this client was built with, for callers that need to size their
         own retry against the same config the client uses (e.g. `critique_once`)."""
         return self._config.budgets
+
+    def backoff_between_writer_attempts(self, attempt: int) -> None:
+        """Serve the same wait `_create` uses, for a caller retrying at its own layer.
+
+        `graph._generate` re-asks the writer pool after a whole call has failed. That
+        retry needs a pause for the same reason the in-call one does, and routing it
+        here keeps a single injectable clock — a test that stubs `sleep` stubs both.
+        """
+        self._backoff(attempt)
 
     # ------------------------------------------------------------------ identity
 
@@ -196,6 +293,7 @@ class LLMClient:
         tool_handler: ToolHandler | None = None,
         max_tool_rounds: int = 6,
         timeout: float | None = None,
+        should_offer_tools: Callable[[], bool] | None = None,
     ) -> Completion:
         """One chat completion, retried within the call budget.
 
@@ -203,6 +301,12 @@ class LLMClient:
         loop: the model may emit tool calls, which are executed and fed back, until it
         answers in prose or `max_tool_rounds` is reached. Tool *results* are untrusted
         third-party text (RA-010) — the handler is responsible for fencing them.
+
+        `should_offer_tools`, when given, is consulted before every round: a false
+        answer withdraws `tools` for the rest of the call. It exists because a tool
+        can run out of budget mid-loop — the search handler starts returning "budget
+        exhausted" text — and a model handed a tool that cannot work will keep calling
+        it until the rounds are gone (D41). Withdrawing it forces the answer instead.
 
         `timeout`, when given, overrides the client-wide `budgets.timeout_seconds`
         for this call only (passed straight through to the OpenAI SDK's per-request
@@ -237,19 +341,38 @@ class LLMClient:
         for round_no in range(max_tool_rounds + 1):
             # The final round drops `tools` entirely: a model that keeps calling tools
             # forever must still produce an answer, and removing the tool is the only
-            # instruction every provider in the roster honours identically.
+            # instruction every provider in the roster honours identically. A tool
+            # whose own budget has run out is withdrawn the same way, as soon as that
+            # happens, rather than being offered for rounds it can no longer serve.
             exhausted = round_no == max_tool_rounds
+            offering = not exhausted and (should_offer_tools is None or should_offer_tools())
             kwargs = {**base, "messages": messages}
-            if not exhausted:
+            if offering:
                 kwargs["tools"] = tools
             reply = self._invoke_create(alias, kwargs, timeout)
             prompt_tokens += reply.prompt_tokens
             completion_tokens += reply.completion_tokens
 
             calls = _tool_calls(reply.message)
-            if not calls or exhausted:
+            if not calls or not offering:
+                text = (reply.message.get("content") or "").strip()
+                if not text:
+                    # The model spent its last round on another tool call instead of
+                    # an answer. `_create`'s empty-content guard let that through —
+                    # correctly, since a message carrying tool calls is not an empty
+                    # completion — and this loop used to return it as a successful
+                    # `text=""`, which the caller could only read as "the model wrote
+                    # nothing". Two production runs aborted on exactly that (D41).
+                    # One more round, asked in words, is far cheaper than discarding a
+                    # writer call that has already spent its whole search budget.
+                    reply = self._answer_now(alias, base, messages, timeout)
+                    prompt_tokens += reply.prompt_tokens
+                    completion_tokens += reply.completion_tokens
+                    text = (reply.message.get("content") or "").strip()
+                if not text:
+                    raise ModelCallError(f"{alias}: tool loop ended without an answer")
                 return Completion(
-                    text=(reply.message.get("content") or "").strip(),
+                    text=text,
                     model_reported=reply.reported,
                     prompt_tokens=prompt_tokens,
                     completion_tokens=completion_tokens,
@@ -271,6 +394,32 @@ class LLMClient:
                 )
         raise ModelCallError(f"{alias}: tool loop did not terminate")  # pragma: no cover
 
+    #: The one instruction sent when a model ends its tool loop without prose. Kept
+    #: free of any run material — it says nothing about the question, the draft, or the
+    #: tool results already in the conversation.
+    _ANSWER_NOW = (
+        "You have no tools available and no further tool calls are possible. "
+        "Write your complete final answer now, as prose, using what you already have."
+    )
+
+    def _answer_now(
+        self,
+        alias: str,
+        base: dict[str, Any],
+        messages: list[dict[str, Any]],
+        timeout: float | None,
+    ) -> _Reply:
+        """One last toolless round asking, in words, for the answer.
+
+        The unanswered assistant message is deliberately NOT appended: it carries tool
+        calls with no matching `role: tool` replies, and several providers reject a
+        conversation shaped like that. Nudging from the last complete state is both
+        valid and closer to what the model was asked in the first place.
+        """
+        nudged = [*messages, {"role": "user", "content": self._ANSWER_NOW}]
+        log.warning("call to %s ended its tool loop without prose; asking for the answer", alias)
+        return self._invoke_create(alias, {**base, "messages": nudged}, timeout)
+
     def _invoke_create(self, alias: str, kwargs: dict[str, Any], timeout: float | None) -> _Reply:
         """Calls `_create` with a `timeout` kwarg only when one was actually given.
 
@@ -289,11 +438,21 @@ class LLMClient:
             kwargs = {**kwargs, "timeout": timeout}
         last: Exception | None = None
         for attempt in range(self._config.budgets.call_retries + 1):
+            # Before every attempt but the first. Placed at the top of the loop rather
+            # than at each `continue` so no retry path can be added later that forgets
+            # to wait.
+            if attempt > 0:
+                self._backoff(attempt, _retry_after(last) if last else None)
             try:
                 resp = self._client.chat.completions.create(**kwargs)
             except Exception as exc:  # transport / provider error
                 last = exc
                 log.warning("call to %s failed (attempt %d): %s", alias, attempt + 1, exc)
+                if _permanent(exc):
+                    # Spending the rest of the budget re-sending a request the provider
+                    # has already judged malformed just delays the caller's rotation to
+                    # a model that might work.
+                    raise PermanentCallError(f"{alias}: {exc}") from exc
                 continue
             usage = resp.usage
             reported = getattr(resp, "model", None) or alias

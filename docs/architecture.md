@@ -235,9 +235,22 @@ carried no headings is accepted with a warning; the warning rides the run's exis
   every alias in the roster (writers, critics, and the orchestrator), validates per-lens roster
   health, and checks the config invariant `0 < min_ticks < hard_cap` (fail closed) so no generating
   rule can fire at or beyond the cap.
+- **Writer-pool depth (D41):** author exclusion applies to writers too, so the pool the *next* draft
+  may come from is `writers \ {author(Rₙ)}`. Size the pool for **≥2 eligible writers on a revision
+  round** — i.e. at least three writers — or one flaky response is an aborted run rather than a
+  retry. This is a sizing recommendation, not a fail-closed check: a two-writer roster is legal and
+  still runs, it just has no lateral move when its one eligible writer misbehaves.
 - **Concurrency/limits:** bounded concurrency (the 3 lenses may run in parallel), per-call timeout +
   retry budget, token/context budgeting for the slow local model, backpressure so parallel lenses
   don't overload one proxy/model.
+- **Transient-failure posture (D41):** every retry waits — exponential with jitter, bounded by
+  `budgets.retry_backoff_seconds` / `retry_backoff_max_seconds`, and a provider's own `Retry-After`
+  wins where it sends one. Failures whose status says the *request* is wrong (400/401/403/404/413/
+  422) raise `PermanentCallError` immediately instead of consuming the budget. A completion is never
+  empty: an agentic loop that ends on a tool call gets exactly one further toolless round asking for
+  prose, and raises if that is empty too, so no caller can mistake a stalled loop for a model that
+  wrote nothing. A tool whose own budget is spent is withdrawn from subsequent rounds rather than
+  offered for rounds it cannot serve.
 - **Submission backpressure (RC-007):** concurrency bounds token *spend* but not how many runs may
   pile up, so submission is also bounded. `RunWorker.submit()` refuses with **HTTP 429** once the
   queue's waiting depth reaches `max_queue_depth`, and a fixed-window `submit_rate_max` /

@@ -417,6 +417,85 @@ def test_a_pool_of_duds_is_still_fatal(identities, config):
 
     assert final["fatal"]
     assert "every eligible writer failed" in final["fatal_reason"]
+
+
+class FlakyWriterClient(FakeClient):
+    """A proxy where nominated *generation calls* come back empty, by ordinal.
+
+    Not keyed by alias, unlike `DudWriterClient`: the failure being reproduced is
+    transient, so the same model has to fail once and then work.
+    """
+
+    empty_generations: set[int] = set()
+
+    def complete(self, alias, *, system, user, **kwargs):
+        completion = super().complete(alias, system=system, user=user, **kwargs)
+        if self.generations in self.empty_generations:
+            return completion.__class__(
+                text="", model_reported=alias, prompt_tokens=0, completion_tokens=0
+            )
+        return completion
+
+
+def test_the_only_eligible_writer_is_asked_again_rather_than_the_run_aborted(
+    identities, config
+):
+    """D41, and the shape of the three runs that aborted on 2026-07-29.
+
+    Author exclusion applies to writers, so from round two a two-writer roster leaves
+    exactly ONE eligible model. `attempts` used to be `min(len(pool), writer_attempts)`,
+    which made the retry budget 1 — every abort logged `writer attempt 1/1` — so a
+    single empty completion ended the run with its defects still open.
+    """
+    client = FlakyWriterClient(
+        identities=identities,
+        critique_fn=always_material,  # keeps the loop generating past round one
+        # A distinct draft each round, or rule 12 freezes the run for a repeated
+        # artifact before the writer fallback is ever reached.
+        report_fn=lambda n: f"{REPORT}\nRevision {n}.\n",
+    )
+    # The second generation is the first on a one-deep pool: generation one ran with
+    # both writers eligible (a human seed excludes nobody).
+    client.empty_generations = {2}
+
+    final = run(config, question="Is it so?", seed=REPORT, client=client)
+
+    assert not final["fatal"], "a transient empty completion must not end the run"
+
+    events = events_of(final)
+    failures = [e for e in events if e["kind"] == "generate_failed"]
+    assert len(failures) == 1
+    assert "empty report" in failures[0]["reason"]
+
+    # The sharp end: the draft that followed the failure was written by the SAME model,
+    # because it was the only eligible one. Before D41 there was no second attempt to
+    # make, and this was `terminal=aborted`.
+    generated = [e for e in events if e["kind"] == "generate"]
+    assert generated[1]["author"] == failures[0]["author"]
+
+    # And it waited first, rather than re-asking a model mid-wobble inside a second.
+    assert client.writer_backoffs == [1]
+
+
+def test_writer_attempts_bounds_the_retry_of_a_single_eligible_writer(identities, config):
+    """The other half: wrapping the rotation must not become an unbounded retry. Three
+    attempts, then rule 1, exactly as `budgets.writer_attempts` says."""
+    client = FlakyWriterClient(
+        identities=identities,
+        critique_fn=always_material,
+        report_fn=lambda n: f"{REPORT}\nRevision {n}.\n",
+    )
+    # Generation 1 succeeds; every attempt after it comes back empty.
+    client.empty_generations = set(range(2, 40))
+
+    final = run(config, question="Is it so?", seed=REPORT, client=client)
+
+    assert final["fatal"]
+    assert "every eligible writer failed" in final["fatal_reason"]
+    failures = [e for e in events_of(final) if e["kind"] == "generate_failed"]
+    assert len(failures) == config.budgets.writer_attempts == 3
+    # One wait per retry, never before the first attempt.
+    assert client.writer_backoffs == [1, 2]
 def test_seed_warnings_from_ingest_reach_the_final_record(identities, config):
     """Ingest runs at the edge, so anything it noticed about the seed has to be carried
     into the run to be visible at all — the run page and final.json read `warnings`."""

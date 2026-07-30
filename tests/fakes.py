@@ -97,6 +97,11 @@ class FakeClient:
     #: repairs offered to a critic whose issues fail validation. 0 keeps the historical
     #: one-call-per-critique behaviour every existing test was written against.
     critic_repair_retries: int = 0
+    #: `attempt` values `_generate` asked to wait for between writer attempts. Recorded
+    #: rather than served: this fake never sleeps, so a graph test that drives the
+    #: writer fallback runs at full speed while still being able to assert the pause
+    #: happened (D41).
+    writer_backoffs: list[int] = field(default_factory=list)
 
     # ---- the LLMClient surface the graph uses -----------------------------
 
@@ -117,6 +122,9 @@ class FakeClient:
 
     def tool_capable_for(self, alias: str) -> bool:
         return self.probe_tool_calling(alias)
+
+    def backoff_between_writer_attempts(self, attempt: int) -> None:
+        self.writer_backoffs.append(attempt)
 
     def complete(self, alias: str, *, system: str, user: str, **kwargs: Any) -> Completion:
         self.calls.append(

@@ -3,6 +3,8 @@
 from __future__ import annotations
 
 import logging
+import os
+import sys
 import time
 from pathlib import Path
 
@@ -30,11 +32,27 @@ console = Console()
 _WEB_EXTRA_MODULES = {"fastapi", "markdown_it", "uvicorn", "multipart", "starlette"}
 
 
+#: Names a level for `ra` itself, for a deployment that cannot pass `--verbose` — the
+#: container's CMD is fixed. Set because a night of aborted production runs left only
+#: WARNING lines behind: no run starts, no controller decisions, no search results, so
+#: the post-mortem was inference rather than reading (D41).
+LOG_LEVEL_ENV = "RA_LOG_LEVEL"
+
+
 def _setup_logging(verbose: bool) -> None:
-    logging.basicConfig(
-        level=logging.INFO if verbose else logging.WARNING,
-        format="%(levelname)s %(name)s: %(message)s",
-    )
+    level = logging.INFO if verbose else logging.WARNING
+    # Env wins over the flag: `--verbose` can only ever raise verbosity, so honouring
+    # an explicit RA_LOG_LEVEL is the only way a deployment can ask for less than INFO
+    # once it has asked for more. An unparseable value keeps the flag's level rather
+    # than failing a run over a logging preference.
+    named = (os.environ.get(LOG_LEVEL_ENV) or "").strip().upper()
+    if named:
+        resolved = logging.getLevelNamesMapping().get(named)
+        if resolved is None:
+            print(f"warning: ignoring unknown ${LOG_LEVEL_ENV}={named!r}", file=sys.stderr)
+        else:
+            level = resolved
+    logging.basicConfig(level=level, format="%(levelname)s %(name)s: %(message)s")
 
 
 @app.command()

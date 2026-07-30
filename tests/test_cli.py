@@ -211,3 +211,53 @@ def test_audition_refine_rejects_unknown_transforms(doctor_config):
     )
     assert result.exit_code == 2
     assert "unknown transforms" in result.stdout
+
+
+# ------------------------------------------------------------------- logging
+
+
+def test_the_log_level_can_be_named_by_the_environment(monkeypatch):
+    """D41. The container's CMD is fixed, so `--verbose` is unreachable in production —
+    and a night of aborted runs left only WARNING lines to diagnose them from."""
+    monkeypatch.setenv(cli.LOG_LEVEL_ENV, "info")
+    captured: dict[str, object] = {}
+    monkeypatch.setattr(cli.logging, "basicConfig", lambda **kw: captured.update(kw))
+
+    cli._setup_logging(verbose=False)
+
+    assert captured["level"] == cli.logging.INFO
+
+
+def test_the_environment_can_also_ask_for_less_than_verbose(monkeypatch):
+    """`--verbose` can only ever raise verbosity, so honouring the variable is the only
+    way a deployment that passes the flag can still ask for less."""
+    monkeypatch.setenv(cli.LOG_LEVEL_ENV, "ERROR")
+    captured: dict[str, object] = {}
+    monkeypatch.setattr(cli.logging, "basicConfig", lambda **kw: captured.update(kw))
+
+    cli._setup_logging(verbose=True)
+
+    assert captured["level"] == cli.logging.ERROR
+
+
+def test_an_unknown_log_level_warns_and_keeps_the_flag_default(monkeypatch, capsys):
+    """A logging preference must not be able to fail a run."""
+    monkeypatch.setenv(cli.LOG_LEVEL_ENV, "CHATTY")
+    captured: dict[str, object] = {}
+    monkeypatch.setattr(cli.logging, "basicConfig", lambda **kw: captured.update(kw))
+
+    cli._setup_logging(verbose=False)
+
+    assert captured["level"] == cli.logging.WARNING
+    assert "CHATTY" in capsys.readouterr().err
+
+
+def test_no_variable_leaves_the_historical_behaviour(monkeypatch):
+    monkeypatch.delenv(cli.LOG_LEVEL_ENV, raising=False)
+    captured: dict[str, object] = {}
+    monkeypatch.setattr(cli.logging, "basicConfig", lambda **kw: captured.update(kw))
+
+    cli._setup_logging(verbose=False)
+    assert captured["level"] == cli.logging.WARNING
+    cli._setup_logging(verbose=True)
+    assert captured["level"] == cli.logging.INFO

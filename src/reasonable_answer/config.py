@@ -77,10 +77,21 @@ class Budgets(BaseModel):
     # and spends a whole `critique_attempts` slot to ask a fresh model the same thing.
     critic_repair_retries: int = Field(default=2, ge=0, le=10)
     call_retries: int = Field(default=2, ge=0, le=10)
-    # How many *distinct* writers a single draft may be asked of before the run dies.
-    # Bounded by the pool: rotating past its end would re-ask the model that failed.
+    # How many times a single draft is asked for before the run dies. Attempts rotate
+    # through the writer pool and WRAP: with a two-writer roster the pool is one model
+    # deep on every revision round (author exclusion already removed the other), so
+    # bounding this by the pool size made the retry budget 1 and one flaky response
+    # killed the run. Re-asking a pool member is safe — `writer_pool` excluded the
+    # previous author before `_generate` ever saw it (D41).
     writer_attempts: int = Field(default=3, ge=1, le=10)
     timeout_seconds: float = Field(default=300.0, gt=0, le=7200)
+    # Wait between retries, exponential with jitter: attempt N sleeps
+    # min(base * 2**(N-1), max) * uniform(0.5, 1.0). Zero base disables the wait, which
+    # is what the offline suite uses. Retrying a transient provider failure with no
+    # pause at all is what three aborted production runs did — the whole budget was
+    # spent inside five seconds, before anything upstream could recover (D41).
+    retry_backoff_seconds: float = Field(default=2.0, ge=0, le=60)
+    retry_backoff_max_seconds: float = Field(default=30.0, ge=0, le=300)
     max_concurrency: int = Field(default=3, ge=1, le=16)
 
     @model_validator(mode="after")
@@ -90,6 +101,14 @@ class Budgets(BaseModel):
             raise ConfigError(
                 f"config invariant violated: 0 < min_ticks < hard_cap "
                 f"(got min_ticks={self.min_ticks}, hard_cap={self.hard_cap})"
+            )
+        # A cap below the base would silently make every wait the cap, so the base
+        # would read as configuration that does nothing. Say so instead.
+        if self.retry_backoff_max_seconds < self.retry_backoff_seconds:
+            raise ConfigError(
+                f"config invariant violated: retry_backoff_max_seconds must not be below "
+                f"retry_backoff_seconds (got max={self.retry_backoff_max_seconds}, "
+                f"base={self.retry_backoff_seconds})"
             )
         return self
 

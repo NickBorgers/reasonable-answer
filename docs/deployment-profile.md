@@ -67,6 +67,27 @@ Credentialled requests are hardened the same way anonymous ones are: the same op
 redirects, a single allowed host, and an allowlist that strips `Authorization` and friends if a
 redirect is ever followed. The outbound user agent is fixed and is not configurable.
 
+### What the proxy must not do
+
+Two requirements on the LiteLLM configuration itself. Neither is checkable from this repository —
+the application can only detect the first, after the fact, and pay for it. Both were observed in
+production on 2026-07-29 (D41).
+
+**No fallback routing on any alias the roster names.** A LiteLLM fallback that quietly serves
+`gemma4` from `meta-llama/llama-4-scout` breaks every downstream identity claim at once: author
+exclusion, distinct-reviewer counting, and the family-decorrelation warning all reason over the
+resolved `provider/model` that `/model/info` reported at startup. RA fails closed when the served
+model disagrees with the pinned alias (RA-017) — which is the right outcome, but the price is a
+burnt lens attempt and, if it lands on the writer, a burnt writer attempt. Configure fallbacks for
+aliases outside the roster if you want them; never for one inside it.
+
+**Tool-call parsing must actually be configured for the served model.** DeepSeek emits tool calls in
+its own fullwidth-token syntax (`<｜tool▁calls▁begin｜>`); a proxy that does not parse it hands the
+raw markup back as message *content*, where it reads as a successful prose answer. `llm.py` carries
+a guard (`_unparsed_tool_call`) that catches this and retries, because one production run once
+shipped a final answer that was nothing but a tool-call block — but the guard is a net, not a fix,
+and every catch spends an attempt from the call budget.
+
 ## Source verification is on in production
 
 The committed roster ships `search.verify_sources: false` with the whole `sources:` block commented
