@@ -52,7 +52,7 @@ services:
       # deployment asks for INFO. Worth the volume: a night of aborted runs left only
       # WARNING lines behind — no run starts, no controller decisions, no search
       # results — and the post-mortem had to infer what the logs should have said
-      # (D42). Nothing at INFO carries run material: search logs query *lengths*
+      # (D-provider-retry). Nothing at INFO carries run material: search logs query *lengths*
       # (RA-016) and the controller is blind to the report by construction.
       RA_LOG_LEVEL: "INFO"
       # Every concurrent run multiplies load on one proxy; the local models in the
@@ -71,13 +71,13 @@ services:
       # Required while the mounted roster has search.enabled: true — startup fails
       # closed without it. brave.token does not exist inside the container.
       BRAVE_SEARCH_API_KEY: ${BRAVE_SEARCH_API_KEY}
-      # Crossref/Unpaywall's polite pool (D39). Passed explicitly like the key above,
+      # Crossref/Unpaywall's polite pool (D-existence-vs-body). Passed explicitly like the key above,
       # because a variable the operator exports outside the container does not reach the
       # process inside it — and the failure would be silent: every registry request would
       # quietly fall back to the anonymous, harder-throttled pool while the roster claims
       # otherwise. Startup warns when it is unset, which is what makes that visible.
       RA_CONTACT_EMAIL: ${RA_CONTACT_EMAIL:-}
-      # The keyed source tiers (D40). Unlike the contact email above, a missing one of
+      # The keyed source tiers (D-paid-tier-page). Unlike the contact email above, a missing one of
       # these is never silent: the tier that wants it refuses to start rather than
       # spending its whole call budget on 401s and reporting them as coverage. Both are
       # inert until the matching tier is switched on in the roster.

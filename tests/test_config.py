@@ -1,4 +1,4 @@
-"""Proxy configuration resolution — D21's env override for `base_url`.
+"""Proxy configuration resolution — D-proxy-base-url's env override for `base_url`.
 
 Fully offline: nothing here touches the proxy. It asserts the precedence
 env value > roster file value > built-in default, and that the override is

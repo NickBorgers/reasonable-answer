@@ -55,7 +55,7 @@
           "category": { "type": ["string", "null"] },
           "decision_ref": {
             "type": ["string", "null"],
-            "description": "The design-doc decision or finding this blocker cites, e.g. \"D6\" or \"RA-014\". The invariant reviewer is expected to populate this: a blocker that cannot name the contract it violates is usually an opinion."
+            "description": "The design-doc decision or finding this blocker cites, e.g. \"D-isolation-boundary\" or \"RA-014\". The invariant reviewer is expected to populate this: a blocker that cannot name the contract it violates is usually an opinion."
           },
           "source": {
             "type": "string",

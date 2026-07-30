@@ -35,7 +35,7 @@ by the edge, in this order:
 `resolve_identity()` lowercases the value, bounds it, rejects control characters, and returns it as
 both the run owner and the rate-limit key. Enforcement is HTTP middleware, so a request with no
 identity gets a bare `403` before routing. Two exemptions: `/healthz`, and **every `GET` under
-`/runs/`**, which is anonymous by design (D35 — holding the run id is the credential). `POST` to a
+`/runs/`**, which is anonymous by design (D-id-as-credential — holding the run id is the credential). `POST` to a
 public read path is still refused.
 
 The consequence worth internalizing: **the security boundary is the deployment, not the code.**
@@ -68,7 +68,7 @@ redirects, a single allowed host, and an allowlist that strips `Authorization` a
 redirect is ever followed. The outbound user agent is fixed and is not configurable.
 
 One outbound destination is not a provider and not configured by a credential: with `push.enabled`
-the server POSTs a notification to the push service named by each subscription (D43). The default
+the server POSTs a notification to the push service named by each subscription (D-stop-notification). The default
 `push.endpoint_hosts` admits four — Apple, Google, Mozilla and Microsoft (`web.push.apple.com`,
 `fcm.googleapis.com`, `*.push.services.mozilla.com`, `*.notify.windows.com`) — so an egress
 allowlist that names only Apple and Google will silently break Firefox and Windows subscriptions
@@ -82,7 +82,7 @@ again before every send.
 
 Two requirements on the LiteLLM configuration itself. Neither is checkable from this repository —
 the application can only detect the first, after the fact, and pay for it. Both are failure modes RA
-guards against in code (RA-017, and the `_unparsed_tool_call` net in `llm.py`); see D42.
+guards against in code (RA-017, and the `_unparsed_tool_call` net in `llm.py`); see D-provider-retry.
 
 **No fallback routing on any alias the roster names.** A LiteLLM fallback that quietly serves
 `gemma4` from `meta-llama/llama-4-scout` breaks every downstream identity claim at once: author
@@ -114,17 +114,17 @@ search:
 
 sources:
   enabled: true          # master switch; each tier still opts in separately
-  identifiers:           # D39 — ask a registry whether the cited source exists
+  identifiers:           # D-existence-vs-body — ask a registry whether the cited source exists
     enabled: true
-  pdf:                   # D39 — read a cited/mirrored PDF instead of failing on it
+  pdf:                   # D-existence-vs-body — read a cited/mirrored PDF instead of failing on it
     enabled: true        # required alongside open_access: a free copy is usually a PDF
-  open_access:           # D39 — fetch a free copy of the body and read it once
+  open_access:           # D-existence-vs-body — fetch a free copy of the body and read it once
     enabled: true
     providers: [openalex, unpaywall, europe_pmc, arxiv, core]
-  extraction:            # D40 — a rendering service reads the cited URL
+  extraction:            # D-paid-tier-page — a rendering service reads the cited URL
     enabled: true
     provider: firecrawl
-  delivery:              # D40 — licensed document delivery
+  delivery:              # D-paid-tier-page — licensed document delivery
     enabled: false       # off; the tier is a validated seam with no runtime wiring
 ```
 
@@ -148,7 +148,7 @@ on disk: per run, `events.jsonl`, `audit.json`, and `owner.txt` under the runs v
 startup event recording identities, modes, budgets, and which resolve tiers were enabled. A
 background sweeper enforces `retention_days`.
 
-`compose.yaml` sets **`RA_LOG_LEVEL: INFO`** (D42). The shipped code default is WARNING, and the
+`compose.yaml` sets **`RA_LOG_LEVEL: INFO`** (D-provider-retry). The shipped code default is WARNING, and the
 container's CMD is fixed so `--verbose` cannot be passed; at WARNING a deployment records no run
 starts, no controller decisions and no search results, which leaves a failure reconstructable only
 from code. The level is safe to raise because no INFO site emits run material: search logs query
@@ -158,7 +158,7 @@ and `structured()`'s schema-violation log names the exception class, never the r
 Two things stdout is still **not** a substitute for. The per-run `events.jsonl` remains the audit
 trail — logs are lossy, unowned, and outside the mode-0700 run tree. And a `MalformedOutputError`
 message still embeds the validator's own error text, which reaches container logs at WARNING via
-`critique`; that predates D42 and is unchanged by it, but it means the run tree is the only place
+`critique`; that predates D-provider-retry and is unchanged by it, but it means the run tree is the only place
 whose privacy posture is actually enforced.
 
 ## Keeping this page true

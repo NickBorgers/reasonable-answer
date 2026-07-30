@@ -201,7 +201,7 @@ def _locate_url(url: str, structure: Structure) -> StructuralRef:
 
 
 def mechanical_citation_issues(sources: list, structure: Structure) -> list[RawIssue]:
-    """``fabricated_citation`` findings a fetch *settles*, not that a critic judges (D38).
+    """``fabricated_citation`` findings a fetch *settles*, not that a critic judges (D-notfound-fabrication).
 
     A cited URL that returns a definitive not-found (HTTP 404 / 410 Gone) does not
     resolve — the page does not exist. That is the one fetch outcome that establishes
@@ -253,7 +253,7 @@ def to_defects(
     it lives on in the audit store only (principle 3).
 
     `overruled` holds registry keys (category, normalized claim_span) of defects a
-    writer disputed and lost (D25): those are marked `adjudicated=True` so the next
+    writer disputed and lost (D-writer-disputes): those are marked `adjudicated=True` so the next
     writer is told the task was independently reviewed and stands."""
     defects: list[Defect] = []
     seen: set[tuple] = set()
@@ -291,7 +291,7 @@ def to_defects(
 def suppress(
     results: list[LensResult], keys: set[tuple[str, str]]
 ) -> tuple[list[LensResult], list[dict]]:
-    """Drop issues matching upheld adjudication keys (D25) — applied ONCE, before
+    """Drop issues matching upheld adjudication keys (D-writer-disputes) — applied ONCE, before
     `tally`, `clean_records`, `to_defects` and `signal_signature`, so counts,
     clearance and fix-tasks all see the same filtered stream.
 
@@ -327,7 +327,7 @@ def suppress(
 def defect_provenance(results: list[LensResult]) -> dict[str, list[str]]:
     """Registry key -> sorted raising critic identities, for surviving material
     issues. Audit-side only: consumed by arbiter *eligibility* (deterministic
-    code), never by any prompt (D25)."""
+    code), never by any prompt (D-writer-disputes)."""
     provenance: dict[str, set[str]] = {}
     for result in results:
         if result.failed:

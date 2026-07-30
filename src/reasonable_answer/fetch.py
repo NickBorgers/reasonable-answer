@@ -1,6 +1,6 @@
 """Resolve the URLs a report cites, so the evidence lens can read them.
 
-Search (D17) made citations *real* — the writer can no longer invent a URL. It did
+Search (D-retrieval-opt-in) made citations *real* — the writer can no longer invent a URL. It did
 nothing about whether a cited page **supports the claim attached to it**, because no
 critic could open it. The evidence lens has always owned two categories it could not
 actually falsify:
@@ -18,12 +18,12 @@ what obliged :mod:`.prompts` to tell the evidence critic to disregard every fail
 fetch — throwing away the one case verification exists to catch.
 
 When the cited URL yields no body at all — which is what a paywalled journal does — an
-injected resolver (:mod:`.resolve`, D39) may still establish that the source *exists*, or
+injected resolver (:mod:`.resolve`, D-existence-vs-body) may still establish that the source *exists*, or
 find an open-access copy of it. That is an addition to this module's vocabulary, not to
 its reach: the ladder is constructed in `graph._build_resolver` and handed in, so `fetch`
 never imports `resolve`, and every provider call goes back out through `http_get` below.
 
-**Not an SSRF boundary** (D18). This fetches URLs a model chose, which is exposure by
+**Not an SSRF boundary** (D-source-verification). This fetches URLs a model chose, which is exposure by
 construction; the deployment is expected to constrain egress at the network layer. The
 bounds here — timeout, byte cap, redirect cap, http(s) only — exist so one slow or
 enormous page cannot stall or exhaust a run, not as a security control. One worked way to
@@ -58,7 +58,8 @@ USER_AGENT = "reasonable-answer/1.0 (citation verification)"
 #: HTTP statuses that establish a cited URL does not exist — "not found", not "could
 #: not read". 404 (Not Found) and 410 (Gone) are the definitive not-found codes; every
 #: other failure class (403, timeout, unreadable content type, empty body) is
-#: unreadable, not absent, and must never be read as fabrication (D38, docs/convergence.md).
+#: unreadable, not absent, and must never be read as fabrication
+#: (D-notfound-fabrication, docs/convergence.md).
 NOT_FOUND_STATUSES = frozenset({404, 410})
 
 _SOURCES_HEADING = re.compile(r"^#{1,6}\s*sources\s*$", re.IGNORECASE | re.MULTILINE)
@@ -91,7 +92,7 @@ class SourceOutcome(str, Enum):
     shape and utterly different facts, and collapsing them is what forced
     :mod:`.prompts` to tell the evidence critic to disregard *every* failed fetch —
     discarding the one case where verification could actually catch a fabricated
-    citation (D18, docs/decisions.md).
+    citation (D-source-verification, docs/decisions.md).
 
     `error` keeps the human-readable tail; this carries the machine decision. Two
     fields, two jobs.
@@ -119,12 +120,12 @@ class SourceOutcome(str, Enum):
 
 #: Statuses that mean "refused", as distinct from "not there". 999 is LinkedIn's
 #: non-standard bot-wall code and shows up in real citation lists. The not-found
-#: counterpart is `NOT_FOUND_STATUSES` above, which D38 already owns.
+#: counterpart is `NOT_FOUND_STATUSES` above, which D-notfound-fabrication already owns.
 _BLOCKED_STATUSES = frozenset({401, 402, 403, 405, 406, 423, 429, 451, 999})
 
 
 class ResolutionTier(str, Enum):
-    """Which rung of the ladder produced a result (D39).
+    """Which rung of the ladder produced a result (D-existence-vs-body).
 
     In the audit trail across *every* source, not only the failures: a tally of
     `{"direct": 5, "open_access": 2, "identifier": 4}` is what tells an operator whether
@@ -133,14 +134,14 @@ class ResolutionTier(str, Enum):
     belong (RA-016).
     """
 
-    #: The cited URL answered by itself. Every result was this before D39, and most
+    #: The cited URL answered by itself. Every result was this before D-existence-vs-body, and most
     #: still are.
     DIRECT = "direct"
     #: A bibliographic registry answered for the identifier embedded in the cited URL.
     IDENTIFIER = "identifier"
     #: A body arrived from an open-access copy that is not the cited URL.
     OPEN_ACCESS = "open_access"
-    #: A rendering service read the cited URL itself (D40). Distinct from `OPEN_ACCESS`
+    #: A rendering service read the cited URL itself (D-paid-tier-page). Distinct from `OPEN_ACCESS`
     #: in the way that matters downstream: this is the cited page's own body, so it
     #: carries no `body_source_url` and may settle a dispute.
     EXTRACTION = "extraction"
@@ -155,7 +156,7 @@ class Provider(str, Enum):
     UNPAYWALL = "unpaywall"
     EUROPE_PMC = "europe_pmc"
     ARXIV = "arxiv"
-    #: Keyed, and on the paid ladder for that reason rather than for a fee (D40).
+    #: Keyed, and on the paid ladder for that reason rather than for a fee (D-paid-tier-page).
     CORE = "core"
     #: The rendering provider. Renders JavaScript and survives a bot wall; does not and
     #: cannot pass a hard paywall.
@@ -176,7 +177,7 @@ MAX_METADATA_ABSTRACT_CHARS = 2_000
 
 @dataclass(frozen=True)
 class SourceMetadata:
-    """What a bibliographic registry knows about a citation — existence, chiefly (D39).
+    """What a bibliographic registry knows about a citation — existence, chiefly (D-existence-vs-body).
 
     This is deliberately *not* a body. It answers "does this source exist, and is it the
     thing the report says it is", which is the question paywalls make unanswerable and
@@ -234,8 +235,8 @@ class FetchedSource:
        text that may embed a URL and is not (RA-016). `tier` and `provider` are closed
        vocabularies too, for the same reason and the same destination.
 
-    D39 adds `body_source_url` and `metadata`, both additive and both defaulting to the
-    pre-D39 shape. `body_source_url` is set **only** when `text` came from somewhere
+    D-existence-vs-body adds `body_source_url` and `metadata`, both additive and both defaulting to the
+    pre-D-existence-vs-body shape. `body_source_url` is set **only** when `text` came from somewhere
     other than `url` — an open-access mirror — because a preprint is not the version of
     record, and `dispute.adjudicate_mechanical` must refuse to settle a dispute about
     the cited URL on a different copy's wording.
@@ -284,7 +285,7 @@ class FetchedSource:
         True only for a definitive not-found (HTTP 404 / 410 Gone): the page does not
         exist, which is exactly ``fabricated_citation`` under source verification. Every
         other failure (403, timeout, unreadable content type, empty body) is "could not
-        read", which is never evidence of fabrication (D38, docs/convergence.md).
+        read", which is never evidence of fabrication (D-notfound-fabrication, docs/convergence.md).
 
         Expressed against `outcome` rather than `status` so the two cannot drift, and so
         a not-found established by something other than an HTTP code — a registry that
@@ -383,11 +384,11 @@ class SourceFetcher:
     run sees the same evidence and a failure is not silently retried into a success
     halfway through.
 
-    `resolver` is injected rather than imported (D39). The tiers need `search.QueryBudget`
+    `resolver` is injected rather than imported (D-existence-vs-body). The tiers need `search.QueryBudget`
     and `prompts`, both of which sit downstream of this module, so `fetch -> resolve`
     would close a cycle. `graph._build_resolver` constructs it, exactly as
     `_build_searcher` constructs the searcher, which keeps network I/O out of the graph
-    and the test suite offline (D24).
+    and the test suite offline (D-seed-conversion).
     """
 
     def __init__(

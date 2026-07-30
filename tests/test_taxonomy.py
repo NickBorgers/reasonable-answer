@@ -19,7 +19,7 @@ from reasonable_answer.taxonomy import (
 )
 
 #: The categories whose defect is an absence or a property of arrangement, so no span of
-#: "the offending text" exists and `claim_span` must anchor to present text instead (D41).
+#: "the offending text" exists and `claim_span` must anchor to present text instead (D-absence-anchor).
 ABSENCE_CATEGORIES = (
     Category.OMITTED_COUNTERARGUMENT,
     Category.UNEXAMINED_PRESUPPOSITION,
@@ -53,7 +53,7 @@ def test_non_stylistic_categories_belong_to_exactly_one_lens():
 
 
 def test_bias_floors_match_bias_md():
-    # docs/bias.md §5 is normative for these three values (D24).
+    # docs/bias.md §5 is normative for these three values (D-social-bias).
     assert SEVERITY_FLOOR[Category.ONE_SIDED_SOURCING] is Severity.MAJOR
     assert SEVERITY_FLOOR[Category.LOADED_LANGUAGE] is Severity.MINOR
     assert SEVERITY_FLOOR[Category.UNEXAMINED_PRESUPPOSITION] is Severity.MAJOR
@@ -74,7 +74,7 @@ def test_bias_categories_reach_their_lens_prompt():
 
 def test_claim_span_anchor_reaches_each_lens_prompt_and_only_its_own():
     """A lens is told what to anchor for every category it may raise, and for none it
-    may not — the anchors follow the same closed scope as the meanings table (D41)."""
+    may not — the anchors follow the same closed scope as the meanings table (D-absence-anchor)."""
     for lens in LENSES:
         prompt = critic_user(lens, "q", "# r\n\nbody\n")
         for category in Category:

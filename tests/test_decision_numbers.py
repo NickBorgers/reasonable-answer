@@ -1,11 +1,12 @@
 """Tests for scripts/validate-decision-numbers.sh.
 
-docs/decisions.md numbers its sections `## D<n>`, and that number is echoed across
-config/, src/, tests/ and docs. The number is allocated by whoever writes the PR, so two
-PRs open at once can each pick the same next-free number and collide when both merge
-(issue #71). The script refuses a file in which any decision number is defined twice; on a
-`pull_request` event the checked-out file is the merge result, so a duplicate there is a
-collision that would otherwise land on main.
+docs/decisions.md identifies each decision by a slug derived from its subject
+(`D-source-verification`), not by a number from a shared counter (D-decision-slugs, which
+supersedes D-decision-gate). Slugs cannot collide between two concurrently-open PRs, so this
+gate exists to catch the one thing they do not prevent: the *same* slug defined twice. A
+decision is defined in either of two forms — a `## D-<slug> — …` prose section or a
+`| D-<slug> | … |` top-table row — and the gate must refuse a duplicate across their union,
+including the table form its predecessor could not see.
 
 These run offline and touch nothing outside tmp_path.
 """
@@ -36,32 +37,47 @@ def write(tmp_path: Path, body: str) -> Path:
     return f
 
 
-def test_unique_numbers_pass(tmp_path: Path) -> None:
-    r = run(write(tmp_path, "## D20 — a\n\n## D21 — b\n\n## D23 — c\n"))
-    assert r.returncode == 0, r.stderr
-
-
-def test_duplicate_number_fails(tmp_path: Path) -> None:
-    r = run(write(tmp_path, "## D30 — a\n\n## D31 — b\n\n## D30 — c\n"))
-    assert r.returncode == 1
-    assert "D30" in r.stderr
-
-
-def test_substring_numbers_are_distinct(tmp_path: Path) -> None:
-    # D3 and D30 share a prefix but are different allocations; neither is a duplicate.
-    r = run(write(tmp_path, "## D3 — a\n\n## D30 — b\n"))
-    assert r.returncode == 0, r.stderr
-
-
-def test_references_are_not_allocations(tmp_path: Path) -> None:
-    # A summary row (`| D1 | … |`) and prose mentioning D26 twice are references, not
-    # `## D<n>` section headers, so they must not be counted as collisions.
+def test_unique_slugs_pass(tmp_path: Path) -> None:
     body = (
         "| # | Decision | Rationale |\n"
-        "| D1 | first | r |\n"
-        "| D1 | still the same row family | r |\n\n"
-        "See D26, and again D26, discussed below.\n\n"
-        "## D26 — the only real allocation here\n"
+        "| D-alpha | first | r |\n\n"
+        "## D-beta — second\n\n## D-gamma — third\n"
+    )
+    r = run(write(tmp_path, body))
+    assert r.returncode == 0, r.stderr
+
+
+def test_duplicate_prose_slug_fails(tmp_path: Path) -> None:
+    r = run(write(tmp_path, "## D-alpha — a\n\n## D-beta — b\n\n## D-alpha — c\n"))
+    assert r.returncode == 1
+    assert "D-alpha" in r.stderr
+
+
+def test_duplicate_across_forms_fails(tmp_path: Path) -> None:
+    # The blind spot the predecessor gate had: a slug defined once as a table row and once
+    # as a prose section is still a duplicate. This is the collision four numbers hid in.
+    body = "| # | Decision | Rationale |\n| D-alpha | terse | r |\n\n## D-alpha — the expansion\n"
+    r = run(write(tmp_path, body))
+    assert r.returncode == 1
+    assert "D-alpha" in r.stderr
+
+
+def test_slug_prefix_is_not_a_duplicate(tmp_path: Path) -> None:
+    # Distinct slugs that share a prefix are different decisions, not a collision.
+    r = run(write(tmp_path, "## D-social-bias — a\n\n## D-social-bias-audit — b\n"))
+    assert r.returncode == 0, r.stderr
+
+
+def test_references_and_mapping_rows_are_not_definitions(tmp_path: Path) -> None:
+    # A prose mention of a slug, and the old->new mapping table (whose first cell is an old
+    # numeric id and whose slug sits in the *second* column), are references, not definitions.
+    body = (
+        "| old id | new slug |\n"
+        "|---|---|\n"
+        "| D18 | `D-alpha` |\n"
+        "| D24 | `D-alpha` |\n\n"
+        "See D-alpha, and again D-alpha, discussed below.\n\n"
+        "## D-alpha — the only real definition here\n"
     )
     r = run(write(tmp_path, body))
     assert r.returncode == 0, r.stderr

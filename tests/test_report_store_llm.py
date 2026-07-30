@@ -72,7 +72,7 @@ def test_content_only_purge_keeps_the_decision_record(tmp_path):
     store.critique("h" * 64, "logic", 1, CritiqueOutput(issues=[]))
     store.event("control", rule=7)
     store.final("final body", {"terminal_status": "accepted"})
-    # D26: refinement content is a CONTENT_DIRS entry precisely so it does not silently
+    # D-question-refinement: refinement content is a CONTENT_DIRS entry precisely so it does not silently
     # escape this same purge (a root-level file would, per store.py's comment).
     store.refinement({"provenance": "verified", "offer_id": "abc"})
 
@@ -162,7 +162,7 @@ def test_budgets_fail_closed_on_a_cap_that_cannot_be_hard():
 
 def test_a_backoff_cap_below_its_base_is_rejected():
     """Otherwise every wait silently becomes the cap and the base reads as a setting
-    that does nothing (D42)."""
+    that does nothing (D-provider-retry)."""
     with pytest.raises(ConfigError, match="retry_backoff_max_seconds"):
         Budgets(retry_backoff_seconds=10.0, retry_backoff_max_seconds=5.0)
 

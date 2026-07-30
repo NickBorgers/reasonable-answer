@@ -4,7 +4,7 @@ Identity is read from a request header and trusted as presented. That is sound o
 when the app's port is unreachable except through the proxy that sets the header:
 Cloudflare overwrites `Cf-Access-*` on everything it proxies, so through the tunnel
 the value is authoritative, and `tailscale serve` does the same for its own headers.
-A caller reaching the port directly can set either header to anything (D32,
+A caller reaching the port directly can set either header to anything (D-identity-header,
 docs/authentication.md).
 
 Everything that turns a request into an identity lives in this one function, so
@@ -26,7 +26,7 @@ ACCESS_EMAIL_HEADER = "cf-access-authenticated-user-email"
 
 #: Set by `tailscale serve` when it fronts the app; carries the calling node's login.
 #:
-#: Only the login. `Tailscale-User-Name` sits beside it and D21 read both, because a
+#: Only the login. `Tailscale-User-Name` sits beside it and D-bounded-submission read both, because a
 #: rate-limit key only has to be *stable* — any string would do. An ownership key has to
 #: be the *same* string the other door produces, and the display name ("Nick Borgers")
 #: is a different namespace from the address Access reports. Reaching for it would file

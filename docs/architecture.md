@@ -1,6 +1,6 @@
 # Architecture — the LangGraph graph (v3)
 
-## Roster structure & role assignment (D15, D16)
+## Roster structure & role assignment (D-per-lens-critics, D-critic-only-specialists)
 
 The roster is **role-structured**, not a flat swap:
 
@@ -19,7 +19,7 @@ dimension can be independently double-checked (see Acceptance in
 `converged_unconfirmed`.
 
 "Eligible" in this structural sense — non-author, distinct identity, distinct family — is what the
-convergence controller counts. D20 adds an orthogonal **demonstrated-capability** term: `ra audition`
+convergence controller counts. D-critic-audition adds an orthogonal **demonstrated-capability** term: `ra audition`
 measures whether each critic can actually perform its lens (`fit` / `marginal` / `unfit`), `ra doctor`
 reports the cached status, and `audition.enforce` fails startup closed on a cached `unfit` verdict
 (`marginal` / stale / not-audited stay warnings). That gate runs in `build_runtime` before any tokens
@@ -59,9 +59,9 @@ Invariants (enforced in code, covered by tests):
 |------|-------|----------|-------|-------------|
 | **intake** | question + **markdown** seed | normalized `question` / `seed`; routing | none | deterministic |
 | **generate** | question + latest report + **defect list** | next report (with citations) | non-author (alternating) | LLM (untrusted output) |
-| **adjudicate** *(D25, opt-in)* | pending disputes + finding + one paragraph | `AdjudicationRecord[]` | mechanical fetch-check, else an arbiter ≠ disputer ≠ raiser | mechanical, or LLM inside a closed 2-field schema |
+| **adjudicate** *(D-writer-disputes, opt-in)* | pending disputes + finding + one paragraph | `AdjudicationRecord[]` | mechanical fetch-check, else an arbiter ≠ disputer ≠ raiser | mechanical, or LLM inside a closed 2-field schema |
 | **critique** | report + question + **one lens** + taxonomy | `Issue[]` per lens | per-lens non-author model | LLM (untrusted output) |
-| **triage** | this tick's `Issue[]` (minus **upheld-adjudication suppressions**, D25) | `OrchestratorView` + `DefectList` | none — **mechanical** | deterministic |
+| **triage** | this tick's `Issue[]` (minus **upheld-adjudication suppressions**, D-writer-disputes) | `OrchestratorView` + `DefectList` | none — **mechanical** | deterministic |
 | **orchestrate** | `OrchestratorView` **only** | recommendation (minor-polish judgment) | LLM, blind | LLM inside guardrails |
 | **controller** | `ControllerInput` | decision + terminal status | none | **deterministic — owns termination** |
 | **finalize** | best report + history | final report + terminal status + audit trail | none | deterministic |
@@ -72,7 +72,7 @@ Invariants (enforced in code, covered by tests):
 
 ## The 3 lenses (per-lens critic models, three fresh contexts)
 
-Each lens is assigned its own critic model (D15) — pick the best tool per dimension. The only hard
+Each lens is assigned its own critic model (D-per-lens-critics) — pick the best tool per dimension. The only hard
 rule is that a lens's model must **not** be the author of the artifact under review.
 
 ```mermaid
@@ -124,8 +124,8 @@ failed lens" vs. "unknown categories dropped") is resolved **in favor of fail-cl
 | Unknown enum / invalid or over-length field in any issue | **fails the entire lens** — never silently dropped |
 | Malformed / schema-violating critic output | up to *R* bounded repair retries; then lens **failed** |
 | Any **failed lens** in a tick | `lenses_failed > 0` ⇒ review incomplete ⇒ controller rule 2 (re-critique); budget exhausted ⇒ rule 3 `fatal` → `aborted` |
-| A **dispute** cannot be adjudicated (no eligible arbiter, arbiter down/malformed, budget spent) | recorded `dismissed` with the concrete method; **the finding stands** — every non-`upheld` path is the status quo ante (D25) |
-| The **dispute-elicitation** call fails or returns garbage | `dispute_pass_failed` event; the revision proceeds with no disputes — never fatal (D25) |
+| A **dispute** cannot be adjudicated (no eligible arbiter, arbiter down/malformed, budget spent) | recorded `dismissed` with the concrete method; **the finding stands** — every non-`upheld` path is the status quo ante (D-writer-disputes) |
+| The **dispute-elicitation** call fails or returns garbage | `dispute_pass_failed` event; the revision proceeds with no disputes — never fatal (D-writer-disputes) |
 | Per-call timeout | retry within budget; exhausted ⇒ `fatal` |
 | Empty `Issue[]` | counts as clean **only if** all lenses completed successfully |
 | Generator failure | retry within budget; exhausted ⇒ `fatal` |
@@ -235,7 +235,7 @@ carried no headings is accepted with a warning; the warning rides the run's exis
   every alias in the roster (writers, critics, and the orchestrator), validates per-lens roster
   health, and checks the config invariant `0 < min_ticks < hard_cap` (fail closed) so no generating
   rule can fire at or beyond the cap.
-- **Writer-pool depth (D42):** author exclusion applies to writers too, so the pool the *next* draft
+- **Writer-pool depth (D-provider-retry):** author exclusion applies to writers too, so the pool the *next* draft
   may come from is `writers \ {author(Rₙ)}`. Size the pool for **≥2 eligible writers on a revision
   round** — i.e. at least three writers — or one flaky response is an aborted run rather than a
   retry. This is a sizing recommendation, not a fail-closed check: a two-writer roster is legal and
@@ -243,7 +243,7 @@ carried no headings is accepted with a warning; the warning rides the run's exis
 - **Concurrency/limits:** bounded concurrency (the 3 lenses may run in parallel), per-call timeout +
   retry budget, token/context budgeting for the slow local model, backpressure so parallel lenses
   don't overload one proxy/model.
-- **Transient-failure posture (D42):** every retry waits — exponential with jitter, bounded by
+- **Transient-failure posture (D-provider-retry):** every retry waits — exponential with jitter, bounded by
   `budgets.retry_backoff_seconds` / `retry_backoff_max_seconds`, and a provider's own `Retry-After`
   wins where it sends one. Failures whose status says the *request* is wrong (400/401/403/404/413/
   422) raise `PermanentCallError` immediately instead of consuming the budget. A completion is never
@@ -256,7 +256,7 @@ carried no headings is accepted with a warning; the warning rides the run's exis
   queue's waiting depth reaches `max_queue_depth`, and a fixed-window `submit_rate_max` /
   `submit_rate_window_seconds` limiter caps how fast one caller may open new runs — keyed by the
   caller's resolved identity (Cloudflare Access email first, then the Tailscale header, then the
-  optional `auth.dev_identity`), the same identity the auth middleware enforces (D32). There is no
+  optional `auth.dev_identity`), the same identity the auth middleware enforces (D-identity-header). There is no
   shared global bucket: a request carrying no identity is refused by the middleware before it
   reaches submission at all. Both checks run **before** any run directory is written, so a refused
   submission costs no disk.

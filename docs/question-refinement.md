@@ -1,6 +1,6 @@
 # Question refinement — pre-run reframing suggestions
 
-> **Status:** Implemented; this is decision **D26** in [decisions.md](./decisions.md).
+> **Status:** Implemented; this is decision **D-question-refinement** in [decisions.md](./decisions.md).
 > The questions below are synthetic, each chosen to illustrate one framing
 > category; no private run content appears in this spec.
 > Revised 2026-07-25 after an adversarial design review (findings QR-001–017).
@@ -57,7 +57,7 @@ can cheaply act on it: the asker, before the run starts.
    `fetch()`es the refinement route with the current text (same-origin; permitted
    by the existing CSP, `connect-src 'self'`). The route is `POST /refine`; the
    browser-facing URL the script actually emits is base-path aware —
-   `RA_ROOT_PATH + "/refine"` (D29), which is the bare `/refine` root-origin
+   `RA_ROOT_PATH + "/refine"` (D-base-path), which is the bare `/refine` root-origin
    identity only when `RA_ROOT_PATH` is unset. Each request aborts any in-flight
    predecessor (`AbortController`) and carries the exact text it was issued
    for; a response is applied only if that text still matches the textarea,
@@ -108,7 +108,7 @@ question is about, only *how it is posed*.
 | --- | --- | --- |
 | **Split the either/or** | Question offers exactly two labels for something that is a record or a spectrum | Mayor/zoning → "What is the mayor's actual record on the zoning plan — where have they supported, amended, or opposed it?" |
 | **Check the premise first** | Question presupposes a contested or unverified fact | Chickens → "Is it actually against the local rules to keep backyard chickens, and what are my options if it is?" |
-| **Name the outcome you care about** | A scalar verdict ("net positive/negative", "better/worse") that names no measurable outcome, or only a broad domain no single number can score | Four-day week → "What were the effects of a four-day work week on output and on employee retention?"; fluoride/"public health" → enumerate the domain's components (dental, skeletal, neurological), **never** select one (D33) |
+| **Name the outcome you care about** | A scalar verdict ("net positive/negative", "better/worse") that names no measurable outcome, or only a broad domain no single number can score | Four-day week → "What were the effects of a four-day work week on output and on employee retention?"; fluoride/"public health" → enumerate the domain's components (dental, skeletal, neurological), **never** select one (D-refine-audition) |
 | **Surface the real goal** | A practical need is buried inside a factual framing | Chickens (second half) → the options clause above |
 | **Ask what's answerable** | Pure value question with no factual core | Data-vs-intuition → "What does research say about when data-driven and intuition-driven decisions each perform better?" |
 | **Ask the question behind the question** | The literal question is settled; the live question is adjacent | Apollo 11 → offer *both*: keep the verification question, and add "Why does the belief that the Moon landing was faked persist?" |
@@ -123,11 +123,11 @@ what is verifiable, and may only ever appear *in addition to* the unchanged
 literal question. This transform ships **disabled** and is enabled only after
 a paired-fixture audition passes: mirror questions posed from opposing
 framings must yield mirror suggestions (the same deferred methodology as
-D24's bias-correlation audition).
+D-social-bias's bias-correlation audition).
 
 ## Mechanism
 
-Follows the D25 pattern: opt-in config flag, byte-identical behavior when off,
+Follows the D-writer-disputes pattern: opt-in config flag, byte-identical behavior when off,
 and the seed-ingestion precedent (PR #25) of edge-side transformation that is
 audited but never routes — refinement lives entirely at the web edge, never
 inside the graph.
@@ -260,7 +260,7 @@ inside the graph.
 
 Two distinct layers. **Enforced** means deterministic server-side validation;
 **prompt policy** means best-effort instructions whose adherence is tested
-statistically with fixtures, not assumed — since D33, by the mechanical
+statistically with fixtures, not assumed — since D-refine-audition, by the mechanical
 grader behind `ra audition-refine` (see "Auditing the prompt surface" below).
 
 Enforced:
@@ -291,7 +291,7 @@ do", applied to suggestions; fixture-tested per transform):
    output. Showing chips for every question destroys the magic and turns the
    feature into a nag.
 8. **One transform per suggestion.**
-9. **Preserve the scope** (D33). The rewrite covers everything the original
+9. **Preserve the scope** (D-refine-audition). The rewrite covers everything the original
    covered. A domain too broad to measure ("public health") is *unpacked*
    into component outcomes, never quietly replaced by one of them ("dental
    health") — narrowing the user's scope reads as steering toward the
@@ -299,7 +299,7 @@ do", applied to suggestions; fixture-tested per transform):
    cross-references stay stable; conceptually it is 6's sibling: 6 protects
    *what* the question is about, 9 protects *how much* of it.
 
-## Auditing the prompt surface (D33)
+## Auditing the prompt surface (D-refine-audition)
 
 Prompt policy that is never measured is indistinguishable from prompt policy
 that is ignored. `refine_audition.py` measures it: a fixture corpus at
@@ -350,7 +350,7 @@ though enabling it stays a human decision.
   5–6 and 9, the highest-risk transform disabled until its paired-fixture audition
   passes, and `refinement.json` making every offered suggestion auditable
   per run. The realized instance of this failure mode is scope narrowing —
-  the fluoride/dental-health incident that produced D33 — now pinned by the
+  the fluoride/dental-health incident that produced D-refine-audition — now pinned by the
   `downscope-net-positive-01` fixture at zero tolerance.
 
 ## Non-goals
@@ -378,10 +378,10 @@ The design above is normative; this section maps it to where it landed, not to r
    DOM construction).
 7. `web/worker.py` / `store.py`: `refinement.json` writer (purgeable) +
    non-content `refinement` event in `events.jsonl`.
-8. Docs: `## D26` section in `decisions.md` (problem / mechanism /
+8. Docs: `## D-question-refinement` section in `decisions.md` (problem / mechanism /
    alternatives rejected / isolation accounting / known residuals), the
    valid-ID allowlist in `.github/scripts/review/prompts/invariant.md` bumped
-   to `D1`–`D26`, this file registered in `DESIGN.md`'s Document map, and a
+   to `D-alternating-refine-game`–`D-question-refinement`, this file registered in `DESIGN.md`'s Document map, and a
    cross-reference from `bias.md §4`.
 9. Tests — what actually landed in this PR (`tests/test_refine.py`,
    `tests/test_refine_web.py`, `tests/test_report_store_llm.py`):
@@ -423,7 +423,7 @@ The design above is normative; this section maps it to where it landed, not to r
      string checks above: the stale-response race (a slow, superseded
      response must not clobber newer chips), edit-after-selection clearing
      provenance, and submit-while-refinement-pending are all unexercised.
-   - ~~**Prompt fixtures**~~ — landed with D33: `tests/fixtures/refine/`
+   - ~~**Prompt fixtures**~~ — landed with D-refine-audition: `tests/fixtures/refine/`
      carries a positive fixture per enabled transform, the pinned
      down-scoping regression, two well-posed controls, and the
      `question_behind_the_question` mirror pair (diagnostic only).

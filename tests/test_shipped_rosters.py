@@ -58,18 +58,18 @@ def test_default_roster_boots_without_a_proxy_or_a_credential(default_config: Co
     # stay off independently so that enabling one tier never turns on another.
     assert default_config.sources.enabled is False
     assert default_config.sources.pdf.enabled is False
-    # The registry tiers (D39) reach hosts of their own, so they need egress the smoke
+    # The registry tiers (D-existence-vs-body) reach hosts of their own, so they need egress the smoke
     # test withholds — and the identifier tier can raise a blocking `fabricated_citation`
-    # via D38, which is not something an unattended default should be able to do.
+    # via D-notfound-fabrication, which is not something an unattended default should be able to do.
     assert default_config.sources.identifiers.enabled is False
     assert default_config.sources.open_access.enabled is False
-    # The paid tiers (D40) additionally need a credential the smoke test withholds, and
+    # The paid tiers (D-paid-tier-page) additionally need a credential the smoke test withholds, and
     # refuse to start without one — so "off" here is what keeps `make test` bootable.
     assert default_config.sources.extraction.enabled is False
     assert default_config.sources.delivery.enabled is False
     assert default_config.disputes.enabled is False
     # Auditioning itself needs no withholding — it only happens via `ra audition`. What
-    # must stay off is the gate that reads its cache: `enforce` is warn-by-default (D20).
+    # must stay off is the gate that reads its cache: `enforce` is warn-by-default (D-critic-audition).
     assert default_config.audition.enforce is False
 
 

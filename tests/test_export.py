@@ -248,7 +248,7 @@ def test_the_review_record_is_the_same_list_the_page_shows(client, finished_run)
 
 def test_copy_markdown_copies_the_export_document_not_just_the_report(client, finished_run):
     """Copy markdown must place the export — report *and* review record — on the
-    clipboard, the same text `export.md`/`Download .md` serve (D30). The source is the
+    clipboard, the same text `export.md`/`Download .md` serve (D-verdict-attached). The source is the
     off-screen textarea the copy button selects, so the record has to be *in* it, not
     merely elsewhere on the page."""
     page = client.get(f"/runs/{finished_run}/report").text

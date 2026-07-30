@@ -141,7 +141,7 @@ def writer_first_draft(question: str, *, current_date: str | None = None) -> str
 
 
 #: Appended to the revision instructions only when the dispute channel is on and
-#: this is not a polish pass (D25). Without it, a writer facing a factually wrong
+#: this is not a polish pass (D-writer-disputes). Without it, a writer facing a factually wrong
 #: task has exactly two moves — falsify the report or stall the run — and both
 #: corrupt the outcome.
 WRITER_DISPUTE_ADDENDUM = (
@@ -156,7 +156,7 @@ WRITER_DISPUTE_ADDENDUM = (
 
 def _task_dump(defect: Defect) -> dict:
     """`adjudicated` appears only when true: with the channel off (or nothing
-    adjudicated) the task JSON is byte-identical to a build without D25."""
+    adjudicated) the task JSON is byte-identical to a build without D-writer-disputes."""
     dumped = defect.model_dump(exclude_none=True, mode="json")
     if not dumped.get("adjudicated"):
         dumped.pop("adjudicated", None)
@@ -197,7 +197,7 @@ def writer_revision(
 
 
 def writer_dispute(question: str, report: str, defects: list[Defect]) -> str:
-    """The dispute-elicitation pass (D25): a separate, fresh structured call made
+    """The dispute-elicitation pass (D-writer-disputes): a separate, fresh structured call made
     after the revision completes. Tasks are numbered by index so a dispute can
     reference one without repeating its text."""
     tasks = json.dumps(
@@ -259,7 +259,7 @@ def critic_user(
     # that standard to the blocked and paywalled sources that make up most of a real
     # failure set is how verification manufactures defects.
     #
-    # `fabricated_citation` is deliberately *not* sharpened toward the critic. D38
+    # `fabricated_citation` is deliberately *not* sharpened toward the critic. D-notfound-fabrication
     # raises it mechanically in `triage.mechanical_citation_issues`, so inviting the
     # critic to raise it too would double-report one defect — at its blocking floor,
     # twice. What the critic is told instead is that the finding is already recorded;
@@ -319,7 +319,7 @@ def fetched_sources_block(sources: list) -> str:
     is the page, here is proof the source *exists* but not its text, and here is a
     failure. Blurring the second into either of the others is what this block exists to
     prevent — read as the first it invites `misrepresented_source` against an abstract,
-    read as the third it leaves a real paywalled journal looking fabricated (D39).
+    read as the third it leaves a real paywalled journal looking fabricated (D-existence-vs-body).
     """
     entries = []
     for i, s in enumerate(sources, 1):
@@ -536,7 +536,7 @@ ARBITER_SYSTEM = (
 
 
 def arbiter_user(defect, dispute, paragraph_text: str, question: str, evidence_page=None) -> str:
-    """The arbiter's entire input (D25). Deliberately absent: the report body, any
+    """The arbiter's entire input (D-writer-disputes). Deliberately absent: the report body, any
     alias or identity, the lens, the round, the run id. The dispute is an
     interested party's argument and is labelled as such."""
     finding = json.dumps(
@@ -633,7 +633,7 @@ def orchestrator_user(view_json: str) -> str:
 
 # --------------------------------------------------------------- question refinement
 #
-# docs/question-refinement.md (D26). Ambient, pre-run reframing suggestions: the
+# docs/question-refinement.md (D-question-refinement). Ambient, pre-run reframing suggestions: the
 # model sees only the question, never anything from the graph, and returns zero or
 # more chip suggestions. Zero is the expected, common outcome — most questions are
 # already well-posed and get no chips at all.

@@ -5,13 +5,13 @@ Design notes worth keeping in mind while reading:
 * **Every request carries an identity, and the app does not verify it.** It comes
   from a header set by Cloudflare Access or by `tailscale serve` (`identity.py`),
   which is only meaningful while the app's port is unreachable except through one of
-  them. A caller who can reach the port directly can claim to be anyone (D32,
+  them. A caller who can reach the port directly can claim to be anyone (D-identity-header,
   docs/authentication.md).
 * **Authentication is enforced by middleware, not by each route.** Every route but
   `/healthz` and the GETs under `/runs/` is behind it, including routes nobody has
   written yet — the failure mode of a per-route call is a new handler that forgets to
   make it. The exemption is method-scoped, so a new *write* is gated by default and
-  only a new *read* under `/runs/` inherits the public rule (D35).
+  only a new *read* under `/runs/` inherits the public rule (D-id-as-credential).
 * **Ownership is per run and scopes the index, not each read.** You see your own runs
   listed; anyone who holds a run id can read that run, signed in or not — holding the
   id is the credential. Sharing a link is the intended way to show someone a report.
@@ -19,7 +19,7 @@ Design notes worth keeping in mind while reading:
   `--owner` — are served to nobody.
 * **Nothing public names a person.** A shared link reaches strangers, so the owner's
   address is kept off every route under `/runs/`: no byline on the run page, no
-  `owner` field in `audit.json` (D35).
+  `owner` field in `audit.json` (D-id-as-credential).
 * **Showing reports to a human does not weaken the isolation design.** Blindness is
   about what enters a *model's* context. This UI is a window onto the audit trail,
   which is the whole reason the pipeline keeps one.
@@ -71,7 +71,7 @@ from .worker import QueueFull, RateLimited, RunWorker
 #: It reports liveness only, and nothing about any run.
 _UNAUTHENTICATED_PATHS = frozenset({"/healthz"})
 
-#: Reading a run needs no identity: holding the id is the credential (D35). Everything
+#: Reading a run needs no identity: holding the id is the credential (D-id-as-credential). Everything
 #: under this prefix is a pure disk read of one run's own audit trail — no worker, no
 #: graph, no token cost — so a person can share the URL they are looking at and have it
 #: open for anyone.
@@ -81,7 +81,7 @@ _UNAUTHENTICATED_PATHS = frozenset({"/healthz"})
 #: so it does not match), `POST /runs/{id}/resume` and `POST /runs/{id}/again` all fall
 #: through to the identity check unchanged, as do `/` and the app-shell assets. Matched
 #: against the same `request.url.path` the proxy has already stripped `RA_ROOT_PATH` from,
-#: exactly as `_UNAUTHENTICATED_PATHS` is (D29). An owner-less run still 404s via
+#: exactly as `_UNAUTHENTICATED_PATHS` is (D-base-path). An owner-less run still 404s via
 #: `_require`, so nothing that was unreadable before becomes readable here.
 #:
 #: A prefix means a *future* GET under `/runs/` is public the day it is written.
@@ -136,10 +136,10 @@ def create_app(
     # Empty by default, which leaves every emitted URL byte-identical to a root-origin
     # deployment. Resolved once here, like the static assets, and only ever prepended to
     # URLs the app *emits* — the proxy strips it from the path before the request lands, so
-    # the routes below stay unprefixed. See D29.
+    # the routes below stay unprefixed. See D-base-path.
     base_path = normalize_base_path(os.environ.get("RA_ROOT_PATH"))
     # The prefix for the URLs a *reader* uses: the run page and everything hanging off it.
-    # Split from `base_path` because the two live behind different doors (D35). The edge
+    # Split from `base_path` because the two live behind different doors (D-id-as-credential). The edge
     # gates `/app/` with Cloudflare Access and leaves `/runs/` open, so a run page emitted
     # under `/app` is a link only a signed-in person can open — which is the whole thing
     # this exists to fix. Setting `RA_PUBLIC_ROOT_PATH=/` puts every run URL at the origin
@@ -155,7 +155,7 @@ def create_app(
     )
     concurrent = max_concurrent or int(os.environ.get("RA_MAX_CONCURRENT_RUNS", "1"))
     # How many progress streams may be open at once, across everybody. One reader needs
-    # one; the number exists because the route is anonymous (D35) and an open connection
+    # one; the number exists because the route is anonymous (D-id-as-credential) and an open connection
     # is the only cost a stranger can impose here.
     _streams = _StreamLimit(int(os.environ.get("RA_MAX_LIVE_STREAMS", "32")))
     if (cap := os.environ.get("RA_MAX_RESUME_ATTEMPTS")):
@@ -175,7 +175,7 @@ def create_app(
             "auth.dev_identity is set: unauthenticated requests are treated as %s",
             config.auth.dev_identity,
         )
-    # Notifications (D43). Built before the worker because the worker holds the notifier:
+    # Notifications (D-stop-notification). Built before the worker because the worker holds the notifier:
     # the send happens on the worker thread the moment a run stops, which is the only place
     # that knows a run stopped without a browser having to be watching. `push_key` is the
     # public half, embedded in the index for `pushManager.subscribe`; empty when the feature
@@ -205,7 +205,7 @@ def create_app(
             store=push_store,
             vapid_pem=pem,
             subject=config.push.subject,
-            # Run URLs live on the reader-facing base (D35), so a notification opens the
+            # Run URLs live on the reader-facing base (D-id-as-credential), so a notification opens the
             # same link every other run reference in the app uses.
             public_base=public_base,
             endpoint_hosts=config.push.endpoint_hosts,
@@ -237,7 +237,7 @@ def create_app(
     @asynccontextmanager
     async def lifespan(_: FastAPI):
         # A bad or schema-incapable refine alias must fail here, at boot, not on some
-        # user's first pause after typing (D26) -- so this runs before recovery, which is
+        # user's first pause after typing (D-question-refinement) -- so this runs before recovery, which is
         # itself allowed to enqueue real work.
         refiner.start()
         # Recovery lives here rather than in RunWorker.__init__ so that constructing a
@@ -279,7 +279,7 @@ def create_app(
         because those are opt-in and this must not be: the cost of forgetting is an
         open route onto other people's seed material. Every handler below can assume
         `request.state.viewer` is a real identity — except the GETs under `/runs/`,
-        which are public (D35) and where it may be None.
+        which are public (D-id-as-credential) and where it may be None.
 
         `HTTPException` is not available here — it is raised past the exception
         middleware that would turn it into a response — so the refusal is returned
@@ -289,7 +289,7 @@ def create_app(
         if request.url.path in _UNAUTHENTICATED_PATHS:
             return await call_next(request)
         if request.method == "GET" and request.url.path.startswith(_PUBLIC_GET_PREFIX):
-            # Reading a run is public (D35). The identity is still resolved rather than
+            # Reading a run is public (D-id-as-credential). The identity is still resolved rather than
             # forced to None, because the same page is reachable through the gated door
             # too and a viewer we happen to know is not worth throwing away — but None is
             # an ordinary value here, not a refusal, so every handler under `/runs/` must
@@ -370,7 +370,7 @@ def create_app(
                     status_code=400, detail=f"seed exceeds {config.max_report_chars} characters"
                 )
 
-        # `refine_offer_id`/`refine_selected` are claims, not evidence (D26): resolved
+        # `refine_offer_id`/`refine_selected` are claims, not evidence (D-question-refinement): resolved
         # against the server's own offer record, never trusted from the client. Skipped
         # outright when refinement is disabled -- with no offer ever minted while off,
         # any stray or forged pair would resolve to `unverified` anyway, but calling
@@ -505,7 +505,7 @@ def create_app(
         # explaining an exception to this rule costs more than just applying it here too.
         _reject_cross_site(request)
         if not refiner.enabled:
-            # The endpoint does not exist when the feature is off (D26).
+            # The endpoint does not exist when the feature is off (D-question-refinement).
             raise HTTPException(status_code=404, detail="refinement is disabled")
 
         question = question.strip()
@@ -537,7 +537,7 @@ def create_app(
     # grows no new surface at all rather than two routes that always refuse.
     #
     # Top level, deliberately *not* under `/runs/` — subscribing attaches a device to an
-    # identity, and D35 opens `/runs/` to anonymous readers. A subscribe endpoint there
+    # identity, and D-id-as-credential opens `/runs/` to anonymous readers. A subscribe endpoint there
     # would let anyone holding a run id register their own phone against this app; the
     # method guard in `authenticate` would still refuse a `POST`, but siting a write route
     # inside the public read prefix and relying on that is the wrong side of the rule.
@@ -613,7 +613,7 @@ def create_app(
         already writes every state change to `events.jsonl`, and a tick is minutes
         long — so a 1s poll is both simpler and entirely sufficient.
 
-        Anonymous since D35, which changes what an open connection costs: the ceiling
+        Anonymous since D-id-as-credential, which changes what an open connection costs: the ceiling
         used to be the number of people who could sign in, and is now the number of
         people who hold a run id. Nothing here writes — `Registry` has no write path at
         all, and the only worker call is `active()`, a lock-guarded dict copy — so the
@@ -685,7 +685,7 @@ def create_app(
         # record — it says so rather than printing a status nothing supports.
         final, prov = _provenance(registry, summary, run_id)
         # Copy markdown puts the export document — report + review record — on the
-        # clipboard, the same bytes `export.md`/`Download .md` serve (D30). An unreadable
+        # clipboard, the same bytes `export.md`/`Download .md` serve (D-verdict-attached). An unreadable
         # record cannot be exported as a file (the route 409s), but the page still
         # renders, so the copy mirrors what the page shows: the record as unreadable.
         return render_report(
@@ -736,7 +736,7 @@ def create_app(
     def audit(run_id: str) -> dict[str, Any]:
         """The whole audit trail: summary, verdict, every event.
 
-        Public since D35, which is the point — the trail is the reason the pipeline
+        Public since D-id-as-credential, which is the point — the trail is the reason the pipeline
         keeps one, and a shared link that cannot be checked is not much of a claim.
         `owner` is the one field held back: it is an email address, it is not evidence
         about the run, and a link shared with a stranger should not hand them the
@@ -833,7 +833,7 @@ def _reject_cross_site(request: Request) -> None:
     A plain HTML form POST triggers no CORS preflight, and the CSP's `form-action 'self'`
     only constrains forms *this* app serves — neither stops a foreign page from
     auto-submitting a run to a guessable hostname and burning a full 10–25-minute run.
-    This matters more since D32, not less: Cloudflare Access sets a `CF_Authorization`
+    This matters more since D-identity-header, not less: Cloudflare Access sets a `CF_Authorization`
     cookie, so such a POST now arrives *authenticated*, as a real user, and would create
     a run they own. The app sets no session cookie of its own to hang a SameSite
     attribute on, so the request context itself is the only signal.

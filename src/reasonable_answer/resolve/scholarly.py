@@ -10,7 +10,7 @@ Five of the six are keyless. **CORE is not**, and that difference is load-bearin
 than incidental: a keyed provider needs a credential-bearing request (a token in a header,
 a no-redirect opener, fail-closed startup validation), and "enabled without a key" has to
 be fatal at load rather than a tier that silently spends its budget on 401s and reports
-them as coverage. D40 added that posture for the paid tiers, and CORE inherits it.
+them as coverage. D-paid-tier-page added that posture for the paid tiers, and CORE inherits it.
 
 Coverage, and therefore what a denial is worth (`authoritative`):
 
@@ -374,7 +374,7 @@ class ApiKeyRequired(RuntimeError):
 
 
 class Core:
-    """`api.core.ac.uk/v3/discover` — open-access full text, aggregated (D40).
+    """`api.core.ac.uk/v3/discover` — open-access full text, aggregated (D-paid-tier-page).
 
     The one provider here that needs a credential, which is why it sits with the paid
     tiers rather than beside Unpaywall: not because CORE charges (the tier it is on is

@@ -82,7 +82,7 @@ def _short(identity: str | None) -> str:
 
 #: The page's Content-Security-Policy, in one place so the test that pins it and the head
 #: that emits it cannot disagree. Every source here is argued for in the comment beside the
-#: meta tag and in D27; widening it is a decision that belongs in `docs/decisions.md`.
+#: meta tag and in D-installable-pwa; widening it is a decision that belongs in `docs/decisions.md`.
 CSP = (
     "default-src 'none'; img-src 'self'; style-src 'unsafe-inline'; "
     "script-src 'self' 'unsafe-inline'; connect-src 'self'; manifest-src 'self'; "
@@ -129,7 +129,7 @@ def render_layout(
     # is byte-for-byte the non-refine build -- load-bearing for `render_index`'s promise
     # that `refine.enabled = false` renders an unchanged page (docs/question-refinement.md).
     # The service-worker + live-progress tag is emitted exactly as it is without refine
-    # (D27); the refine script, when enabled, is appended as its own separate tag.
+    # (D-installable-pwa); the refine script, when enabled, is appended as its own separate tag.
     scripts = (
         f"<script>{_register_sw_js(base_path)}{LIVE_JS if live else ''}"
         f"{COPY_JS if copyable else ''}</script>"
@@ -154,7 +154,7 @@ def render_layout(
      and `worker-src` are additions rather than relaxations, both blocked by
      `default-src 'none'` and neither covered by `script-src 'unsafe-inline'`, which
      permits inline blocks and not URLs. Changing this literal is a decision, not a
-     tidy-up: see D27, and the test that pins it. -->
+     tidy-up: see D-installable-pwa, and the test that pins it. -->
 <meta http-equiv="Content-Security-Policy" content="{CSP}">
 <title>{esc(title)}</title>
 <!-- Hand-maintained copies of `--bg` light and dark from the stylesheet below. -->
@@ -173,10 +173,10 @@ def render_layout(
 <link rel="apple-touch-icon" href="{base_path}/static/icons/apple-touch-icon.png">
 <!-- `crossorigin="use-credentials"` because a manifest is the one subresource a browser
      fetches with credentials *omitted* by default, even same-origin. Every route but
-     `/healthz` now needs an identity (D32), and through Cloudflare Access the fetch has
+     `/healthz` now needs an identity (D-identity-header), and through Cloudflare Access the fetch has
      to carry the `CF_Authorization` cookie to get past the edge at all — without this
      attribute the manifest request is refused, the browser has no manifest, and the app
-     silently stops being installable (D27). Same-origin, so this asks for credentials
+     silently stops being installable (D-installable-pwa). Same-origin, so this asks for credentials
      without opting into CORS. -->
 <link rel="manifest" href="{base_path}/manifest.webmanifest" crossorigin="use-credentials">
 <style>{CSS}{extra_css}</style>
@@ -209,7 +209,7 @@ def render_index(
     viewer: str | None = None,
     vapid_key: str = "",
 ) -> str:
-    # The index is behind the gate; the runs it links to are not (D35). Defaulting to
+    # The index is behind the gate; the runs it links to are not (D-id-as-credential). Defaulting to
     # `base_path` keeps a single-door deployment — dev, the tailnet — emitting exactly
     # what it emitted before.
     public_base = base_path if public_base is None else public_base
@@ -260,9 +260,9 @@ def render_index(
         if config.push.enabled
         else ""
     )
-    # "Fetched and checked against what the report says they say" is the D18 verified-sourcing
+    # "Fetched and checked against what the report says they say" is the D-source-verification verified-sourcing
     # posture (`search.verify_sources: true`): the cited pages are fetched and handed to the
-    # evidence lens. The shipped roster enables retrieval only and keeps verification off (D22),
+    # evidence lens. The shipped roster enables retrieval only and keeps verification off (D-run-date-grounding),
     # and retrieval alone does not establish that a page supports the claim attached to it
     # (docs/convergence.md). So this claim is config-derived, unlike the static header tagline:
     # here `render_index` has the `Config` the tagline's element does not.
@@ -368,7 +368,7 @@ def _status_block(status: str, terminal_note: str = "") -> str:
     the first thing a stranger reads, and `exhausted unresolved` on its own is a marker
     in a vocabulary they have never seen. So it gets a label naming what the word is
     describing, and the `STATUS_MEANING` sentence that says what it means. Same words as
-    the exported file, from the same table (D30), so a reader on screen and a recipient
+    the exported file, from the same table (D-verdict-attached), so a reader on screen and a recipient
     holding the download are told the same thing.
     """
     meaning = esc(STATUS_MEANING.get(status, ""))
@@ -399,7 +399,7 @@ def render_run(
     # this one; now it says how the run went, states the verdict, and points at the
     # report. `report` survives as a flag: whether there is anything to point at.
     #
-    # This page is public (D35): it is served without an identity, so it takes no viewer
+    # This page is public (D-id-as-credential): it is served without an identity, so it takes no viewer
     # and shows nothing owner-scoped. That is what makes the URL in the address bar the
     # URL you can send to someone. Two things went with it:
     #
@@ -537,7 +537,7 @@ def _lens_row(r: RoundSnapshot, lens: str) -> str:
 def _share_links(run_id: str, public_base: str = "") -> str:
     """The report page's take-it-with-you row.
 
-    Every one of these is a public GET (D35), so they take the public base — a reader
+    Every one of these is a public GET (D-id-as-credential), so they take the public base — a reader
     who followed a shared link must be able to follow them too. `audit.json` is here as
     well as on the run page: this is the page that gets shared, and a verdict a
     recipient cannot check is not much of a claim.
@@ -562,7 +562,7 @@ def _copy_control(markdown: str) -> str:
 
     The text is the export document — report *and* review record — so Copy markdown puts
     the same bytes on the clipboard that `GET /runs/<id>/export.md` serves and `Download
-    .md` saves (D30). It lives in a textarea rather than a JS string literal: it is
+    .md` saves (D-verdict-attached). It lives in a textarea rather than a JS string literal: it is
     model-written, and interpolating it into a script is the one way to hand it the
     execution the renderer spends its whole docstring denying it. The textarea is
     positioned off-screen rather than hidden, because `execCommand('copy')` — the only
@@ -593,7 +593,7 @@ def render_report(
     stylesheet and one review record, so `Save as PDF` from a phone produces the same
     document as the download.
 
-    Public since D35, like every other read under `/runs/`, so its own links are emitted
+    Public since D-id-as-credential, like every other read under `/runs/`, so its own links are emitted
     from `public_base`: a recipient who can open this page can follow every link on it.
     """
     public_base = base_path if public_base is None else public_base
@@ -654,7 +654,7 @@ def _register_sw_js(base_path: str = "") -> str:
     return _REGISTER_SW_JS.replace("__RA_BASE__", base_path)
 
 
-#: Opting a device in to notifications (D43). Emitted only when `push.enabled`, so a build
+#: Opting a device in to notifications (D-stop-notification). Emitted only when `push.enabled`, so a build
 #: with the feature off renders the index byte-identically to before.
 #:
 #: Two rules are load-bearing and both come from the platforms rather than from taste.
@@ -856,7 +856,7 @@ COPY_JS = """
 })();
 """
 
-# Pre-run question refinement (D26, docs/question-refinement.md "UX flow"). Every DOM
+# Pre-run question refinement (D-question-refinement, docs/question-refinement.md "UX flow"). Every DOM
 # node that carries model- or user-derived text is built with createElement/textContent
 # only -- never innerHTML -- because the page's CSP allows `script-src 'unsafe-inline'`,
 # which would make DOM XSS exploitable if a suggestion's text were ever concatenated into
@@ -1053,7 +1053,7 @@ def _refine_js(base_path: str = "") -> str:
     request leaves the prefix the app is actually served under and 404s. With an empty
     base this is byte-identical to the unprefixed form.
 
-    D26 (refinement) and D29 (base path) landed in separate PRs and collided in a merge
+    D-question-refinement (refinement) and D-base-path (base path) landed in separate PRs and collided in a merge
     that no reviewer read; every other URL on the page was already prefixed, and this one
     was missed. The failure is silent — chips simply never appear."""
     return REFINE_JS.replace("__RA_BASE__", base_path)
@@ -1484,7 +1484,7 @@ main {
 # Appended onto CSS only when refine.enabled (see render_index) so a disabled build's
 # <style> tag is unchanged. No motion is used, so there is nothing here for
 # @media (prefers-reduced-motion: reduce) to turn off (docs/question-refinement.md).
-#: The notification opt-in (D43). Two rules, because the control reuses `button.secondary`
+#: The notification opt-in (D-stop-notification). Two rules, because the control reuses `button.secondary`
 #: and `.hint` and needs nothing else: the global `button` rule's top margin would otherwise
 #: push it a full line below the table, and the note has to sit beside the button rather than
 #: under it.

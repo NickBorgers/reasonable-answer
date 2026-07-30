@@ -1,4 +1,4 @@
-"""The dispute channel (D25): mechanical adjudication, arbiter eligibility,
+"""The dispute channel (D-writer-disputes): mechanical adjudication, arbiter eligibility,
 registry semantics, suppression, and the end-to-end loop behaviour.
 
 The load-bearing properties: adjudication fails closed toward the finding on
@@ -329,7 +329,7 @@ def test_dispute_config_bounds():
 
 
 def test_unadjudicated_tasks_carry_no_adjudicated_key_at_all():
-    """Byte-identity with a pre-D25 build: the field appears only when true."""
+    """Byte-identity with a pre-D-writer-disputes build: the field appears only when true."""
     prompt = prompts.writer_revision("q", REPORT, [make_defect()], polish=False)
     assert "adjudicated" not in prompt
 

@@ -1,4 +1,4 @@
-"""The real `LLMClient` tool-calling internals (D17 / RA-019).
+"""The real `LLMClient` tool-calling internals (D-retrieval-opt-in / RA-019).
 
 `FakeClient` stands in for the whole client elsewhere, which means the agentic loop in
 `complete()` and the capability probe in `probe_tool_calling()` never execute in the
@@ -154,7 +154,7 @@ def test_a_model_that_never_stops_calling_tools_is_still_forced_to_answer(client
 
 
 def test_a_tool_call_on_the_exhausted_round_is_asked_again_in_words(client):
-    """D42. Dropping `tools` is an instruction, not an enforcement — a model may answer
+    """D-provider-retry. Dropping `tools` is an instruction, not an enforcement — a model may answer
     the final round with another tool call anyway. `_create` passes that message (one
     carrying tool calls is not an empty completion), so the loop used to return
     `text=""` as a *success*, and two production runs aborted reading it as "the writer
@@ -186,7 +186,7 @@ def test_a_tool_call_on_the_exhausted_round_is_asked_again_in_words(client):
 
 def test_a_loop_that_never_produces_prose_raises_rather_than_returning_nothing(client):
     """The backstop. One nudge, then the failure enters the caller's retry budget as a
-    `ModelCallError` instead of surfacing as a successful empty report (D42)."""
+    `ModelCallError` instead of surfacing as a successful empty report (D-provider-retry)."""
     _scripted(client, [_tool_message(), _tool_message(), _tool_message()])
 
     with pytest.raises(ModelCallError, match="ended without an answer"):
@@ -199,7 +199,7 @@ def test_a_loop_that_never_produces_prose_raises_rather_than_returning_nothing(c
 
 
 def test_a_tool_whose_budget_is_spent_is_withdrawn_mid_loop(client):
-    """D42. The search handler answers "budget exhausted" as *text* by design, so a
+    """D-provider-retry. The search handler answers "budget exhausted" as *text* by design, so a
     writer told nothing would read silence as "nothing exists" — but leaving the tool on
     offer let a determined model spend every remaining round asking again and arrive at
     the end with a tool call instead of a report."""

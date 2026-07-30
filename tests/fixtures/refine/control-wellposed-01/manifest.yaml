@@ -1,6 +1,6 @@
 # The fluoride question already asked well: population named, domain enumerated.
-# This is the other half of the D33 requirement — a model that suggests anything
-# here is manufacturing chips, and D26's designed default is silence.
+# This is the other half of the D-refine-audition requirement — a model that suggests anything
+# here is manufacturing chips, and D-question-refinement's designed default is silence.
 tier: obvious
 kind: control
 question: "What are the measured effects of tap-water fluoridation on dental, skeletal, and neurological health outcomes in {{country}}?"

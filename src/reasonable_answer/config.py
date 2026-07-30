@@ -1,7 +1,9 @@
 """Run configuration: the role-structured roster, budgets, and startup validation.
 
 The roster is a **writer pool** plus **per-lens critic pools**, and an optional
-**orchestrator** entry (D15/D16/D19). Critic-only specialists are allowed and are the
+**orchestrator** entry
+(D-per-lens-critics/D-critic-only-specialists/D-orchestrator-roster-entry). Critic-only specialists
+are allowed and are the
 clean way to satisfy author-exclusion: a model that never writes can review every tick.
 That is how the strongest model in the roster earns its keep — as a writer it would be
 barred from reviewing its own drafts.
@@ -82,14 +84,14 @@ class Budgets(BaseModel):
     # deep on every revision round (author exclusion already removed the other), so
     # bounding this by the pool size made the retry budget 1 and one flaky response
     # killed the run. Re-asking a pool member is safe — `writer_pool` excluded the
-    # previous author before `_generate` ever saw it (D42).
+    # previous author before `_generate` ever saw it (D-provider-retry).
     writer_attempts: int = Field(default=3, ge=1, le=10)
     timeout_seconds: float = Field(default=300.0, gt=0, le=7200)
     # Wait between retries, exponential with jitter: attempt N sleeps
     # min(base * 2**(N-1), max) * uniform(0.5, 1.0). Zero base disables the wait, which
     # is what the offline suite uses. Retrying a transient provider failure with no
     # pause at all is what three aborted production runs did — the whole budget was
-    # spent inside five seconds, before anything upstream could recover (D42).
+    # spent inside five seconds, before anything upstream could recover (D-provider-retry).
     retry_backoff_seconds: float = Field(default=2.0, ge=0, le=60)
     retry_backoff_max_seconds: float = Field(default=30.0, ge=0, le=300)
     max_concurrency: int = Field(default=3, ge=1, le=16)
@@ -118,7 +120,7 @@ class ProxyConfig(BaseModel):
 
     base_url: str = "https://llm.featherback-mermaid.ts.net/v1"
     #: Env var whose value, when set and non-empty, overrides `base_url`. Mirrors
-    #: `api_key_env` (D21): a containerized deployment can inject only the proxy URL
+    #: `api_key_env` (D-proxy-base-url): a containerized deployment can inject only the proxy URL
     #: — e.g. a Docker-bridge DNS name the baked Tailscale URL cannot resolve — and
     #: leave the baked roster authoritative for models, critics, search, and budgets.
     #: Precedence: env value > roster file value > built-in default.
@@ -144,7 +146,8 @@ class ProxyConfig(BaseModel):
 
 
 class SearchConfig(BaseModel):
-    """Web search for writers (D17, amending D5 / resolving RA-011's deferral).
+    """Web search for writers (D-retrieval-opt-in, amending D-in-artifact-citations /
+    resolving RA-011's deferral).
 
     Off by default: a roster with no credential must keep working exactly as before.
     When it is on, startup is fail-closed on both halves — a missing credential and a
@@ -188,7 +191,7 @@ class PdfSourceConfig(BaseModel):
 
     A PDF is one of the commonest shapes an academic citation takes, and until this
     existed every one of them failed — `fetch` refused the content type outright even
-    though the converter had been in the tree since D24. No new host is involved: this
+    though the converter had been in the tree since D-seed-conversion. No new host is involved: this
     re-fetches the URL the report already cited.
     """
 
@@ -211,7 +214,7 @@ class PdfSourceConfig(BaseModel):
 
 
 class IdentifierTierConfig(BaseModel):
-    """Tier 0 (D39): ask a bibliographic registry whether the cited source exists.
+    """Tier 0 (D-existence-vs-body): ask a bibliographic registry whether the cited source exists.
 
     The cheapest and largest win in the ladder. A paywalled journal refuses the fetch and
     is then indistinguishable from a citation nobody published — until a registry
@@ -219,7 +222,7 @@ class IdentifierTierConfig(BaseModel):
     read. That answer costs one keyless GET and never needs the paywalled body.
 
     It is also the only tier that can *raise* a defect: an identifier every authoritative
-    registry denies is `NOT_FOUND`, which D38 mints as a blocking `fabricated_citation`.
+    registry denies is `NOT_FOUND`, which D-notfound-fabrication mints as a blocking `fabricated_citation`.
     Hence the budget and the deliberate conservatism in `resolve/`.
     """
 
@@ -237,7 +240,7 @@ class IdentifierTierConfig(BaseModel):
 
 
 class OpenAccessTierConfig(BaseModel):
-    """Tier 1 (D39): find a free copy of the body, and read it exactly once.
+    """Tier 1 (D-existence-vs-body): find a free copy of the body, and read it exactly once.
 
     Separate switch from tier 0 because it is a materially different act: tier 0 asks a
     registry a question, tier 1 fetches a *different document* and hands its text to a
@@ -265,7 +268,7 @@ class OpenAccessTierConfig(BaseModel):
 
 
 class ExtractionTierConfig(BaseModel):
-    """Tier 2 (D40): a rendering service reads the cited URL when this process cannot.
+    """Tier 2 (D-paid-tier-page): a rendering service reads the cited URL when this process cannot.
 
     The first tier that costs money, and the first that reaches a host chosen by neither
     the report nor a registry. It renders JavaScript and gets past the bot walls that
@@ -274,7 +277,7 @@ class ExtractionTierConfig(BaseModel):
 
     There is deliberately no stealth switch. A rendering provider's stealth mode rotates
     residential IPs to defeat bot detection, which is the industrial form of the browser
-    impersonation `fetch.py` refuses and D39 records as doctrine. Rendering a page is not
+    impersonation `fetch.py` refuses and D-existence-vs-body records as doctrine. Rendering a page is not
     disguising who is asking for it, and only the first is in scope.
     """
 
@@ -299,7 +302,7 @@ class ExtractionTierConfig(BaseModel):
 
 
 class DeliveryTierConfig(BaseModel):
-    """Tier 3 (D40): licensed document delivery. A seam, with nothing behind it.
+    """Tier 3 (D-paid-tier-page): licensed document delivery. A seam, with nothing behind it.
 
     Services like CCC RightFind and Reprints Desk Article Galaxy do lawfully deliver
     paywalled bodies, per article, under copyright-cleared single-use terms. Those terms
@@ -358,7 +361,7 @@ class SourcesConfig(BaseModel):
 
     @model_validator(mode="after")
     def _delivery_fails_closed(self) -> SourcesConfig:
-        # D40: `delivery` ships as a seam with no provider behind it, so enabling it
+        # D-paid-tier-page: `delivery` ships as a seam with no provider behind it, so enabling it
         # without naming one can never make a call — and unlike `extraction`, there is not
         # even a registry entry to fall back to by mistake. That is what makes it inert
         # rather than half-built: the config refuses to boot instead of silently ignoring
@@ -369,7 +372,7 @@ class SourcesConfig(BaseModel):
         if self.enabled and self.delivery.enabled and not self.delivery.provider:
             raise ConfigError(
                 "fail closed: sources.delivery.enabled is on but no provider is named. "
-                "The delivery tier ships as a seam with no provider behind it (D40), so "
+                "The delivery tier ships as a seam with no provider behind it (D-paid-tier-page), so "
                 "enabling it without one makes no call — inert rather than half-built."
             )
         return self
@@ -389,10 +392,11 @@ class SeedConfig(BaseModel):
     #: Allow `--seed <url>` and the web seed-URL field. Turning this off removes the
     #: field from the form as well as rejecting the parameter.
     #:
-    #: Off by default, like `search.enabled` and `search.verify_sources` (D17/D18):
+    #: Off by default, like `search.enabled` and `search.verify_sources`
+    #: (D-retrieval-opt-in/D-source-verification):
     #: a URL seed makes the server fetch a caller-chosen URL and hand the body back
     #: as the run's first report — a read proxy into whatever the host can reach, for
-    #: anyone who can submit. Authentication (D32) narrows *who* that is; it does not
+    #: anyone who can submit. Authentication (D-identity-header) narrows *who* that is; it does not
     #: shrink what the host can reach, and the people invited in are not the threat
     #: model this guards against. The network-layer egress boundary that makes it
     #: acceptable is still a deployment concern outside this repo
@@ -479,11 +483,11 @@ class AuditionThresholds(BaseModel):
 
 
 class RefineAuditionThresholds(BaseModel):
-    """Where the refine audition's verdicts fall (docs/question-refinement.md, D33).
+    """Where the refine audition's verdicts fall (docs/question-refinement.md, D-refine-audition).
 
     The asymmetry relative to `AuditionThresholds` is deliberate: for a critic,
     silence is the failure being measured; for refinement, silence is the designed
-    default (D26), so a low fire rate only warns while a *violation* — a suggestion
+    default (D-question-refinement), so a low fire rate only warns while a *violation* — a suggestion
     that narrows scope, fires a disallowed transform, or drops the subject — gates.
     """
 
@@ -506,7 +510,7 @@ class RefineAuditionThresholds(BaseModel):
 
 
 class RefineAuditionConfig(BaseModel):
-    """Fixture audition for the refine prompt surface (D33). Same doctrine as
+    """Fixture audition for the refine prompt surface (D-refine-audition). Same doctrine as
     `AuditionConfig`: no `enabled` flag — measuring costs proxy calls, only the
     explicit `ra audition-refine` command spends them, and `ra doctor` only reads
     the cache left behind."""
@@ -556,15 +560,15 @@ class AuditionConfig(BaseModel):
     repetitions: int = Field(default=3, ge=1, le=20)
     max_concurrency: int = Field(default=3, ge=1, le=16)
     thresholds: AuditionThresholds = Field(default_factory=AuditionThresholds)
-    #: The refine prompt surface's own audition (D33) — separate corpus, separate
+    #: The refine prompt surface's own audition (D-refine-audition) — separate corpus, separate
     #: cache, separate command (`ra audition-refine`).
     refine: RefineAuditionConfig = Field(default_factory=RefineAuditionConfig)
 
 
 class DisputeConfig(BaseModel):
-    """The writer dispute channel (D25). Off by default: with `enabled: false`
+    """The writer dispute channel (D-writer-disputes). Off by default: with `enabled: false`
     every prompt and every state transition is byte-identical to a build without
-    the feature — the D17 offline-when-off pattern."""
+    the feature — the D-retrieval-opt-in offline-when-off pattern."""
 
     model_config = ConfigDict(extra="forbid")
 
@@ -612,7 +616,7 @@ DEFAULT_PUSH_ENDPOINT_HOSTS: tuple[str, ...] = (
 
 
 class PushConfig(BaseModel):
-    """Notifying a run's owner when it stops (D43, web/push.py).
+    """Notifying a run's owner when it stops (D-stop-notification, web/push.py).
 
     Off by default, like every other feature that needs egress or a secret. Turning it on
     generates a VAPID keypair under `runs_dir` on the next boot and adds an opt-in control
@@ -660,9 +664,9 @@ _DEFAULT_REFINE_TRANSFORMS = frozenset(REFINE_TRANSFORMS) - {"question_behind_th
 
 
 class RefineConfig(BaseModel):
-    """Pre-run reframing suggestions (D26, docs/question-refinement.md). Off by
+    """Pre-run reframing suggestions (D-question-refinement, docs/question-refinement.md). Off by
     default: with `enabled: false` the web edge behaves byte-identically to a build
-    without the feature, matching the D17/D25 opt-in pattern.
+    without the feature, matching the D-retrieval-opt-in/D-writer-disputes opt-in pattern.
 
     Deliberately **excluded** from `graph._run_fingerprint`: refinement lives entirely
     at the web edge and never reaches the graph (the fingerprint hashes `question`,
@@ -815,7 +819,7 @@ def validate_roster_health(config: Config, identities: dict[str, str]) -> list[s
                 f"weak independence (correlated blind spots)"
             )
 
-    # Dispute arbiters (D25) must be neither the disputing writer nor the critic
+    # Dispute arbiters (D-writer-disputes) must be neither the disputing writer nor the critic
     # that raised the finding. Fail OPEN with a warning, not closed: a dispute with
     # no eligible arbiter is dismissed at runtime and the defect stands — the status
     # quo ante — so an uncoverable pair costs a privilege, never a safety property.

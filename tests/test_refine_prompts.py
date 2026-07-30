@@ -1,4 +1,4 @@
-"""Prompt-policy assertions for the D26 refine channel (docs/question-refinement.md).
+"""Prompt-policy assertions for the D-question-refinement refine channel (docs/question-refinement.md).
 
 `refine_system`/`refine_user` are a new model-facing surface, so two invariants
 need a test the same way every other untrusted->model surface in the repo does

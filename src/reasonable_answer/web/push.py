@@ -1,13 +1,13 @@
-"""Web Push notification of a stopped run (D43).
+"""Web Push notification of a stopped run (D-stop-notification).
 
 A run takes 10-25 minutes and the interface makes it easy to start several. Before this
 module the only way to learn one had finished was to be looking at its page, where the SSE
 stream (`app.stream`) reloads it. Close the tab -- or background the installed app on a
 phone, where iOS suspends it -- and nothing ever said. This is the piece that says it.
 
-It exists because D27 shipped a service worker. Web Push has no other delivery mechanism:
+It exists because D-installable-pwa shipped a service worker. Web Push has no other delivery mechanism:
 the browser wakes the worker, and the worker shows the notification. On iOS it works only
-for a web app added to the home screen, which is the posture D27 already built for.
+for a web app added to the home screen, which is the posture D-installable-pwa already built for.
 
 Three properties bound what is here.
 
@@ -59,7 +59,7 @@ VAPID_FILE = ".vapid-private.pem"
 
 #: A push service answering with either of these means the subscription is permanently
 #: gone -- the browser was uninstalled, the user revoked permission, the endpoint expired.
-#: Deliberately *not* imported from `fetch.NOT_FOUND_STATUSES`, which D38 owns for deciding
+#: Deliberately *not* imported from `fetch.NOT_FOUND_STATUSES`, which D-notfound-fabrication owns for deciding
 #: whether a *citation* is fabricated: the two happen to be the same pair today, and a
 #: change to what counts as a missing source must not silently change what counts as a dead
 #: device.
@@ -319,7 +319,7 @@ class Notifier:
         """The notification, as the service worker will receive it.
 
         Deep-links at the *public* base, not the gated one: run URLs are the shareable
-        surface (D35) and the reader-facing base is what every other run link uses, so a
+        surface (D-id-as-credential) and the reader-facing base is what every other run link uses, so a
         notification that opened `/app/runs/<id>` would be the one link in the app that
         behaves differently. A finished run points at the report -- the thing that was
         waited for -- and one that stopped without shipping an answer points at the run
@@ -345,7 +345,7 @@ class Notifier:
         """Push to every device `owner` has registered. Returns the number delivered.
 
         An owner-less run notifies nobody: there is no identity to attribute it to, and
-        D32 already settled that inventing one is how a stranger's run reaches someone
+        D-identity-header already settled that inventing one is how a stranger's run reaches someone
         else. Exceptions never escape -- see this module's docstring.
         """
         if not owner:

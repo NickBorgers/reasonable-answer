@@ -1,4 +1,4 @@
-"""How `LLMClient` retries a failing provider (D42).
+"""How `LLMClient` retries a failing provider (D-provider-retry).
 
 Three production runs aborted on 2026-07-29 because retrying cost nothing and therefore
 bought nothing: `run-6f54b5a33e26` spent its entire call budget on three empty
@@ -290,7 +290,7 @@ def _returning(content: str):
 
 def test_a_schema_violation_never_logs_the_rejected_content_at_info(tmp_path, caplog):
     """RA-016: `structured()`'s repair loop must not copy report-derived validation
-    input into ordinary logs. `RA_LOG_LEVEL=INFO` is the container default (D42), so a
+    input into ordinary logs. `RA_LOG_LEVEL=INFO` is the container default (D-provider-retry), so a
     validator that quotes a private `claim_span` back in its error must not reach INFO.
 
     The report content is synthetic, but it stands in for exactly what a real `triage`

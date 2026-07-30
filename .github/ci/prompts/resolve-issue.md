@@ -18,7 +18,7 @@ The repository is checked out at `/workspace` on branch `${BRANCH_NAME}`, alread
 
 `docs/` is **normative specification, not background reading**. The design was hardened over
 multiple rounds of adversarial review; every safety property exists because a specific finding
-killed the previous version. `docs/decisions.md` is a numbered decision log (D1 onward) with finding
+killed the previous version. `docs/decisions.md` is a slug-identified decision log (each section is a `D-<slug>`) with finding
 tables (RA-*, RB-*, RC-*, RG-*).
 
 Read before touching code:

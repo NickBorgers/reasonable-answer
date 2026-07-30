@@ -1,9 +1,9 @@
-# Social bias — the observable-text rules (D24)
+# Social bias — the observable-text rules (D-social-bias)
 
 > **Status:** normative. This document governs the three social-bias categories in
 > `taxonomy.py` (`one_sided_sourcing`, `loaded_language`, `unexamined_presupposition`) and the
 > writer standards in `prompts.py::WRITER_SYSTEM`. A change to one side without the other is
-> docs-as-spec drift and blocks in review. See D24 in [decisions.md](./decisions.md).
+> docs-as-spec drift and blocks in review. See D-social-bias in [decisions.md](./decisions.md).
 
 ## 1. Scope: observable text properties only
 
@@ -80,7 +80,7 @@ the framing) — compatible with the resolvability contract on critic instructio
 this is `omitted_counterargument`'s sibling, an omission of examination, and it carries the same
 floor for the same reason.
 
-This backstop is downstream and unchanged. [Question refinement](./question-refinement.md) (D26)
+This backstop is downstream and unchanged. [Question refinement](./question-refinement.md) (D-question-refinement)
 offers the same insight — a question may presuppose a contested framing — upstream, to the one
 party who can cheaply act on it before a run exists: the asker.
 

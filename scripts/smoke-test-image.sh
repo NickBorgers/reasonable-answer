@@ -90,7 +90,7 @@ for i in $(seq 1 60); do
   sleep 1
 done
 
-# Every route but /healthz needs an identity (D32), and this container is unfronted: the
+# Every route but /healthz needs an identity (D-identity-header), and this container is unfronted: the
 # image ships no `auth.dev_identity`, so nothing here is reachable without a header. That
 # is worth asserting on the image itself and not only in pytest — a Dockerfile that baked
 # in a dev identity would open the whole app, and would look like a working image.

@@ -139,8 +139,8 @@ canonical wording, one pattern, no per-file improvisation.
 
 ## This project is spec-driven — the part most likely to trip you
 
-`docs/` is normative specification, not background reading. `docs/decisions.md` is a numbered
-decision log (D1 onward) with finding tables (RA-*, RB-*, RC-*, RG-*). The invariant reviewer
+`docs/` is normative specification, not background reading. `docs/decisions.md` is a slug-identified
+decision log (each section is a `D-<slug>`) with finding tables (RA-*, RB-*, RC-*, RG-*). The invariant reviewer
 checks code against it.
 
 That creates a trap. If a reviewer blocker asks you to change behaviour governed by an invariant,

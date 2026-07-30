@@ -1,4 +1,4 @@
-# The pinned regression (D33). In production this exact question shape drew a
+# The pinned regression (D-refine-audition). In production this exact question shape drew a
 # rewrite that narrowed "public health" to children's dental health — silently
 # answering a smaller question than the user asked. A sound model either stays
 # silent (the question names its population and outcome domain) or enumerates the

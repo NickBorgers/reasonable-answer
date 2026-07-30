@@ -87,14 +87,14 @@ round 2   writer deepseek-v4-flash
 whatever fronts the app — `Cf-Access-Authenticated-User-Email` from Cloudflare Access, or the
 `Tailscale-User-*` headers from `tailscale serve` — and a request carrying neither is refused on
 every route but `/healthz` and the `GET`s under `/runs/`, which are public: holding a run id is
-the credential for reading that run, so a finished report can be shared with anyone (D35). Every
+the credential for reading that run, so a finished report can be shared with anyone (D-id-as-credential). Every
 write still needs an identity. Runs belong to whoever submitted them: your index shows only your
 own runs, and only its owner can resume a run.
 
 Because the header is not verified, anyone who can reach the port directly can claim to be any
 user. `ra serve` binds `127.0.0.1` by default and `compose.yaml` publishes only to loopback for
 that reason: keep the proxy the only way in. See [docs/authentication.md](docs/authentication.md)
-for the Cloudflare Access setup, and D32 in [docs/decisions.md](docs/decisions.md) for what that
+for the Cloudflare Access setup, and D-identity-header in [docs/decisions.md](docs/decisions.md) for what that
 trade does and does not buy.
 
 Showing reports and critiques to a *human* does not weaken the isolation design — blindness is
@@ -114,7 +114,7 @@ so `make serve` does exercise the whole path locally.)
 
 The service worker caches the icons, the manifest and a small offline page — **and nothing else**.
 Runs are live data, so offline you get the offline page rather than a stale run status, and a run
-page is never stored on the device at all. See [D27](docs/decisions.md) for why that is a
+page is never stored on the device at all. See [D-installable-pwa](docs/decisions.md) for why that is a
 structural property rather than a rule someone has to remember.
 
 The icons are the project logo. To use your own, replace the PNGs in
@@ -127,14 +127,14 @@ check on the accent-blue plate — instead.
 ## Sharing a result
 
 Anyone who holds a run id can open that run — signed in or not — because every `GET` under
-`/runs/` answers an unauthenticated caller (D35). So the URL a reader is looking at is the one
+`/runs/` answers an unauthenticated caller (D-id-as-credential). So the URL a reader is looking at is the one
 they can hand to someone, inside the tailnet or Access audience or outside it: sharing is handing
 over a **link**. A **file** is the durable alternative — for a recipient who cannot reach the
 host, or a copy that must outlive the run's retention sweep. Every export carries
 the report *and* its review record — status, sourcing label, which round shipped, the reviewers
 whose clean records key to that exact artifact, and any outstanding defects. As prose, an
 `accepted` report and a `needs_human_review` one look identical; that difference is the whole
-product, so it travels with the text (D30).
+product, so it travels with the text (D-verdict-attached).
 
 The report is rendered on exactly one page — `/runs/<id>/report` — and that is where all of this
 lives. `/runs/<id>` is the run itself: the verdict, the round-by-round trail, `audit.json`, `Ask
@@ -224,14 +224,14 @@ the CSP is unaffected. The app
 still receives the stripped path, so the proxy is the ordinary
 `location /app/ { proxy_pass http://ra:8080/; }` (the trailing slashes strip `/app/`). Unset,
 it serves at the origin root exactly as before. The CSP is unchanged: this is purely
-path-prefixing, not a relaxation. See D29.
+path-prefixing, not a relaxation. See D-base-path.
 
 **To let a finished run be shared with anyone**, add `RA_PUBLIC_ROOT_PATH=/` and route
 `/runs/` to the app path-preserving, without Access in front. Every `GET` under `/runs/` —
 the run page, the report, the exports, `audit.json`, the live stream — answers an
 unauthenticated caller, so the URL a reader is looking at is the one they can send to
 someone; every write stays behind the gate. Unset, it falls back to `RA_ROOT_PATH` and
-nothing changes. See [D35](./docs/decisions.md) and
+nothing changes. See [D-id-as-credential](./docs/decisions.md) and
 [authentication.md](./docs/authentication.md).
 
 **To be told when a run finishes**, turn it on in the roster and supply a contact address in
@@ -271,7 +271,7 @@ ask the devices to re-subscribe. And **on an iPhone the app has to be on the hom
 first**: iOS gives push only to Home Screen web apps and only prompts in response to a direct tap
 ([WebKit, 2023](https://webkit.org/blog/13878/web-push-for-web-apps-on-ios-and-ipados/)), and a
 declined permission prompt can only be reset by deleting and reinstalling, so the button appears
-only once it can actually work. See [D43](./docs/decisions.md).
+only once it can actually work. See [D-stop-notification](./docs/decisions.md).
 
 ## Configuration
 
@@ -379,7 +379,7 @@ invented one. (arXiv ids and PMCIDs are covered when arXiv and Europe PMC are ad
 `sources.identifiers.providers`, or through the open-access tier below.) Set
 `sources.open_access.enabled: true` as well and a free copy is read where one exists, labelled as a
 mirror rather than the version of record. Neither tier sharpens `misrepresented_source`: an
-abstract is not the source's text. See D39.
+abstract is not the source's text. See D-existence-vs-body.
 
 **Known limitations.** Output is labelled *consensus-reviewed with in-artifact sourcing* by default,
 *…with retrieved sourcing* when `search.enabled: true`, and *…with verified sourcing* when
@@ -388,7 +388,7 @@ cited source exists and, when a body can be read, that the page says something c
 claim — not that the page is correct, and not that the roster chose good sources. A
 registry-confirmed source whose body cannot be read proves existence only, and an open-access
 mirror is disclosed as a different document from the cited page. With verification off, whether a
-source supports the claim attached to it is unverified entirely. (See D5/D17/D18/D39 in
+source supports the claim attached to it is unverified entirely. (See D-in-artifact-citations/D-retrieval-opt-in/D-source-verification/D-existence-vs-body in
 [decisions.md](docs/decisions.md) and the evidence section of [convergence.md](docs/convergence.md).)
 
 **Writer disputes (optional, off by default).** Set `disputes.enabled: true` and a writer that
@@ -397,7 +397,7 @@ report to satisfy it. A citation dispute whose quote checks out against the cite
 `verify_sources` on) is upheld mechanically; anything else goes to a fresh-context arbiter model
 that is neither the writer nor the critic that raised the finding, and that defaults to the
 finding when uncertain. Upheld disputes suppress the re-raised finding for the rest of the run
-(auditable in `events.jsonl`); everything else leaves the finding standing. See D25 in
+(auditable in `events.jsonl`); everything else leaves the finding standing. See D-writer-disputes in
 [decisions.md](docs/decisions.md).
 
 A critic's quote fields (`claim_span`, `related_span`) are verified to be verbatim text from

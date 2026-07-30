@@ -295,7 +295,7 @@ def plant_unfit_verdict(config: Config, identity: str, tmp_path: Path) -> None:
 def test_audition_enforcement_refuses_to_start_before_spending_anything(
     identities, config, tmp_path
 ):
-    """D20's opt-in fail-closed. A lens staffed by a measured-unfit critic is not being
+    """D-critic-audition's opt-in fail-closed. A lens staffed by a measured-unfit critic is not being
     reviewed, so the run must not begin — and must not pay for the structured-output
     probes on its way to finding that out."""
     plant_unfit_verdict(config, identities["logic-spec"], tmp_path)
@@ -440,7 +440,7 @@ class FlakyWriterClient(FakeClient):
 def test_the_only_eligible_writer_is_asked_again_rather_than_the_run_aborted(
     identities, config
 ):
-    """D42, and the shape of the three runs that aborted on 2026-07-29.
+    """D-provider-retry, and the shape of the three runs that aborted on 2026-07-29.
 
     Author exclusion applies to writers, so from round two a two-writer roster leaves
     exactly ONE eligible model. `attempts` used to be `min(len(pool), writer_attempts)`,
@@ -468,7 +468,7 @@ def test_the_only_eligible_writer_is_asked_again_rather_than_the_run_aborted(
     assert "empty report" in failures[0]["reason"]
 
     # The sharp end: the draft that followed the failure was written by the SAME model,
-    # because it was the only eligible one. Before D42 there was no second attempt to
+    # because it was the only eligible one. Before D-provider-retry there was no second attempt to
     # make, and this was `terminal=aborted`.
     generated = [e for e in events if e["kind"] == "generate"]
     assert generated[1]["author"] == failures[0]["author"]

@@ -316,7 +316,8 @@ def test_url_seeds_can_be_disabled():
 
 
 def test_url_seeds_are_off_by_default():
-    """The D17/D18 posture (D24): fetching a caller-chosen URL is exposure a
+    """The D-retrieval-opt-in/D-source-verification posture (D-seed-conversion):
+    fetching a caller-chosen URL is exposure a
     deployment must opt into, so a bare config refuses it."""
     from reasonable_answer.config import SeedConfig
 
