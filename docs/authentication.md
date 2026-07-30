@@ -120,13 +120,19 @@ the sign-in. So the URL a reader is looking at is the URL they can send to someo
 | surface | routes | identity |
 |---|---|---|
 | reads of a run | `GET /runs/<id>`, `/report`, `/report.md`, `/export.md`, `/export.html`, `/audit.json`, `/progress`, `/stream` | **not required** |
-| writes | `POST /runs`, `/runs/<id>/again`, `/runs/<id>/resume`, `/refine` | required |
+| writes | `POST /runs`, `/runs/<id>/again`, `/runs/<id>/resume`, `/refine`, `/push/subscribe`, `/push/unsubscribe` | required |
 | the index | `GET /` | required (it is a per-viewer list) |
 | the app shell | `manifest.webmanifest`, `sw.js`, `offline.html`, icons | required |
 | healthcheck | `GET /healthz` | not required |
 
 The rule is method-scoped: a `POST` to a public read path is refused before it reaches
 routing. An owner-less run still 404s, so nothing that was unreadable becomes readable.
+
+The push routes sit at the top level rather than under `/runs/` on purpose (D43).
+Subscribing attaches a *device* to an *identity*, which is the gated half of the rule
+above; putting it inside the public read prefix and leaning on the method guard would make
+that placement a coincidence rather than a decision. A test enumerates the route table, so
+a future push route cannot drift in there either.
 
 ### The two root paths
 

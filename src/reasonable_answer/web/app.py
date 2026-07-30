@@ -32,6 +32,7 @@ import logging
 import math
 import os
 import threading
+import time
 from contextlib import asynccontextmanager
 from pathlib import Path
 from typing import Any
@@ -51,6 +52,7 @@ from ..config import Config, ConfigError
 from ..llm import LLMClient
 from ..store import CorruptRun
 from . import assets as static_assets
+from . import push
 from .identity import resolve_identity
 from .refine import RefinementService
 from .registry import Registry, RunSummary
@@ -173,7 +175,43 @@ def create_app(
             "auth.dev_identity is set: unauthenticated requests are treated as %s",
             config.auth.dev_identity,
         )
-    worker = worker or RunWorker(config, max_concurrent=concurrent)
+    # Notifications (D43). Built before the worker because the worker holds the notifier:
+    # the send happens on the worker thread the moment a run stops, which is the only place
+    # that knows a run stopped without a browser having to be watching. `push_key` is the
+    # public half, embedded in the index for `pushManager.subscribe`; empty when the feature
+    # is off, which is what makes the page byte-identical to a build without it.
+    push_store: push.PushStore | None = None
+    notifier: push.Notifier | None = None
+    push_key = ""
+    if config.push.enabled:
+        if not config.push.subject:
+            # Fail at boot, not when the first run finishes. `py_vapid` refuses to sign
+            # without a `sub` claim, and that exception would be raised inside `_deliver`'s
+            # best-effort `except` — so the symptom would be notifications that silently
+            # never arrive, which is the failure this check exists to convert into a
+            # startup error.
+            raise RuntimeError(
+                f"push.enabled is true but ${config.push.subject_env} is unset; it must be "
+                "a mailto: address or a bare https://host — the VAPID contact (RFC 8292). "
+                "It is an env var rather than a roster key so a committed config never "
+                "carries a personal address."
+            )
+        push_store = push.PushStore(
+            config.runs_dir / push.SUBSCRIPTIONS_FILE,
+            max_per_identity=config.push.max_subscriptions_per_identity,
+        )
+        pem, push_key = push.load_or_create_vapid(config.runs_dir / push.VAPID_FILE)
+        notifier = push.Notifier(
+            store=push_store,
+            vapid_pem=pem,
+            subject=config.push.subject,
+            # Run URLs live on the reader-facing base (D35), so a notification opens the
+            # same link every other run reference in the app uses.
+            public_base=public_base,
+            endpoint_hosts=config.push.endpoint_hosts,
+            timeout_seconds=config.push.timeout_seconds,
+        )
+    worker = worker or RunWorker(config, max_concurrent=concurrent, notifier=notifier)
     refiner = refiner or RefinementService(
         config,
         # A refine-dedicated `LLMClient`, never shared with anything else:
@@ -276,6 +314,7 @@ def create_app(
             base_path=base_path,
             public_base=public_base,
             viewer=request.state.viewer,
+            vapid_key=push_key,
         )
 
     # A seed reaches this handler as pasted text or as an http(s) URL, and never as a
@@ -491,6 +530,66 @@ def create_app(
         # threadpool and the event loop is unaffected -- same as `submit` above.
         offer = refiner.suggest(question)
         return JSONResponse(offer.as_json(), headers={"Cache-Control": "no-store"})
+
+    # ---------------------------------------------------------- notifications
+
+    # Registered only when the feature is on, so a deployment with `push.enabled: false`
+    # grows no new surface at all rather than two routes that always refuse.
+    #
+    # Top level, deliberately *not* under `/runs/` — subscribing attaches a device to an
+    # identity, and D35 opens `/runs/` to anonymous readers. A subscribe endpoint there
+    # would let anyone holding a run id register their own phone against this app; the
+    # method guard in `authenticate` would still refuse a `POST`, but siting a write route
+    # inside the public read prefix and relying on that is the wrong side of the rule.
+    if config.push.enabled and push_store is not None:
+
+        @app.post("/push/subscribe")
+        async def push_subscribe(request: Request) -> JSONResponse:
+            _reject_cross_site(request)
+            store = push_store
+            assert store is not None  # narrowed by the enclosing `if`
+            try:
+                body = await request.json()
+            except Exception:
+                raise HTTPException(status_code=400, detail="expected a JSON body") from None
+            if not isinstance(body, dict):
+                raise HTTPException(status_code=400, detail="expected a JSON object")
+            keys = body.get("keys")
+            if not isinstance(keys, dict):
+                raise HTTPException(status_code=400, detail="missing subscription keys")
+            endpoint = body.get("endpoint")
+            p256dh = keys.get("p256dh")
+            auth = keys.get("auth")
+            if not all(isinstance(v, str) and v for v in (endpoint, p256dh, auth)):
+                raise HTTPException(status_code=400, detail="incomplete subscription")
+            # The SSRF boundary. This string is chosen by the browser and the server will
+            # POST to it, so it is checked here and again before every send.
+            try:
+                push.validate_endpoint(endpoint, config.push.endpoint_hosts)
+            except ValueError as exc:
+                raise HTTPException(status_code=400, detail=str(exc)) from None
+            store.add(
+                request.state.viewer, endpoint, p256dh, auth, now=time.time()
+            )
+            return JSONResponse({"ok": True}, headers={"Cache-Control": "no-store"})
+
+        @app.post("/push/unsubscribe")
+        async def push_unsubscribe(request: Request) -> JSONResponse:
+            _reject_cross_site(request)
+            store = push_store
+            assert store is not None
+            try:
+                body = await request.json()
+            except Exception:
+                raise HTTPException(status_code=400, detail="expected a JSON body") from None
+            endpoint = body.get("endpoint") if isinstance(body, dict) else None
+            if not isinstance(endpoint, str) or not endpoint:
+                raise HTTPException(status_code=400, detail="missing endpoint")
+            # Scoped to the caller: an endpoint may only be forgotten by the identity it is
+            # stored under, so holding somebody else's endpoint string does not let you turn
+            # their notifications off.
+            store.remove(request.state.viewer, endpoint)
+            return JSONResponse({"ok": True}, headers={"Cache-Control": "no-store"})
 
     # ------------------------------------------------------------- fragments
 

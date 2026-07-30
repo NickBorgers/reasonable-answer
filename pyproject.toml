@@ -21,6 +21,13 @@ web = [
     # Renders the report markdown for the browser. Declared even though `rich` already
     # pulls it in: the web layer uses it directly and must not depend on that accident.
     "markdown-it-py>=3.0",
+    # Web Push notification of a stopped run (D43). Carries both halves of the protocol:
+    # the VAPID assertion (RFC 8292) and the aes128gcm payload encryption (RFC 8291), the
+    # second of which is not something to hand-roll. Pulls `cryptography`, which ships
+    # manylinux wheels for both architectures the release build targets. In the `web` extra
+    # rather than its own because `push.enabled` already gates every use of it, so a
+    # separate extra would be a second switch that can disagree with the first.
+    "pywebpush>=2.0",
 ]
 # PDF seed reports. Optional because it is the only format that needs a dependency at
 # all — HTML, .docx and .txt convert on the standard library — so the core install

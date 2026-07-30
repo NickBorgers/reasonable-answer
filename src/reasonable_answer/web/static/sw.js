@@ -19,6 +19,9 @@ var ASSETS = __RA_PRECACHE__;
 // behind a stripping proxy the browser requests `/app/offline.html`, so the navigate
 // fallback below has to look that URL up in the cache, not the bare `/offline.html`.
 var OFFLINE = '__RA_OFFLINE__';
+// Artwork for a push notification. Substituted like OFFLINE so it carries the base path,
+// and chosen from the precache list so a notification shown offline still has its icon.
+var ICON = '__RA_ICON__';
 
 self.addEventListener('install', function (event) {
   event.waitUntil(
@@ -92,4 +95,55 @@ self.addEventListener('fetch', function (event) {
   // Everything else — including the event stream — is left to the browser. Returning
   // without calling respondWith is what keeps this worker out of the middle of a
   // long-lived `text/event-stream` response, which it would otherwise risk buffering.
+});
+
+// ---------------------------------------------------------------- notifications
+
+// A run stops and the server pushes here (D43). Neither handler below touches `caches`,
+// so the invariant at the top of this file is unaffected: `cache.put` still appears in
+// exactly one branch, reachable only for URLs in ASSETS.
+
+self.addEventListener('push', function (event) {
+  // Chrome enforces `userVisibleOnly`: every push must result in a visible notification,
+  // and if this handler throws the browser substitutes its own "site updated in the
+  // background" notice. So the parse is defensive and there is always a fallback — a
+  // vague notification is bad, the browser's generic one is worse.
+  var payload = {};
+  try {
+    payload = event.data ? event.data.json() : {};
+  } catch (e) {
+    payload = {};
+  }
+  var title = payload.title || 'reasonable-answer';
+  event.waitUntil(
+    self.registration.showNotification(title, {
+      body: payload.body || 'A run has finished.',
+      // Reuses the installed app's icon rather than a notification-specific asset; the
+      // monochrome status-bar glyph Android would also like is not shipped yet, and its
+      // absence costs a generic dot, not a broken notification.
+      icon: ICON,
+      badge: ICON,
+      // The run id, so a second push about the same run replaces the first instead of
+      // stacking. Queue five questions and you want five notifications, not five per run.
+      tag: payload.tag || 'ra-run',
+      data: { url: payload.url || './' }
+    })
+  );
+});
+
+self.addEventListener('notificationclick', function (event) {
+  event.notification.close();
+  var target = (event.notification.data && event.notification.data.url) || './';
+  event.waitUntil(
+    self.clients.matchAll({ type: 'window', includeUncontrolled: true }).then(function (list) {
+      // Focus a tab already showing this run before opening another one: the common case
+      // is the phone's installed app still parked on the page it was left on.
+      for (var i = 0; i < list.length; i++) {
+        if (list[i].url.indexOf(target) !== -1 && 'focus' in list[i]) {
+          return list[i].focus();
+        }
+      }
+      return self.clients.openWindow(target);
+    })
+  );
 });

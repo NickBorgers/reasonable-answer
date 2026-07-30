@@ -234,6 +234,45 @@ someone; every write stays behind the gate. Unset, it falls back to `RA_ROOT_PAT
 nothing changes. See [D35](./docs/decisions.md) and
 [authentication.md](./docs/authentication.md).
 
+**To be told when a run finishes**, turn it on in the roster and supply a contact address in
+the environment:
+
+```yaml
+push:
+  enabled: true
+```
+
+```bash
+RA_PUSH_SUBJECT=mailto:you@example.com   # or a bare https://your.site
+```
+
+The address is the VAPID `sub` claim ([RFC 8292 §2.1](https://datatracker.ietf.org/doc/html/rfc8292#section-2.1))
+— how a push service reaches whoever operates this server. The RFC *recommends* it (`SHOULD`); the
+**hard requirement is `py_vapid`'s**, which refuses to sign a token whose `sub` is missing, so
+startup fails closed rather than letting notifications silently never arrive. It is an env var and
+not a roster key for the same reason `RA_CONTACT_EMAIL` is: the roster is committed, and this is a
+personal address. A `mailto:` needs the scheme; an `https://` value must be a bare host with no
+path.
+
+On the next boot the app generates a VAPID keypair at `<runs_dir>/.vapid-private.pem` and the
+index grows a **Notify me when runs finish** button. Tap it once per device and a run that
+stops — finished, or dead — pushes a notification naming the question and its status, which
+opens the report. There is nothing to register with anyone: no Firebase project, no APNs
+certificate, no app store. The server needs outbound HTTPS to whichever push services your
+`push.endpoint_hosts` allows; the default list covers Apple, Google, Mozilla and Microsoft
+(`web.push.apple.com`, `fcm.googleapis.com`, `*.push.services.mozilla.com`,
+`*.notify.windows.com`), so an egress policy that omits Firefox or Windows will break
+subscriptions from those browsers even though the app accepts them. The page needs HTTPS,
+which installation already required.
+
+Two things to know. **Back up `.vapid-private.pem`** — every subscription is bound to the key
+it was minted under, so losing it invalidates all of them silently, with no channel left to
+ask the devices to re-subscribe. And **on an iPhone the app has to be on the home screen
+first**: iOS gives push only to Home Screen web apps and only prompts in response to a direct tap
+([WebKit, 2023](https://webkit.org/blog/13878/web-push-for-web-apps-on-ios-and-ipados/)), and a
+declined permission prompt can only be reset by deleting and reinstalling, so the button appears
+only once it can actually work. See [D43](./docs/decisions.md).
+
 ## Configuration
 
 Everything lives in [config/roster.yaml](./config/roster.yaml). The roster is **role-structured**:
