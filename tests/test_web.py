@@ -15,6 +15,7 @@ from types import SimpleNamespace
 import pytest
 from conftest import WEB_IDENTITY, access_headers, web_client
 from fakes import FakeClient
+from pydantic import ValidationError
 
 from reasonable_answer.config import DEFAULT_PUSH_ENDPOINT_HOSTS, PushConfig
 from reasonable_answer.export import STATUS_MEANING
@@ -1712,13 +1713,24 @@ def test_service_worker_registration_is_guarded_and_cannot_break_the_live_script
 
 
 VAPID_SUBJECT = "mailto:ops@example.com"
+#: A per-test env var name, so the subject a test sets cannot leak into another test's
+#: process environment through the real `RA_PUSH_SUBJECT`.
+SUBJECT_ENV = "RA_PUSH_SUBJECT_TEST"
+
+
+@pytest.fixture
+def vapid_subject(monkeypatch):
+    """The VAPID contact lives in the environment, never in the roster (it is somebody's
+    personal address and the roster is committed), so tests supply it the way a deployment
+    does. A dedicated var name, so a test cannot pick up a real `RA_PUSH_SUBJECT`."""
+    monkeypatch.setenv(SUBJECT_ENV, VAPID_SUBJECT)
 
 
 def _push_config(config):
     """`config`, with notifications on. The key is generated on first boot, so nothing has
     to be planted here."""
     return config.model_copy(
-        update={"push": PushConfig(enabled=True, subject=VAPID_SUBJECT)}
+        update={"push": PushConfig(enabled=True, subject_env=SUBJECT_ENV)}
     )
 
 
@@ -1750,7 +1762,7 @@ APPLE = "https://web.push.apple.com/dev/abc123"
 
 
 @pytest.fixture
-def push_app(config):
+def push_app(config, vapid_subject):
     """An app with notifications enabled, plus its store and a recording sender."""
     pushed = config = _push_config(config)
     worker = RunWorker(config, max_concurrent=1, runner=lambda *a, **k: None)
@@ -1882,6 +1894,31 @@ def test_with_push_off_there_are_no_routes_and_the_page_is_unchanged(config):
         assert not (config.runs_dir / push.VAPID_FILE).exists()
     finally:
         plain.shutdown(timeout=0.1)
+
+
+def test_the_vapid_contact_comes_from_the_environment_and_boot_fails_without_it(config, monkeypatch):
+    """It is somebody's personal address and the roster is committed to a public repository,
+    so there is deliberately no config field to put it in — the same shape
+    `SourcesConfig.contact_email` already uses. Missing it has to be a boot error, because
+    `py_vapid` raises on signing and that exception would land in the notifier's
+    best-effort `except`, showing up as notifications that never arrive."""
+    monkeypatch.delenv(SUBJECT_ENV, raising=False)
+    pushed = _push_config(config)
+    assert pushed.push.subject == ""
+    worker = RunWorker(config, max_concurrent=1, runner=lambda *a, **k: None)
+    try:
+        with pytest.raises(RuntimeError, match=SUBJECT_ENV):
+            create_app(pushed, worker=worker)
+    finally:
+        worker.shutdown(timeout=0.1)
+
+    # And no field on the model can carry it instead: `extra="forbid"` turns an attempt to
+    # write the address into the roster into a validation error.
+    with pytest.raises(ValidationError):
+        PushConfig(enabled=True, subject="mailto:leaked@example.com")
+
+    monkeypatch.setenv(SUBJECT_ENV, VAPID_SUBJECT)
+    assert _push_config(config).push.subject == VAPID_SUBJECT
 
 
 def test_the_opt_in_ships_hidden_and_carries_the_key(push_app):

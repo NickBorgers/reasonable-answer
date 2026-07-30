@@ -1998,6 +1998,15 @@ back to a generic body, because Chrome's `userVisibleOnly` contract means a hand
 the browser's own "site updated in the background" notice — a vague notification is bad, that one is
 worse.
 
+**The contact address is an environment variable, and there is deliberately no roster field for
+it.** RFC 8292 requires a `sub` claim — a `mailto:` or bare `https://host` a push service can use
+to reach the operator — and `py_vapid` refuses to sign without one, so an unset subject means every
+send raises before reaching the network. That exception would land in the notifier's best-effort
+`except` and present as notifications that silently never arrive, so `push.enabled` with no subject
+is a boot failure instead. It is an env var for the same reason `SourcesConfig.contact_email` is:
+the value is somebody's personal address, the roster is committed to a public repository, and a
+config field is an invitation to put it there. Only the *variable name* is configurable.
+
 **The VAPID key is generated, not configured, and losing it is the sharp edge.** A keypair is
 self-issued: there is no account anywhere to register it with, no Firebase project, no APNs
 certificate. So making the operator produce one by hand adds a setup step that can be got wrong and

@@ -185,12 +185,16 @@ def create_app(
     push_key = ""
     if config.push.enabled:
         if not config.push.subject:
-            # Fail at boot, not when the first run finishes. A send with no `sub` claim is
-            # refused by the push service, and the symptom would be a notification that
-            # silently never arrives.
+            # Fail at boot, not when the first run finishes. `py_vapid` refuses to sign
+            # without a `sub` claim, and that exception would be raised inside `_deliver`'s
+            # best-effort `except` — so the symptom would be notifications that silently
+            # never arrive, which is the failure this check exists to convert into a
+            # startup error.
             raise RuntimeError(
-                "push.enabled is true but push.subject is empty; set a mailto: or https: "
-                "contact for the VAPID assertion (RFC 8292)"
+                f"push.enabled is true but ${config.push.subject_env} is unset; it must be "
+                "a mailto: address or a bare https://host — the VAPID contact (RFC 8292). "
+                "It is an env var rather than a roster key so a committed config never "
+                "carries a personal address."
             )
         push_store = push.PushStore(
             config.runs_dir / push.SUBSCRIPTIONS_FILE,

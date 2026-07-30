@@ -234,14 +234,24 @@ someone; every write stays behind the gate. Unset, it falls back to `RA_ROOT_PAT
 nothing changes. See [D35](./docs/decisions.md) and
 [authentication.md](./docs/authentication.md).
 
-**To be told when a run finishes**, set `push.enabled: true` and a `push.subject` contact in
-the roster:
+**To be told when a run finishes**, turn it on in the roster and supply a contact address in
+the environment:
 
 ```yaml
 push:
   enabled: true
-  subject: mailto:you@example.com   # required — the VAPID contact, RFC 8292
 ```
+
+```bash
+RA_PUSH_SUBJECT=mailto:you@example.com   # or a bare https://your.site
+```
+
+The address is the VAPID `sub` claim (RFC 8292) — how a push service reaches whoever operates
+this server. It is **required**: the spec mandates it and `py_vapid` refuses to sign without
+one, so startup fails closed rather than letting notifications silently never arrive. It is an
+env var and not a roster key for the same reason `RA_CONTACT_EMAIL` is: the roster is committed,
+and this is a personal address. A `mailto:` needs the scheme; an `https://` value must be a bare
+host with no path.
 
 On the next boot the app generates a VAPID keypair at `<runs_dir>/.vapid-private.pem` and the
 index grows a **Notify me when runs finish** button. Tap it once per device and a run that

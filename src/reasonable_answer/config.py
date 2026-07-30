@@ -623,11 +623,17 @@ class PushConfig(BaseModel):
     model_config = ConfigDict(extra="forbid")
 
     enabled: bool = False
-    #: The `sub` claim in the VAPID assertion (RFC 8292) -- a `mailto:` or `https:` URL a
-    #: push service can use to reach whoever operates this server. Required by the spec and
-    #: by Apple; a send with an empty subject is rejected at the push service, so this is
-    #: validated at startup rather than discovered when the first run finishes.
-    subject: str = ""
+    #: Env var naming the `sub` claim for the VAPID assertion (RFC 8292): a `mailto:` or
+    #: bare `https://host` that a push service can use to reach whoever operates this
+    #: server. Required -- the spec mandates it, and `py_vapid` refuses to sign without one,
+    #: so an unset subject means every send raises before it reaches the network.
+    #:
+    #: An env var and not a roster key, for exactly the reason `SourcesConfig.contact_email`
+    #: is one: this is somebody's personal address, the roster is committed to a public
+    #: repository, and a config field is an invitation to put it there. Startup fails closed
+    #: when `push.enabled` is set and this resolves empty, so the mistake is a boot error
+    #: rather than notifications that silently never arrive.
+    subject_env: str = "RA_PUSH_SUBJECT"
     #: Push services this server will POST to. The endpoint comes from the browser, so this
     #: is the SSRF boundary for it -- see `web/push.validate_endpoint`.
     endpoint_hosts: tuple[str, ...] = DEFAULT_PUSH_ENDPOINT_HOSTS
@@ -637,6 +643,14 @@ class PushConfig(BaseModel):
     #: Devices one person may register. A phone, a laptop and a tablet is three; the cap
     #: exists so the store cannot grow without bound, not to ration anything.
     max_subscriptions_per_identity: int = Field(default=10, ge=1, le=50)
+
+    @property
+    def subject(self) -> str:
+        """Resolved at read time, like `SourcesConfig.contact_email` and
+        `ProxyConfig.api_key`: the value belongs to the environment, never to the roster
+        file, so a checked-in config cannot carry somebody's address into a container
+        image or a public repository."""
+        return os.environ.get(self.subject_env, "").strip()
 
 
 #: All transforms except the ideologically riskiest one (docs/question-refinement.md
