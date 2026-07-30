@@ -137,6 +137,19 @@ on disk: per run, `events.jsonl`, `audit.json`, and `owner.txt` under the runs v
 startup event recording identities, modes, budgets, and which resolve tiers were enabled. A
 background sweeper enforces `retention_days`.
 
+`compose.yaml` sets **`RA_LOG_LEVEL: INFO`** (D41). The shipped code default is WARNING, and the
+container's CMD is fixed so `--verbose` cannot be passed; at WARNING a deployment records no run
+starts, no controller decisions and no search results, which leaves a failure reconstructable only
+from code. The level is safe to raise because no INFO site emits run material: search logs query
+*lengths* and counts (RA-016), controller decisions derive only from the blind `OrchestratorView`,
+and `structured()`'s schema-violation log names the exception class, never the rejected value.
+
+Two things stdout is still **not** a substitute for. The per-run `events.jsonl` remains the audit
+trail — logs are lossy, unowned, and outside the mode-0700 run tree. And a `MalformedOutputError`
+message still embeds the validator's own error text, which reaches container logs at WARNING via
+`critique`; that predates D41 and is unchanged by it, but it means the run tree is the only place
+whose privacy posture is actually enforced.
+
 ## Keeping this page true
 
 This page describes a live system, which means it goes stale in a way the rest of `docs/` does
