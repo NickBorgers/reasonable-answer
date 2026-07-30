@@ -2129,23 +2129,19 @@ the fail-closed lenses are not touched.
 ## D-decision-slugs — decisions are identified by a subject slug, not a shared counter
 
 **The problem.** A decision identifier was a number allocated from a single sequence on `main`, so
-choosing one meant knowing what every in-flight PR had chosen. Two PRs open at once reliably picked the
-same next-free number and only found out at merge. It was not rare: `D26`–`D33` all landed on one day,
-and the sequence kept turning over at roughly two a day after. #74 merged `D31` while #75 already carried
-`D31`; #75 renumbered to `D33`, which #76 then merged first, forcing #75 to `D34` — two of one PR's
-review cycles spent on numbering rather than the change under review. Later three consecutive PRs all
-authored `D41` (#102, #104, #106); two renumbered on the way in and neither commit subject was corrected,
-so `main`'s history still misstates which decision two of those merges introduced. Each renumber is a
-push, which resets the review cycle and spends a full panel run — the identifier's cost was paid in the
-one place a rename is most expensive, because the number is echoed into the commit subject, the PR title
-and body, and `config/`, `src/`, `tests/` and docs.
+choosing one meant knowing what every in-flight PR had already chosen. Two PRs opened against the same
+base necessarily draw the same next-free number from that shared maximum, and the collision surfaces only
+at merge — by construction, not by luck, because neither PR's merge ref contains the other's choice. The
+only remedy the counter offered was to renumber, and a renumber is a push: it resets the review cycle and
+spends a full panel run. That cost lands in the most expensive place a rename can, because the number is
+echoed into the commit subject, the PR title and body, and across `config/`, `src/`, `tests/` and docs.
 
-The counter had also failed silently in this very file: four numbers each named **two** different
-decisions — `D18` (open-weight roster *and* source verification), `D20` (redeploy durability *and* critic
-audition), `D21` (proxy-URL override *and* bounded submission), and `D24` (seed conversion *and*
-social-bias categories). The gate could not see it, because it read only `^## D<n>` prose headings and
-never the table rows, so "is this identifier defined twice?" was a question it could not answer for the
-table-form half of the decisions.
+The counter had also failed silently in this very file. Four old numbers each named **two** different
+decisions — the old→new mapping at the top of this file splits each into two slugs (for example
+`D-open-weight-roster` and `D-source-verification`, which shared one number, and `D-redeploy-survival`
+and `D-critic-audition`, which shared another). The gate could not catch it, because it matched only the
+`## ` prose headings and never the table rows, so "is this identifier defined twice?" was a question it
+could not answer for the table-form half of the decisions.
 
 **The decision.** Identify each decision by a **slug derived from its subject** (`D-source-verification`),
 coined by the authoring PR. Two concurrent PRs cannot collide, because a slug is chosen from the
