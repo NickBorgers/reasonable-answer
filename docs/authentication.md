@@ -121,7 +121,7 @@ the sign-in. So the URL a reader is looking at is the URL they can send to someo
 |---|---|---|
 | reads of a run | `GET /runs/<id>`, `/report`, `/report.md`, `/export.md`, `/export.html`, `/audit.json`, `/progress`, `/stream` | **not required** |
 | writes | `POST /runs`, `/runs/<id>/again`, `/runs/<id>/resume`, `/refine`, `/push/subscribe`, `/push/unsubscribe` | required |
-| the index | `GET /` | required (it is a per-viewer list) |
+| the index | `GET /`, `GET /runs-table` | required (both are per-viewer lists) |
 | the app shell | `manifest.webmanifest`, `sw.js`, `offline.html`, icons | required |
 | healthcheck | `GET /healthz` | not required |
 

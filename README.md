@@ -255,9 +255,11 @@ personal address. A `mailto:` needs the scheme; an `https://` value must be a ba
 path.
 
 On the next boot the app generates a VAPID keypair at `<runs_dir>/.vapid-private.pem` and the
-index grows a **Notify me when runs finish** button. Tap it once per device and a run that
+header grows a **notify me** button — on every page, so it is there on the run page you land on
+after starting something. Tap it once per device and a run that
 stops — finished, or dead — pushes a notification naming the question and its status, which
-opens the report. There is nothing to register with anyone: no Firebase project, no APNs
+opens the report. The button disappears once that device is subscribed: there is nothing left
+to do, and turning notifications back off belongs to the OS, which owns the permission. There is nothing to register with anyone: no Firebase project, no APNs
 certificate, no app store. The server needs outbound HTTPS to whichever push services your
 `push.endpoint_hosts` allows; the default list covers Apple, Google, Mozilla and Microsoft
 (`web.push.apple.com`, `fcm.googleapis.com`, `*.push.services.mozilla.com`,

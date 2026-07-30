@@ -2171,6 +2171,92 @@ boundary all live in the pipeline core and are untouched. This is repository gov
 how a *document* is identified, not what enters any model's context. The rename itself is mechanical —
 each decision's body says exactly what it said before, under its new name.
 
+## D-header-optin — the notification opt-in lives in the shell, and only until the device is subscribed
+
+**The problem.** D-stop-notification shipped the opt-in as a control at the bottom of the index's
+"Your runs" panel — below a table that grows without bound. Two things were wrong with that, and the
+second is the one that matters.
+
+It was hard to reach: with a dozen runs listed, the control sat below a screenful of rows, on the one
+page a person visits least once they have started something. And it was *absent* exactly where it was
+wanted. Starting a run redirects to `/runs/<id>`; the moment someone decides they want telling is the
+moment they have just kicked off a 10-25 minute run and are about to put the phone down. On that page
+there was no control at all, and no way to get to one without navigating back.
+
+**Installed to a home screen there is no navigating back.** A standalone app has no address bar, no
+reload button and no visible history - that is what `display: standalone` means. A control reachable
+only from one page, on a surface with no chrome to reach it with, is a control that is not there.
+
+**Decision.** The opt-in moves into the layout shell, beside `how this works`, so it is on every page
+the app renders - index, run page, report. One mount point, one script, one state machine.
+
+**It is shown only while this device has no subscription.** A toggle reading "Notifications on" would
+be a permanent header element that never changes and never helps, and the header is the most expensive
+real estate the page has. Once notifications are on there is nothing left to offer, so the steady
+state is an empty header. Turning them *off* belongs to the OS, which owns the permission and exposes
+it in Settings on every platform that implements Web Push; a page-level "off" switch would be a second
+control that can disagree with the real one. What the script does keep is *reconciliation*: a
+permission revoked out of band leaves a subscription the server would go on pushing to, so a `denied`
+permission on load tells the server to forget that endpoint rather than waiting for the push service
+to start answering `410`.
+
+**It is emitted only for a signed-in caller, which is a rule about strangers and not about tidiness.**
+Every `GET` under `/runs/` answers an anonymous reader (D-id-as-credential), so the run and report
+pages are reached by people who were handed a link. They have no runs to be notified about, and
+`POST /push/subscribe` is a gated write that would refuse them, so a control there is an invitation to
+a 403. The key is withheld unless `request.state.viewer` is set.
+
+**On iOS in a browser tab the control stays hidden rather than explaining itself.** `PushManager`
+exists there and `subscribe()` rejects, so feature detection alone would show a button that fails.
+D-stop-notification put an inline hint in its place; in a header there is no room for a sentence, and
+the install affordance is one the browser already offers. Hidden is the honest state: the feature
+genuinely is unavailable until the app is installed.
+
+## D-self-refreshing-index — the runs list corrects itself, because an installed app cannot be reloaded by hand
+
+**The problem.** The index is a snapshot. A run finishes, and the table goes on saying `running` until
+something reloads the page. In a browser tab that is a non-issue - the reader hits reload. Installed
+to a home screen it is a defect with no user-side fix: there is no reload button, no address bar, and
+on iOS no pull-to-refresh inside the page. The one mechanism the index relied on is the one the
+platform removes.
+
+That is not cosmetic. D-installable-pwa states the rule this violates outright - *a finished run
+displayed as still running is the one output this interface must not produce* - and spends its whole
+service-worker design on preventing it in the cache. It was being produced anyway, one layer up, by a
+page that had no way to correct itself.
+
+**Decision.** The runs table refreshes itself. `render_index_rows` renders the `<tbody>` as a
+fragment, `GET /runs-table` serves it, and the page swaps the element in place.
+
+**The visibility handler is the load-bearing half, not the interval.** The realistic failure is not a
+page left open in the foreground for five minutes; it is an app backgrounded for an hour and then
+swiped back to. iOS freezes timers in a suspended standalone app, so an interval alone resumes late
+and shows stale rows for a beat first - precisely at the moment of maximum attention. Refreshing on
+`visibilitychange` means the list is current *before* it is looked at. `pageshow` with `persisted`
+covers the back-forward cache, which restores a page wholesale and runs no tick at all.
+
+**The interval runs only while something is live, and stops itself.** `data-live` is computed on the
+server from the same `is_live` the rows are rendered from and travels *on the fragment*, so the flag
+and the rows it describes can never disagree - and the client never infers liveness by scraping status
+text. When a refresh returns `data-live="0"` the loop ends, so an idle index left open on a phone
+costs nothing.
+
+**One renderer, so the two views cannot drift.** The page and the endpoint both call
+`render_index_rows`. The fragment is the whole `<tbody>` rather than its rows so the swap is one node
+and the refreshed flag arrives with the rows in a single step.
+
+**`/runs-table`, not `/runs/table`.** `_PUBLIC_GET_PREFIX` is the string `"/runs/"` and every `GET`
+beneath it is anonymous (D-id-as-credential). This is a per-viewer, owner-scoped list - the index's own
+body - so it must be gated, and the sibling name is what keeps it outside the prefix by construction
+rather than by a special case. `/runs/table` would have read as the natural name and would have
+published one person's index to anyone holding any run id. A test asserts the path is not inside the
+prefix.
+
+**Unconditional, unlike refine and notifications.** This is not a feature to opt into; it is the
+repair of a staleness the installed app cannot fix by hand. It needs no credential, makes no outbound
+request and reveals nothing the index does not already show its own viewer.
+
+
 ## Open items for a future round
 
 - Whether `misrepresented_source` can be meaningfully checked without fetching the source
