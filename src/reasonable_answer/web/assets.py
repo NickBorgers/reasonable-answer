@@ -58,6 +58,11 @@ ICON_TYPES = {
 _MANIFEST_TYPE = "application/manifest+json"
 _OFFLINE_TYPE = "text/html; charset=utf-8"
 
+#: Artwork for a push notification (D41). `icon-192.png` rather than the 512: notification
+#: icons are drawn small, it is already in `ICON_TYPES` and therefore already precached, and
+#: reusing a precached entry means a notification shown while offline still has its icon.
+_NOTIFICATION_ICON = "icon-192.png"
+
 
 @dataclass(frozen=True)
 class Asset:
@@ -181,6 +186,10 @@ def load(base_path: str = "") -> Assets:
         source.replace("__RA_CACHE_VERSION__", version)
         .replace("__RA_PRECACHE__", json.dumps(precache))
         .replace("__RA_OFFLINE__", offline_url)
+        # The notification icon (D41). Substituted for the same reason as OFFLINE: it is a
+        # browser-facing URL, so behind a stripping proxy it has to carry the base path, and
+        # it is already precached, so a notification arriving offline still has its artwork.
+        .replace("__RA_ICON__", base_path + ICONS_PREFIX + _NOTIFICATION_ICON)
     )
 
     return Assets(

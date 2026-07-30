@@ -207,6 +207,7 @@ def render_index(
     base_path: str = "",
     public_base: str | None = None,
     viewer: str | None = None,
+    vapid_key: str = "",
 ) -> str:
     # The index is behind the gate; the runs it links to are not (D35). Defaulting to
     # `base_path` keeps a single-door deployment — dev, the tailnet — emitting exactly
@@ -243,6 +244,20 @@ def render_index(
     <input type="hidden" id="refine_selected" name="refine_selected" value="">
     <div id="refine-chips" class="refine-chips" hidden></div>"""
         if config.refine.enabled
+        else ""
+    )
+    # Omitted entirely when push is off, so that page is byte-identical to a build without
+    # the feature (same promise refine makes above). The button ships `hidden` and the script
+    # reveals it: a browser that cannot do push, or an iOS tab that is not installed, must
+    # not show a control that would fail — and with scripting off, nothing here appears at
+    # all, which is the honest outcome for a feature that is entirely script-driven.
+    push_block = (
+        """
+  <p class="push-optin">
+    <button type="button" class="secondary" id="push-toggle" hidden>Notify me when runs finish</button>
+    <span class="hint" id="push-note"></span>
+  </p>"""
+        if config.push.enabled
         else ""
     )
     # "Fetched and checked against what the report says they say" is the D18 verified-sourcing
@@ -288,6 +303,7 @@ def render_index(
     <thead><tr><th>status</th><th>question</th><th>rounds</th><th>started</th><th></th></tr></thead>
     <tbody>{rows}</tbody>
   </table>
+  {push_block}
 </section>
 
 <section class="panel roster">
@@ -302,12 +318,18 @@ def render_index(
   </div>
 </section>
 """
+    # Both features share the one `extra_script` slot, concatenated. Each blob is a
+    # self-contained IIFE ending in a semicolon, which is what makes appending safe; the
+    # empty string is the identity, so any combination of the two off leaves the page as it
+    # was without them.
     return render_layout(
         "reasonable-answer",
         body,
         base_path=base_path,
-        extra_css=REFINE_CSS if config.refine.enabled else "",
-        extra_script=_refine_js(base_path) if config.refine.enabled else "",
+        extra_css=(REFINE_CSS if config.refine.enabled else "")
+        + (PUSH_CSS if config.push.enabled else ""),
+        extra_script=(_refine_js(base_path) if config.refine.enabled else "")
+        + (_push_js(base_path, vapid_key) if config.push.enabled else ""),
     )
 
 
@@ -630,6 +652,139 @@ _REGISTER_SW_JS = """
 
 def _register_sw_js(base_path: str = "") -> str:
     return _REGISTER_SW_JS.replace("__RA_BASE__", base_path)
+
+
+#: Opting a device in to notifications (D41). Emitted only when `push.enabled`, so a build
+#: with the feature off renders the index byte-identically to before.
+#:
+#: Two rules are load-bearing and both come from the platforms rather than from taste.
+#:
+#: `Notification.requestPermission()` is called from the click handler and never on load.
+#: On iOS a declined permission cannot be re-prompted — the only reset is deleting and
+#: reinstalling the home-screen app — so an auto-prompt spends that single chance on a page
+#: view, before the person has any idea what they are being asked to allow.
+#:
+#: On iOS, push exists only for a web app added to the home screen. In a Safari tab
+#: `PushManager` is present but `subscribe()` rejects, so feature detection alone would show
+#: a button that cannot work. The standalone check turns that into an instruction instead.
+#:
+#: MUST end in a semicolon, for the reason given on `_REGISTER_SW_JS`.
+_PUSH_JS = """
+(function () {
+  var btn = document.getElementById('push-toggle');
+  var note = document.getElementById('push-note');
+  if (!btn) return;
+
+  function say(text, disabled) {
+    btn.textContent = text;
+    btn.disabled = !!disabled;
+  }
+  function tell(text) {
+    if (note) note.textContent = text;
+  }
+
+  if (!('serviceWorker' in navigator) || !('PushManager' in window) ||
+      !('Notification' in window) || !window.isSecureContext) {
+    return;
+  }
+  var standalone = window.navigator.standalone === true ||
+    (window.matchMedia && window.matchMedia('(display-mode: standalone)').matches);
+  var iOS = /iPad|iPhone|iPod/.test(navigator.userAgent) ||
+    (navigator.platform === 'MacIntel' && navigator.maxTouchPoints > 1);
+  if (iOS && !standalone) {
+    tell('Add this to your home screen to enable notifications.');
+    return;
+  }
+  if (Notification.permission === 'denied') {
+    tell('Notifications are blocked for this site in your browser settings.');
+    return;
+  }
+
+  btn.hidden = false;
+
+  function key() {
+    // The VAPID public key, base64url, as `applicationServerKey` wants it: raw bytes.
+    var raw = '__RA_VAPID__'.replace(/-/g, '+').replace(/_/g, '/');
+    while (raw.length % 4) raw += '=';
+    var bin = atob(raw);
+    var out = new Uint8Array(bin.length);
+    for (var i = 0; i < bin.length; i++) out[i] = bin.charCodeAt(i);
+    return out;
+  }
+
+  navigator.serviceWorker.ready.then(function (reg) {
+    return reg.pushManager.getSubscription().then(function (existing) {
+      if (existing) say('Notifications on', false);
+      else say('Notify me when runs finish', false);
+
+      btn.addEventListener('click', function () {
+        say('\\u2026', true);
+        reg.pushManager.getSubscription().then(function (sub) {
+          if (sub) {
+            // Unsubscribing locally before telling the server keeps the browser from
+            // holding a subscription the server has already forgotten, which would leave
+            // the button reading "on" with nothing able to reach it.
+            var endpoint = sub.endpoint;
+            return sub.unsubscribe().then(function () {
+              return post('__RA_BASE__/push/unsubscribe', { endpoint: endpoint });
+            }).then(function () {
+              say('Notify me when runs finish', false);
+              tell('');
+            });
+          }
+          return Notification.requestPermission().then(function (state) {
+            if (state !== 'granted') {
+              say('Notify me when runs finish', false);
+              tell(state === 'denied'
+                ? 'Notifications are blocked for this site in your browser settings.'
+                : '');
+              return null;
+            }
+            return reg.pushManager.subscribe({
+              userVisibleOnly: true,
+              applicationServerKey: key()
+            }).then(function (fresh) {
+              var raw = fresh.toJSON();
+              return post('__RA_BASE__/push/subscribe', {
+                endpoint: raw.endpoint,
+                keys: raw.keys
+              }).then(function (ok) {
+                if (!ok) {
+                  // The server refused to store it, so the browser must not keep it
+                  // either — otherwise this device is subscribed to a push service the
+                  // server will never send to.
+                  return fresh.unsubscribe().then(function () {
+                    say('Notify me when runs finish', false);
+                    tell('Could not enable notifications.');
+                  });
+                }
+                say('Notifications on', false);
+                tell('');
+              });
+            });
+          });
+        }).catch(function () {
+          say('Notify me when runs finish', false);
+          tell('Could not enable notifications.');
+        });
+      });
+    });
+  }).catch(function () {});
+
+  function post(url, payload) {
+    return fetch(url, {
+      method: 'POST',
+      headers: { 'Content-Type': 'application/json' },
+      credentials: 'same-origin',
+      body: JSON.stringify(payload)
+    }).then(function (r) { return r.ok; });
+  }
+})();
+"""
+
+
+def _push_js(base_path: str = "", vapid_key: str = "") -> str:
+    return _PUSH_JS.replace("__RA_BASE__", base_path).replace("__RA_VAPID__", vapid_key)
 
 LIVE_JS = """
 (function () {
@@ -1329,6 +1484,15 @@ main {
 # Appended onto CSS only when refine.enabled (see render_index) so a disabled build's
 # <style> tag is unchanged. No motion is used, so there is nothing here for
 # @media (prefers-reduced-motion: reduce) to turn off (docs/question-refinement.md).
+#: The notification opt-in (D41). Two rules, because the control reuses `button.secondary`
+#: and `.hint` and needs nothing else: the global `button` rule's top margin would otherwise
+#: push it a full line below the table, and the note has to sit beside the button rather than
+#: under it.
+PUSH_CSS = """
+.push-optin { display: flex; align-items: center; gap: .6rem; flex-wrap: wrap; margin: .9rem 0 0; }
+.push-optin button { margin-top: 0; }
+"""
+
 REFINE_CSS = """
 .refine-chips { display: flex; flex-direction: column; gap: .4rem; margin: .5rem 0 0; }
 /* margin-top resets the global `button` rule's 1rem, which would otherwise stack on
