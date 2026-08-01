@@ -111,6 +111,43 @@ def test_every_material_category_has_a_planted_fixture():
     assert not missing, f"material categories with no planted fixture: {', '.join(missing)}"
 
 
+def test_every_lens_has_an_obvious_tier_fixture():
+    """D-obvious-per-lens. Both fail-closed sensitivity gates in `judge` count planted
+    defects on `tier: obvious` fixtures only. A lens whose whole planted set is
+    `moderate` has `obvious_total == 0`, so both gates are skipped and a critic that
+    returns nothing on every call grades MARGINAL — which `enforce_fitness` does not
+    block. The completeness lens shipped in exactly that state.
+    """
+    fixtures = audition.load_fixtures(CORPUS)
+    planted = [f for f in fixtures.fixtures if not f.is_control]
+    for lens in Lens:
+        mine = [f for f in planted if f.lens is lens]
+        assert any(f.tier is audition.Tier.OBVIOUS and f.defects for f in mine), (
+            f"lens {lens.value} has no tier: obvious planted fixture — both fail-closed "
+            f"gates in judge() are dead for it and a silent critic grades marginal"
+        )
+
+
+def test_every_lens_has_a_locus_anchored_planted_defect():
+    """D-obvious-per-lens, the other half. `anywhere: true` skips the locus window
+    entirely, so a lens whose every planted defect sets it measures only "did the critic
+    name a category from my lens", not "did it find the defect" — and a critic that
+    reflexively raises one material issue of a fixed category on every artifact scores
+    perfect sensitivity on that lens.
+    """
+    fixtures = audition.load_fixtures(CORPUS)
+    for lens in Lens:
+        anchored = [
+            f.id
+            for f in fixtures.fixtures
+            if f.lens is lens and any(not d.anywhere for d in f.defects)
+        ]
+        assert anchored, (
+            f"lens {lens.value} has no planted defect with a real locus — its sensitivity "
+            f"score would not depend on where the critic looked"
+        )
+
+
 def test_every_lens_sees_all_controls():
     fixtures = audition.load_fixtures(CORPUS)
     controls = {f.id for f in fixtures.fixtures if f.is_control}
@@ -506,6 +543,72 @@ def test_flagging_everything_is_also_unfit():
     judgement = audition.judge(noisy, THRESHOLDS)
     assert judgement.verdict is audition.Verdict.UNFIT
     assert any("invents" in r for r in judgement.reasons)
+
+
+def test_a_critic_that_is_never_clean_on_a_sound_report_is_unfit():
+    """D-obvious-per-lens. The cheapest degenerate strategy: raise exactly one material
+    issue of the right category on every artifact. It scores perfect sensitivity, and
+    its `control_material_rate` lands on exactly 1.00 — which is not *greater than* the
+    1.0 default, so the noise gate let it through and the verdict was MARGINAL, which
+    `enforce_fitness` does not block.
+    """
+    always_fires = metrics(
+        planted_total=4,
+        strict_hits=4,
+        same_lens_hits=4,
+        obvious_total=2,
+        obvious_hits=2,
+        control_runs=4,
+        control_material_issues=4,
+        control_clean_runs=0,
+    )
+    assert always_fires.control_material_rate == 1.0
+    assert always_fires.control_material_rate <= THRESHOLDS.max_control_material_rate
+    judgement = audition.judge(always_fires, THRESHOLDS)
+    assert judgement.verdict is audition.Verdict.UNFIT
+    assert any("clean" in r for r in judgement.reasons)
+
+
+def test_never_clean_is_unfit_under_every_threshold_setting():
+    """The mirror of `test_silent_critic_is_unfit_under_every_threshold_setting`: a
+    critic that never lets a sound report through blocks convergence whatever the
+    calibration says, so the gate is hardcoded rather than tunable."""
+    always_fires = metrics(
+        planted_total=4,
+        strict_hits=4,
+        same_lens_hits=4,
+        obvious_total=2,
+        obvious_hits=2,
+        control_runs=4,
+        control_material_issues=4,
+        control_clean_runs=0,
+    )
+    permissive = AuditionThresholds(
+        min_obvious_sensitivity=0.0,
+        warn_lens_sensitivity=0.0,
+        max_control_material_rate=99.0,
+        warn_control_material_rate=99.0,
+        max_schema_failure_rate=1.0,
+    )
+    assert audition.judge(always_fires, permissive).verdict is audition.Verdict.UNFIT
+
+
+def test_an_occasional_false_positive_is_not_the_never_clean_gate():
+    """The gate is about *never*, not about noise in degrees — a critic clean on some
+    sound reports and not others is what `warn_control_material_rate` is for."""
+    occasionally_noisy = metrics(
+        planted_total=4,
+        strict_hits=4,
+        same_lens_hits=4,
+        obvious_total=2,
+        obvious_hits=2,
+        control_runs=4,
+        control_material_issues=2,
+        control_clean_runs=2,
+    )
+    judgement = audition.judge(occasionally_noisy, THRESHOLDS)
+    assert judgement.verdict is audition.Verdict.MARGINAL
+    assert not any("clean" in r for r in judgement.reasons)
 
 
 def test_schema_failures_are_unfit_and_distinct_from_silence():

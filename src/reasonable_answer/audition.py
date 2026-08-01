@@ -26,7 +26,10 @@ category matching plus a structural-locus window, and nothing else.
 and is worse than useless: it never lets a run converge, it drains the critique
 budget, it drives `stagnation_count` to the limit, and rule 13 — after spending its
 bounded rewrite (D-scoped-revision) — terminates `exhausted_unresolved` on a report that
-was fine. Silence and noise are two ways to fail the same job.
+was fine. Silence and noise are two ways to fail the same job, so each direction carries
+one hardcoded gate no threshold setting can reach — zero obvious planted defects found,
+and zero clean reviews of a sound control (D-obvious-per-lens). The thresholds around
+them are calibration; those two are not.
 
 **A verdict covers the whole corpus, or it is not a verdict.** A call that fails the
 schema is neither a miss nor a false positive, so it is excluded from grading — but
@@ -542,6 +545,21 @@ def judge(metrics: Metrics, thresholds: AuditionThresholds) -> Judgement:
         reasons.append(
             f"invents {metrics.control_material_rate:.2f} material issues per sound "
             f"report — runs would stagnate rather than converge"
+        )
+        return Judgement(Verdict.UNFIT, tuple(reasons))
+
+    # The mirror of the silence gate above, and unreachable by threshold tuning for the
+    # same reason (D-obvious-per-lens). A critic that never once returns a clean lens on
+    # a sound report never lets one converge: rule 3 needs a clean record, and this model
+    # cannot produce one whatever the report says. The rate gate above misses the cheapest
+    # version of that strategy — exactly one material issue per artifact scores a
+    # `control_material_rate` of 1.00, which is not *greater than* the 1.0 default — so
+    # the strategy that most perfectly defeats the harness slipped through the noise
+    # direction while scoring full marks on the sensitivity direction.
+    if metrics.control_runs and metrics.control_clean_runs == 0:
+        reasons.append(
+            f"never returned a clean review of a sound report (0 of {metrics.control_runs}) "
+            f"— no report could ever clear this lens"
         )
         return Judgement(Verdict.UNFIT, tuple(reasons))
 
