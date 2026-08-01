@@ -97,6 +97,11 @@ class State(TypedDict, total=False):
     decision: dict
     polish_next: bool
     polish_used: int
+    #: Rule 13's escape valve (D-scoped-revision), shaped exactly like the polish pair
+    #: above: a one-shot flag the generate node consumes, and a whole-run counter the
+    #: controller reads back.
+    full_rewrite_next: bool
+    rewrites_used: int
     critique_attempts_remaining: int
     confirmation_attempts_remaining: int
 
@@ -411,6 +416,8 @@ def _intake(state: State, rt: Runtime) -> dict:
         "defects": [],
         "polish_used": 0,
         "polish_next": False,
+        "rewrites_used": 0,
+        "full_rewrite_next": False,
         "critique_attempts_remaining": cfg.budgets.critique_attempts,
         "confirmation_attempts_remaining": cfg.budgets.confirmation_attempts,
         "prev_material": -1,
@@ -470,6 +477,33 @@ def _route_intake(state: State) -> str:
 # ------------------------------------------------------------------- generate
 
 
+def _scope_fields(
+    cfg: Config,
+    previous: str | None,
+    text: str,
+    defects: list[Defect],
+    *,
+    polish: bool,
+    full_rewrite: bool,
+) -> dict[str, int]:
+    """Warn-only scope measurement for the `generate` event (D-scoped-revision).
+
+    Silent for the three generations that legitimately touch everything — the first
+    draft, a rule-9 polish pass, and a rule-13 rewrite — so an absent field means "not
+    applicable" rather than "in scope", and the A/B never averages those rounds in.
+    """
+    if cfg.revision.scope_check == "off" or not previous or polish or full_rewrite:
+        return {}
+    scope = report_mod.revision_scope(previous, text, [d.locus for d in defects])
+    if scope.out_of_scope:
+        log.info(
+            "revision touched %d paragraph(s) no fix task named (of %d changed)",
+            len(scope.out_of_scope),
+            len(scope.changed),
+        )
+    return scope.as_event_fields()
+
+
 def _generate(state: State, rt: Runtime) -> dict:
     cfg = rt.config
     last_author = state.get("author_identity")
@@ -485,17 +519,24 @@ def _generate(state: State, rt: Runtime) -> dict:
     polish = state.get("polish_next", False)
     defects = [Defect.model_validate(d) for d in state.get("defects", [])]
 
+    # Rule 13 spent a rewrite to break a stalled patch chain: this one generation asks
+    # for the whole document however `revision.mode` is set (D-scoped-revision).
+    full_rewrite = state.get("full_rewrite_next", False)
+    mode = "rewrite" if full_rewrite else cfg.revision.mode
+
     # .get(): a checkpoint from before run_date existed resumes dateless, which is
     # exactly the prior behavior.
     run_date = state.get("run_date")
-    if state.get("report"):
+    previous = state.get("report")
+    if previous:
         user = prompts.writer_revision(
             state["question"],
-            state["report"],
+            previous,
             defects,
             polish,
             rt.disputes_enabled,
             current_date=run_date,
+            mode=mode,
         )
     else:
         user = prompts.writer_first_draft(state["question"], current_date=run_date)
@@ -571,10 +612,12 @@ def _generate(state: State, rt: Runtime) -> dict:
         author=identity,
         artifact_hash=h,
         polish=polish,
+        full_rewrite=full_rewrite,
         defects_applied=len(defects),
         tokens=completion.completion_tokens,
         # Auditable after the fact: did this draft's citations come from a lookup?
         searches=completion.tool_calls,
+        **_scope_fields(cfg, previous, text, defects, polish=polish, full_rewrite=full_rewrite),
     )
 
     pending_disputes = _elicit_disputes(state, rt, alias, text, defects, polish)
@@ -597,6 +640,7 @@ def _generate(state: State, rt: Runtime) -> dict:
         "critique_rounds": {},
         "defects": [],
         "polish_next": False,
+        "full_rewrite_next": False,
         "pending_lenses": [lens.value for lens in LENSES],
         "pending_disputes": pending_disputes,
     }
@@ -1161,6 +1205,8 @@ def _control(state: State, rt: Runtime) -> dict:
         polish_recommended=state.get("polish_next", False),
         stagnation_limit=cfg.budgets.stagnation_limit,
         cycle_period=cfg.budgets.cycle_period,
+        rewrites_used=state.get("rewrites_used", 0),
+        rewrite_cap=cfg.budgets.rewrite_cap,
     )
 
     decision = decide(ci)
@@ -1221,6 +1267,14 @@ def _control(state: State, rt: Runtime) -> dict:
         out["polish_next"] = decision.polish
         if decision.polish:
             out["polish_used"] = state.get("polish_used", 0) + 1
+        out["full_rewrite_next"] = decision.full_rewrite
+        if decision.full_rewrite:
+            out["rewrites_used"] = state.get("rewrites_used", 0) + 1
+            # Load-bearing. `stagnation_count` is what selected this rule; leaving it at
+            # the limit means the very next tick re-fires rule 13 and spends the whole
+            # rewrite budget in consecutive ticks without ever letting a rewritten draft
+            # be judged on its own signal.
+            out["stagnation_count"] = 0
     else:
         out["terminal_status"] = decision.terminal_status
     return out

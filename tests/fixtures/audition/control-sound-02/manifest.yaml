@@ -1,4 +1,12 @@
-lens: logic
+# A control declares no `lens` and no `tier` (D-control-soundness): it is graded by
+# every lens, and it gates no sensitivity threshold because it plants nothing.
+#
+# Soundness contract, which no test can check and review therefore must: every
+# empirical claim below carries an in-text citation to a Sources entry; the question's
+# ambiguous term is named and decomposed rather than assumed; the case against the
+# report's own answer has its own section. This question is contested, so the sourcing
+# is deliberately drawn across a bank, an intergovernmental body and academic work on
+# both sides of the cost-contingency dispute — `one_sided_sourcing` floors to `major`,
+# and a two-source control would earn that finding honestly.
 kind: control
-tier: obvious
 question: "Is nuclear power cost-competitive with solar and wind?"

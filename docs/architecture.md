@@ -58,7 +58,7 @@ Invariants (enforced in code, covered by tests):
 | Node | Reads | Produces | Model | Trust model |
 |------|-------|----------|-------|-------------|
 | **intake** | question + **markdown** seed | normalized `question` / `seed`; routing | none | deterministic |
-| **generate** | question + latest report + **defect list** | next report (with citations) | non-author (alternating) | LLM (untrusted output) |
+| **generate** | question + latest report + **defect list** | next report (with citations) — under `revision.mode: patch` only the paragraphs a fix task named are edited, the rest returned byte-identical (D-scoped-revision) | non-author (alternating) | LLM (untrusted output) |
 | **adjudicate** *(D-writer-disputes, opt-in)* | pending disputes + finding + one paragraph | `AdjudicationRecord[]` | mechanical fetch-check, else an arbiter ≠ disputer ≠ raiser | mechanical, or LLM inside a closed 2-field schema |
 | **critique** | report + question + **one lens** + taxonomy | `Issue[]` per lens | per-lens non-author model | LLM (untrusted output) |
 | **triage** | this tick's `Issue[]` (minus **upheld-adjudication suppressions**, D-writer-disputes) | `OrchestratorView` + `DefectList` | none — **mechanical** | deterministic |
@@ -300,7 +300,7 @@ sequenceDiagram
     C->>O: OrchestratorView only
     O-->>C: recommendation (minor-polish judgment only)
     C->>C: ordered decision table (guardrails override the LLM)
-    alt generate next artifact (rules 4,9,14)
+    alt generate next artifact (rules 4,9,13,14)
         C->>G: generate Rₙ₊₁ from question + Rₙ + DefectList (author always differs from every lens critic)
         G-->>S: report Rₙ₊₁ (new hash ⇒ clean-record set resets)
     else re-critique SAME artifact (rules 2, 8 — no generation)

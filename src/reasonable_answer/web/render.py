@@ -8,6 +8,7 @@ in the container. Every interpolation of run-derived text goes through `esc`.
 from __future__ import annotations
 
 import html
+import re
 import time
 from typing import Any
 
@@ -594,6 +595,68 @@ def _copy_control(markdown: str) -> str:
   tabindex="-1">{esc(markdown)}</textarea>"""
 
 
+#: A rendered `<h2>` as `web/markdown.py` emits it: markdown-it with `html=False` produces
+#: bare `<h2>Heading text</h2>` — no attributes, blocks joined by a newline. That shape is
+#: what makes splitting on it safe; a heading carrying inline markup simply fails the match
+#: and the page falls back to the plain article.
+_H2 = re.compile(r"^<h2>([^<]*)</h2>", re.M)
+
+
+def _split_sections(report_html: str) -> list[tuple[str, str]] | None:
+    """The rendered report split at its `<h2>` boundaries, as (casefolded heading, html).
+
+    Returns ``None`` — the caller renders the plain single article — unless the body opens
+    with a `## Conclusion` heading. The report is model-written, so its structure is only
+    as reliable as the skeleton prompt (D-report-template): everything here **fails open**.
+    A pre-skeleton run, a seeded artifact, or a writer that ignored the frame gets exactly
+    the page it got before this existed.
+    """
+    if not report_html.startswith("<h2>"):
+        return None
+    sections: list[tuple[str, str]] = []
+    for i, part in enumerate(report_html.split("\n<h2>")):
+        chunk = part if i == 0 else "<h2>" + part
+        heading = _H2.match(chunk)
+        if not heading:
+            return None
+        sections.append((heading.group(1).strip().casefold(), chunk))
+    if sections[0][0] != "conclusion":
+        return None
+    return sections
+
+
+def _sectioned_article(sections: list[tuple[str, str]]) -> tuple[str, str, str]:
+    """(answer card, article body, sources block) from the split sections.
+
+    The conclusion becomes its own card above the page furniture; the counterargument
+    section is boxed where it stands (its prominence is the point — D-report-template);
+    a trailing `## Sources` folds behind a count on screen and is duplicated into a
+    `print-only` block, because print drops closed disclosure content and a printed
+    report without its sources is not the artifact this page promises.
+    """
+    answer, rest = sections[0][1], list(sections[1:])
+    sources_html = ""
+    if rest and rest[-1][0] == "sources":
+        sources_html = rest.pop()[1]
+    middle = "\n".join(
+        f'<section class="counter">{chunk}</section>'
+        if heading == "the strongest counterargument"
+        else chunk
+        for heading, chunk in rest
+    )
+    sources_block = ""
+    if sources_html:
+        entries = sources_html.count("<li>")
+        count = f" ({entries})" if entries else ""
+        listing = _H2.sub("", sources_html, count=1).strip()
+        sources_block = (
+            f'<details class="sources-fold screen-only">'
+            f"<summary>Sources{count}</summary>{listing}</details>"
+            f'<div class="report print-only">{sources_html}</div>'
+        )
+    return answer, middle, sources_block
+
+
 def render_report(
     summary: RunSummary,
     report: str,
@@ -620,19 +683,36 @@ def render_report(
     public_base = base_path if public_base is None else public_base
     chosen = (final or {}).get("chosen_round")
     provenance = f" · shipped from round {esc(chosen)}" if chosen else ""
-    body = f"""
-{print_header}
-<section class="panel reading">
-  <p class="question screen-only">{esc(summary.question)}</p>
-  <div class="screen-only">
+    furniture = f"""<div class="screen-only">
     {_status_block(summary.status, summary.terminal_note)}
   </div>
   <div class="run-meta screen-only">
     <a class="dim" href="{public_base}/runs/{esc(summary.run_id)}">back to the run</a>
     <span class="dim mono">{esc(summary.run_id)}{provenance}</span>
   </div>
-  <div class="share screen-only">{_copy_control(copy_markdown or report)}{_share_links(summary.run_id, public_base)}</div>
-  <article class="report">{to_html(report)}</article>
+  <div class="share screen-only">{_copy_control(copy_markdown or report)}{_share_links(summary.run_id, public_base)}</div>"""
+    report_html = to_html(report)
+    sections = _split_sections(report_html)
+    if sections is None:
+        # Fail-open path: a report that does not follow the D-report-template frame gets
+        # the page exactly as it was before the answer card existed.
+        article = f"""{furniture}
+  <article class="report">{report_html}</article>"""
+    else:
+        # The conclusion-first frame, rendered conclusion-first: on a phone the old order
+        # spent ~1.5 screens of page furniture before the report's first sentence. The
+        # answer card goes above the status/share chrome, which the reader needs *after*
+        # deciding the answer is worth interrogating.
+        answer, middle, sources_block = _sectioned_article(sections)
+        middle_article = f'\n  <article class="report">{middle}</article>' if middle else ""
+        article = f"""<article class="report answer-card">{answer}</article>
+  {furniture}{middle_article}
+  {sources_block}"""
+    body = f"""
+{print_header}
+<section class="panel reading">
+  <p class="question screen-only">{esc(summary.question)}</p>
+  {article}
 </section>
 {record}"""
     return render_layout(
@@ -1375,6 +1455,29 @@ table.runs { width: 100%; border-collapse: collapse; }
 .report hr { border: 0; border-top: 1px solid var(--line); margin: 1.8rem 0; }
 /* The Sources section is a reference list, not prose — tighten it and let long URLs wrap. */
 .report h2 + ol, .report h2 + ul { font-size: .9rem; }
+/* ------------------------------------------------- the answer card (D-answer-card)
+   Rendered only when the report opens with a `## Conclusion` h2 (the D-report-template
+   frame); everything else falls back to the plain article these rules never touch. */
+.report.answer-card { border-left: 3px solid var(--accent); margin-bottom: 1rem; }
+.report.answer-card > h2:first-child { margin-top: 0; }
+/* The counterargument is boxed where it stands: its prominence is the point, and it must
+   never travel separately from its answer — so a box, not a fold. */
+.report .counter {
+  border: 1px solid var(--line); border-left: 3px solid var(--warn);
+  border-radius: 6px; padding: .2rem 1rem; margin: 0 0 1rem;
+}
+.report .counter > h2:first-child { margin-top: .8rem; }
+/* Sources fold behind their count on screen. Print never sees this element (`screen-only`);
+   a `print-only` duplicate carries the full list onto paper, because a closed <details>
+   prints as nothing and a report without its sources is not this page's artifact. */
+.sources-fold {
+  background: var(--bg); border: 1px solid var(--line); border-radius: 8px;
+  padding: .2rem 1.2rem; margin-top: 1rem; overflow-wrap: anywhere; line-height: 1.7;
+}
+.sources-fold > summary { cursor: pointer; color: var(--dim); padding: .6rem 0; }
+.sources-fold > summary:hover { color: var(--ink); }
+.sources-fold ol, .sources-fold ul { font-size: .9rem; margin: .4rem 0 1rem; }
+.sources-fold a { color: var(--accent); }
 .fold > summary {
   cursor: pointer; color: var(--dim); font-size: .9rem; padding: .4rem 0; list-style-position: outside;
 }
@@ -1439,6 +1542,8 @@ main {
     margin-left: calc(-1 * var(--pad-x)); margin-right: calc(-1 * var(--pad-x));
     border-left: 0; border-right: 0; border-radius: 0; padding: 1rem var(--pad-x);
   }
+  /* Full-bleed zeroes the side borders; the answer card's accent is load-bearing. */
+  .panel > .report.answer-card { border-left: 3px solid var(--accent); }
   .report h1 { font-size: 1.3rem; }
   .report h2 { font-size: 1.1rem; }
   /* iOS Safari zooms the page whenever a focused control is under 16px, and these inherit
@@ -1451,7 +1556,9 @@ main {
   }
   /* In a standalone window there is no browser back button, so these two links are the
      only way out of a run or a report. They have to be real targets. */
-  .run-meta a, .fold > summary { display: inline-flex; align-items: center; min-height: 2.75rem; }
+  .run-meta a, .fold > summary, .sources-fold > summary {
+    display: inline-flex; align-items: center; min-height: 2.75rem;
+  }
   /* The runs table has five columns and cannot fit a phone, so each row becomes a card:
      the question on its own full-width line, then the remaining fields labelled from the
      `data-label` attributes that `_run_row` mirrors off the header cells. */

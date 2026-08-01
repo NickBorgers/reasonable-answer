@@ -2327,8 +2327,267 @@ dependable one).
 critic category is unchanged and should simply fire less: its target section is now structural.
 Rendering the frame as a layered mobile reading experience is a separate decision.
 
+## D-answer-card — the report page leads with the conclusion, and fails open to the page it replaced
 
-## D-ci-model-pinning — every CI role names the model it runs, and the cheap surfaces move to Codex
+**The problem.** The report page rendered the body as one blob below the page's own furniture: on a
+375px viewport a reader got the question, the status badge and its meaning sentence, the back-link,
+the run id, and a four-control share row — roughly a screen and a half — before the report's first
+sentence. D-report-template makes every report open with a `## Conclusion` section; a page that
+buries that section under chrome squanders exactly what the frame exists to deliver, and the narrow
+viewport measured above is where that burial costs the most.
+
+**Decision.** When the rendered body opens with a `## Conclusion` h2, `render_report` splits it at
+its `<h2>` boundaries and reassembles the page conclusion-first: the conclusion as a distinct card
+*above* the status/share furniture, the counterargument section boxed where it stands, the trailing
+`## Sources` folded behind its entry count. Server-side string transform in `web/render.py`, CSS
+only, no new JS, no CSP change.
+
+**Fail open, because the structure is model-written.** The frame is a prompt, not a validator
+(D-report-template), so the splitter trusts nothing: a body with preamble before the first heading, a
+first heading that is not `Conclusion`, or a heading carrying inline markup gets the exact page the
+route served before this existed — one plain article under the furniture. A pre-frame run, a seeded
+artifact, and a writer that ignored the skeleton all degrade to the old page rather than to a broken
+one. markdown-it with `html=False` emits bare `<h2>text</h2>` blocks joined by newlines, which is
+what makes the split safe to do with a string operation; anything off that shape falls through.
+
+**The counterargument is boxed, never folded.** An objection separated from its answer reads as
+stronger than it is — the same reason D-report-template forbids raising an objection without engaging
+it. So the counterargument gets visual prominence in place (a bordered box in the article flow), and
+no disclosure control that could ever show the objection without the engagement.
+
+**Sources fold on screen and duplicate for print.** The fold is the one collapse this page makes: a
+reference list of long URLs is the least-read, most space-hungry section on a phone. A closed
+`<details>` prints as nothing, and the print stylesheet exists precisely because a report that
+reaches paper must keep its verdict and its evidence — so the fold is `screen-only` and a
+`print-only` duplicate carries the full list onto paper — a CSS-only mechanism with no `beforeprint`
+JS, consistent with this decision's no-new-JS, no-CSP-change constraint. `export.html` is untouched:
+the transform lives in `web/render.py`, downstream of the shared markdown renderer, so the no-script
+export keeps its single-article shape.
+
+**Deliberately not done.** No sticky section-jump bar, no collapsed topical sections, no citation
+drill-in yet — each builds on this sectionizer and each is its own decision; collapse-by-default in
+particular is deferred to that separate decision rather than adopted here, precisely because folding
+a section away from its answer is the kind of tradeoff this decision is careful about. And no
+restructuring of the run page: it shows the pipeline, not the report.
+
+
+## D-scoped-revision — a revision edits the paragraphs it was asked about, and stagnation buys one rewrite
+
+**The problem, measured.** Six consecutive production runs finished with **zero `accepted` and zero
+`converged_unconfirmed`**: four hit `hard_cap` with major issues (`exhausted_unresolved`), two reached
+`needs_human_review`. The cause was not that fixes failed to land — `defects_applied` tracked the
+material count round for round, so the writer was applying essentially every fix task it was given.
+Across all 36 regenerations in those runs:
+
+```
+mean material before a regeneration: 5.39      mean after: 4.81
+```
+
+The count did not fall. Each revision retired about as many defects as it created. Broken out by
+critique pass, the process is stationary from the second pass onward, and the completeness lens gets
+*worse* the longer a run goes:
+
+| pass | logic | evidence | completeness |
+|---|---|---|---|
+| 0 | 1.7 | 5.3 | 1.0 |
+| 2 | 0.8 | 1.0 | 0.8 |
+| 4 | 0.8 | 3.2 | 2.4 |
+| 7 | 1.6 | 2.0 | 3.2 |
+
+(mean issues per critic call, all six runs pooled)
+
+The consequence is that acceptance was not merely rare, it was arithmetically out of reach. Observed
+per-call clean rates were logic 0.40, evidence 0.20, completeness 0.14, so a single pass clears all
+three lenses about 1.1% of the time — and `accepted` needs that to happen twice, once to reach
+`material == 0` and again for the rule-8 confirmation top-up. `material` hit 0 twice in 45 triage
+passes. Rule 8 fired once in six runs; the fresh critic returned 9 material issues and sent
+`run-cabddb9a612b` back for seven more rounds.
+
+These figures are drawn from the `audit.json` trail of that six-run production set — a private
+operator's own run history, not part of this public repository — so, as in D-question-refinement, the
+run IDs stand only as opaque handles and the measurements cannot be re-fetched from the diff (QP9).
+They are the *motivation* for this decision, not its warrant. What the decision rests on and pins
+publicly is the **mechanism**: the arithmetic below is checkable against the code, and the tests this
+PR adds — `tests/test_revision_scope.py`, the rule-13 branches in `tests/test_controller.py`, and the
+valve behaviour in `tests/test_graph.py` — make the changed behaviour checkable from the diff itself,
+the same way D-source-verification pins its empirical claim rather than resting it on private run
+audit material.
+
+**The mechanism.** `prompts.writer_revision` ended *"Return the complete revised report in Markdown —
+the whole document, not a diff,"* and `roles.next_writer` hands each revision to a **different** model.
+So every round, a model that did not write the text regenerated ~1,800 words in order to repair ~5
+paragraphs, and every passage the critics had just cleared was re-rendered by a model with different
+priors. Fixing five paragraphs by re-rolling forty is a losing trade, and the numbers above are what
+losing it looks like.
+
+**Decision, part one: scope the edit.** `revision.mode: patch` (the default) tells the writer to change
+only the paragraphs a fix task names in its locus, plus whatever a task's instruction explicitly
+requires elsewhere, and to return every other paragraph **byte-identical**. The output shape is
+unchanged — still the whole document, because the artifact hash is taken over the whole document and
+every downstream reader wants a complete report. What changes is the licence to re-render text nobody
+complained about. `revision.mode: rewrite` reproduces the previous prompt byte for byte, so the two are
+A/B-comparable from configuration rather than from a checkout.
+
+**Why this is not an echo chamber.** The objection to patching is that a blind spot planted early is
+never challenged again. [isolation.md](./isolation.md) already answers it, and the answer is that
+writer rotation was never carrying that load: principle #7 "is fundamentally about *not sharing a
+context*, not about model identity," and model diversity is named there as "a second, independent
+layer … each dimension blessed by ≥2 distinct non-author models." Decorrelation is assigned to the
+**critic roster**. Writer rotation appears in none of the seven principles; its stated justification in
+`config/roster.yaml` is availability (D-provider-retry). Three properties therefore hold unchanged, and
+they are what make patching safe:
+
+1. **Rotation stays.** `roles.next_writer` and `roles.writer_pool` are untouched — a different model
+   patches every round, and no model ever patches its own last draft.
+2. **Critics still read the whole document.** Nothing in the critique path changes. Untouched prose is
+   not unreviewed prose: a rotating critic pool re-reads every paragraph on every tick.
+3. **Clean records still reset on every generation.** RC-002 is absolute. There are no locus-scoped or
+   carried-over attestations — that is precisely where a real echo chamber would form. The convergence
+   gain comes from a lower defect birth rate, not from reusing stale clearance.
+
+**Decision, part two: stagnation buys one rewrite.** Scoping the edit means a run can only ever
+accrete, and an accreted document — eight rounds of "add a sentence acknowledging X" bolted onto one
+line of drafting — is exactly what the completeness lens punishes. Controller rule 13 gains a generate
+branch: when the signal has been stagnant for `K` ticks and `rewrites_used < budgets.rewrite_cap`
+(default 1), the run spends one **whole-document rewrite by a fresh writer** and lets the next tick
+judge it on its own signal; otherwise rule 13 is the terminal it always was. This also gives a dead
+rule a job — rule 13 requires the per-category `{blocking, major}` multiset to be byte-identical for
+`K` ticks, and real trajectories jitter (`7,6,2,3,5,6,8,8`), so it never fired in any of the six runs.
+`stagnation_count` is reset when the rewrite is granted; without that the next tick immediately
+re-fires rule 13 and spends the whole budget in consecutive ticks.
+
+**Termination survives, unchanged in kind.** `rewrite_cap` is finite and strictly decrements; the
+rewrite is a generation, so it advances `round` toward `hard_cap` like rules 4, 9 and 14; and rule 13
+is unreachable at or beyond the cap, because the cap-gated rules 5 and 6 precede it in the table
+whenever `material > 0`. No new cap gate is required. The rule number stays 13 — the table is still
+1–14, and rule 13 already branched internally on `blocking > 0`.
+
+**Measurement, not assertion.** `report.revision_scope` diffs the previous and revised drafts by
+paragraph *content* (never by locus number — inserting a paragraph renumbers every locus after it, and
+fix tasks routinely ask for one) and records `changed_paragraphs`, `in_scope`, `out_of_scope` and
+`defect_loci_untouched` on the `generate` audit event. It is **warn-only**, matching D-refine-audition's
+warn-only doctrine: rejecting a draft would burn one of three `writer_attempts`, and a model that
+reflows whitespace is not a reason to lose a run. An enforcing tier is worth building only if these
+numbers say the prompt does not hold. The check is silent for the three generations that legitimately
+touch everything — the first draft, a rule-9 polish pass, and a rule-13 rewrite — so an absent field
+means "not applicable" rather than "in scope".
+
+**Known residual: framing lock-in.** One model's voice and framing now persist across a patch chain
+instead of being re-rolled every round, and `loaded_language` floors at `minor` under D-social-bias
+precisely so a noisy critic cannot force revisions on judgment-laden framing. So a framing bias that
+survives its first review is not caught as material and will ride the chain. The rule-13 rewrite is the
+mitigation, and it is a partial one: it fires on a stalled signal, not on framing. Recorded here rather
+than papered over.
+
+**Deliberately not done.** No change to what critics receive, to author exclusion, or to the blind
+orchestrator. No severity-floor changes — `omitted_counterargument` and `unexamined_presupposition` at
+`major` were 11 of the 21 outstanding defects across these runs and are worth revisiting separately.
+No roster change: `mistral-large-2512` scored 4.25 material issues per call on the completeness lens
+across 20 calls and was **never once clean**, against `audition.thresholds.max_control_material_rate`
+of 1.0 — that is the other half of this problem and belongs to `ra audition`, not here. `hard_cap` is
+not raised; the pass table above shows no improvement after pass 2, so more rounds are pure cost.
+
+
+## D-control-soundness — a control fixture must be sound under *every* lens, not one
+
+Observed on a live `ra audition` of the shipped roster (9 critic slots, 10 fixtures, 3
+repetitions). Every audited critic on the `evidence` lens graded `unfit`, and two of three on
+`completeness` did. Sensitivity was not the problem — `obvious_sensitivity` was ≈1.0 across the
+board. Every `unfit` verdict came from `control_material_rate` alone: 4.17, 3.00 and 2.67
+material issues invented per sound control on `evidence`, 2.83 and 1.67 on `completeness`,
+against a `max_control_material_rate` of 1.0.
+
+The critics were right and the corpus was wrong. Both controls carried real, material,
+lens-relevant defects:
+
+- `control-sound-01` asserted that hospital construction "follows a trend that predates 1918,
+  driven by the shift of surgery and childbirth into institutional settings" with no citation
+  anywhere in the report, and attributed a Rockefeller funding claim and a "studies exploiting
+  variation in local pandemic severity" claim to nothing.
+- `control-sound-02` attributed "the literature attributes much of the gap to construction
+  experience" and "studies that model whole systems … generally find" to no source, and cited a
+  contested cost question to two sources.
+- `control-sound-01` also attributed a specific statistic — US cities with permanently staffed
+  health departments "roughly doubled between 1917 and 1923" — to Tomes (1998), a claim the
+  fixture author could not stand behind on review. That is `misrepresented_source` in a fixture
+  declared sound.
+
+`uncited_claim` and `one_sided_sourcing` both floor to `major`, so each of those is material by
+`_is_material`. An evidence critic doing its job correctly scored 2-4 per control against a
+threshold of 1.0. The lens was **structurally unpassable**, and the ordering of the observed
+noise rates — evidence worst, completeness next, logic barely affected — tracks exactly how many
+genuine targets the controls handed each lens. Logic was cleanest because the controls were in
+fact written to be logically sound: the one lens whose contract they honoured.
+
+**Root cause.** `FixtureSet.for_lens` hands every control to every lens, deliberately and
+correctly — noise is a property of the model, not of a planted category, and a control scoped to
+one lens leaves the other two unmeasured on the direction D-critic-audition exists to measure.
+But nothing held the corpus to the other half of that bargain. Each control declared a single
+`lens:`, and the soundness review — such as it was — went only as far as that declaration.
+`test_every_lens_sees_all_controls` asserted that every lens *sees* every control; no test, and
+no prose, asserted that a control is *clean* for the lens seeing it.
+
+**Decision.** A control is sound under all three lenses or it is not a control. Both shipped
+controls are rewritten to that contract: every empirical claim carries an in-text citation that
+resolves to a `## Sources` entry, the question's ambiguous term is named and decomposed rather
+than assumed, the case against the report's own answer gets its own section, and a contested
+question is sourced across genuinely different kinds of publisher and across both sides of the
+live dispute. Attributions the author cannot stand behind are removed rather than softened.
+
+**A control now declares neither `lens` nor `tier`, and the loader refuses one that does.**
+Both fields were read only on the planted path — `for_lens` ignores them, `_check_lens_ownership`
+has no defects to check, `obvious_total` counts planted defects only — so `lens: evidence` on a
+control asserted a scope nothing enforced while reading, to anyone auditing the corpus, as
+though soundness under that lens had been established. Deleting the field is the honest form:
+there is no lens a control belongs to. `Fixture.lens` becomes `Lens | None`, and a *planted*
+fixture with no lens is now rejected too, since nothing would grade it.
+
+**The soundness itself is not mechanically checkable, and the tests say so rather than
+pretending otherwise.** A claim carrying no citation marker at all cannot be distinguished by
+regex from prose that needs none — a definitional sentence legitimately cites nothing, and a
+blanket "every paragraph cites something" rule would push fixture authors to bolt fake citations
+onto definitions. What *is* checked is the resolvable part: in-text citations resolve to
+`## Sources` entries, entries are all cited, and a control carries at least
+`MIN_CONTROL_SOURCES` distinct sources so it cannot earn `one_sided_sourcing` honestly. The
+omission and presupposition classes that drive the `completeness` rate have no mechanical form
+at all; they rest on the soundness contract recorded in each control's manifest and on review.
+A gate that covers part of a property should say which part.
+
+**Rejected: raising `max_control_material_rate`.** It is the correct threshold. A critic
+inventing more than one material issue per sound report manufactures work every round, drains
+`critique_attempts`, drives `stagnation_count` to its limit and terminates a fine report
+`exhausted_unresolved` (rule 13). Moving the line to accommodate a broken corpus would convert a
+measurement of the corpus into a permanently weakened measurement of the models.
+
+**Rejected: per-lens `sound_for:` scoping on controls.** It would have made the existing corpus
+pass by narrowing what each control claims. With two controls and three lenses, at least one
+lens would then have had no control at all — its noise direction unmeasured, which is the exact
+failure D-critic-audition was written to close. Making the fixture honest is the fix; making the
+measurement smaller is not.
+
+**Cache and blast radius.** Editing the artifacts changes `corpus_hash`, so every cached verdict
+stops matching in `cached_judgements` and drops to *not audited* — never to `unfit`. The
+`audition.enforce` gate blocks only on a positive `unfit`, so this is safe to land even in a
+deployment running with enforcement on: it degrades to "re-measure", which is the correct
+reading, because a verdict from the old corpus is a claim about a measurement that no longer
+exists.
+
+**This is the half D-scoped-revision deferred.** That decision measured `mistral-large-2512` at
+4.25 material issues per call on the completeness lens across 20 calls, never once clean, and
+declined to re-roster on it: "that is the other half of this problem and belongs to `ra audition`,
+not here." It belongs here, and the finding reads differently now. A completeness critic scoring
+against a control that genuinely omits counterarguments is not necessarily noisy — some fraction
+of that 4.25 was the corpus. How much, only a re-audition against the rewritten controls can say,
+which is the point of fixing the corpus before drawing a roster conclusion from it.
+
+**What this decision does not establish.** The rewritten controls have not been re-auditioned —
+that costs a paid proxy run, and the fix stands or falls on the defects quoted above, which are
+in the corpus and reviewable without spending a call. The expectation is that `evidence` and
+`completeness` verdicts improve materially. If they do not, the residue is a real over-flagging
+finding about those models and should be recorded as one.
+
+
+## D-ci-model-pinning — every CI role names the model it runs, and the runtime-chosen agents default to Codex
 
 **The problem.** Two separate ones, found together while looking for the pipeline's API cost.
 
@@ -2419,7 +2678,19 @@ exercised, and this change puts more traffic on it.
 ## Open items for a future round
 
 - Per-role CI cost telemetry, and a revisit of the D-ci-model-pinning tiers against measured
-  proxy spend rather than list pricing.
+  proxy spend. The tiers are currently a bet on task shape; nothing in this repository can yet
+  say whether they cost more or less than what they replaced.
+- Making the audition self-diagnosing about its own corpus (D-control-soundness). The bug that
+  decision fixes was invisible to every gate for exactly as long as it existed, and was only
+  caught by reading a failing result. The audition already holds the evidence: when a control
+  draws material issues from a *majority of independent critics at the same locus*, the parsimonious
+  reading is that the control has a defect, not that every model invented the same one. Reporting
+  that as "fixture suspect" instead of grading the models down would make this class self-limiting.
+  It needs a locus-clustering rule and a majority threshold, and it changes what `ra audition`
+  reports, so it is its own decision.
+- A third control fixture. Two controls x 3 repetitions is 6 runs per slot, which is a thin base
+  for a rate compared against a threshold of 1.0 — the audition that surfaced D-control-soundness
+  exited 0 on one pass and 1 on the next. Cost is roughly +10% on a full audition.
 - Whether `misrepresented_source` can be meaningfully checked without fetching the source
   (v1 only checks on-its-face support); a later evidence layer (RA-011) would strengthen this.
 - Calibration of `K` (plateau window), the hard cap, and defect-score weights against real runs.

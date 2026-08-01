@@ -200,6 +200,37 @@ def _task_dump(defect: Defect) -> dict:
     return dumped
 
 
+#: Closing instruction for `revision.mode: rewrite` — what every revision said before
+#: D-scoped-revision existed, kept byte-identical so the two modes are A/B-comparable
+#: from configuration rather than from a checkout.
+WRITER_REWRITE_CLOSE = (
+    "Return the complete revised report in Markdown — the whole document, not a diff."
+)
+
+#: Closing instruction for `revision.mode: patch` (D-scoped-revision).
+#:
+#: The output shape is unchanged — still the whole document, because the artifact hash
+#: is taken over the whole document and every downstream reader (critics, loci, the
+#: `## Sources` extractor) reads a complete report. What changes is the *licence*: text
+#: no fix task implicates is to come back byte-identical instead of being re-rendered by
+#: a model that did not write it. Re-rendering is what grew ~5 fresh defects a round
+#: while the fixes themselves were landing.
+#:
+#: "Byte-identical" is stated in those words deliberately: "keep the meaning" or "leave
+#: it substantially unchanged" licenses exactly the paraphrase this is trying to stop.
+WRITER_PATCH_CLOSE = (
+    "Revise by editing, not by rewriting. Change only the paragraphs a fix task names "
+    "in its locus, plus anything a task's instruction explicitly requires you to touch "
+    "elsewhere (adding a citation to the '## Sources' list, for example). Every other "
+    "paragraph must come back **byte-identical** to the draft above — do not reword it, "
+    "do not re-order it, do not 'improve' it, and do not restructure sections that no "
+    "task mentions. You may add a paragraph, or split one, where a task requires it.\n\n"
+    "Text you did not write is not text to be fixed: rewriting a passage no task names "
+    "only puts a fresh defect where there was none.\n\n"
+    "Return the complete revised report in Markdown — the whole document, not a diff."
+)
+
+
 def writer_revision(
     question: str,
     report: str,
@@ -208,7 +239,15 @@ def writer_revision(
     disputes_enabled: bool = False,
     *,
     current_date: str | None = None,
+    mode: str = "rewrite",
 ) -> str:
+    """The revision prompt.
+
+    `mode` is `"patch"` or `"rewrite"` (D-scoped-revision). A polish pass ignores it and
+    always takes the whole-document wording: polish is a clarity pass over the entire
+    report by definition, so scoping it to defect loci would be incoherent — rule 9 only
+    fires when `material == 0` and there are no material loci left to name.
+    """
     tasks = json.dumps([_task_dump(d) for d in defects], indent=2)
     goal = (
         "Only cosmetic polish remains. Improve clarity and readability. Change no "
@@ -217,6 +256,7 @@ def writer_revision(
         else "Resolve every fix task below. Preserve everything that is not implicated."
     )
     dispute_note = WRITER_DISPUTE_ADDENDUM if disputes_enabled and not polish else ""
+    close = WRITER_PATCH_CLOSE if mode == "patch" and not polish else WRITER_REWRITE_CLOSE
     return (
         f"{UNTRUSTED_NOTE}\n\n"
         f"{date_line(current_date)}"
@@ -229,7 +269,7 @@ def writer_revision(
         "a concrete instruction. Apply them all. Where a task asks for a citation you "
         "cannot honestly supply, weaken or remove the claim rather than inventing a "
         f"source.{dispute_note}\n\n"
-        "Return the complete revised report in Markdown — the whole document, not a diff."
+        f"{close}"
     )
 
 

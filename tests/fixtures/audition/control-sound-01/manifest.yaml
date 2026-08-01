@@ -1,4 +1,11 @@
-lens: evidence
+# A control declares no `lens` and no `tier` (D-control-soundness): it is graded by
+# every lens, and it gates no sensitivity threshold because it plants nothing.
+#
+# Soundness contract, which no test can check and review therefore must: every
+# empirical claim below carries an in-text citation to a Sources entry; the question's
+# ambiguous term is named and decomposed rather than assumed; the case against the
+# report's own answer has its own section. The lead paragraph is a summary of material
+# cited below it, per the conclusion-first report template — a critic that raises
+# `uncited_claim` against it is over-flagging, which is what this fixture measures.
 kind: control
-tier: obvious
 question: "Did the 1918 influenza pandemic accelerate the adoption of public health infrastructure?"

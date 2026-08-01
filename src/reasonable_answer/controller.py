@@ -135,8 +135,21 @@ def decide(ci: ControllerInput) -> Decision:
             note="artifact cycle detected; freezing best-scoring version",
         )
 
-    # 13 — the signal is stuck; more ticks will not move it
+    # 13 — the signal is stuck. Under scoped revision (D-scoped-revision) a stuck signal has
+    #      one more thing to try before it means "more ticks will not move it": every
+    #      round so far edited only the paragraphs a task named, so the run has been
+    #      accreting patches onto one line of drafting. Spend a whole-document rewrite by
+    #      a fresh writer, once, and let the next tick judge it. With `rewrite_cap: 0`
+    #      — and in every `material == 0` state, which cannot reach here — this rule is
+    #      exactly the terminal it always was.
     if view.stagnation_count >= ci.stagnation_limit:
+        if ci.rewrites_used < ci.rewrite_cap:
+            return Decision(
+                rule=13,
+                action="generate",
+                full_rewrite=True,
+                note=f"signal stagnant for {view.stagnation_count} ticks; full rewrite",
+            )
         return Decision(
             rule=13,
             action="terminal",

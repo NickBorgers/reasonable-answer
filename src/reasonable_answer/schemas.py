@@ -257,6 +257,13 @@ class ControllerInput(BaseModel):
     polish_recommended: bool
     stagnation_limit: int
     cycle_period: int
+    #: Rule 13's escape valve (D-scoped-revision). Deliberately NOT on `OrchestratorView`:
+    #: `polish_used`/`polish_cap` are there because rule 9 is the blind LLM's one
+    #: authority and it needs to see its own budget. Rule 13 is fully deterministic, so
+    #: putting these in the view would widen the RB-008 noninterference surface to buy
+    #: nothing.
+    rewrites_used: int = 0
+    rewrite_cap: int = 0
 
 
 Terminal = Literal[
@@ -280,6 +287,10 @@ class Decision(BaseModel):
     terminal_status: Terminal | None = None
     recritique_lenses: list[Lens] = Field(default_factory=list)
     polish: bool = False
+    #: Rule 13's stalled-patch-chain rewrite (D-scoped-revision): this generation ignores
+    #: `revision.mode` and asks for the whole document. Mutually exclusive with `polish`
+    #: — rule 9 only fires when `material == 0` and rule 13 only when `material > 0`.
+    full_rewrite: bool = False
     note: str = ""
 
 

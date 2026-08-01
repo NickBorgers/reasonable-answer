@@ -160,6 +160,32 @@ know what to fix. It is preserved by passing a **structured defect list** — ob
 "the artifact being improved + an objective task," which is exactly what #1 permits; it also
 keeps the generator's context small, preserving #6.
 
+### Scoping the edit is not narrowing the review (D-scoped-revision)
+
+Under `revision.mode: patch` a revision changes only the paragraphs a fix task named and returns the
+rest byte-identical, instead of re-rendering the whole document every round. **No principle above
+moves.** The distinction that matters is between *who edits* and *who reviews*, and only the first is
+scoped:
+
+- Every critic still receives the **whole** rendered artifact, in a fresh blind context, every tick.
+  Untouched prose is not unreviewed prose. #1 through #6 are untouched, and #7 — `critic(Rn) ≠
+  writer(Rn)` — is untouched because nothing about who critiques changed.
+- **Writer rotation is deliberately kept.** A different model patches every round and no model ever
+  patches its own last draft, so no single model's prose accumulates unchallenged. Note that rotation
+  is not one of the seven principles and never was: as stated above, #7 "is fundamentally about *not
+  sharing a context*, not about model identity," and the decorrelation layer is the **critic roster**.
+  Rotation's own justification is availability (D-provider-retry). Keeping it is cheap insurance, not
+  a load-bearing property being preserved.
+- **Clean records still reset on every generation.** Any patched draft is a new `artifact_hash` and
+  therefore a fresh clean-record set (RC-002). A locus-scoped attestation that survived a hash change
+  *would* be an echo chamber — a lens cleared once on text nobody re-read — and is deliberately not
+  built.
+
+The residual this does introduce is framing: one model's voice now persists across a patch chain, and
+`loaded_language` floors at `minor` (D-social-bias) so a framing bias that survives its first review
+is not caught as material. Controller rule 13's bounded whole-document rewrite is the partial
+mitigation; D-scoped-revision records the gap.
+
 ## The depersonalization step (principle 1, made concrete)
 
 ```mermaid

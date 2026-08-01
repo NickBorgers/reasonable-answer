@@ -140,6 +140,50 @@ def test_rule_13_stagnation(totals, expected):
     assert (d.rule, d.terminal_status) == (13, expected)
 
 
+def test_rule_13_spends_a_rewrite_before_giving_up():
+    """D-scoped-revision: a stalled patch chain has one thing left to try."""
+    ci = make_ci(
+        make_view(totals={"major": 2}, stagnation_count=3),
+        stagnation_limit=3,
+        rewrites_used=0,
+        rewrite_cap=1,
+    )
+    d = decide(ci)
+    assert (d.rule, d.action, d.full_rewrite) == (13, "generate", True)
+    # It is a generation, not a polish: rule 9 only fires when material == 0.
+    assert d.polish is False
+
+
+def test_rule_13_terminates_once_the_rewrite_budget_is_spent():
+    ci = make_ci(
+        make_view(totals={"major": 2}, stagnation_count=3),
+        stagnation_limit=3,
+        rewrites_used=1,
+        rewrite_cap=1,
+    )
+    d = decide(ci)
+    assert (d.rule, d.terminal_status, d.full_rewrite) == (13, "exhausted_unresolved", False)
+
+
+def test_rule_13_with_no_rewrite_budget_is_the_rule_it_always_was():
+    """`rewrite_cap: 0` must be byte-identical to the pre-D-scoped-revision behavior."""
+    view = make_view(totals={"blocking": 1}, stagnation_count=3)
+    without = decide(make_ci(view, stagnation_limit=3))
+    explicit = decide(make_ci(view, stagnation_limit=3, rewrites_used=0, rewrite_cap=0))
+    assert without == explicit
+    assert (without.rule, without.terminal_status) == (13, "needs_human_review")
+
+
+def test_rule_12_still_precedes_the_rewrite_valve():
+    """A cycle is not something another draft fixes — rule 12 wins even with budget."""
+    ci = make_ci(
+        make_view(totals={"major": 1}, stagnation_count=3, cycle_detected=True),
+        stagnation_limit=3,
+        rewrite_cap=1,
+    )
+    assert decide(ci).rule == 12
+
+
 def test_rule_14_ordinary_continue():
     d = decide(make_ci(make_view(totals={"major": 2})))
     assert (d.rule, d.action) == (14, "generate")
@@ -149,19 +193,25 @@ def test_no_rule_generates_at_or_beyond_the_cap():
     """RI-001 — the hard cap is genuinely hard. Sweep the whole input space."""
     for blocking, major, minor in itertools.product((0, 1), (0, 1), (0, 3)):
         for polish, cleared_n, eligible in itertools.product((True, False), (0, 1, 2), (1, 3)):
-            view = make_view(
-                round=8,
-                hard_cap=8,
-                min_ticks=2,
-                totals={"blocking": blocking, "major": major, "minor": minor},
-            )
-            ci = make_ci(
-                view,
-                lens_status=cleared({lens.value: cleared_n for lens in LENSES}, eligible=eligible,
-                                    unused=eligible - cleared_n if eligible > cleared_n else 0),
-                polish_recommended=polish,
-            )
-            assert decide(ci).action != "generate", (blocking, major, minor, polish, cleared_n)
+            # Rule 13's rewrite branch generates, so it is swept here too: it carries no
+            # `round < hard_cap` gate of its own and relies on cap-gated rules 5/6
+            # preceding it (D-scoped-revision).
+            for stag, cap in itertools.product((0, 3), (0, 1)):
+                view = make_view(
+                    round=8,
+                    hard_cap=8,
+                    min_ticks=2,
+                    totals={"blocking": blocking, "major": major, "minor": minor},
+                    stagnation_count=stag,
+                )
+                ci = make_ci(
+                    view,
+                    lens_status=cleared({lens.value: cleared_n for lens in LENSES}, eligible=eligible,
+                                        unused=eligible - cleared_n if eligible > cleared_n else 0),
+                    polish_recommended=polish,
+                    rewrite_cap=cap,
+                )
+                assert decide(ci).action != "generate", (blocking, major, minor, polish, stag, cap)
 
 
 def test_decision_is_total():
@@ -183,6 +233,9 @@ def test_decision_is_total():
                     fatal=fatal,
                     critique_attempts_remaining=budget,
                     lens_status=cleared({lens.value: cleared_n for lens in LENSES}, eligible=eligible),
+                    # The rewrite valve must not open a hole in totality: rule 13 still
+                    # matches exactly one branch for every state that reaches it.
+                    rewrite_cap=1 if stag else 0,
                 )
                 d = decide(ci)
                 assert 1 <= d.rule <= 14

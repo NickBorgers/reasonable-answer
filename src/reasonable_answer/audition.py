@@ -24,9 +24,9 @@ category matching plus a structural-locus window, and nothing else.
 
 **Both directions gate.** A critic that flags everything scores perfect sensitivity
 and is worse than useless: it never lets a run converge, it drains the critique
-budget, it drives `stagnation_count` to the limit, and rule 13 terminates
-`exhausted_unresolved` on a report that was fine. Silence and noise are two ways to
-fail the same job.
+budget, it drives `stagnation_count` to the limit, and rule 13 — after spending its
+bounded rewrite (D-scoped-revision) — terminates `exhausted_unresolved` on a report that
+was fine. Silence and noise are two ways to fail the same job.
 """
 
 from __future__ import annotations
@@ -106,7 +106,10 @@ class Fixture(BaseModel):
     model_config = ConfigDict(extra="forbid")
 
     id: str
-    lens: Lens
+    #: The lens responsible for this fixture's planted defects. `None` on a control,
+    #: which has none: a control is graded by *every* lens (see `for_lens`), so naming
+    #: one would assert a scope nothing honors. D-control-soundness.
+    lens: Lens | None = None
     tier: Tier = Tier.MODERATE
     question: str
     artifact: str
@@ -160,6 +163,11 @@ class FixtureSet:
         Controls belong to every lens: "does this model invent defects" is a question
         about the model, not about the planted category, and a control graded on only
         one lens would leave the other two unmeasured on noise.
+
+        The load-time consequence is D-control-soundness: a control must be sound under
+        every lens, not merely under the one whose noise it was written to measure. A
+        control carrying a real uncited claim scores every competent evidence critic as
+        an inventor of defects.
         """
         return tuple(f for f in self.fixtures if f.lens is lens or f.is_control)
 
@@ -201,6 +209,7 @@ def load_fixtures(directory: Path | None = None) -> FixtureSet:
         kind = manifest.pop("kind", None)
         if kind == "control" and manifest.get("defects"):
             raise FixtureError(f"fixture '{fixture_dir.name}' is kind: control but has defects")
+        _check_control_manifest(fixture_dir.name, manifest, is_control=not manifest.get("defects"))
         if "slots" in manifest and manifest["slots"]:
             manifest["slots"] = {k: tuple(v) for k, v in manifest["slots"].items()}
 
@@ -223,6 +232,31 @@ def load_fixtures(directory: Path | None = None) -> FixtureSet:
     return FixtureSet(fixtures=resolved, corpus_hash=corpus_hash)
 
 
+def _check_control_manifest(name: str, manifest: dict, is_control: bool) -> None:
+    """A control declares neither `lens` nor `tier`; a planted fixture must declare a lens.
+
+    Both fields are read only on the planted path — `for_lens` hands controls to every
+    lens whatever they claim, `_check_lens_ownership` has no defects to check, and
+    `obvious_total` counts planted defects only. A control declaring `lens: evidence`
+    therefore asserts a scope nothing enforces, and reads as though the corpus had been
+    checked for soundness under that one lens when no such check exists in either
+    direction (D-control-soundness). Forbidding the field is the mechanical half of that
+    decision; the soundness itself is not mechanically checkable and rests on review.
+    """
+    if is_control:
+        declared = [f for f in ("lens", "tier") if f in manifest]
+        if declared:
+            raise FixtureError(
+                f"fixture '{name}' is a control but declares {', '.join(declared)} — a "
+                f"control is graded by every lens and gates no sensitivity threshold, so "
+                f"the field would assert a scope nothing honors (D-control-soundness)"
+            )
+    elif "lens" not in manifest:
+        raise FixtureError(
+            f"fixture '{name}' plants defects but declares no lens — nothing would grade it"
+        )
+
+
 def _check_lens_ownership(fixture: Fixture) -> None:
     """A planted category must belong to the lens declared responsible for it.
 
@@ -230,6 +264,8 @@ def _check_lens_ownership(fixture: Fixture) -> None:
     fixture, then grade every logic critic as blind — `triage.validate_issue` rejects
     an out-of-scope category, so no correct critic could ever score.
     """
+    if fixture.lens is None:  # control: no defects to own, checked at load
+        return
     owned = LENS_CATEGORIES[fixture.lens]
     for defect in fixture.defects:
         if defect.category not in owned:

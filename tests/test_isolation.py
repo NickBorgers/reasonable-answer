@@ -129,9 +129,13 @@ def test_generator_prompt_carries_no_critique_prose(identities, config):
         rationale="no citation attached",
         instruction="cite a source or remove the claim",
     )
-    text = prompts.writer_revision("q?", CLEAN_REPORT, [defect], polish=False)
-    for leak in ("lens", "critic", "reviewer", "logic", "evidence", "completeness"):
-        assert leak not in text.lower(), leak
+    # Both revision modes (D-scoped-revision): scoping the *edit* must not widen what
+    # crosses the handoff. The patch close states a rule and its cost, never a verdict
+    # about the text it tells the writer to leave alone.
+    for mode in ("rewrite", "patch"):
+        text = prompts.writer_revision("q?", CLEAN_REPORT, [defect], polish=False, mode=mode)
+        for leak in ("lens", "critic", "reviewer", "logic", "evidence", "completeness"):
+            assert leak not in text.lower(), (mode, leak)
 
 
 # -------------------------------------------------------- prompt injection
