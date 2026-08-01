@@ -24,7 +24,8 @@ from reasonable_answer.config import (
     Roster,
 )
 from reasonable_answer.schemas import CritiqueOutput, LensResult, RawIssue, StructuralRef
-from reasonable_answer.taxonomy import Category, Lens, Severity
+from reasonable_answer.taxonomy import LENS_CATEGORIES, Category, Lens, Severity
+from reasonable_answer.triage import clean_records
 
 CORPUS = Path(__file__).parent / "fixtures" / "audition"
 
@@ -363,6 +364,31 @@ def test_minor_severity_issue_does_not_count_as_a_detection():
     assert found[0].same_lens is False
 
 
+@pytest.mark.parametrize("severity", [Severity.MAJOR, Severity.BLOCKING])
+def test_escalated_stylistic_issue_does_not_count_as_a_detection(severity):
+    """Escalation is legal — `validate_issue` never checks severity — and production
+    discards `stylistic` anyway. A critic that filed only a `major` nitpick on the
+    planted paragraph would have let the defect through, so the grader must not credit
+    it (D-audition-stylistic-parity)."""
+    fixture = audition.Fixture(
+        id="f",
+        lens=Lens.COMPLETENESS,
+        question="q",
+        artifact="x",
+        defects=(
+            audition.PlantedDefect(
+                category=Category.OMITTED_COUNTERARGUMENT,
+                locus=StructuralRef(section=2, paragraph=1),
+            ),
+        ),
+    )
+    found = audition.grade(
+        fixture, result(Lens.COMPLETENESS, issue(Category.STYLISTIC, 2, 1, severity))
+    )
+    assert found[0].strict is False
+    assert found[0].same_lens is False
+
+
 def test_material_count_applies_the_severity_floor():
     """A critic under-rating a blocking category still raised a material issue —
     triage would clamp it up, so the noise measure must too."""
@@ -372,6 +398,28 @@ def test_material_count_applies_the_severity_floor():
         issue(Category.STYLISTIC, 1, 1, Severity.MINOR),
     )
     assert audition.material_issue_count(noisy) == 1
+
+
+@pytest.mark.parametrize("severity", [Severity.MAJOR, Severity.BLOCKING])
+def test_escalated_stylistic_issue_on_a_control_is_not_noise(severity):
+    """The unfit gate this feeds says such a critic would make "runs stagnate rather
+    than converge". A stylistic finding cannot stagnate a run — `tally` ignores it and
+    it never withholds a clean record — so it is not noise the gate may count."""
+    noisy = result(Lens.LOGIC, issue(Category.STYLISTIC, 1, 1, severity))
+    assert audition.material_issue_count(noisy) == 0
+
+
+@pytest.mark.parametrize("lens", list(Lens))
+@pytest.mark.parametrize("severity", list(Severity))
+def test_grader_materiality_agrees_with_triage_for_every_category(lens, severity):
+    """The anti-drift test. For every (category, severity) a critic could legally
+    report, the grader counts an issue exactly when triage withholds the lens's clean
+    record for it. Both read one predicate; this pins that they keep doing so."""
+    for category in LENS_CATEGORIES[lens]:
+        one = result(lens, issue(category, 1, 1, severity))
+        graded_material = audition.material_issue_count(one) == 1
+        blocks_clearance = not clean_records([one])
+        assert graded_material is blocks_clearance, (category, severity)
 
 
 # ------------------------------------------------------------------ verdicts
