@@ -2674,6 +2674,81 @@ actually fired in production. The timeout containment bounds a hang, but the pat
 exercised, and this change puts more traffic on it.
 
 
+## D-category-coverage — every material category needs a planted fixture, and coverage is now a test
+
+**The problem.** The audition corpus covered every *lens* and was checked for exactly that
+(`test_shipped_corpus_loads_and_covers_both_directions`). Per-lens coverage is not per-category
+coverage, and the difference is load-bearing. `grade` scores the relaxed `same_lens` match and
+`judge` gates on lens-level rates, so a critic that is wholly blind to one category still clears
+every threshold on the strength of the categories its lens does cover. The lens reads as measured;
+the blind spot is invisible in the report and in the cached verdict alike.
+
+Three of the eleven non-stylistic categories had no planted fixture: `misrepresented_source`
+(evidence, floors `major`), `overstated_claim` (logic, floors `major`), and `unclear_structure`
+(completeness, floors `minor`). `misrepresented_source` is the sharpest case. The only instance
+the corpus ever contained was an *accidental* one — the statistic `control-sound-01` attributed to
+Tomes (1998), which D-control-soundness removed as a defect in a fixture declared sound — so the
+category has never been legitimately measured on any model, in either direction. It is also the
+category D-source-verification sharpens into a checkable fact once fetched pages are present, which
+makes a critic's baseline competence at it worth knowing before that switch is turned on.
+
+**Decision.** Every category whose mechanical severity floor is material — `major` or `blocking` —
+carries at least one planted fixture, and `test_every_material_category_has_a_planted_fixture`
+enforces it. Two fixtures are added to close the gap this decision found:
+
+| fixture | lens | tier | the planted defect |
+|---|---|---|---|
+| `misrepresented-source-01` | evidence | obvious | A real, accurately listed source (Durkin et al. 2022, *… through sixth grade*) is described in the body as reporting twelfth-grade outcomes it cannot contain. The paragraph before it cites the same paper correctly. |
+| `overstated-claim-01` | logic | moderate | Randomized support establishing a small average effect (aOR 0.88, NNT ≈ 33, concentrated in deficient participants, two null trials) is restated as a flat "prevents" with an individual-level expectation attached. |
+
+Both are authored in `prompts.REPORT_SKELETON` shape — no `#` title, `## Conclusion` first, `[n]`
+citations, a numbered `## Sources` — because a fixture that does not look like production input
+measures the critic on a document shape it never sees.
+
+**Why the rule stops at the material floor.** `_is_material` gates every hit in `grade`, so a
+detection on a minor-floor category scores only when a critic volunteers an escalation above the
+floor. Requiring a fixture for `unclear_structure` or `loaded_language` would therefore assert a
+measurement the grader cannot reliably make: the fixture would be graded as a miss against critics
+that found it and filed it honestly at `minor`. `loaded-language-01` already sits in the corpus and
+already has this problem; **it is diagnostic, not a sensitivity measurement**, and the same holds
+for any `unclear_structure` fixture. No fixture is added for `unclear_structure` here, and
+[concepts.md](./concepts.md) now says which categories the corpus can and cannot score. Whether the
+grader should credit a minor-floor detection at all is a separate question about scoring, not about
+coverage, and it belongs to the issue that raised it rather than to this one.
+
+**Why not simply require a fixture per category, floor be damned.** Because the resulting corpus
+would encode a claim the harness cannot honour. A coverage rule whose satisfaction leaves a
+category still unmeasured is worse than an acknowledged gap: it converts "we have not measured
+this" into "we have", which is the same substitution D-control-soundness was written to undo.
+
+**Tiering.** `obvious` gates a fail-closed verdict (`obvious_hits == 0` → `unfit`), so it is
+claimed only where a competent critic must catch the defect. `misrepresented-source-01` earns it:
+the tell is bibliographic and sits on the face of the Sources entry, the evidence lens brief names
+this exact case, and the same source is cited correctly one paragraph earlier.
+`overstated-claim-01` does not: it is a hedge-drop two sections after the numbers that constrain
+it, `prevents` is ordinary shorthand for `reduces the risk of`, and a fast reader can wave it
+through without being incompetent. Each fixture's manifest records that reasoning where the next
+author will read it.
+
+**Cache and blast radius.** New fixture directories change `corpus_hash`, so every cached verdict
+stops matching and drops to *not audited* — never to `unfit`, and `audition.enforce` blocks only on
+a positive `unfit`. Safe to land with enforcement on: it degrades to "re-measure", which is correct,
+because the corpus now measures something it did not measure before.
+
+**What this decision does not establish.** No model has been auditioned against either fixture —
+that costs a paid proxy run. Two things are therefore unknown and should be read as open: whether
+rostered evidence critics actually catch an on-its-face misrepresentation, and whether
+`misrepresented-source-01` is honestly `obvious`. If a re-audition shows competent models missing it
+while catching the other three evidence fixtures, the tier is wrong and should drop to `moderate`
+rather than the roster being re-cut around it.
+
+**Invariants.** None in reach. Fixtures are test data: they enter no production path, and author
+exclusion, the blind `OrchestratorView`, fail-closed lenses, the severity floors and controller
+termination are all untouched. The audition already hands fixture text to a critic as untrusted
+report content under the sentinel author `AUDITION_AUTHOR`, and these two fixtures use that path
+unchanged.
+
+
 ## Open items for a future round
 
 - Per-role CI cost telemetry, and a revisit of the D-ci-model-pinning tiers against measured

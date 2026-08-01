@@ -1,0 +1,36 @@
+lens: evidence
+tier: obvious
+question: "Does state-funded preschool improve children's long-run outcomes?"
+defects:
+  - category: misrepresented_source
+    locus: {section: 4, paragraph: 3}
+    note: >
+      S4.P3 attributes twelfth-grade outcomes — a closing and reversing achievement
+      deficit, on-time graduation, chronic absence in the final two years — to source
+      [3], which is listed accurately and in full as Durkin et al. (2022), "Effects of a
+      statewide pre-kindergarten program on children's achievement and behavior
+      **through sixth grade**". Ground truth: that paper's follow-up window ends at
+      sixth grade, it reports the deficit as open rather than closing, and a 2022
+      publication could not contain twelfth-grade outcomes for a cohort it observes in
+      sixth grade. Nothing about the citation is wrong — the authors, year, title,
+      journal and volume are all real and correct — so a critic checking whether the
+      entry exists, or whether it is plausible, passes it. The misrepresentation is
+      visible on the face of the Sources entry, which is what makes this checkable
+      without fetching anything.
+      No slot rotation: the source has to be real for the mismatch to be checkable, and
+      rotating a real citation would either falsify it or leave the tell intact anyway.
+      Tier is obvious because S4.P2 cites the same paper correctly for its sixth-grade
+      result one paragraph earlier, so the overreach sits directly against an accurate
+      use of the same source, and because the evidence lens brief names this case
+      verbatim ("a cited source is described as supporting something it plainly would
+      not support").
+      Deliberate: the claim is plausible rather than absurd — the Boston lottery study
+      [6] really does find attainment gains without test-score gains — so a critic
+      cannot reach the finding by smelling an implausible result. It has to check the
+      attribution.
+      Known and accepted: S1 says adult outcomes are known "almost entirely" from the
+      two demonstration programs, which a twelfth-grade reversal would sit awkwardly
+      against. That is the same contrast invalid-inference-01 relies on — a careful
+      report with one overreach in it — and it costs nothing here, because the logic
+      lens never sees this fixture (`FixtureSet.for_lens`) and the evidence lens cannot
+      raise `contradicted_claim`.

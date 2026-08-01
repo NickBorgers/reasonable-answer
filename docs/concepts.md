@@ -220,7 +220,14 @@ it — each one, again, a guard against a known LLM failure mode:
   the property it exists to measure. Model judges carry documented and reproducible biases —
   position, verbosity, and self-enhancement among them
   ([Zheng et al. 2023](https://arxiv.org/abs/2306.05685)) — so a grader built from one would
-  import exactly the failure modes the audition is supposed to detect.
+  import exactly the failure modes the audition is supposed to detect. Covering every *lens* is
+  not covering every *category*: because the grader scores a relaxed same-lens match, a critic
+  blind to one category still passes on the strength of the others, so every category that floors
+  at `major` or `blocking` now carries its own planted fixture and a test says so
+  (D-category-coverage). The two minor-floor categories — `unclear_structure` and
+  `loaded_language` — are **diagnostic only**. A detection has to clear the material floor to
+  count, so a critic that finds one and files it honestly at `minor` scores nothing; a fixture for
+  those ranks models against each other and must never be read as a sensitivity measurement.
 - **The dispute channel.** Critics can be wrong, and a false positive is otherwise
   indistinguishable from a real defect — floors escalate it, the blind referee counts it, and a
   compliant writer would "fix" the report into falsehood. An opt-in channel (D-writer-disputes) lets the writer

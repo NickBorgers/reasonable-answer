@@ -1,0 +1,41 @@
+lens: logic
+tier: moderate
+question: "Does vitamin D supplementation prevent respiratory infections?"
+defects:
+  - category: overstated_claim
+    locus: {section: 5, paragraph: 2}
+    note: >
+      S5.P2 drops every hedge the report established for itself. Ground truth, from the
+      report's own support: an adjusted odds ratio of 0.88 for having at least one
+      infection, a number needed to treat of about 33, the effect concentrated in
+      participants who were deficient at baseline, a later pooled estimate of 0.92 whose
+      interval only just excludes 1.0, and two large trials that found no reduction at
+      all. What that licenses is "a small average reduction, mostly in deficient people".
+      What S5.P2 asserts is "Daily vitamin D supplementation prevents acute
+      respiratory infections" flatly, and that an individual "can expect to get through
+      the winter without an infection they would otherwise have had" — restating a
+      roughly 3 percent absolute chance as an expectation.
+      Fixture-authoring note for whoever edits this next: do not write the cholecalciferol
+      form as "vitamin D" followed by a bare 3. `tests/test_citation_resolution.py`
+      scans the tree for stale numeric decision ids (`\bD[0-9]{1,2}\b`) and that spelling
+      trips it, which is why the null trials cited here are CORONAVIT and the Norwegian
+      cod liver oil trial rather than VIDARIS.
+      Distinct from invalid_inference-01, which moves from an observed association to a
+      causal prediction: causation is not the leap here, because the support is
+      randomized trials and the direction of the effect is exactly what the report says
+      it is. Only the magnitude and the generality are inflated. Distinct from
+      loaded_language-01, which smuggles an evaluative verdict in through wording: the
+      wording here is plain, and the sentence would be unobjectionable if the pooled
+      effect were large.
+      Tier is moderate, not obvious. The overstatement sits sections away from the numbers
+      that constrain it, "prevents" is ordinary shorthand for "reduces the risk of", and
+      S5.P1 immediately before it is careful about baseline status — so a fast reader can
+      carry that care forward onto S5.P2 and wave it through without being incompetent. It
+      also negates nothing stated elsewhere: the report never says supplementation fails
+      to prevent infections, so a critic scanning for contradictions rather than weighing a
+      claim against its support finds nothing here. That is the point — the fixture
+      measures whether the critic holds the claim against the support, not against a
+      neighbouring sentence.
+      No slot rotation: nothing here is a fabricated surface form. The four sources are
+      real and accurately listed, and the defect lives in the strength of the prose, not
+      in a name a model could memorize.

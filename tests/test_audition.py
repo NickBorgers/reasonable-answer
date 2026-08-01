@@ -79,6 +79,36 @@ def test_shipped_corpus_loads_and_covers_both_directions():
         assert any(f.lens is lens for f in planted), f"lens {lens.value} has no planted fixture"
 
 
+def test_every_material_category_has_a_planted_fixture():
+    """D-category-coverage. Per-lens coverage is not per-category coverage.
+
+    `grade` scores the relaxed `same_lens` match and `judge` gates on lens-level rates,
+    so a critic wholly blind to one category still grades FIT on the strength of the
+    categories its lens does cover — the lens looks measured and the blind spot is
+    invisible. `misrepresented_source` sat uncovered from the corpus's first day.
+
+    Scoped to the categories that floor at `major` or `blocking`, because those are the
+    only ones a detection can be scored on: `_is_material` gates every hit, so a
+    minor-floor category (`unclear_structure`, `loaded_language`) can earn credit only
+    when a critic volunteers an escalation. Requiring a fixture for those would assert a
+    measurement the grader cannot make.
+    """
+    from reasonable_answer.taxonomy import SEVERITY_FLOOR, is_material
+
+    planted = {
+        defect.category
+        for fixture in audition.load_fixtures(CORPUS).fixtures
+        for defect in fixture.defects
+    }
+    material = {
+        category
+        for category in Category
+        if category is not Category.STYLISTIC and is_material(SEVERITY_FLOOR[category])
+    }
+    missing = sorted(category.value for category in material - planted)
+    assert not missing, f"material categories with no planted fixture: {', '.join(missing)}"
+
+
 def test_every_lens_sees_all_controls():
     fixtures = audition.load_fixtures(CORPUS)
     controls = {f.id for f in fixtures.fixtures if f.is_control}
