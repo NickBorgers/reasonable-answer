@@ -2403,6 +2403,16 @@ three lenses about 1.1% of the time — and `accepted` needs that to happen twic
 passes. Rule 8 fired once in six runs; the fresh critic returned 9 material issues and sent
 `run-cabddb9a612b` back for seven more rounds.
 
+These figures are drawn from the `audit.json` trail of that six-run production set — a private
+operator's own run history, not part of this public repository — so, as in D-question-refinement, the
+run IDs stand only as opaque handles and the measurements cannot be re-fetched from the diff (QP9).
+They are the *motivation* for this decision, not its warrant. What the decision rests on and pins
+publicly is the **mechanism**: the arithmetic below is checkable against the code, and the tests this
+PR adds — `tests/test_revision_scope.py`, the rule-13 branches in `tests/test_controller.py`, and the
+valve behaviour in `tests/test_graph.py` — make the changed behaviour checkable from the diff itself,
+the same way D-source-verification pins its empirical claim rather than resting it on private run
+audit material.
+
 **The mechanism.** `prompts.writer_revision` ended *"Return the complete revised report in Markdown —
 the whole document, not a diff,"* and `roles.next_writer` hands each revision to a **different** model.
 So every round, a model that did not write the text regenerated ~1,800 words in order to repair ~5

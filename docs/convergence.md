@@ -171,11 +171,15 @@ ControllerInput = OrchestratorView + {
   polish_recommended: bool                        # from the orchestrator LLM
   polish_used: int, polish_cap: int
   stagnation_limit K: int, cycle_period L: int
+  rewrites_used: int, rewrite_cap: int            # rule 13's bounded rewrite (D-scoped-revision)
 }
 ```
 
 Identifiers live here, never in the LLM's view. **Noninterference** (RB-008) is defined over
-`OrchestratorView`.
+`OrchestratorView`. `rewrites_used`/`rewrite_cap` sit on `ControllerInput` and deliberately *not*
+on `OrchestratorView`: `polish_used`/`polish_cap` are in the view because rule 9 is the blind LLM's
+one authority and it must see its own budget, but rule 13 is fully deterministic, so surfacing the
+rewrite budget to the LLM would widen the RB-008 noninterference surface to buy nothing.
 
 ## Acceptance evidence — immutable, hash-keyed records (RC-001, RC-002)
 
