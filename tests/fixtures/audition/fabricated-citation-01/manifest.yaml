@@ -1,15 +1,22 @@
+# Matched pair (D-fixture-report-shape): derived from `control-base-remote-work-01` by
+# replacing source [2] — a real study — with a fabricated one and rewriting only the two
+# sentences that name it. Length, structure, citation density and topic are held fixed
+# against the sound sibling.
 lens: evidence
 tier: obvious
 question: "Does remote work reduce team productivity?"
 defects:
   - category: fabricated_citation
-    locus: {section: 2, paragraph: 2}
+    locus: {section: 4, paragraph: 2}
     note: >
-      S2.P2 cites a journal article that does not exist, with a precise sample size,
-      duration and effect size. It also appears in the Sources block, so a critic that
-      only checks "is it listed" will pass it. The two real citations around it are
+      S4.P2 cites a journal article that does not exist, with a precise sample size,
+      duration and effect size. It also appears in the numbered Sources block and is
+      cited from four other paragraphs, so a critic that only checks "is it listed"
+      or "is it load-bearing" will pass it. The four real citations around it are
       accurate, which is the point: the fixture measures whether the critic verifies
-      citations or pattern-matches on their shape.
+      citations or pattern-matches on their shape. The claim the fabricated source
+      carries is itself unremarkable — hours up, output flat — so the defect cannot
+      be found by noticing an implausible finding.
 slots:
   fabricated_author: ["Vasquez and Lindqvist", "Okonkwo and Mehta", "Rasmussen and Bianchi"]
   fabricated_year: ["2021", "2022", "2020"]

@@ -73,6 +73,17 @@ def test_shipped_corpus_loads_and_covers_both_directions():
     assert planted, "no planted fixtures: sensitivity would be unmeasurable"
     assert controls, "no control fixtures: the noise direction would be unmeasurable"
 
+    # `control_material_rate` is a mean over `controls * repetitions` runs and is
+    # compared against a threshold of 1.0. With two controls at the shipped
+    # `repetitions: 3`, one residual soundness flaw in one control moves that mean by
+    # 0.5 — half the distance to the unfit line, which is how the pre-D-control-soundness
+    # corpus mis-graded every evidence critic. Four bounds one control's leverage at
+    # 0.25; the shipped corpus carries six (D-fixture-report-shape).
+    assert len(controls) >= 4, (
+        f"{len(controls)} controls: one bad control would move `control_material_rate` "
+        f"by {1 / len(controls):.2f} against a threshold of 1.0"
+    )
+
     # Every lens must have something to be measured on, or its models grade
     # INSUFFICIENT forever and the harness silently covers nothing.
     for lens in Lens:
@@ -194,10 +205,12 @@ def test_planted_fixture_without_a_lens_is_rejected(tmp_path):
         audition.load_fixtures(tmp_path / "corpus")
 
 
-#: `Surname (Year)` / `Surname et al. (Year)` / `A, B and C (Year)` — the last
-#: capitalised word before the year is the one that must appear in `## Sources`.
-_INTEXT_CITE = re.compile(r"([A-Z][A-Za-z-]+)(?:\s+et\s+al\.)?\s*\((\d{4})\)")
-_SOURCE_ENTRY = re.compile(r"^-\s+([A-Z][A-Za-z-]+)[^(]*\((\d{4})\)")
+#: Inline `[1]` marker and a numbered `## Sources` entry — the citation mechanics
+#: `prompts.REPORT_SKELETON` actually mandates (D-fixture-report-shape). The corpus used
+#: author-year citations with bulleted sources until then, which is a form production
+#: writers are instructed never to emit.
+_INTEXT_CITE = re.compile(r"\[(\d{1,2})\]")
+_SOURCE_ENTRY = re.compile(r"^(\d{1,2})\.\s+\S")
 
 #: A contested question sourced from one or two places earns `one_sided_sourcing`,
 #: which floors to `major` — a finding the critic would be right to raise, scored
@@ -205,12 +218,16 @@ _SOURCE_ENTRY = re.compile(r"^-\s+([A-Z][A-Za-z-]+)[^(]*\((\d{4})\)")
 MIN_CONTROL_SOURCES = 4
 
 
+def _controls():
+    return [f for f in audition.load_fixtures(CORPUS).fixtures if f.is_control]
+
+
 def _split_sources(artifact: str) -> tuple[str, list[str]]:
     body, _, sources = artifact.partition("\n## Sources")
-    return body, [ln for ln in sources.splitlines() if ln.startswith("- ")]
+    return body, [ln for ln in sources.splitlines() if _SOURCE_ENTRY.match(ln)]
 
 
-@pytest.mark.parametrize("fixture_id", ["control-sound-01", "control-sound-02"])
+@pytest.mark.parametrize("fixture_id", [f.id for f in _controls()])
 def test_control_citations_resolve_in_both_directions(fixture_id):
     """D-control-soundness, the mechanically checkable part.
 
@@ -218,33 +235,127 @@ def test_control_citations_resolve_in_both_directions(fixture_id):
     the failure that motivated the decision — a claim with no citation marker at all,
     which no regex can distinguish from prose that needs none. That half rests on the
     soundness contract in each manifest and on review.
+
+    Parametrized over *every* control rather than a hand-written pair, so a control
+    added later cannot join the corpus without its citations resolving
+    (D-fixture-report-shape).
     """
-    fixture = next(
-        f for f in audition.load_fixtures(CORPUS).fixtures if f.id == fixture_id
-    )
+    fixture = next(f for f in _controls() if f.id == fixture_id)
     body, entries = _split_sources(fixture.artifact)
-    assert entries, f"{fixture_id}: no '## Sources' section"
+    assert entries, f"{fixture_id}: no numbered '## Sources' entries"
 
-    # Count *distinct* sources, not raw entries: `one_sided_sourcing` is a property of how
-    # many separate sources back a claim, so the same source listed twice must not count
-    # twice. Normalise each entry to its `(surname, year)` identity; an entry the regex
-    # cannot parse falls back to its own text, so nothing is silently collapsed.
-    def _identity(entry):
-        m = _SOURCE_ENTRY.match(entry)
-        return (m.group(1), m.group(2)) if m else entry.strip()
-
-    distinct = {_identity(e) for e in entries}
-    assert len(distinct) >= MIN_CONTROL_SOURCES, (
-        f"{fixture_id}: {len(distinct)} distinct sources — thin enough to earn `one_sided_sourcing`"
+    # Numbers, not surnames: a numbered reference list is the identity, so the same
+    # source listed twice under two numbers is two citable entries and would be caught
+    # below as two entries the body must cite separately.
+    numbers = [int(_SOURCE_ENTRY.match(e).group(1)) for e in entries]
+    assert numbers == list(range(1, len(numbers) + 1)), (
+        f"{fixture_id}: Sources entries are numbered {numbers}, not 1..n — an inline "
+        f"[n] marker would resolve to the wrong entry or to none"
+    )
+    assert len(numbers) >= MIN_CONTROL_SOURCES, (
+        f"{fixture_id}: {len(numbers)} sources — thin enough to earn `one_sided_sourcing`"
     )
 
-    for name, year in sorted(set(_INTEXT_CITE.findall(body))):
-        assert any(name in entry and year in entry for entry in entries), (
-            f"{fixture_id}: in-text '{name} ({year})' resolves to no Sources entry"
+    cited = {int(n) for n in _INTEXT_CITE.findall(body)}
+    for n in sorted(cited):
+        assert n in numbers, f"{fixture_id}: in-text [{n}] resolves to no Sources entry"
+    for n in numbers:
+        assert n in cited, f"{fixture_id}: Sources entry {n} is never cited"
+
+
+def _headings(artifact: str) -> list[str]:
+    return [ln[3:].strip() for ln in artifact.splitlines() if ln.startswith("## ")]
+
+
+@pytest.mark.parametrize("fixture_id", [f.id for f in audition.load_fixtures(CORPUS).fixtures])
+def test_every_artifact_has_the_shape_production_writers_are_told_to_emit(fixture_id):
+    """D-fixture-report-shape.
+
+    The audition measures critics with the production critic prompt, so its value rests
+    on the fixtures looking like what a critic sees in a run. `prompts.REPORT_SKELETON`
+    is what the writer is held to; a corpus that violates it audits critics on a document
+    class no production writer may emit, shifting locus distribution, the organization
+    cues the completeness lens judges, and citation mechanics.
+    """
+    fixture = next(f for f in audition.load_fixtures(CORPUS).fixtures if f.id == fixture_id)
+    artifact = fixture.artifact
+
+    assert not re.search(r"^# \S", artifact, re.MULTILINE), (
+        f"{fixture_id}: has a top-level '#' title — the report is the body only"
+    )
+    assert artifact.startswith("## Conclusion\n"), (
+        f"{fixture_id}: must open with '## Conclusion', nothing before it"
+    )
+    last_line = artifact.rstrip().splitlines()[-1]
+    assert _SOURCE_ENTRY.match(last_line), (
+        f"{fixture_id}: must end on a numbered '## Sources' entry, not {last_line[:40]!r}"
+    )
+
+    headings = _headings(artifact)
+    assert headings[0] == "Conclusion", f"{fixture_id}: first section is {headings[0]!r}"
+    assert headings[-1] == "Sources", f"{fixture_id}: last section is {headings[-1]!r}"
+    for required in ("Key findings", "The strongest counterargument"):
+        assert required in headings, f"{fixture_id}: no '## {required}' section"
+    assert _INTEXT_CITE.search(artifact), f"{fixture_id}: no inline [n] citations"
+
+
+#: How far the longest artifact may exceed the shortest. Corpus class was readable off
+#: length alone before D-fixture-report-shape — controls ran 652-656 words against
+#: 239-357 for the planted fixtures, a 2.7x spread — so a model could score by being
+#: conservative on long reports and aggressive on short ones without detecting anything.
+MAX_LENGTH_SPREAD = 1.5
+
+
+def test_corpus_class_is_not_readable_off_length():
+    """D-fixture-report-shape, the confound half.
+
+    Sensitivity and noise are measured on disjoint fixture sets, so any feature that
+    separates those sets is a shortcut past the measurement. Length is the easiest one
+    to acquire accidentally and the easiest to check.
+    """
+    fixtures = audition.load_fixtures(CORPUS).fixtures
+    lengths = {f.id: len(f.artifact.split()) for f in fixtures}
+    control = sorted(lengths[f.id] for f in fixtures if f.is_control)
+    planted = sorted(lengths[f.id] for f in fixtures if not f.is_control)
+    assert control and planted
+
+    longest, shortest = max(lengths.values()), min(lengths.values())
+    assert longest <= MAX_LENGTH_SPREAD * shortest, (
+        f"corpus spans {shortest}-{longest} words ({longest / shortest:.2f}x): "
+        f"{min(lengths, key=lengths.get)} .. {max(lengths, key=lengths.get)}"
+    )
+
+    # Overlapping ranges are necessary but weak — [500, 900] and [899, 901] overlap.
+    # Requiring each class's median to sit inside the other's range rules out the two
+    # classes merely touching at one end.
+    assert control[len(control) // 2] <= planted[-1] and control[len(control) // 2] >= planted[0], (
+        f"control median sits outside the planted range {planted[0]}-{planted[-1]}"
+    )
+    assert planted[len(planted) // 2] <= control[-1] and planted[len(planted) // 2] >= control[0], (
+        f"planted median sits outside the control range {control[0]}-{control[-1]}"
+    )
+
+
+def test_corpus_class_is_not_readable_off_source_count():
+    """D-fixture-report-shape, the same confound one step along.
+
+    Controls carried six dense sources against three for a typical planted fixture, and
+    the check has to be made per lens rather than corpus-wide: a lens only ever sees its
+    own planted fixtures plus the controls, so a gap that closes in aggregate can stay
+    wide open inside `for_lens`.
+    """
+    fixtures = audition.load_fixtures(CORPUS)
+    counts = {f.id: len(_split_sources(f.artifact)[1]) for f in fixtures.fixtures}
+    control = sorted(counts[f.id] for f in fixtures.fixtures if f.is_control)
+
+    for lens in Lens:
+        planted = sorted(counts[f.id] for f in fixtures.for_lens(lens) if not f.is_control)
+        assert planted, f"lens {lens.value} has no planted fixture"
+        assert planted[0] >= control[0] - 1, (
+            f"on {lens.value}, planted fixtures carry {planted[0]}-{planted[-1]} sources "
+            f"against {control[0]}-{control[-1]} for controls: thin sourcing would be a "
+            f"usable proxy for 'this one has a defect'"
         )
-    for match in filter(None, map(_SOURCE_ENTRY.match, entries)):
-        surname, year = match.group(1), match.group(2)
-        assert surname in body, f"{fixture_id}: Sources entry '{surname} ({year})' is never cited"
 
 
 # ------------------------------------------------------------------- grading
@@ -606,20 +717,20 @@ def test_run_assignment_measures_both_directions_offline():
     slot = audition.Assignment(alias="a", identity="p/m", lens=Lens.EVIDENCE, position=0)
 
     # A critic that finds the planted uncited claim and nothing else. The span is a
-    # real quote from S3.P1 because `require_verbatim_spans` defaults on, exactly as
+    # real quote from S5.P1 because `require_verbatim_spans` defaults on, exactly as
     # in a run — a loose quote fails the lens closed rather than scoring a detection.
     span = "Every credible study of the 2021-2023 period"
 
     def respond(alias, user):
         if span in user:
-            return [issue(Category.UNCITED_CLAIM, 3, 1, claim_span=span)]
+            return [issue(Category.UNCITED_CLAIM, 5, 1, claim_span=span)]
         return []
 
     m = audition.run_assignment(ScriptedClient(respond), slot, fixtures, repetitions=1)
     assert m.calls == len(fixtures.for_lens(Lens.EVIDENCE))
     assert m.schema_failures == 0
     assert m.strict_hits == 1
-    assert m.control_runs == 2
+    assert m.control_runs == sum(1 for f in fixtures.fixtures if f.is_control)
     assert m.control_material_issues == 0
     assert audition.judge(m, THRESHOLDS).verdict is not audition.Verdict.INSUFFICIENT
 

@@ -1,12 +1,19 @@
 # A control declares no `lens` and no `tier` (D-control-soundness): it is graded by
 # every lens, and it gates no sensitivity threshold because it plants nothing.
 #
-# Soundness contract, which no test can check and review therefore must: every
-# empirical claim below carries an in-text citation to a Sources entry; the question's
-# ambiguous term is named and decomposed rather than assumed; the case against the
-# report's own answer has its own section. This question is contested, so the sourcing
-# is deliberately drawn across a bank, an intergovernmental body and academic work on
-# both sides of the cost-contingency dispute — `one_sided_sourcing` floors to `major`,
-# and a two-source control would earn that finding honestly.
+# One of the two unpaired controls (D-fixture-report-shape): it has no planted sibling,
+# so it also checks that the corpus is not merely a set of near-duplicate pairs.
+#
+# Soundness contract, which no test can check and review therefore must: every empirical
+# claim carries an inline [n] citation resolving to a numbered `## Sources` entry; the
+# question's ambiguous term is named and decomposed rather than assumed; the strongest
+# opposing case — that recent Western nuclear costs are contingent rather than intrinsic
+# — has its own section and is left explicitly unresolved rather than dismissed. This
+# question is contested, so the sourcing is deliberately drawn across a bank, an
+# intergovernmental body and academic work on both sides of the cost-contingency
+# dispute: `one_sided_sourcing` floors to `major`, and a two-source control would earn
+# that finding honestly. The `## Conclusion` section summarises material cited below it,
+# per the conclusion-first report template — a critic that raises `uncited_claim` against
+# it is over-flagging, which is what this fixture measures.
 kind: control
 question: "Is nuclear power cost-competitive with solar and wind?"

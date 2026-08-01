@@ -1,16 +1,21 @@
+# Production shape per D-fixture-report-shape. Derived from a sound base whose S4.P1 read
+# "The program office spent $4.1 million of the $6.2 million increase in the first year
+# while opening only 120 of the planned 300 beds"; the base is not shipped, to keep the
+# audition's per-model call count bounded.
 lens: logic
 tier: moderate
 question: "Did the city's homeless services budget increase achieve its goals?"
 defects:
   - category: loaded_language
-    locus: {section: 2, paragraph: 1}
+    locus: {section: 4, paragraph: 1}
     note: >
-      S2.P1 describes the program office as having "squandered" funds and calls the
+      S4.P1 describes the program office as having "squandered" funds and calls the
       outreach initiative a "boondoggle" — evaluative verdicts the cited audit does not
-      make: the audit (accurately summarized elsewhere in the report) found spending
-      consistent with the appropriation but slower than planned. The surrounding
-      paragraphs are neutral, and the numbers in S2.P1 are themselves accurate, so the
-      defect is confined to wording that asserts a verdict the support does not
-      establish. A critic may also reasonably propose `overstated_claim`; the fixture
-      grades on the same-lens window, so either same-lens material finding at the locus
-      scores.
+      make: the audit (accurately summarized elsewhere in the report, including in the
+      same paragraph) found spending consistent with the appropriation but slower than
+      planned. The surrounding paragraphs are neutral, the conclusion in S1.P1 explicitly
+      declines to call the spending wasted, and the numbers in S4.P1 are themselves
+      accurate, so the defect is confined to wording that asserts a verdict the support
+      does not establish. A critic may also reasonably propose `overstated_claim`; the
+      fixture grades on the same-lens window, so either same-lens material finding at the
+      locus scores.

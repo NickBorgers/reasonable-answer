@@ -215,7 +215,14 @@ it — each one, again, a guard against a known LLM failure mode:
   controls, and graded by plain code — measuring both whether they catch what's there and whether
   they invent what isn't. A control is graded by every lens, so it has to be sound under every
   lens (D-control-soundness): a "sound" control carrying one real uncited claim scores every
-  competent evidence critic as an inventor of defects, which is what it did. An LLM grader is
+  competent evidence critic as an inventor of defects, which is what it did. The fixtures are
+  written in the exact shape the writer prompt mandates — conclusion first, a counterargument
+  section engaged on the merits, inline `[1]` citations resolving to a numbered `## Sources`
+  section — because the harness uses the production critic prompt, and a corpus in any other shape
+  would audit critics on documents no production writer may emit (D-fixture-report-shape). Most
+  planted fixtures ship alongside the sound base they were mutated from, so class cannot be read
+  off length, structure or topic: a model that passes by being conservative on long, balanced
+  reports and aggressive on short ones has detected nothing. An LLM grader is
   expressly forbidden: the harness must not depend on
   the property it exists to measure. Model judges carry documented and reproducible biases —
   position, verbosity, and self-enhancement among them
