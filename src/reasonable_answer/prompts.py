@@ -48,10 +48,47 @@ def date_line(current_date: str | None) -> str:
 
 # --------------------------------------------------------------------- generator
 
+#: The section frame every report follows (D-report-template). Composed into
+#: WRITER_SYSTEM — not into `writer_first_draft` alone — so every writer call
+#: (first draft, revision, polish) holds the same structural standard: a frame
+#: stated only at the first draft decays across rounds, and a seeded run never
+#: sees the first-draft prompt at all.
+#:
+#: Two constraints are load-bearing:
+#: * `## Sources` is byte-exact — `fetch._SOURCES_HEADING` matches only a heading
+#:   whose text is the word "sources", and `triage._locate_url` assumes it is last.
+#: * The counterargument must be engaged, never merely listed: an objection raised
+#:   and left unanswered reads as stronger than it is, and a strawmanned one
+#:   forfeits the reason the section exists (see D-report-template).
+REPORT_SKELETON = (
+    "Report shape — every report you produce follows this frame:\n"
+    "1. `## Conclusion` — the first section: a direct answer to the question in two to "
+    "four plain-language sentences, each cited or marked as inference, so a reader who "
+    "stops here leaves with the answer — including one sentence naming the strongest "
+    "opposing view and how it qualifies, or fails to overturn, that answer.\n"
+    "2. `## Key findings` — the handful of facts that carry the conclusion, as short "
+    "cited bullets.\n"
+    "3. `## The strongest counterargument` — the best genuine opposing case, stated in "
+    "the form its proponents would accept, engaged on the merits: what it gets right, "
+    "what evidence would have to hold for the conclusion to flip, and why the conclusion "
+    "stands (or is tempered) despite it. Never present a weakened version of the "
+    "opposing case to make it easier to answer: if you cannot honestly state a strong "
+    "one, say plainly that reasonable objections exist and name them, cited. Never "
+    "raise an objection you then leave unanswered.\n"
+    "4. Topical sections of your choosing — the layered evidence and analysis behind "
+    "the findings. Answer objections where they arise in the analysis rather than "
+    "deferring them all to the counterargument section.\n"
+    "5. `## Sources` — the last section, with exactly that heading, one numbered entry "
+    "per citation.\n"
+    "Nothing before `## Conclusion`, nothing after `## Sources`, and no top-level "
+    "`#` title — the report is the body only."
+)
+
 WRITER_SYSTEM = (
     "You are a careful analytical writer. You produce evidence-led reports in Markdown: "
     "clear section headings, short paragraphs, explicit reasoning, and inline citations "
     "in the form [1], [2] with a '## Sources' section at the end listing each one.\n\n"
+    f"{REPORT_SKELETON}\n\n"
     "Standards you hold yourself to:\n"
     "- Every material factual claim carries a citation, or is explicitly marked as an "
     "inference from cited material.\n"
@@ -136,7 +173,7 @@ def writer_first_draft(question: str, *, current_date: str | None = None) -> str
         f"{date_line(current_date)}"
         f"Write a report that answers the question below.\n\n"
         f"QUESTION\n{DATA_FENCE}\n{question}\n{DATA_END}\n\n"
-        "Return the report in Markdown."
+        "Return the report in Markdown, following the required section frame."
     )
 
 
