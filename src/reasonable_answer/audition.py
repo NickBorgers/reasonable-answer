@@ -32,8 +32,8 @@ was fine. Silence and noise are two ways to fail the same job.
 of what production asks of an evidence critic (`AUDITION_SOURCE_MODE`,
 D-audition-source-mode). A verdict here says the model can or cannot perform the lens on
 the text alone — the standard production falls back to for every citation whose body did
-not arrive, which the fetch design expects to be common enough that the critic prompt is
-written around it (D-existence-vs-body). It says nothing about the sharpened,
+not arrive, a path the fetch design explicitly preserves in the critic prompt
+(D-existence-vs-body). It says nothing about the sharpened,
 sources-present prompt the deployment's evidence lens runs when a page does arrive.
 """
 

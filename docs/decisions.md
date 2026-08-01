@@ -2691,13 +2691,13 @@ recorded nowhere.
 deliberately — and that scope is now stated in the code, carried in the cache identity, and
 written here.** Four reasons, in the order they carry weight.
 
-**The floor is the common production condition, not a hypothetical one.** Fetching is best-effort
-by construction: sites block automated clients, paywall bodies, serve formats the extractor cannot
-read, and go offline, and this system refuses the tricks that would get around that
+**The floor is a production fallback, not a hypothetical condition.** Fetching is best-effort by
+construction: sites can block automated clients, paywall bodies, serve formats the extractor cannot
+read, or go offline, and this system refuses the tricks that would get around that
 (D-existence-vs-body). `fetched_sources_block` therefore tells the critic, in as many words, to
 judge any citation that is not a page of text *on its face* — which is precisely the standard the
-source-less audition measures. A critic that cannot meet it is failing on the fallback path the
-fetch design expects to be common, not on an artificial one.
+source-less audition measures. A critic that cannot meet it is failing on a supported fallback
+path, not an artificial one.
 
 **One definition of "the prompt", across all three lenses.** The logic and completeness lenses
 receive no sources under any configuration. A harness that fed a packet to evidence alone would be

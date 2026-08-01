@@ -224,8 +224,8 @@ it — each one, again, a guard against a known LLM failure mode:
   is a **floor**: critics are graded with no fetched sources in front of them, while a deployment
   with source verification switched on hands its evidence critic the pages the report cites
   (D-audition-source-mode). That is deliberate — it is the condition a real run falls back to
-  every time a page is paywalled, blocked or offline, which the fetch design expects to be common
-  enough that the critic's prompt is written around it — but it means `fit` says the
+  when a page is paywalled, blocked or offline, and the fetch design explicitly preserves that
+  on-its-face review path — but it means `fit` says the
   model can do the job on the text alone, not that it reads a fetched page well. Certifying that
   needs deterministic offline source packets shipped with the fixtures, which is an open item.
 - **The dispute channel.** Critics can be wrong, and a false positive is otherwise
