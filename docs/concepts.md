@@ -220,7 +220,11 @@ it — each one, again, a guard against a known LLM failure mode:
   fail-closed gates count only those, and at least one defect pinned to a real paragraph, because a
   defect matchable anywhere measures only which category the critic named (D-obvious-per-lens). The
   two failures that defeat the harness completely — never firing, and never once letting a sound
-  report through — are hardcoded as unfit rather than left to a threshold. An LLM grader is
+  report through — are hardcoded as unfit rather than left to a threshold. A verdict also has to
+  cover the whole corpus: a call that fails the schema is graded as neither a hit nor a miss, so a
+  model that reliably breaks on one fixture would have that fixture quietly dropped from its own
+  denominators — a fixture nothing ever graded is now `unfit`, not a better score
+  (D-audition-failure-coverage). An LLM grader is
   expressly forbidden: the harness must not depend on
   the property it exists to measure. Model judges carry documented and reproducible biases —
   position, verbosity, and self-enhancement among them
