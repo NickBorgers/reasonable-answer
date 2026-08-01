@@ -2674,6 +2674,102 @@ actually fired in production. The timeout containment bounds a hang, but the pat
 exercised, and this change puts more traffic on it.
 
 
+## D-audition-source-mode — the audition measures the source-less floor, and the verdict says only that
+
+`audition.run_assignment` calls `critique_once` with `sources=None`, on every fixture, for every
+lens. The production deployment runs `verify_sources` always-on
+([deployment-profile.md](./deployment-profile.md)), so its evidence critic reads a prompt this
+harness never builds: `misrepresented_source` sharpened from *"the cited source plainly does not
+support the claim"* into *"the fetched page does not contain the claim"* (`prompts.critic_user`),
+the pages themselves in a `fetched_sources_block` with its three entry shapes (D-existence-vs-body),
+and the standing instruction not to re-raise a definitive not-found that
+`triage.mechanical_citation_issues` has already minted (D-notfound-fabrication). The verdicts are
+named `fit` and `unfit`, which read as unconditional. They are not, and until now the gap was
+recorded nowhere.
+
+**Decision. The audition measures the capability floor a critic brings with no source access —
+deliberately — and that scope is now stated in the code, carried in the cache identity, and
+written here.** Four reasons, in the order they carry weight.
+
+**The floor is the common production condition, not a hypothetical one.** Fetching is best-effort
+by construction: sites block automated clients, paywall bodies, serve formats the extractor cannot
+read, and go offline, and this system refuses the tricks that would get around that
+(D-existence-vs-body). `fetched_sources_block` therefore tells the critic, in as many words, to
+judge any citation that is not a page of text *on its face* — which is precisely the standard the
+source-less audition measures. A critic that cannot meet it is failing on the fallback path the
+fetch design expects to be common, not on an artificial one.
+
+**One definition of "the prompt", across all three lenses.** The logic and completeness lenses
+receive no sources under any configuration. A harness that fed a packet to evidence alone would be
+taking two different measurements and printing both as `fit`, and the position-aware roster
+warnings compare verdicts across lenses.
+
+**Determinism.** `corpus_hash` keys every cached verdict to the exact bytes of the corpus. A
+measurement whose inputs depended on what the network returned that day would be keyed to nothing,
+would differ between machines, and would rot as cited URLs die — the same reason the whole test
+suite is offline.
+
+**The direction the gate actually uses survives the narrowing.** `audition.enforce` blocks only on
+a positive `unfit`, and `unfit` here means the model found nothing obvious in text handed to it
+directly. In principle that is over-strict — a model could be blind bare and sharp with a page in
+hand — and that risk is accepted, because it fails toward re-rostering, which is this project's
+posture, and because the same blindness applies to every citation a run cannot fetch.
+
+**What a `fit` verdict certifies.** That the model raises material, correctly-anchored, in-scope
+findings against the artifact text alone, and does not invent them against a sound control. For
+the evidence lens specifically, that is the on-its-face standard production falls back to whenever
+a body does not arrive.
+
+**What it does not certify, and no threshold change would.** Three things, all of them real:
+
+- **Use of fetched page text.** The sharpened `misrepresented_source` — the strongest check the
+  production evidence lens has — is never exercised. (#118 covers the unfetched form of that
+  category, which the corpus also lacks; the fetched form needs the packets below.)
+- **The discipline of the fetched-sources block.** Not re-raising the `NOT FOUND` case triage has
+  already recorded (a duplicate at the blocking floor), not reading `BLOCKED` as fabrication, not
+  reading a metadata-only entry as a body. Each is a failure mode D-notfound-fabrication and
+  D-existence-vs-body exist to prevent, and this harness can see none of them.
+- **The noise direction with a page in context.** Sensitivity plausibly only improves when a critic
+  is handed evidence. Over-flagging does not: a fetched page is more surface to over-read, and
+  `control_material_rate` is measured without one.
+
+**`fabricated-citation-01` stays `tier: obvious`, and is not measuring a superseded capability.**
+Only an HTTP-definitive not-found is settled mechanically (D-notfound-fabrication); a fabricated
+citation whose URL is blocked, paywalled, or resolves to an unrelated live page leaves the
+judgment exactly where this fixture puts it — with the critic, on the face of the text. What the
+fixture cannot measure is the duplicate case in the list above.
+
+**`prompt_hash()` now describes what it covers.** Its docstring claimed "every prompt surface a
+critic sees" while hashing `critic_user(lens, "q", "body", None)` and nothing else. The claim is
+corrected rather than the coverage widened: the hash covers the surface the harness measures, plus
+`AUDITION_SOURCE_MODE` as an explicit component of the identity.
+
+*Rejected: hashing the sources-present surface too.* It would invalidate every cached verdict
+whenever anyone edited a prompt fragment no measurement had ever used — discarding results that
+remain exactly as true as the day they were recorded — and would advertise a coverage the corpus
+does not have. The mode tag is what makes the narrower hash safe: a sources-present mode cannot
+inherit these verdicts, because it will not key to them.
+
+*Blast radius.* Introducing the tag changes the hash once, so every existing cached verdict stops
+matching and reads *not audited* until `ra audition` is re-run — never `unfit`. The gate blocks
+only on a positive `unfit`, so this is safe to land in a deployment running with enforcement on.
+
+**Rejected: mirroring deployment by fetching the fixtures' own citations.** The planted citations
+are fabricated by construction, so fetching them would measure how today's internet answers a
+made-up URL — a 404 from a dead domain one week, a parked page the next — and the control
+fixtures' real citations would rot on their own schedule. `ra audition` is a live command and may
+spend proxy calls, but the corpus it grades against has to stay a fixed, hashable artifact that is
+identical on every machine.
+
+**Not done, deliberately: offline source packets.** Closing the gap for real needs no network — a
+`sources.yaml` beside a fixture's `artifact.md`, deserialized into `FetchedSource` values covering
+the outcomes that matter (a body that supports the claim, a body that does not, a `BLOCKED`, a
+`NOT FOUND`, a metadata-only record), fed through the same `prompts.critic_user` call, and keyed in
+the cache under a different `AUDITION_SOURCE_MODE`. It is a corpus change that belongs next to the
+fixture work in #118 rather than bolted onto a scoping decision, so it is an open item below. The
+mode tag is the seam it plugs into.
+
+
 ## Open items for a future round
 
 - Per-role CI cost telemetry, and a revisit of the D-ci-model-pinning tiers against measured
@@ -2690,6 +2786,15 @@ exercised, and this change puts more traffic on it.
 - A third control fixture. Two controls x 3 repetitions is 6 runs per slot, which is a thin base
   for a rate compared against a threshold of 1.0 — the audition that surfaced D-control-soundness
   exited 0 on one pass and 1 on the next. Cost is roughly +10% on a full audition.
+- Deterministic offline **source packets** for the evidence fixtures, and a second audition mode
+  that runs under them (D-audition-source-mode). Today every measurement is taken with
+  `sources=None`, so the sharpened `misrepresented_source` and the whole `fetched_sources_block`
+  discipline — don't duplicate a mechanical `NOT FOUND`, don't read `BLOCKED` as fabrication,
+  don't read an abstract as a body — are uncertified for a critic production runs with
+  `verify_sources` on. The packets need no network; they are fixture data. Cost is a corpus
+  addition per evidence fixture, a mode component in the cache key and in what `ra doctor`
+  displays, and roughly a doubling of evidence-lens calls when both modes are run. It lands
+  naturally with the fixture work in #118.
 - Whether `misrepresented_source` can be meaningfully checked without fetching the source
   (v1 only checks on-its-face support); a later evidence layer (RA-011) would strengthen this.
 - Calibration of `K` (plateau window), the hard cap, and defect-score weights against real runs.

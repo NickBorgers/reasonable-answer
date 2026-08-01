@@ -220,7 +220,14 @@ it — each one, again, a guard against a known LLM failure mode:
   the property it exists to measure. Model judges carry documented and reproducible biases —
   position, verbosity, and self-enhancement among them
   ([Zheng et al. 2023](https://arxiv.org/abs/2306.05685)) — so a grader built from one would
-  import exactly the failure modes the audition is supposed to detect.
+  import exactly the failure modes the audition is supposed to detect. What the audition measures
+  is a **floor**: critics are graded with no fetched sources in front of them, while a deployment
+  with source verification switched on hands its evidence critic the pages the report cites
+  (D-audition-source-mode). That is deliberate — it is the condition a real run falls back to
+  every time a page is paywalled, blocked or offline, which the fetch design expects to be common
+  enough that the critic's prompt is written around it — but it means `fit` says the
+  model can do the job on the text alone, not that it reads a fetched page well. Certifying that
+  needs deterministic offline source packets shipped with the fixtures, which is an open item.
 - **The dispute channel.** Critics can be wrong, and a false positive is otherwise
   indistinguishable from a real defect — floors escalate it, the blind referee counts it, and a
   compliant writer would "fix" the report into falsehood. An opt-in channel (D-writer-disputes) lets the writer

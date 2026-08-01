@@ -578,6 +578,18 @@ def test_prompt_hash_tracks_the_critic_prompt(monkeypatch):
     assert audition.prompt_hash() != before
 
 
+def test_prompt_hash_carries_the_source_mode(monkeypatch):
+    """The hash covers the source-less surface only, so the mode has to be in the key.
+
+    Without the tag, a sources-present audition mode would key its verdicts identically
+    to the source-less ones measured today and inherit them wholesale — a claim about a
+    measurement that was never taken (D-audition-source-mode).
+    """
+    before = audition.prompt_hash()
+    monkeypatch.setattr(audition, "AUDITION_SOURCE_MODE", "sources:fixture-packet")
+    assert audition.prompt_hash() != before
+
+
 # -------------------------------------------------------------- running, offline
 
 
@@ -642,6 +654,38 @@ def test_run_assignment_uses_the_production_critic_prompt():
         Lens.EVIDENCE, fixture.question, report_mod.render_with_loci(fixture.artifact), None
     )
     assert any(user == expected for _, user in client.prompts)
+
+
+def test_audition_measures_the_source_less_prompt_surface():
+    """The verdict is a floor claim about the prompt with no fetched pages in it.
+
+    Production runs `verify_sources` on (docs/deployment-profile.md), so its evidence
+    critic can see fetched page text and a `misrepresented_source` sharpened into a
+    checkable fact. Fixtures ship no source packet, so the harness exercises neither —
+    a deliberate scope (D-audition-source-mode) rather than an oversight, and pinned
+    here so it stays a property of the code and not just a claim in a document.
+    """
+    from reasonable_answer import report as report_mod
+    from reasonable_answer.fetch import FetchedSource
+
+    fixtures = audition.load_fixtures(CORPUS)
+    slot = audition.Assignment(alias="a", identity="p/m", lens=Lens.EVIDENCE, position=0)
+    client = ScriptedClient(lambda alias, user: [])
+    audition.run_assignment(client, slot, fixtures, repetitions=1)
+
+    fixture = next(
+        f for f in fixtures.for_lens(Lens.EVIDENCE) if f.id == "fabricated-citation-01"
+    )
+    rendered = report_mod.render_with_loci(fixture.artifact)
+    seen = {user for _, user in client.prompts}
+    assert prompts.critic_user(Lens.EVIDENCE, fixture.question, rendered, None) in seen
+    with_page = prompts.critic_user(
+        Lens.EVIDENCE,
+        fixture.question,
+        rendered,
+        [FetchedSource(url="https://example.org/a", title="T", text="Body text.")],
+    )
+    assert with_page not in seen
 
 
 def test_failed_lens_counts_as_schema_failure_not_as_silence():
