@@ -224,8 +224,18 @@ def test_control_citations_resolve_in_both_directions(fixture_id):
     )
     body, entries = _split_sources(fixture.artifact)
     assert entries, f"{fixture_id}: no '## Sources' section"
-    assert len(entries) >= MIN_CONTROL_SOURCES, (
-        f"{fixture_id}: {len(entries)} sources — thin enough to earn `one_sided_sourcing`"
+
+    # Count *distinct* sources, not raw entries: `one_sided_sourcing` is a property of how
+    # many separate sources back a claim, so the same source listed twice must not count
+    # twice. Normalise each entry to its `(surname, year)` identity; an entry the regex
+    # cannot parse falls back to its own text, so nothing is silently collapsed.
+    def _identity(entry):
+        m = _SOURCE_ENTRY.match(entry)
+        return (m.group(1), m.group(2)) if m else entry.strip()
+
+    distinct = {_identity(e) for e in entries}
+    assert len(distinct) >= MIN_CONTROL_SOURCES, (
+        f"{fixture_id}: {len(distinct)} distinct sources — thin enough to earn `one_sided_sourcing`"
     )
 
     for name, year in sorted(set(_INTEXT_CITE.findall(body))):
