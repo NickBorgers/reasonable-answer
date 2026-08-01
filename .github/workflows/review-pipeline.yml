@@ -290,8 +290,8 @@ jobs:
       role: invariant
       agent: claude
       # The never-abstain backstop on the six invariants and the merge gate. Nothing
-      # downstream catches a safety-property regression this role misses, so it is the one
-      # reviewer pinned to the strongest model available rather than the cheapest adequate one.
+      # downstream catches a safety-property regression this role misses, so it is the role
+      # where the tier is chosen for headroom rather than for economy.
       model: claude-opus-5
       pr_number: ${{ inputs.pr_number }}
       reviewed_sha: ${{ inputs.reviewed_sha }}
@@ -313,7 +313,7 @@ jobs:
       agent: codex
       # The most mechanical role in the panel: does the prose match the diff, and did a
       # behaviour change bring its decision entry with it. Both are checks against text that
-      # is present, so it is the one role given the cheaper tier.
+      # is present, so it is the one role given the lower tier.
       model: gpt-5.6-luna
       pr_number: ${{ inputs.pr_number }}
       reviewed_sha: ${{ inputs.reviewed_sha }}
@@ -378,7 +378,7 @@ jobs:
       # (Claude), and the guard on the spec's direction should not share a model
       # family with the guard on the spec's conformance (QP3, D-quality-reviewer).
       agent: codex
-      # Sol rather than the cheaper Luna: this role may not rely on parametric memory of the
+      # Sol rather than the lower-tier Luna: this role may not rely on parametric memory of the
       # literature, so it has to actually fetch and read the sources the register cites
       # (D-quality-reviewer) — the most demanding reading task on the panel.
       model: gpt-5.6-sol

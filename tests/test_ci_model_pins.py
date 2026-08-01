@@ -13,14 +13,15 @@ workflow ever passed it, so every role ran whatever its CLI defaulted to and the
 a `gpt-5.5` literal buried in a shell heredoc. The panel's composition could change with no diff
 (D-ci-model-pinning). These tests make both properties fail at `pytest` time instead.
 
-Fully offline: it reads workflow YAML and one shell script from this repo, and runs
-``scripts/ci-agent-model.sh``, which touches no network, no git, and no token.
+Fully offline: it reads workflow YAML and one shell script from this repo, and runs the
+``agent_model()`` snippet extracted from that YAML under ``bash``. No network, no git, no token.
 """
 
 from __future__ import annotations
 
 import re
 import subprocess
+import textwrap
 from pathlib import Path
 
 import pytest
@@ -31,7 +32,12 @@ PIPELINE = REPO_ROOT / ".github" / "workflows" / "review-pipeline.yml"
 REVIEWER = REPO_ROOT / ".github" / "workflows" / "review-reviewer.yml"
 FIXER = REPO_ROOT / ".github" / "workflows" / "review-fixer.yml"
 RUN_IN_CONTAINER = REPO_ROOT / ".github" / "actions" / "review-agent-run" / "run-in-container.sh"
-AGENT_MODEL_SH = REPO_ROOT / "scripts" / "ci-agent-model.sh"
+RESOLVER = REPO_ROOT / ".github" / "workflows" / "resolve-issue.yml"
+
+# The `agent_model()` shell function inlined in the resolver and the fixer. It is duplicated on
+# purpose — see the comment at either site — so the check that keeps the copies honest lives
+# here rather than in a shared file the pipeline could not read.
+_AGENT_MODEL_CASE_RE = re.compile(r"^\s*(claude|codex)\)\s*echo\s*\"([^\"]+)\"", re.M)
 
 # Which family an alias belongs to, keyed by the agent that must run it. A pin naming the wrong
 # family would resolve on the wrong proxy path and 404 inside the container, a long way from
@@ -109,13 +115,16 @@ def test_no_model_literal_survives_in_the_container_script() -> None:
     """The `gpt-5.5` default lived here, invisible to anyone reading the pipeline.
 
     A model named in the shell script is one that cannot be seen beside the role it applies to,
-    which is the whole failure D-ci-model-pinning fixes. The codex path must fail closed on an
-    unset `AGENT_MODEL` rather than substituting one.
+    which is the whole failure D-ci-model-pinning fixes.
+
+    Scope note: this asserts only that no alias is *written* here. That the script *refuses* an
+    unpinned model is a behavioural claim, and is proved by running it —
+    ``tests/test_run_in_container.py::test_an_unpinned_model_is_refused_on_the_codex_path`` and
+    its claude twin — rather than by matching the guard's own source text here.
     """
     text = RUN_IN_CONTAINER.read_text(encoding="utf-8")
     stray = re.findall(r"\b(?:gpt|claude)-[0-9a-z.]+[0-9a-z-]*\b", text)
     assert not stray, f"model literal(s) {stray} back in run-in-container.sh"
-    assert "AGENT_MODEL:?" in text, "codex path no longer fails closed on an unpinned model"
 
 
 def test_every_caller_of_the_agent_composite_passes_a_model() -> None:
@@ -138,27 +147,60 @@ def test_every_caller_of_the_agent_composite_passes_a_model() -> None:
     assert not missing, f"review-agent-run called with no model pinned: {missing}"
 
 
-def test_the_shared_agent_model_map_answers_for_both_agents() -> None:
-    """The resolver and fixer pick their agent at runtime, so their model comes from here."""
-    for agent, prefix in _FAMILY_PREFIX.items():
-        done = subprocess.run(
-            ["bash", str(AGENT_MODEL_SH), agent],
-            capture_output=True,
-            text=True,
-            check=True,
+def _inline_agent_model_map(workflow: Path) -> dict[str, str]:
+    return dict(_AGENT_MODEL_CASE_RE.findall(workflow.read_text(encoding="utf-8")))
+
+
+@pytest.mark.parametrize("workflow", [RESOLVER, FIXER], ids=lambda p: p.name)
+def test_the_runtime_agent_map_answers_for_both_agents(workflow: Path) -> None:
+    """The resolver and fixer pick their agent at runtime, so each carries the map inline."""
+    mapping = _inline_agent_model_map(workflow)
+    assert set(mapping) == set(_FAMILY_PREFIX), f"{workflow.name} maps {set(mapping)}"
+    for agent, model in mapping.items():
+        assert model.startswith(_FAMILY_PREFIX[agent]), (
+            f"{workflow.name} maps agent '{agent}' to '{model}', which is the other family's"
         )
-        assert done.stdout.strip().startswith(prefix)
 
 
-def test_the_shared_map_refuses_an_agent_it_does_not_know() -> None:
-    """Fail closed: a typo must stop the job, not resolve to an empty model."""
+def test_the_two_inline_copies_of_the_map_agree() -> None:
+    """The price of inlining, paid here.
+
+    The map cannot live in a shared script: the review pipeline runs its own logic from main's
+    checkout, so a helper file a PR adds does not exist for the run that reviews that PR — it
+    dies at exit 127. Workflow YAML ships with the PR; a new file in the tree does not. So the
+    copies are deliberate, and this is what stops them drifting apart.
+    """
+    assert _inline_agent_model_map(RESOLVER) == _inline_agent_model_map(FIXER)
+
+
+@pytest.mark.parametrize("workflow", [RESOLVER, FIXER], ids=lambda p: p.name)
+def test_the_runtime_map_refuses_an_agent_it_does_not_know(workflow: Path) -> None:
+    """Fail closed: a typo must stop the job, not resolve to an empty model.
+
+    Extracts the shell function as written and runs it, so this tests the deployed text rather
+    than a restatement of it.
+    """
+    text = workflow.read_text(encoding="utf-8")
+    body = re.search(r"agent_model\(\) \{.*?\n(\s*)\}\n", text, re.S)
+    assert body, f"no agent_model() function found in {workflow.name}"
+    # The function is indented inside a YAML block scalar; dedent so bash can parse it.
+    snippet = textwrap.dedent(body.group(0))
+
     done = subprocess.run(
-        ["bash", str(AGENT_MODEL_SH), "gemini"],
+        ["bash", "-c", f"{snippet}\nagent_model gemini"],
         capture_output=True,
         text=True,
     )
     assert done.returncode != 0
     assert not done.stdout.strip()
+
+    ok = subprocess.run(
+        ["bash", "-c", f"{snippet}\nagent_model codex"],
+        capture_output=True,
+        text=True,
+        check=True,
+    )
+    assert ok.stdout.strip() == _inline_agent_model_map(workflow)["codex"]
 
 
 def test_the_cold_fixer_pin_is_resolved_through_the_shared_map() -> None:
@@ -172,3 +214,21 @@ def test_the_cold_fixer_pin_is_resolved_through_the_shared_map() -> None:
     assert "model: ${{ steps.session.outputs.cold_model }}" in text
     stray = re.findall(r"model:\s*(?:gpt|claude)-[0-9a-z.-]+", text)
     assert not stray, f"cold fixer pins a model literal {stray} instead of resolving it"
+
+
+def test_the_pipeline_never_shells_out_to_a_script_a_pr_could_add() -> None:
+    """The regression that took the fixer down on the PR that introduced these pins.
+
+    review-fixer.yml and review-reviewer.yml run the pipeline's own logic from *main's*
+    checkout, deliberately, so that a PR cannot edit the pipeline reviewing it. The corollary
+    is easy to miss: a `scripts/` helper added by a PR is absent for that PR's own review, and
+    the step dies at exit 127 with no reviewer having said anything wrong. Anything these
+    workflows need at runtime has to be in the workflow text itself, or already on main.
+    """
+    known_on_main = {"ci-session-store.sh"}
+    for workflow in (FIXER, REVIEWER):
+        called = set(re.findall(r"\./scripts/([a-z0-9-]+\.sh)", workflow.read_text("utf-8")))
+        assert called <= known_on_main, (
+            f"{workflow.name} calls {sorted(called - known_on_main)} from the main checkout; "
+            f"if a PR adds that file, the PR's own review cannot see it"
+        )

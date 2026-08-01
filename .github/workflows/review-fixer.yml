@@ -368,13 +368,30 @@ jobs:
           # choice free, so it follows the default author rather than diverging from it.
           COLD_AGENT=codex
           RESOLVED_AGENT=$([ "$MODE" = "author-resume" ] && echo "$AGENT" || echo "$COLD_AGENT")
-          # Resumed or cold, the model comes from the same shared map the resolver uses, so
-          # a resumed author cannot end up on a different checkpoint than it started on.
-          RESOLVED_MODEL=$(./scripts/ci-agent-model.sh "$RESOLVED_AGENT")
+
+          # ── agent→model map (D-ci-model-pinning) ──────────────────────────────────────
+          # Inline, and duplicated in resolve-issue.yml, on purpose. This job runs the
+          # pipeline's own logic from *main's* checkout so a PR cannot edit the pipeline that
+          # reviews it — which means a helper script introduced by a PR does not exist for the
+          # run reviewing that PR, and the step dies at exit 127. Workflow YAML ships with the
+          # PR; a new file in the tree does not. tests/test_ci_model_pins.py asserts the two
+          # copies stay identical, so the drift a shared file would have prevented is caught
+          # offline instead.
+          agent_model() {
+            case "$1" in
+              codex)  echo "gpt-5.6-sol" ;;
+              claude) echo "claude-opus-5" ;;
+              *) echo "unknown agent '$1' (expected claude | codex)" >&2; return 1 ;;
+            esac
+          }
+
+          # Resumed or cold, the model comes from the same map, so a resumed author cannot end
+          # up on a different checkpoint than it started on.
+          RESOLVED_MODEL=$(agent_model "$RESOLVED_AGENT")
           # Emitted separately because the late fallback step below cannot reuse the pair
           # above: it fires precisely when the primary run failed, and in author-resume mode
           # that pair names the *author's* agent, not the cold one.
-          COLD_MODEL=$(./scripts/ci-agent-model.sh "$COLD_AGENT")
+          COLD_MODEL=$(agent_model "$COLD_AGENT")
           {
             echo "mode=${MODE}"
             echo "session_dir=${SESSION_DIR}"

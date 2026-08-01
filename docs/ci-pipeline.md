@@ -73,12 +73,14 @@ review; the same reasoning applies to its CI.
 Each role also **names its model**, not merely its family (D-ci-model-pinning). `agent:`
 selects a family; the checkpoint inside it used to be whatever the CLI happened to default to,
 which meant a role's effective reviewer could change with no diff to review — the panel's
-composition was not a property of this repository. The pins are sized to the work each role
-does: `invariant` is the never-abstain backstop on the six invariants and the merge gate, so
-it gets the strongest model available; `docs` checks text against text, so it gets the cheapest
-adequate one. The family split those pins sit inside is what [QP3](./quality-principles.md)
-protects, and it is unchanged — three Codex roles, two Claude, with `quality` cross-family from
-`invariant`. Both the roles and the models are visible in one place, `review-pipeline.yml`.
+composition was not a property of this repository. The pins are sized to the *shape* of each
+role's work: `invariant` is the never-abstain backstop on the six invariants and the merge gate,
+so its tier is chosen for headroom; `docs` checks text against text, so it takes a lower one.
+That sizing is a revisable bet, not a measured result — no benchmark was run, and this repo has
+no per-role cost telemetry (D-ci-model-pinning). The family split those pins sit inside is what
+[QP3](./quality-principles.md) protects, and it is unchanged — three Codex roles, two Claude,
+with `quality` cross-family from `invariant`. Both the roles and the models are visible in one
+place, `review-pipeline.yml`.
 
 ### Reviewer contract
 
@@ -241,15 +243,23 @@ started is safe.
 
 An `agent:claude` / `agent:codex` label is a persistent per-issue override; an explicit
 choice in an `/autoresolve` comment outranks it. With neither, the agent is
-`vars.CI_AGENT_DEFAULT`, which defaults to **codex** (D-ci-model-pinning): resolving an issue
-end to end is the pipeline's largest single token consumer, and it is a stage where family
-diversity is not at stake, since all five reviewer roles read the result afterwards whatever
-wrote it.
+`vars.CI_AGENT_DEFAULT`, which defaults to **codex** (D-ci-model-pinning): resolving an issue end
+to end is the pipeline's longest-running agent task by its configured budget (60 minutes against
+the reviewers' 30), and it is a stage where family diversity is not at stake, since all five
+reviewer roles read the result afterwards whatever wrote it.
 
-Because that agent is chosen at runtime, the resolver and the fixer cannot carry an inline
-`model:` the way a reviewer role does. Both resolve it through
-[`scripts/ci-agent-model.sh`](https://github.com/NickBorgers/reasonable-answer/blob/main/scripts/ci-agent-model.sh),
-a single agent→model map, rather than each keeping a copy that could drift.
+Because that agent is chosen at runtime, the resolver and the fixer cannot carry a fixed
+`model:` the way a reviewer role does. Each resolves it through an `agent_model()` shell
+function written inline in its own workflow.
+
+That duplication is deliberate, and the reason is worth stating because it is easy to
+rediscover the hard way. The reviewer and fixer jobs run the pipeline's own logic from **main's
+checkout**, so that a PR cannot edit the pipeline that reviews it. The corollary is that a
+`scripts/` helper *added by a PR does not exist for that PR's own review* — the step dies at
+exit 127, in a job nobody was reading, with no reviewer having found anything wrong. Workflow
+YAML ships with the PR; a new file in the tree does not. So the map lives in the YAML, and
+`tests/test_ci_model_pins.py` asserts the two copies stay identical — the anti-drift job a
+shared file would have done, moved to a place the pipeline can actually reach.
 
 ### The fixer
 

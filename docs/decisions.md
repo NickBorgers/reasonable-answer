@@ -2363,15 +2363,34 @@ qualify, because that adjacency is what lets a reader check the panel's composit
 This also pays off the gap noted above: `invariant`, `docs`, `security`, and `test` now carry a
 stated reason for their family, which QP3 asks of a new role and which they had never had.
 
+**What the "why this tier" column is, and is not.** It records the *shape of each role's task* —
+how much of the repository it must hold, whether it must fetch and read sources, whether anything
+downstream catches what it misses. Those are properties of this pipeline, checkable against the
+prompts in `.github/scripts/review/prompts/`. It is **not** a measured claim that a given alias
+is adequate for a given role, or that one costs less than another: no benchmark was run, and the
+relative capability of these checkpoints is asserted by their vendors, not established here. The
+tiering is a deliberate, revisable bet, and the thing that would falsify it is a role that starts
+missing defects it used to catch — visible as blockers appearing only after a human review.
+
 **Decision — Codex becomes the default author, and the cold fixer.** `CI_AGENT_DEFAULT` defaults
-to `codex`, and the cold fixer is pinned to it. Resolving an issue end to end is the largest
-single token consumer in the pipeline, and it is the stage where family diversity is *not* at
+to `codex`, and the cold fixer is pinned to it. Resolving an issue end to end is the pipeline's
+longest-running agent task by its configured budget — a 60-minute timeout against the reviewers'
+30 — and it is the stage where family diversity is *not* at
 stake: whatever writes a PR, all five reviewer roles still read it afterwards, and author
 exclusion is enforced by context, not by vendor ([isolation.md](./isolation.md) — model identity
 is the secondary boundary there, the context window the primary one). The cold fixer's existing
 rationale already said the author's identity buys nothing when there is no session to resume, so
-the pin was free to move. Because the agent is chosen at runtime in both stages, the model comes
-from one shared map, `scripts/ci-agent-model.sh`, rather than a copy in each workflow.
+the pin was free to move. Because the agent is chosen at runtime in both stages, each resolves
+the model through an `agent_model()` map written inline in its own workflow.
+
+**Why that map is duplicated rather than extracted.** It was a shared script first, and the
+fixer died at exit 127 on the very PR that introduced it. The reviewer and fixer jobs run the
+pipeline's own logic from **main's** checkout — that is what stops a PR editing the pipeline
+reviewing it — so a `scripts/` helper added by a PR does not exist for that PR's own review.
+Workflow YAML ships with the PR; a new file in the tree does not. Two copies in the YAML is
+therefore the only form that bootstraps, and `tests/test_ci_model_pins.py` asserts they stay
+identical, doing offline the anti-drift job the shared file was there to do. It also refuses any
+new `./scripts/*.sh` call from those two workflows, so the trap does not get re-set.
 
 **What this is not.** It is not a move to a single-family panel. The split stays three Codex, two
 Claude, with `quality` cross-family from `invariant` per D-quality-reviewer, and QP3 now has an
@@ -2379,12 +2398,17 @@ executable check (`tests/test_ci_model_pins.py`) rather than resting on reviewer
 QP3's surface column is *widened* to include `model:` — a strengthening, so §4 of the register,
 which gates weakening a row on new fetchable evidence, does not apply.
 
-**The cost basis, stated honestly.** This rests on published list pricing, not on measured spend:
-there is no per-role cost telemetry in this repository, and adding it was out of scope. The change
-is not uniformly cheaper — `test` dropping to Sonnet and `docs` to Luna save, but `gpt-5.5` →
-`gpt-5.6-sol` on three surfaces is an upgrade that may cost more. The defensible claim is the
-first decision, not the second: the pipeline now says what it runs. Measuring actual per-role
-spend, and revisiting these tiers against it, is an open item below.
+**The cost basis, and its limits.** The motivating request was to cut CI API spend. No cost claim
+is made here, because none can be supported: this repository has no per-role cost telemetry, no
+spend was measured before or after, and vendor list prices are neither cited in the register nor
+stable enough to state as fact in a normative document. So the tier assignments are a bet on task
+shape, not a demonstrated saving, and the direction of the net change is genuinely unknown — two
+roles moved to cheaper-listed tiers while three moved to a newer, more expensive-listed one.
+
+What *is* established, and is the actual justification for this decision, is the first half: the
+pipeline now names the model each role runs, which it previously did not. That claim needs no
+citation — it is a property of the diff. Measuring per-role spend, and revisiting these tiers
+against evidence rather than against task shape, is an open item below.
 
 **Known risk.** Making Codex the default author makes `codex exec resume --last` the fixer's
 common path, and the cold-fixer fallback — which D-resume-timeout added — has to date never

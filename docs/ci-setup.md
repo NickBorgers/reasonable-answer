@@ -115,7 +115,7 @@ default author, since setting it back to `claude` takes effect without a commit.
 Every role names its model rather than following a CLI default (D-ci-model-pinning), so the
 proxy has to resolve all five aliases below or the job fails closed at `review-agent-run`.
 Reviewer pins live in `review-pipeline.yml` beside the `agent:` they qualify; the two stages
-that pick their agent at runtime resolve theirs through `scripts/ci-agent-model.sh`.
+that pick their agent at runtime carry an `agent_model()` map inline instead.
 
 | surface | agent | alias | why this tier |
 |---|---|---|---|
@@ -128,11 +128,17 @@ that pick their agent at runtime resolve theirs through `scripts/ci-agent-model.
 
 Both CLIs reach these through the one proxy, on the two compatibility paths above — so a
 Claude alias must resolve on `LLM_PROXY_BASE_URL` and a GPT alias on
-`LLM_PROXY_OPENAI_BASE_URL`. Confirm before changing a pin:
+`LLM_PROXY_OPENAI_BASE_URL`. Confirm before changing a pin, exporting the same values you
+set as repository variables above:
 
 ```bash
-curl -s -H "Authorization: Bearer ${LITELLM_API_KEY}" "${LLM_PROXY_OPENAI_BASE_URL}models"
+export AI_API_KEY=fake-key                                   # the proxy is ACL'd, not key-authed
+export LLM_PROXY_OPENAI_BASE_URL=https://llm.<tailnet>.ts.net/v1/
+curl -s -H "Authorization: Bearer ${AI_API_KEY}" "${LLM_PROXY_OPENAI_BASE_URL}models"
 ```
+
+(`AI_API_KEY` is the CI-side name. `LITELLM_API_KEY` is the *runtime app's* variable, described
+in [deployment-profile.md](./deployment-profile.md); the two are not interchangeable here.)
 
 ## 4. Create the labels
 

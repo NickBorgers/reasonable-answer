@@ -314,8 +314,7 @@ jobs:
           echo "Author session directory: ${DIR}"
 
       # The agent is chosen at runtime — a comment, a label, or the repo default — so the
-      # model cannot be written inline the way a reviewer role's is. Resolved from the one
-      # shared map rather than a copy of it (D-ci-model-pinning).
+      # model cannot be written inline the way a reviewer role's is (D-ci-model-pinning).
       - name: Resolve the model for that agent
         if: steps.existing.outputs.skip != 'true'
         id: model
@@ -323,7 +322,21 @@ jobs:
           AGENT: ${{ needs.authorize.outputs.agent }}
         run: |
           set -euo pipefail
-          MODEL=$(./scripts/ci-agent-model.sh "$AGENT")
+
+          # ── agent→model map (D-ci-model-pinning) ──────────────────────────────────────
+          # Kept identical to the copy in review-fixer.yml, and inline in both rather than
+          # extracted to a script: the review pipeline runs its own logic from main's
+          # checkout, so a helper file added by a PR does not exist for the run that reviews
+          # it. tests/test_ci_model_pins.py asserts the two copies agree.
+          agent_model() {
+            case "$1" in
+              codex)  echo "gpt-5.6-sol" ;;
+              claude) echo "claude-opus-5" ;;
+              *) echo "unknown agent '$1' (expected claude | codex)" >&2; return 1 ;;
+            esac
+          }
+
+          MODEL=$(agent_model "$AGENT")
           echo "model=${MODEL}" >> "$GITHUB_OUTPUT"
           echo "Author agent ${AGENT} runs on ${MODEL}"
 
