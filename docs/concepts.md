@@ -215,7 +215,12 @@ it — each one, again, a guard against a known LLM failure mode:
   controls, and graded by plain code — measuring both whether they catch what's there and whether
   they invent what isn't. A control is graded by every lens, so it has to be sound under every
   lens (D-control-soundness): a "sound" control carrying one real uncited claim scores every
-  competent evidence critic as an inventor of defects, which is what it did. An LLM grader is
+  competent evidence critic as an inventor of defects, which is what it did. The corpus also has to
+  hold up its end per lens: every lens carries at least one *obvious*-tier fixture, because the two
+  fail-closed gates count only those, and at least one defect pinned to a real paragraph, because a
+  defect matchable anywhere measures only which category the critic named (D-obvious-per-lens). The
+  two failures that defeat the harness completely — never firing, and never once letting a sound
+  report through — are hardcoded as unfit rather than left to a threshold. An LLM grader is
   expressly forbidden: the harness must not depend on
   the property it exists to measure. Model judges carry documented and reproducible biases —
   position, verbosity, and self-enhancement among them
