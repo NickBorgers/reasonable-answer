@@ -15,7 +15,7 @@ material defect* — into a tautology, and nothing downstream can tell the diffe
 So: fixtures with known planted defects, a **mechanical** grader, and a verdict per
 (model, lens).
 
-Three design commitments worth stating plainly.
+Four design commitments worth stating plainly.
 
 **The grader is a pure function and never an LLM.** An LLM grader is precisely the
 component whose reliability is in question here; using one would make the harness's
@@ -28,13 +28,25 @@ budget, it drives `stagnation_count` to the limit, and rule 13 — after spendin
 bounded rewrite (D-scoped-revision) — terminates `exhausted_unresolved` on a report that
 was fine. Silence and noise are two ways to fail the same job.
 
-**The measurement is taken with no fetched sources**, which is a floor and not the whole
-of what production asks of an evidence critic (`AUDITION_SOURCE_MODE`,
-D-audition-source-mode). A verdict here says the model can or cannot perform the lens on
-the text alone — the standard production falls back to for every citation whose body did
-not arrive, a path the fetch design explicitly preserves in the critic prompt
-(D-existence-vs-body). It says nothing about the sharpened,
-sources-present prompt the deployment's evidence lens runs when a page does arrive.
+**A verdict covers the whole corpus, or it is not a verdict.** A call that fails the
+schema is neither a miss nor a false positive, so it is excluded from grading — but
+excluding it from the *denominators* too would let a model that reliably breaks on one
+fixture have that fixture deleted from its own exam. Every rate below is therefore
+paired with a coverage count, and a fixture that never produced a single gradable
+review makes the verdict `unfit` before any rate is read (D-audition-failure-coverage).
+
+**The measurement is taken with no fetched sources**, which is a floor strictly below
+what production ever hands its evidence critic once a report cites anything at all
+(`AUDITION_SOURCE_MODE`, D-audition-source-mode). `sources=None` here matches only the
+"nothing to check" case of zero citations extracted from the report — production's
+failed-fetch case (a citation that is paywalled, blocked or offline) still renders a
+`fetched_sources_block` naming the failure, with the instruction not to re-raise a
+not-found `triage.mechanical_citation_issues` has already settled mechanically
+(D-existence-vs-body). A verdict here says the model can or cannot perform the lens with
+no source scaffolding whatsoever; it says nothing about the sharpened, sources-present
+prompt the deployment's evidence lens runs when a page arrives, and nothing about the
+weaker but still-present on-its-face prompt production runs on a citation it attempted
+and failed to fetch.
 """
 
 from __future__ import annotations
@@ -50,7 +62,7 @@ from enum import Enum
 from pathlib import Path
 
 import yaml
-from pydantic import BaseModel, ConfigDict, Field
+from pydantic import BaseModel, ConfigDict, Field, model_validator
 
 from . import prompts
 from .config import AuditionConfig, AuditionThresholds, ConfigError, Roster
@@ -366,6 +378,18 @@ class Metrics(BaseModel):
     identity: str
     lens: Lens
 
+    #: Fixtures this (identity, lens) owed a measurement on — `for_lens`, controls
+    #: included. Required rather than defaulted on purpose: a record that cannot say
+    #: what it owed cannot say whether it measured all of it, so an entry written
+    #: before coverage accounting existed fails validation and `load_cache` drops it
+    #: to *not audited* — never to a pass (D-audition-failure-coverage).
+    fixtures_owed: int = Field(ge=0)
+    #: Ids of owed fixtures that never produced one gradable review, across every
+    #: repetition. Not the same as "looked and found nothing": a graded zero is a
+    #: measured miss and lands in the denominators below, whereas these fixtures are
+    #: absent from them entirely, which is what makes them dangerous.
+    uncovered_fixtures: tuple[str, ...] = ()
+
     planted_total: int = 0
     strict_hits: int = 0
     same_lens_hits: int = 0
@@ -381,6 +405,20 @@ class Metrics(BaseModel):
     calls: int = 0
     schema_failures: int = 0
     latencies: tuple[float, ...] = ()
+
+    @model_validator(mode="after")
+    def _coverage_is_consistent(self) -> Metrics:
+        if len(self.uncovered_fixtures) > self.fixtures_owed:
+            raise ValueError(
+                f"{len(self.uncovered_fixtures)} uncovered fixtures against "
+                f"{self.fixtures_owed} owed — the record contradicts itself"
+            )
+        return self
+
+    @property
+    def fixtures_covered(self) -> int:
+        """Owed fixtures that produced at least one gradable review."""
+        return self.fixtures_owed - len(self.uncovered_fixtures)
 
     @property
     def strict_sensitivity(self) -> float:
@@ -454,6 +492,9 @@ def judge(metrics: Metrics, thresholds: AuditionThresholds) -> Judgement:
 
     Order matters: every fail-closed condition is checked before any warn condition,
     so a model that is both noisy and blind reports `unfit` rather than `marginal`.
+    The mechanical gates — schema failures, then fixture coverage — come before the
+    judgement gates, so a model that cannot be measured is reported as unmeasurable
+    rather than graded on whatever fraction of the corpus survived.
     """
     reasons: list[str] = []
 
@@ -467,6 +508,23 @@ def judge(metrics: Metrics, thresholds: AuditionThresholds) -> Judgement:
         reasons.append(
             f"schema failure rate {metrics.schema_failure_rate:.0%} exceeds "
             f"{thresholds.max_schema_failure_rate:.0%} — lens results would fail closed"
+        )
+        return Judgement(Verdict.UNFIT, tuple(reasons))
+
+    # Coverage before any rate, because coverage is what the rates are *over*. A
+    # fixture whose every repetition failed contributes nothing to `planted_total`,
+    # `obvious_total` or `control_runs`, so the sensitivity and noise rates below would
+    # be computed across a corpus subset the model selected by failing — and a model
+    # failing under the schema gate's tolerance (3 of 15 calls is exactly one fixture
+    # of five, at 20%) could delete a whole fixture from its own exam and still read
+    # `fit`. `unfit` rather than `insufficient` for the same reason the schema gate
+    # above is: being asked `repetitions` times and returning nothing gradable every
+    # time is a definite, reproducible failure, not an absence of evidence.
+    if metrics.uncovered_fixtures:
+        reasons.append(
+            f"never produced a gradable review of {len(metrics.uncovered_fixtures)} of "
+            f"{metrics.fixtures_owed} fixtures ({', '.join(metrics.uncovered_fixtures)}) — "
+            f"every rate would be measured over the rest of the corpus only"
         )
         return Judgement(Verdict.UNFIT, tuple(reasons))
 
@@ -555,12 +613,15 @@ AUDITION_AUTHOR = "(audition-fixture)"
 #: the cache identity (D-audition-source-mode).
 #:
 #: Every call the harness makes passes `sources=None`, so the critic sees the
-#: unsharpened category-meaning table and no fetched-pages block — while the production
-#: deployment runs `verify_sources` on (docs/deployment-profile.md) and its evidence
-#: critic sees both. That is deliberate: this measures the capability floor a critic
-#: brings with no source access, which is also what production falls back to on every
-#: blocked or paywalled fetch. It is not a claim about the sources-present surface, and
-#: D-audition-source-mode records what that leaves uncertified.
+#: unsharpened category-meaning table and no fetched-pages block at all — while the
+#: production deployment runs `verify_sources` on (docs/deployment-profile.md) and its
+#: evidence critic sees a fetched-pages block on any citation it attempted to fetch,
+#: including a failed one (a `BLOCKED` or `NOT FOUND` entry, not silence). That is
+#: deliberate: this measures the capability floor a critic brings with no source
+#: scaffolding whatsoever, a strictly lower bar than production's failed-fetch case. It
+#: is not a claim about the sources-present surface, nor about the weaker but
+#: still-present on-its-face prompt production runs on an attempted-and-failed citation,
+#: and D-audition-source-mode records what both leave uncertified.
 #:
 #: The tag is hashed into `prompt_hash`, so a sources-present mode added later gets its
 #: own cache line rather than inheriting a verdict measured under this one.
@@ -575,12 +636,21 @@ def run_assignment(
     require_verbatim_spans: bool = True,
 ) -> Metrics:
     """Audition one model on one lens across the whole corpus. Needs a client."""
+    owed = fixtures.for_lens(assignment.lens)
     metrics = Metrics(
-        alias=assignment.alias, identity=assignment.identity, lens=assignment.lens
+        alias=assignment.alias,
+        identity=assignment.identity,
+        lens=assignment.lens,
+        fixtures_owed=len(owed),
     )
     latencies: list[float] = []
+    #: Fixtures that produced at least one gradable review. Recorded per fixture rather
+    #: than as a count of failures, because "20% of calls failed" cannot distinguish a
+    #: model that stumbles once on each of five fixtures from one that is deterministically
+    #: broken on a single fixture and therefore never measured on it at all.
+    covered: set[str] = set()
 
-    for fixture in fixtures.for_lens(assignment.lens):
+    for fixture in owed:
         for _ in range(repetitions):
             started = time.monotonic()
             result = critique_once(
@@ -609,6 +679,8 @@ def run_assignment(
                 metrics.schema_failures += 1
                 continue
 
+            covered.add(fixture.id)
+
             if fixture.is_control:
                 metrics.control_runs += 1
                 found = material_issue_count(result)
@@ -626,7 +698,12 @@ def run_assignment(
                 metrics.obvious_total += len(detections)
                 metrics.obvious_hits += sum(1 for d in detections if d.same_lens)
 
-    return metrics.model_copy(update={"latencies": tuple(latencies)})
+    return metrics.model_copy(
+        update={
+            "latencies": tuple(latencies),
+            "uncovered_fixtures": tuple(f.id for f in owed if f.id not in covered),
+        }
+    )
 
 
 def run_audition(

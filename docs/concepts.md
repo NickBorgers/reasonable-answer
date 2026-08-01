@@ -215,19 +215,25 @@ it — each one, again, a guard against a known LLM failure mode:
   controls, and graded by plain code — measuring both whether they catch what's there and whether
   they invent what isn't. A control is graded by every lens, so it has to be sound under every
   lens (D-control-soundness): a "sound" control carrying one real uncited claim scores every
-  competent evidence critic as an inventor of defects, which is what it did. An LLM grader is
+  competent evidence critic as an inventor of defects, which is what it did. A verdict also has to
+  cover the whole corpus: a call that fails the schema is graded as neither a hit nor a miss, so a
+  model that reliably breaks on one fixture would have that fixture quietly dropped from its own
+  denominators — a fixture nothing ever graded is now `unfit`, not a better score
+  (D-audition-failure-coverage). An LLM grader is
   expressly forbidden: the harness must not depend on
   the property it exists to measure. Model judges carry documented and reproducible biases —
   position, verbosity, and self-enhancement among them
   ([Zheng et al. 2023](https://arxiv.org/abs/2306.05685)) — so a grader built from one would
   import exactly the failure modes the audition is supposed to detect. What the audition measures
-  is a **floor**: critics are graded with no fetched sources in front of them, while a deployment
-  with source verification switched on hands its evidence critic the pages the report cites
-  (D-audition-source-mode). That is deliberate — it is the condition a real run falls back to
-  when a page is paywalled, blocked or offline, and the fetch design explicitly preserves that
-  on-its-face review path — but it means `fit` says the
-  model can do the job on the text alone, not that it reads a fetched page well. Certifying that
-  needs deterministic offline source packets shipped with the fixtures, which is an open item.
+  is a **floor**, and deliberately a strict one: critics are graded with no fetched-source
+  scaffolding whatsoever, while a deployment with source verification switched on hands its
+  evidence critic a `fetched_sources_block` for every citation it attempted to fetch — including a
+  paywalled, blocked or offline one, which still renders as a named failure entry rather than
+  silence (D-audition-source-mode). So `fit` says only that the model can do the job on the
+  artifact text alone, with nothing about any citation to lean on, not that it reads a fetched page
+  well, and not even that it handles the weaker on-its-face prompt production runs on a citation
+  whose fetch failed. Certifying either needs deterministic offline source packets shipped with the
+  fixtures, which is an open item.
 - **The dispute channel.** Critics can be wrong, and a false positive is otherwise
   indistinguishable from a real defect — floors escalate it, the blind referee counts it, and a
   compliant writer would "fix" the report into falsehood. An opt-in channel (D-writer-disputes) lets the writer

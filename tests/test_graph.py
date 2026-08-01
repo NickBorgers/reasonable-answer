@@ -399,6 +399,9 @@ def plant_unfit_verdict(config: Config, identity: str, tmp_path: Path) -> None:
     silent = audition.Metrics(
         alias="logic-spec", identity=identity, lens=Lens.LOGIC,
         calls=10, planted_total=6, obvious_total=6, control_runs=4, control_clean_runs=4,
+        # Graded on every fixture it owed: the verdict under test is silence, not the
+        # coverage gate, which would otherwise reach `unfit` first for the wrong reason.
+        fixtures_owed=5,
     )
     assert audition.judge(silent, config.audition.thresholds).verdict is audition.Verdict.UNFIT
     audition.save_cache(
