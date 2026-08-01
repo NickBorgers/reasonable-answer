@@ -2333,8 +2333,8 @@ Rendering the frame as a layered mobile reading experience is a separate decisio
 375px viewport a reader got the question, the status badge and its meaning sentence, the back-link,
 the run id, and a four-control share row — roughly a screen and a half — before the report's first
 sentence. D-report-template makes every report open with a `## Conclusion` section; a page that
-buries that section under chrome squanders exactly what the frame exists to deliver. Reading happens
-mostly on phones, where the burial is worst.
+buries that section under chrome squanders exactly what the frame exists to deliver, and the narrow
+viewport measured above is where that burial costs the most.
 
 **Decision.** When the rendered body opens with a `## Conclusion` h2, `render_report` splits it at
 its `<h2>` boundaries and reassembles the page conclusion-first: the conclusion as a distinct card
@@ -2359,15 +2359,16 @@ no disclosure control that could ever show the objection without the engagement.
 reference list of long URLs is the least-read, most space-hungry section on a phone. A closed
 `<details>` prints as nothing, and the print stylesheet exists precisely because a report that
 reaches paper must keep its verdict and its evidence — so the fold is `screen-only` and a
-`print-only` duplicate carries the full list onto paper, no `beforeprint` JS (which iOS Safari, the
-actual print target, does not reliably fire). `export.html` is untouched: the transform lives in
-`web/render.py`, downstream of the shared markdown renderer, so the no-script export keeps its
-single-article shape.
+`print-only` duplicate carries the full list onto paper — a CSS-only mechanism with no `beforeprint`
+JS, consistent with this decision's no-new-JS, no-CSP-change constraint. `export.html` is untouched:
+the transform lives in `web/render.py`, downstream of the shared markdown renderer, so the no-script
+export keeps its single-article shape.
 
 **Deliberately not done.** No sticky section-jump bar, no collapsed topical sections, no citation
 drill-in yet — each builds on this sectionizer and each is its own decision; collapse-by-default in
-particular has genuinely split evidence (Wikimedia's 2025 experiment measured expanded sections
-*reducing* reading). And no restructuring of the run page: it shows the pipeline, not the report.
+particular is deferred to that separate decision rather than adopted here, precisely because folding
+a section away from its answer is the kind of tradeoff this decision is careful about. And no
+restructuring of the run page: it shows the pipeline, not the report.
 
 
 ## Open items for a future round
