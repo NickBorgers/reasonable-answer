@@ -102,11 +102,44 @@ never be reviewed.
 | `LLM_PROXY_BASE_URL` | `https://llm.<tailnet>.ts.net/anthropic/` | Claude-path agents |
 | `LLM_PROXY_OPENAI_BASE_URL` | `https://llm.<tailnet>.ts.net/v1/` | Codex-path agents |
 | `AI_API_KEY` | `fake-key` | both — the proxy is tailnet-ACL'd, not key-authenticated |
-| `CI_AGENT_DEFAULT` | `claude` | which agent `/autoresolve` uses with no explicit choice |
+| `CI_AGENT_DEFAULT` | `codex` | which agent `/autoresolve` uses with no explicit choice |
 | `CI_IMAGE` | *(optional)* override for the agent image reference | agent jobs |
 
 These are variables rather than secrets deliberately: a tailnet hostname is not a secret,
 and keeping it out of the YAML means changing proxies does not require a commit.
+`CI_AGENT_DEFAULT` is the exception worth knowing: it also serves as the revert switch for the
+default author, since setting it back to `claude` takes effect without a commit.
+
+### Models the proxy must serve
+
+Every role names its model rather than following a CLI default (D-ci-model-pinning), so the
+proxy has to resolve each of the four distinct aliases below, across the six surfaces that use
+them, or the job fails closed at `review-agent-run`.
+Reviewer pins live in `review-pipeline.yml` beside the `agent:` they qualify; the two stages
+that pick their agent at runtime carry an `agent_model()` map inline instead.
+
+| surface | agent | alias | why this tier |
+|---|---|---|---|
+| `invariant` reviewer | claude | `claude-opus-5` | never-abstain backstop on the six invariants and the merge gate |
+| `test` reviewer | claude | `claude-sonnet-5` | bounded, checklist-shaped job against `test.md` |
+| `docs` reviewer | codex | `gpt-5.6-luna` | the most mechanical role: text checked against text |
+| `security` reviewer | codex | `gpt-5.6-sol` | guards the egress boundary, where a miss reaches production |
+| `quality` reviewer | codex | `gpt-5.6-sol` | must fetch and read cited sources, not recall them |
+| issue author, fixer | per agent | `gpt-5.6-sol` / `claude-opus-5` | open-ended work across a whole repository |
+
+Both CLIs reach these through the one proxy, on the two compatibility paths above — so a
+Claude alias must resolve on `LLM_PROXY_BASE_URL` and a GPT alias on
+`LLM_PROXY_OPENAI_BASE_URL`. Confirm before changing a pin, exporting the same values you
+set as repository variables above:
+
+```bash
+export AI_API_KEY=fake-key                                   # the proxy is ACL'd, not key-authed
+export LLM_PROXY_OPENAI_BASE_URL=https://llm.<tailnet>.ts.net/v1/
+curl -s -H "Authorization: Bearer ${AI_API_KEY}" "${LLM_PROXY_OPENAI_BASE_URL}models"
+```
+
+(`AI_API_KEY` is the CI-side name. `LITELLM_API_KEY` is the *runtime app's* variable, described
+in [deployment-profile.md](./deployment-profile.md); the two are not interchangeable here.)
 
 ## 4. Create the labels
 

@@ -54,8 +54,13 @@ def _run(
     claude_body: str,
     resume: bool,
     timeout: str = "2s",
+    model: str | None = "claude-sonnet-5",
 ) -> subprocess.CompletedProcess[str]:
-    """Invoke run-in-container.sh against a fake `claude`, in an isolated tmp cwd."""
+    """Invoke run-in-container.sh against a fake `claude`, in an isolated tmp cwd.
+
+    `model` mirrors the composite's now-mandatory `AGENT_MODEL`; pass None to exercise the
+    caller that forgot to pin one (D-ci-model-pinning).
+    """
     bin_dir = tmp_path / "bin"
     _write_fake_claude(bin_dir, claude_body)
 
@@ -74,6 +79,8 @@ def _run(
         "AGENT_KILL_AFTER": "1s",
         "AGENT_RESUME": "1" if resume else "0",
     }
+    if model is not None:
+        env["AGENT_MODEL"] = model
     return subprocess.run(
         ["bash", str(SCRIPT)],
         cwd=tmp_path,
@@ -95,6 +102,13 @@ EMPTY_CLEAN = "exit 0\n"
 # Writes the artifact and *then* dies: the case where "no result" cannot detect a crash.
 WRITES_THEN_CRASHES = (
     'mkdir -p "$(dirname "$RESULT_PATH")"; printf \'{"ok":true}\' > "$RESULT_PATH"; exit 5\n'
+)
+# Succeeds, and records the argv it was called with. The other shims discard their arguments,
+# so nothing they do can tell whether a flag actually reached the CLI.
+ARGV_REL = "argv.txt"
+RECORDS_ARGV = (
+    f'printf "%s\\n" "$@" > {ARGV_REL}; '
+    'mkdir -p "$(dirname "$RESULT_PATH")"; printf \'{"ok":true}\' > "$RESULT_PATH"\n'
 )
 
 
@@ -172,3 +186,99 @@ def test_a_stale_sentinel_is_cleared_before_running(tmp_path: Path) -> None:
     r = _run(tmp_path, claude_body=SUCCEEDS, resume=True, timeout="30s")
     assert r.returncode == 0, r.stderr
     assert not (tmp_path / SENTINEL_REL).exists()
+
+
+# ── an unpinned model is refused on both paths, before any CLI is invoked ─────
+#
+# The script used to substitute a default when AGENT_MODEL was unset — `gpt-5.5` inline on
+# the codex path, and on the claude path simply omitting `--model` so the CLI chose. Both
+# meant a role could run a checkpoint nobody selected (D-ci-model-pinning). These prove the
+# refusal by *running* it, rather than asserting the guard's own source text, and they cover
+# the codex branch, which had no behavioural coverage at all before.
+
+
+def _run_codex(tmp_path: Path, *, model: str | None) -> subprocess.CompletedProcess[str]:
+    """Drive the codex branch with a fake `codex` on PATH."""
+    bin_dir = tmp_path / "bin"
+    bin_dir.mkdir(parents=True, exist_ok=True)
+    fake = bin_dir / "codex"
+    fake.write_text("#!/usr/bin/env bash\n" + SUCCEEDS)
+    fake.chmod(0o755)
+
+    prompt = tmp_path / "prompt.md"
+    prompt.write_text("do the thing\n")
+
+    env = {
+        "PATH": f"{bin_dir}:/usr/bin:/bin",
+        "HOME": str(tmp_path),
+        "CI_AGENT": "codex",
+        "REVIEW_ROLE": "fixer",
+        "REVIEW_PROMPT_PATH": str(prompt),
+        "RESULT_PATH": RESULT_REL,
+        "OUTPUT_LOG_PATH": OUTPUT_LOG_REL,
+        "AGENT_TIMEOUT": "30s",
+        "AGENT_KILL_AFTER": "1s",
+        "AGENT_RESUME": "0",
+        # The codex branch writes a provider block and refuses without a base URL.
+        "OPENAI_BASE_URL": "http://127.0.0.1:9/v1/",
+    }
+    if model is not None:
+        env["AGENT_MODEL"] = model
+    return subprocess.run(
+        ["bash", str(SCRIPT)],
+        cwd=tmp_path,
+        capture_output=True,
+        text=True,
+        env=env,
+    )
+
+
+def test_an_unpinned_model_is_refused_on_the_claude_path(tmp_path: Path) -> None:
+    r = _run(tmp_path, claude_body=SUCCEEDS, resume=False, timeout="30s", model=None)
+    assert r.returncode != 0
+    assert "AGENT_MODEL" in r.stderr
+    # Refused before the CLI ran at all: no artifact, so nothing downstream can mistake this
+    # for a completed review.
+    assert not (tmp_path / RESULT_REL).exists()
+
+
+def test_an_unpinned_model_is_refused_on_the_codex_path(tmp_path: Path) -> None:
+    r = _run_codex(tmp_path, model=None)
+    assert r.returncode != 0
+    assert "AGENT_MODEL" in r.stderr
+    assert not (tmp_path / RESULT_REL).exists()
+    # And no config was left behind naming some fallback model.
+    assert not (tmp_path / ".codex" / "config.toml").exists()
+
+
+def test_the_claude_path_forwards_the_pinned_model_to_the_cli(tmp_path: Path) -> None:
+    """The positive half for claude, mirroring the codex config.toml test below.
+
+    The refusal test above fires on the *shared* top-level `AGENT_MODEL` guard, so it would
+    still pass if this branch reverted to `model_args=()` — silently restoring the
+    CLI-default-following behaviour D-ci-model-pinning exists to remove, on both Claude
+    reviewer roles. Asserting the flag reaches the CLI is what closes that.
+    """
+    r = _run(
+        tmp_path,
+        claude_body=RECORDS_ARGV,
+        resume=False,
+        timeout="30s",
+        model="claude-sonnet-5",
+    )
+    assert r.returncode == 0, r.stderr
+    argv = (tmp_path / ARGV_REL).read_text().splitlines()
+    assert "--model" in argv, f"--model never reached the CLI; argv was {argv}"
+    assert argv[argv.index("--model") + 1] == "claude-sonnet-5"
+
+
+def test_the_codex_path_writes_the_pinned_model_into_its_config(tmp_path: Path) -> None:
+    """The positive half: codex takes its model from config.toml, not from `--model`.
+
+    Without this, `test_an_unpinned_model_is_refused_on_the_codex_path` would still pass if
+    the branch stopped honouring AGENT_MODEL entirely.
+    """
+    r = _run_codex(tmp_path, model="gpt-5.6-luna")
+    assert r.returncode == 0, r.stderr
+    config = (tmp_path / ".codex" / "config.toml").read_text()
+    assert 'model = "gpt-5.6-luna"' in config

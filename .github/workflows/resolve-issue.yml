@@ -102,7 +102,12 @@ jobs:
         id: check
         uses: actions/github-script@v7
         env:
-          DEFAULT_AGENT: ${{ vars.CI_AGENT_DEFAULT || 'claude' }}
+          # Codex by default (D-ci-model-pinning). Resolving an issue end to end is the
+          # single largest token consumer in this pipeline, and it is a stage where the
+          # panel's family diversity is not at stake: whatever authors the PR, all five
+          # reviewer roles still read it afterwards. `vars.CI_AGENT_DEFAULT` still wins, so
+          # the choice is revertible from repo settings without a commit.
+          DEFAULT_AGENT: ${{ vars.CI_AGENT_DEFAULT || 'codex' }}
         with:
           script: |
             const allowed = new Set(['OWNER', 'MEMBER', 'COLLABORATOR']);
@@ -308,11 +313,39 @@ jobs:
           echo "dir=${DIR}" >> "$GITHUB_OUTPUT"
           echo "Author session directory: ${DIR}"
 
+      # The agent is chosen at runtime — a comment, a label, or the repo default — so the
+      # model cannot be written inline the way a reviewer role's is (D-ci-model-pinning).
+      - name: Resolve the model for that agent
+        if: steps.existing.outputs.skip != 'true'
+        id: model
+        env:
+          AGENT: ${{ needs.authorize.outputs.agent }}
+        run: |
+          set -euo pipefail
+
+          # ── agent→model map (D-ci-model-pinning) ──────────────────────────────────────
+          # Kept identical to the copy in review-fixer.yml, and inline in both rather than
+          # extracted to a script: the review pipeline runs its own logic from main's
+          # checkout, so a helper file added by a PR does not exist for the run that reviews
+          # it. tests/test_ci_model_pins.py asserts the two copies agree.
+          agent_model() {
+            case "$1" in
+              codex)  echo "gpt-5.6-sol" ;;
+              claude) echo "claude-opus-5" ;;
+              *) echo "unknown agent '$1' (expected claude | codex)" >&2; return 1 ;;
+            esac
+          }
+
+          MODEL=$(agent_model "$AGENT")
+          echo "model=${MODEL}" >> "$GITHUB_OUTPUT"
+          echo "Author agent ${AGENT} runs on ${MODEL}"
+
       - name: Run the agent
         if: steps.existing.outputs.skip != 'true'
         uses: ./.github/actions/review-agent-run
         with:
           agent: ${{ needs.authorize.outputs.agent }}
+          model: ${{ steps.model.outputs.model }}
           role: resolve-issue
           prompt_path: ${{ steps.prompt.outputs.path }}
           image: ${{ vars.CI_IMAGE || 'ghcr.io/nickborgers/reasonable-answer-ci:latest' }}

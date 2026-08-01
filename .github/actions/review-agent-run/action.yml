@@ -6,6 +6,9 @@ description: >
   pipeline runs different roles on different models deliberately, so that a blind spot
   in one model family does not silently clear a whole review.
 
+  `agent` picks the family; `model` picks the checkpoint inside it, and is required rather
+  than defaulted, so no role can quietly follow a CLI vendor's default (D-ci-model-pinning).
+
   The prompt is read from a standalone markdown file and is NEVER inlined into YAML, so
   editing a reviewer's instructions is a plain markdown diff with no escaping concerns.
 
@@ -58,9 +61,11 @@ inputs:
     required: false
     default: 'fake-key'
   model:
-    description: Model to request from the proxy (defaults to the CLI's own default)
-    required: false
-    default: ''
+    description: >-
+      Proxy alias to run this role on. Required: every caller pins its model, because `agent`
+      chooses only a model *family* and an unpinned role would follow the CLI vendor's default
+      wherever it moved (D-ci-model-pinning).
+    required: true
   timeout_minutes:
     description: Hard timeout for the agent invocation
     required: false
@@ -197,6 +202,15 @@ runs:
           claude|codex) ;;
           *) echo "::error::review-agent-run: unknown agent '$AGENT'"; exit 1 ;;
         esac
+
+        # Fail closed on an unpinned model. `agent` fixes only the *family*; without this a
+        # caller that forgets `model:` silently inherits whatever the CLI vendor ships as its
+        # default, so a role's effective model could change with no diff to review. QP3 counts
+        # both inputs as its surface for exactly that reason (D-ci-model-pinning).
+        if [ -z "$MODEL" ]; then
+          echo "::error::review-agent-run: no model pinned for role '${ROLE}' on agent '${AGENT}'; pass model:"
+          exit 1
+        fi
 
         # Artifact basename defaults to the role. The fixer overrides it because it shares
         # .review-output with the reviewer artifacts it just downloaded, and a collision

@@ -271,6 +271,12 @@ jobs:
   # Roles run on different model families on purpose. This project's own design argues
   # that decorrelated blind spots are what make independent review worth more than
   # repeated review; the same reasoning applies to its CI.
+  #
+  # Each role also names its model, not just its family. Left unpinned, a role runs whatever
+  # the CLI vendor currently defaults to, so the panel's composition could change without a
+  # diff — and a verdict has to be attributable to something reviewable. The pins are sized
+  # to each role's job; the family split they sit inside is the part QP3 protects
+  # (D-ci-model-pinning).
 
   review-invariant:
     name: 'Review: invariant'
@@ -283,6 +289,10 @@ jobs:
     with:
       role: invariant
       agent: claude
+      # The never-abstain backstop on the six invariants and the merge gate. Nothing
+      # downstream catches a safety-property regression this role misses, so it is the role
+      # where the tier is chosen for headroom rather than for economy.
+      model: claude-opus-5
       pr_number: ${{ inputs.pr_number }}
       reviewed_sha: ${{ inputs.reviewed_sha }}
       base_ref: ${{ inputs.base_ref }}
@@ -301,6 +311,10 @@ jobs:
     with:
       role: docs
       agent: codex
+      # The most mechanical role in the panel: does the prose match the diff, and did a
+      # behaviour change bring its decision entry with it. Both are checks against text that
+      # is present, so it is the one role given the lower tier.
+      model: gpt-5.6-luna
       pr_number: ${{ inputs.pr_number }}
       reviewed_sha: ${{ inputs.reviewed_sha }}
       base_ref: ${{ inputs.base_ref }}
@@ -319,6 +333,9 @@ jobs:
     with:
       role: security
       agent: codex
+      # Guards the SSRF/egress boundary and the untrusted-text-never-instructs invariant,
+      # where a missed finding reaches production rather than merely the next cycle.
+      model: gpt-5.6-sol
       pr_number: ${{ inputs.pr_number }}
       reviewed_sha: ${{ inputs.reviewed_sha }}
       base_ref: ${{ inputs.base_ref }}
@@ -337,6 +354,9 @@ jobs:
     with:
       role: test
       agent: claude
+      # A bounded, checklist-shaped job against the table in test.md — offline markers,
+      # weakened assertions, coverage of the diff. Sized to the work, not to the family.
+      model: claude-sonnet-5
       pr_number: ${{ inputs.pr_number }}
       reviewed_sha: ${{ inputs.reviewed_sha }}
       base_ref: ${{ inputs.base_ref }}
@@ -358,6 +378,10 @@ jobs:
       # (Claude), and the guard on the spec's direction should not share a model
       # family with the guard on the spec's conformance (QP3, D-quality-reviewer).
       agent: codex
+      # Sol rather than the lower-tier Luna: this role may not rely on parametric memory of the
+      # literature, so it has to actually fetch and read the sources the register cites
+      # (D-quality-reviewer) — the most demanding reading task on the panel.
+      model: gpt-5.6-sol
       pr_number: ${{ inputs.pr_number }}
       reviewed_sha: ${{ inputs.reviewed_sha }}
       base_ref: ${{ inputs.base_ref }}

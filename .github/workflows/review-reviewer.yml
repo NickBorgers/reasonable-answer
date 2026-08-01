@@ -17,6 +17,12 @@ on:
         description: 'claude | codex'
         required: true
         type: string
+      model:
+        description: >
+          Proxy alias this role runs on. Required alongside `agent`: the agent fixes the
+          model family, this fixes the checkpoint inside it (D-ci-model-pinning).
+        required: true
+        type: string
       pr_number:
         required: true
         type: string
@@ -162,6 +168,7 @@ jobs:
         uses: ./.github/actions/review-agent-run
         with:
           agent: ${{ inputs.agent }}
+          model: ${{ inputs.model }}
           role: ${{ inputs.role }}
           prompt_path: .review-prompt/${{ inputs.role }}.md
           image: ${{ vars.CI_IMAGE || format('ghcr.io/nickborgers/{0}-ci:latest', 'reasonable-answer') }}

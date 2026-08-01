@@ -4,12 +4,18 @@
 # the PR workspace, so a pull request cannot modify the script that reviews it.
 #
 # Contract with the calling composite:
-#   in  — REVIEW_PROMPT_PATH, RESULT_PATH, OUTPUT_LOG_PATH, CI_AGENT, AGENT_TIMEOUT_MINUTES
+#   in  — REVIEW_PROMPT_PATH, RESULT_PATH, OUTPUT_LOG_PATH, CI_AGENT, AGENT_MODEL,
+#         AGENT_TIMEOUT_MINUTES
 #   out — a JSON artifact at RESULT_PATH, conforming to schema/reviewer-v1.json
 
 set -euo pipefail
 
 : "${CI_AGENT:?CI_AGENT must be set}"
+# Required for both agents, not just codex. Every role pins its model (D-ci-model-pinning);
+# an unset one used to mean "whatever the CLI defaults to", which is precisely the silent
+# re-composition of the review panel that decision exists to stop. Guarded here rather than
+# per-branch so the two paths cannot drift into different answers for the same mistake.
+: "${AGENT_MODEL:?AGENT_MODEL must be set: every role pins its model}"
 : "${REVIEW_PROMPT_PATH:?REVIEW_PROMPT_PATH must be set}"
 : "${RESULT_PATH:?RESULT_PATH must be set}"
 : "${OUTPUT_LOG_PATH:?OUTPUT_LOG_PATH must be set}"
@@ -72,7 +78,9 @@ mark_incomplete() {
   printf '%s\n' "$1" > "$INCOMPLETE_SENTINEL_PATH"
 }
 
-echo "run-in-container: ${REVIEW_ROLE:-agent} via ${CI_AGENT}, timeout ${TIMEOUT}, resume=${RESUME}"
+# The model is named here, not just the agent: `agent` selects only a *family*, and which
+# checkpoint ran inside it is the thing a verdict has to be attributable to (D-ci-model-pinning).
+echo "run-in-container: ${REVIEW_ROLE:-agent} via ${CI_AGENT} on ${AGENT_MODEL}, timeout ${TIMEOUT}, resume=${RESUME}"
 
 # `timeout`'s own exit status, captured per-branch below via PIPESTATUS[0] so a deadline
 # is told apart from a crash. Defaulted here so the interpretation block after the case
@@ -82,8 +90,7 @@ rc=0
 # `< /dev/null` matters: without it the CLIs wait on stdin and hang until the timeout.
 case "$CI_AGENT" in
   claude)
-    model_args=()
-    [ -n "${AGENT_MODEL:-}" ] && model_args=(--model "$AGENT_MODEL")
+    model_args=(--model "$AGENT_MODEL")
 
     # --continue resumes the most recent session in the mounted state directory. That
     # directory is keyed per (agent, issue, run-id) by ci-session-store.sh and therefore
@@ -119,7 +126,7 @@ case "$CI_AGENT" in
     # placeholder key. Pointing it at LiteLLM requires a provider block in config.toml.
     mkdir -p "$HOME/.codex"
     cat > "$HOME/.codex/config.toml" <<EOF
-model = "${AGENT_MODEL:-gpt-5.5}"
+model = "${AGENT_MODEL}"
 model_provider = "litellm"
 
 [model_providers.litellm]
