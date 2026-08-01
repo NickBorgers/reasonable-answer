@@ -52,11 +52,11 @@ its own path-filtered job to cover a PR that touches nothing but `decisions.md`.
 ```
 review-entry            authorize · fork-reject · resolve SHA · prior-GO check · dedup claim
   └─ review-pipeline    gather (cycle, inherit, cap, classify)
-       ├─ invariant     Claude    ─┐
-       ├─ docs          Codex      │
-       ├─ security      Codex      ├─ read-only, each emits a JSON artifact
-       ├─ test          Claude     │
-       ├─ quality       Codex     ─┘
+       ├─ invariant     Claude · claude-opus-5   ─┐
+       ├─ docs          Codex  · gpt-5.6-luna     │
+       ├─ security      Codex  · gpt-5.6-sol      ├─ read-only, each emits a JSON artifact
+       ├─ test          Claude · claude-sonnet-5  │
+       ├─ quality       Codex  · gpt-5.6-sol     ─┘
        ├─ record-cycle  writes review/cycle — only if a reviewer actually ran
        ├─ fix           the ONLY branch-writing stage; syncs with the base branch and
        │                addresses blockers; skipped on the last cycle, but still runs a
@@ -69,6 +69,16 @@ review-entry            authorize · fork-reject · resolve SHA · prior-GO chec
 Roles run on different model families deliberately. This project's own design argues that
 decorrelated blind spots are what make independent review worth more than repeated
 review; the same reasoning applies to its CI.
+
+Each role also **names its model**, not merely its family (D-ci-model-pinning). `agent:`
+selects a family; the checkpoint inside it used to be whatever the CLI happened to default to,
+which meant a role's effective reviewer could change with no diff to review — the panel's
+composition was not a property of this repository. The pins are sized to the work each role
+does: `invariant` is the never-abstain backstop on the six invariants and the merge gate, so
+it gets the strongest model available; `docs` checks text against text, so it gets the cheapest
+adequate one. The family split those pins sit inside is what [QP3](./quality-principles.md)
+protects, and it is unchanged — three Codex roles, two Claude, with `quality` cross-family from
+`invariant`. Both the roles and the models are visible in one place, `review-pipeline.yml`.
 
 ### Reviewer contract
 
@@ -230,7 +240,16 @@ emits `labeled`, which is deliberately absent from the trigger list, so marking 
 started is safe.
 
 An `agent:claude` / `agent:codex` label is a persistent per-issue override; an explicit
-choice in an `/autoresolve` comment outranks it.
+choice in an `/autoresolve` comment outranks it. With neither, the agent is
+`vars.CI_AGENT_DEFAULT`, which defaults to **codex** (D-ci-model-pinning): resolving an issue
+end to end is the pipeline's largest single token consumer, and it is a stage where family
+diversity is not at stake, since all five reviewer roles read the result afterwards whatever
+wrote it.
+
+Because that agent is chosen at runtime, the resolver and the fixer cannot carry an inline
+`model:` the way a reviewer role does. Both resolve it through
+[`scripts/ci-agent-model.sh`](https://github.com/NickBorgers/reasonable-answer/blob/main/scripts/ci-agent-model.sh),
+a single agent→model map, rather than each keeping a copy that could drift.
 
 ### The fixer
 
@@ -336,7 +355,9 @@ It runs in one of two modes.
 **`cold`** — the fallback, and still the one to optimise for. `author-resume` can only fire
 on a PR that `resolve-issue.yml` opened. Now that filing an issue starts an agent, those
 are no longer rare — but any PR opened by hand, or by a coding agent on a laptop, carries
-no session and lands here. A cold fixer exercises **grounded judgment** (D-fixer-grounded-judgment): it may apply
+no session and lands here. The cold path pins one agent — **codex** — regardless of who
+authored the PR: with no session to resume, the author's identity buys nothing, and a fixed
+choice keeps the path predictable (D-ci-model-pinning). A cold fixer exercises **grounded judgment** (D-fixer-grounded-judgment): it may apply
 any fix it can anchor in the repository's existing content and structure, the PR's
 reconstructed intent, and the reviewer's own finding — including work that spans files no
 reviewer named, such as writing a missing test by mirroring the tests beside it or adopting

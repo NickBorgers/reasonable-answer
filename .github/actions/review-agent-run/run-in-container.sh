@@ -72,7 +72,10 @@ mark_incomplete() {
   printf '%s\n' "$1" > "$INCOMPLETE_SENTINEL_PATH"
 }
 
-echo "run-in-container: ${REVIEW_ROLE:-agent} via ${CI_AGENT}, timeout ${TIMEOUT}, resume=${RESUME}"
+# The model is named here, not just the agent: `agent` selects only a *family*, and which
+# checkpoint ran inside it is the thing a verdict has to be attributable to. Left to the
+# CLI's own default it could change under the pipeline with no diff at all (D-ci-model-pinning).
+echo "run-in-container: ${REVIEW_ROLE:-agent} via ${CI_AGENT} on ${AGENT_MODEL:-<cli default>}, timeout ${TIMEOUT}, resume=${RESUME}"
 
 # `timeout`'s own exit status, captured per-branch below via PIPESTATUS[0] so a deadline
 # is told apart from a crash. Defaulted here so the interpretation block after the case
@@ -119,7 +122,7 @@ case "$CI_AGENT" in
     # placeholder key. Pointing it at LiteLLM requires a provider block in config.toml.
     mkdir -p "$HOME/.codex"
     cat > "$HOME/.codex/config.toml" <<EOF
-model = "${AGENT_MODEL:-gpt-5.5}"
+model = "${AGENT_MODEL:?AGENT_MODEL must be set for the codex path}"
 model_provider = "litellm"
 
 [model_providers.litellm]

@@ -361,16 +361,29 @@ jobs:
             echo "::warning::Author session artifact unavailable (expired, or the run was deleted); falling back to a cold fixer."
           fi
 
-          # A cold fixer runs claude regardless of which agent authored the PR: there is
-          # no session to resume, so the authoring agent's identity carries no benefit,
-          # and pinning one agent keeps the cold path's behaviour predictable.
-          RESOLVED_AGENT=$([ "$MODE" = "author-resume" ] && echo "$AGENT" || echo claude)
+          # A cold fixer runs one pinned agent regardless of which agent authored the PR:
+          # there is no session to resume, so the authoring agent's identity carries no
+          # benefit, and pinning one agent keeps the cold path's behaviour predictable.
+          # That pin is codex (D-ci-model-pinning); the reasoning above is what makes the
+          # choice free, so it follows the default author rather than diverging from it.
+          COLD_AGENT=codex
+          RESOLVED_AGENT=$([ "$MODE" = "author-resume" ] && echo "$AGENT" || echo "$COLD_AGENT")
+          # Resumed or cold, the model comes from the same shared map the resolver uses, so
+          # a resumed author cannot end up on a different checkpoint than it started on.
+          RESOLVED_MODEL=$(./scripts/ci-agent-model.sh "$RESOLVED_AGENT")
+          # Emitted separately because the late fallback step below cannot reuse the pair
+          # above: it fires precisely when the primary run failed, and in author-resume mode
+          # that pair names the *author's* agent, not the cold one.
+          COLD_MODEL=$(./scripts/ci-agent-model.sh "$COLD_AGENT")
           {
             echo "mode=${MODE}"
             echo "session_dir=${SESSION_DIR}"
             echo "agent=${RESOLVED_AGENT}"
+            echo "model=${RESOLVED_MODEL}"
+            echo "cold_agent=${COLD_AGENT}"
+            echo "cold_model=${COLD_MODEL}"
           } >> "$GITHUB_OUTPUT"
-          echo "Fixer mode: ${MODE} (agent: ${RESOLVED_AGENT})"
+          echo "Fixer mode: ${MODE} (agent: ${RESOLVED_AGENT} on ${RESOLVED_MODEL})"
 
       # ── Context reconstruction ───────────────────────────────────────────────
       # For a resumed author this is redundant — it already holds all of it. For a cold
@@ -515,6 +528,7 @@ jobs:
         uses: ./.github/actions/review-agent-run
         with:
           agent: ${{ steps.session.outputs.agent }}
+          model: ${{ steps.session.outputs.model }}
           role: fixer
           result_basename: fixer
           prompt_path: .review-prompt/fixer.md
@@ -673,10 +687,13 @@ jobs:
         if: steps.fallback.outcome == 'success'
         uses: ./.github/actions/review-agent-run
         with:
-          # The cold path runs claude regardless of which agent authored the PR: there
-          # is no session to resume, so the authoring agent's identity carries no
-          # benefit, and pinning one agent keeps the cold path predictable.
-          agent: claude
+          # The cold path runs one pinned agent regardless of which agent authored the PR:
+          # there is no session to resume, so the authoring agent's identity carries no
+          # benefit, and pinning one agent keeps the cold path predictable. Codex, matching
+          # the default author (D-ci-model-pinning). Both come from the session step so the
+          # pin has exactly one definition, resolved through the shared agent→model map.
+          agent: ${{ steps.session.outputs.cold_agent }}
+          model: ${{ steps.session.outputs.cold_model }}
           role: fixer
           result_basename: fixer
           prompt_path: .review-prompt/fixer.md

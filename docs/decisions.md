@@ -2328,8 +2328,74 @@ critic category is unchanged and should simply fire less: its target section is 
 Rendering the frame as a layered mobile reading experience is a separate decision.
 
 
+## D-ci-model-pinning — every CI role names the model it runs, and the cheap surfaces move to Codex
+
+**The problem.** Two separate ones, found together while looking for the pipeline's API cost.
+
+The first is that no CI role named a model. `review-agent-run` had exposed a `model:` input since
+it was written and **no workflow had ever passed it**, so the two Claude roles ran whatever the
+Claude Code CLI currently defaults to, and the three Codex roles ran a `gpt-5.5` literal buried in
+a heredoc in `run-in-container.sh`. QP3's stated surface was the `agent:` inputs — but `agent:`
+fixes only a model *family*. Which checkpoint actually reviewed a PR was therefore not a property
+of this repository at all: a vendor shipping a new CLI default silently re-composed the review
+panel, with no diff, no decision, and nothing for the panel to review. A verdict has to be
+attributable to something, and "whatever the CLI felt like" is not it.
+
+The second is that the cost-shaped choices had never been made deliberately. Nothing in `docs/`
+or `config/` argues about per-role API price anywhere; the economics discussed are cycles, tokens
+per re-review, and third-party search quotas. So the assignment of the *expensive* family to a
+role was, in four of five cases, undocumented — only `quality` had a stated reason.
+
+**Decision — pin the model everywhere.** `model:` becomes required on `review-agent-run`, checked
+at runtime rather than merely declared, since a composite action does not enforce `required: true`.
+The `gpt-5.5` literal leaves `run-in-container.sh` entirely and the codex path fails closed on an
+unset `AGENT_MODEL`. The five reviewer pins sit in `review-pipeline.yml` beside the `agent:` they
+qualify, because that adjacency is what lets a reader check the panel's composition in one place.
+
+| role | agent | model | why this tier |
+|---|---|---|---|
+| `invariant` | claude | `claude-opus-5` | never-abstain backstop on the six invariants and the merge gate; nothing downstream catches what it misses |
+| `test` | claude | `claude-sonnet-5` | bounded, checklist-shaped work against the table in `test.md` |
+| `docs` | codex | `gpt-5.6-luna` | the most mechanical role — prose against diff, decision entry present |
+| `security` | codex | `gpt-5.6-sol` | guards the egress boundary, where a miss reaches production rather than the next cycle |
+| `quality` | codex | `gpt-5.6-sol` | may not rely on remembered literature, so it must actually fetch and read cited sources |
+
+This also pays off the gap noted above: `invariant`, `docs`, `security`, and `test` now carry a
+stated reason for their family, which QP3 asks of a new role and which they had never had.
+
+**Decision — Codex becomes the default author, and the cold fixer.** `CI_AGENT_DEFAULT` defaults
+to `codex`, and the cold fixer is pinned to it. Resolving an issue end to end is the largest
+single token consumer in the pipeline, and it is the stage where family diversity is *not* at
+stake: whatever writes a PR, all five reviewer roles still read it afterwards, and author
+exclusion is enforced by context, not by vendor ([isolation.md](./isolation.md) — model identity
+is the secondary boundary there, the context window the primary one). The cold fixer's existing
+rationale already said the author's identity buys nothing when there is no session to resume, so
+the pin was free to move. Because the agent is chosen at runtime in both stages, the model comes
+from one shared map, `scripts/ci-agent-model.sh`, rather than a copy in each workflow.
+
+**What this is not.** It is not a move to a single-family panel. The split stays three Codex, two
+Claude, with `quality` cross-family from `invariant` per D-quality-reviewer, and QP3 now has an
+executable check (`tests/test_ci_model_pins.py`) rather than resting on reviewer attention alone.
+QP3's surface column is *widened* to include `model:` — a strengthening, so §4 of the register,
+which gates weakening a row on new fetchable evidence, does not apply.
+
+**The cost basis, stated honestly.** This rests on published list pricing, not on measured spend:
+there is no per-role cost telemetry in this repository, and adding it was out of scope. The change
+is not uniformly cheaper — `test` dropping to Sonnet and `docs` to Luna save, but `gpt-5.5` →
+`gpt-5.6-sol` on three surfaces is an upgrade that may cost more. The defensible claim is the
+first decision, not the second: the pipeline now says what it runs. Measuring actual per-role
+spend, and revisiting these tiers against it, is an open item below.
+
+**Known risk.** Making Codex the default author makes `codex exec resume --last` the fixer's
+common path, and the cold-fixer fallback — which D-resume-timeout added — has to date never
+actually fired in production. The timeout containment bounds a hang, but the path stays lightly
+exercised, and this change puts more traffic on it.
+
+
 ## Open items for a future round
 
+- Per-role CI cost telemetry, and a revisit of the D-ci-model-pinning tiers against measured
+  proxy spend rather than list pricing.
 - Whether `misrepresented_source` can be meaningfully checked without fetching the source
   (v1 only checks on-its-face support); a later evidence layer (RA-011) would strengthen this.
 - Calibration of `K` (plateau window), the hard cap, and defect-score weights against real runs.
