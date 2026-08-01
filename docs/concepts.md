@@ -215,7 +215,11 @@ it — each one, again, a guard against a known LLM failure mode:
   controls, and graded by plain code — measuring both whether they catch what's there and whether
   they invent what isn't. A control is graded by every lens, so it has to be sound under every
   lens (D-control-soundness): a "sound" control carrying one real uncited claim scores every
-  competent evidence critic as an inventor of defects, which is what it did. An LLM grader is
+  competent evidence critic as an inventor of defects, which is what it did. A verdict also has to
+  cover the whole corpus: a call that fails the schema is graded as neither a hit nor a miss, so a
+  model that reliably breaks on one fixture would have that fixture quietly dropped from its own
+  denominators — a fixture nothing ever graded is now `unfit`, not a better score
+  (D-audition-failure-coverage). An LLM grader is
   expressly forbidden: the harness must not depend on
   the property it exists to measure. Model judges carry documented and reproducible biases —
   position, verbosity, and self-enhancement among them
