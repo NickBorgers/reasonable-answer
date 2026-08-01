@@ -59,7 +59,7 @@ from .config import AuditionConfig, AuditionThresholds, ConfigError, Roster
 from .critique import critique_once
 from .llm import LLMClient
 from .schemas import LensResult, RawIssue, StructuralRef
-from .taxonomy import LENS_CATEGORIES, SEVERITY_FLOOR, Category, Lens, counts_for_convergence
+from .taxonomy import LENS_CATEGORIES, SEVERITY_FLOOR, SEVERITY_RANK, Category, Lens, counts_for_convergence
 
 #: Fixture corpus shipped with the source tree.
 DEFAULT_FIXTURE_DIR = Path(__file__).resolve().parent.parent.parent / "tests" / "fixtures" / "audition"
