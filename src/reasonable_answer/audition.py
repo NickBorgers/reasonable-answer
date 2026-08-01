@@ -15,7 +15,7 @@ material defect* — into a tautology, and nothing downstream can tell the diffe
 So: fixtures with known planted defects, a **mechanical** grader, and a verdict per
 (model, lens).
 
-Three design commitments worth stating plainly.
+Four design commitments worth stating plainly.
 
 **The grader is a pure function and never an LLM.** An LLM grader is precisely the
 component whose reliability is in question here; using one would make the harness's
@@ -37,6 +37,19 @@ excluding it from the *denominators* too would let a model that reliably breaks 
 fixture have that fixture deleted from its own exam. Every rate below is therefore
 paired with a coverage count, and a fixture that never produced a single gradable
 review makes the verdict `unfit` before any rate is read (D-audition-failure-coverage).
+
+**The measurement is taken with no fetched sources**, which is a floor strictly below
+what production ever hands its evidence critic once a report cites anything at all
+(`AUDITION_SOURCE_MODE`, D-audition-source-mode). `sources=None` here matches only the
+"nothing to check" case of zero citations extracted from the report — production's
+failed-fetch case (a citation that is paywalled, blocked or offline) still renders a
+`fetched_sources_block` naming the failure, with the instruction not to re-raise a
+not-found `triage.mechanical_citation_issues` has already settled mechanically
+(D-existence-vs-body). A verdict here says the model can or cannot perform the lens with
+no source scaffolding whatsoever; it says nothing about the sharpened, sources-present
+prompt the deployment's evidence lens runs when a page arrives, and nothing about the
+weaker but still-present on-its-face prompt production runs on a citation it attempted
+and failed to fetch.
 """
 
 from __future__ import annotations
@@ -643,6 +656,24 @@ def assignments(roster: Roster, identities: dict[str, str]) -> tuple[Assignment,
 #: without implying an authorship that does not exist.
 AUDITION_AUTHOR = "(audition-fixture)"
 
+#: The source mode every measurement here is taken under, named so it can be part of
+#: the cache identity (D-audition-source-mode).
+#:
+#: Every call the harness makes passes `sources=None`, so the critic sees the
+#: unsharpened category-meaning table and no fetched-pages block at all — while the
+#: production deployment runs `verify_sources` on (docs/deployment-profile.md) and its
+#: evidence critic sees a fetched-pages block on any citation it attempted to fetch,
+#: including a failed one (a `BLOCKED` or `NOT FOUND` entry, not silence). That is
+#: deliberate: this measures the capability floor a critic brings with no source
+#: scaffolding whatsoever, a strictly lower bar than production's failed-fetch case. It
+#: is not a claim about the sources-present surface, nor about the weaker but
+#: still-present on-its-face prompt production runs on an attempted-and-failed citation,
+#: and D-audition-source-mode records what both leave uncertified.
+#:
+#: The tag is hashed into `prompt_hash`, so a sources-present mode added later gets its
+#: own cache line rather than inheriting a verdict measured under this one.
+AUDITION_SOURCE_MODE = "sources:none"
+
 
 def run_assignment(
     client: LLMClient,
@@ -678,6 +709,10 @@ def run_assignment(
                 fixture.artifact,
                 hashlib.sha256(fixture.artifact.encode()).hexdigest(),
                 AUDITION_AUTHOR,
+                # Explicit, because it is a doctrine and not an omission: fixtures ship
+                # no source packet, so the measurement is of the source-less surface
+                # (AUDITION_SOURCE_MODE, D-audition-source-mode).
+                sources=None,
                 require_verbatim_spans=require_verbatim_spans,
             )
             latencies.append(time.monotonic() - started)
@@ -795,8 +830,22 @@ class CacheEntry(BaseModel):
 
 
 def prompt_hash() -> str:
-    """Hash of every prompt surface a critic sees, so an edit invalidates the cache."""
+    """Hash of the prompt surface this harness measures, so an edit invalidates the cache.
+
+    That surface is the source-less one, and only that one. It is not "every prompt
+    surface a critic sees": production's evidence critic also sees the sharpened
+    `misrepresented_source` meaning and the fetched-pages block, and neither is hashed
+    here. Deliberately — nothing in this harness measures a critic under them
+    (D-audition-source-mode), so folding them in would discard verdicts that remain
+    exactly as true as the day they were recorded, and would advertise a coverage the
+    corpus does not have.
+
+    What keeps the narrower hash honest is the mode tag: `AUDITION_SOURCE_MODE` is part
+    of the identity, so a sources-present mode added later cannot silently reuse a
+    verdict measured without sources.
+    """
     digest = hashlib.sha256()
+    digest.update(AUDITION_SOURCE_MODE.encode())
     digest.update(prompts.CRITIC_SYSTEM.encode())
     for lens in LENS_CATEGORIES:
         digest.update(prompts.critic_user(lens, "q", "body", None).encode())

@@ -241,6 +241,15 @@ it — each one, again, a guard against a known LLM failure mode:
   `loaded_language` — are **diagnostic only**. A detection has to clear the material floor to
   count, so a critic that finds one and files it honestly at `minor` scores nothing; a fixture for
   those ranks models against each other and must never be read as a sensitivity measurement.
+  What the audition measures is also a **floor**, and deliberately a strict one: critics are graded with no
+  fetched-source scaffolding whatsoever, while a deployment with source verification switched on
+  hands its evidence critic a `fetched_sources_block` for every citation it attempted to fetch —
+  including a paywalled, blocked or offline one, which still renders as a named failure entry
+  rather than silence (D-audition-source-mode). So `fit` says only that the model can do the job
+  on the artifact text alone, with nothing about any citation to lean on, not that it reads a
+  fetched page well, and not even that it handles the weaker on-its-face prompt production runs on
+  a citation whose fetch failed. Certifying either needs deterministic offline source packets
+  shipped with the fixtures, which is an open item.
 - **The dispute channel.** Critics can be wrong, and a false positive is otherwise
   indistinguishable from a real defect — floors escalate it, the blind referee counts it, and a
   compliant writer would "fix" the report into falsehood. An opt-in channel (D-writer-disputes) lets the writer
