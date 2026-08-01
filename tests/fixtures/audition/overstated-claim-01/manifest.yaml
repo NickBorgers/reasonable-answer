@@ -1,0 +1,28 @@
+lens: logic
+tier: moderate
+question: "Did the city's homeless services budget increase achieve its goals?"
+defects:
+  - category: overstated_claim
+    locus: {section: 2, paragraph: 1}
+    note: >
+      S2.P1 states that the figures "settle the question decisively", that the size of the
+      appropriation "was never the binding constraint on capacity", and that "no increase
+      in funding could have delivered the 300 beds on schedule" — a counterfactual
+      certainty that the two findings it rests on (first-year spending within allowed
+      uses, execution nine months behind schedule) do not establish. The numbers are
+      themselves accurate and cited, and S2.P2 notes the retrofits added cost as well as
+      time, which cuts against the claim rather than supporting it: the defect is the
+      strength of the assertion, not the underlying facts. Tier is moderate rather than
+      obvious because the rest of the report is measured — S4 attributes the shortfall to
+      capital-project delay with none of this certainty — so a fast reader may take S2.P1
+      as a summary of it. A critic may also reasonably propose `invalid_inference` or
+      `contradicted_claim` here; the fixture grades on the same-lens window, so any
+      material logic finding at the locus scores.
+
+      This fixture previously planted `loaded_language` on an earlier S2.P1 that called
+      the spending "squandered" and the outreach initiative "a boondoggle". No
+      doctrine-compliant critic could pass it: `loaded_language` floors at `minor`
+      (D-social-bias) and every detection credit requires post-clamp materiality, so
+      reporting the planted category at its own floor scored as blindness. The evaluative
+      wording is removed rather than left beside the overstatement, so the locus measures
+      one thing. See D-minor-floor-fixtures.

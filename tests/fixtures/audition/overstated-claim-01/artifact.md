@@ -4,7 +4,7 @@ The city increased its homeless services budget by 40 percent in fiscal 2023, wi
 
 ## Spending and execution
 
-The program office squandered much of the new appropriation on a boondoggle of an outreach initiative, spending $4.1 million of the $6.2 million increase in the first year while opening only 120 of the planned 300 beds [1]. The auditor's review found expenditures consistent with the appropriation's allowed uses but execution roughly nine months behind the published schedule [1].
+The city spent $4.1 million of the $6.2 million increase in the first year while opening only 120 of the planned 300 beds [1]. The auditor's review found expenditures consistent with the appropriation's allowed uses but execution roughly nine months behind the published schedule [1]. These two findings settle the question decisively: the size of the appropriation was never the binding constraint on capacity, and no increase in funding could have delivered the 300 beds on schedule [1].
 
 Capital delays accounted for most of the shortfall: two of the three planned shelter conversions required unanticipated seismic retrofits, adding both cost and time [1].
 
