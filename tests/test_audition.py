@@ -7,6 +7,7 @@ grows an LLM call, that test stops being satisfiable.
 
 from __future__ import annotations
 
+import json
 import re
 import time
 from pathlib import Path
@@ -533,18 +534,40 @@ def entry(**kwargs) -> audition.CacheEntry:
         metrics=metrics(),
         corpus_hash="corpus",
         prompt_hash="prompt",
+        rubric_hash="rubric",
+        require_verbatim_spans=True,
         repetitions=3,
         recorded_at=time.time(),
     )
     return audition.CacheEntry(**{**base, **kwargs})
 
 
-def test_cache_entry_is_invalidated_by_corpus_prompt_or_repetitions():
+def matches_current(e: audition.CacheEntry, **overrides) -> bool:
+    """`matches` against the entry's own dimensions, with named overrides."""
+    args = dict(
+        corpus_hash="corpus",
+        prompt_hash="prompt",
+        repetitions=3,
+        rubric_hash="rubric",
+        require_verbatim_spans=True,
+    )
+    args.update(overrides)
+    return e.matches(
+        args.pop("corpus_hash"), args.pop("prompt_hash"), args.pop("repetitions"), **args
+    )
+
+
+def test_cache_entry_is_invalidated_by_any_dimension_of_what_it_measured():
+    """Corpus, prompts, repetitions, grading rubric and span-validation regime are all
+    part of what a score means (D-audition-rubric-identity). A verdict carried across a
+    change in any of them is a claim about a measurement that no longer exists."""
     e = entry()
-    assert e.matches("corpus", "prompt", 3)
-    assert not e.matches("other-corpus", "prompt", 3)
-    assert not e.matches("corpus", "other-prompt", 3)
-    assert not e.matches("corpus", "prompt", 5)
+    assert matches_current(e)
+    assert not matches_current(e, corpus_hash="other-corpus")
+    assert not matches_current(e, prompt_hash="other-prompt")
+    assert not matches_current(e, repetitions=5)
+    assert not matches_current(e, rubric_hash="other-rubric")
+    assert not matches_current(e, require_verbatim_spans=False)
 
 
 def test_cache_entry_expires():
@@ -564,6 +587,23 @@ def test_corrupt_cache_reads_as_empty_never_as_passing(tmp_path):
     assert audition.load_cache(path) == {}
 
 
+def test_a_pre_rubric_cache_file_reads_as_not_audited(tmp_path):
+    """Backward compatibility, in the only direction that is safe. An entry written
+    before `rubric_hash`/`require_verbatim_spans` existed cannot say which rules it was
+    graded under, so it must degrade to *not audited* — never be read as a pass
+    (D-audition-rubric-identity)."""
+    path = tmp_path / "cache.json"
+    old_shape = {
+        "metrics": metrics().model_dump(mode="json"),
+        "corpus_hash": "corpus",
+        "prompt_hash": "prompt",
+        "repetitions": 3,
+        "recorded_at": time.time(),
+    }
+    path.write_text(json.dumps({audition.cache_key("p/m", Lens.LOGIC): old_shape}))
+    assert audition.load_cache(path) == {}
+
+
 def test_cache_roundtrip(tmp_path):
     path = tmp_path / "nested" / "cache.json"
     entries = {audition.cache_key("p/m", Lens.EVIDENCE): entry()}
@@ -576,6 +616,56 @@ def test_prompt_hash_tracks_the_critic_prompt(monkeypatch):
     before = audition.prompt_hash()
     monkeypatch.setattr(prompts, "CRITIC_SYSTEM", prompts.CRITIC_SYSTEM + " extra clause")
     assert audition.prompt_hash() != before
+
+
+def test_rubric_hash_is_stable_across_calls():
+    assert audition.rubric_hash() == audition.rubric_hash()
+
+
+def test_rubric_hash_tracks_the_hand_bumped_version(monkeypatch):
+    """The half that covers grading *code* — `grade`, `_is_material`, `_locus_matches`,
+    `run_assignment`'s accounting — which nothing can hash for us."""
+    before = audition.rubric_hash()
+    monkeypatch.setattr(audition, "RUBRIC_VERSION", audition.RUBRIC_VERSION + 1)
+    assert audition.rubric_hash() != before
+
+
+def test_rubric_hash_tracks_the_grading_tables(monkeypatch):
+    """The half that is hashed from the data, so it can never be forgotten."""
+    from reasonable_answer.taxonomy import LENS_CATEGORIES, SEVERITY_FLOOR, SEVERITY_RANK
+
+    before = audition.rubric_hash()
+    monkeypatch.setattr(
+        audition, "LOCUS_PARAGRAPH_TOLERANCE", audition.LOCUS_PARAGRAPH_TOLERANCE + 1
+    )
+    assert audition.rubric_hash() != before
+
+    monkeypatch.undo()
+    floors = dict(SEVERITY_FLOOR) | {Category.UNCITED_CLAIM: Severity.BLOCKING}
+    monkeypatch.setattr(audition, "SEVERITY_FLOOR", floors)
+    assert audition.rubric_hash() != before
+
+    monkeypatch.undo()
+    ranks = dict(SEVERITY_RANK) | {Severity.MINOR: 5}
+    monkeypatch.setattr(audition, "SEVERITY_RANK", ranks)
+    assert audition.rubric_hash() != before
+
+    monkeypatch.undo()
+    scopes = dict(LENS_CATEGORIES)
+    scopes[Lens.LOGIC] = scopes[Lens.LOGIC] + (Category.UNCITED_CLAIM,)
+    monkeypatch.setattr(audition, "LENS_CATEGORIES", scopes)
+    assert audition.rubric_hash() != before
+
+
+def test_rubric_hash_tracks_the_metrics_field_set(monkeypatch):
+    """A `judge` gate reading a counter that older entries never collected would see 0
+    and call it a measured zero. Hashing the field set makes that self-invalidating, so
+    adding a metric needs no `RUBRIC_VERSION` bump to stay honest."""
+    before = audition.rubric_hash()
+    fields = dict(audition.Metrics.model_fields)
+    fields["hallucinated_loci"] = fields["strict_hits"]
+    monkeypatch.setattr(audition.Metrics, "model_fields", fields)
+    assert audition.rubric_hash() != before
 
 
 # -------------------------------------------------------------- running, offline
@@ -689,10 +779,17 @@ def test_audition_warns_by_default_and_has_no_inert_enabled_flag():
 # --------------------------------------------------------- the enforcement gate
 
 
-def unfit_cache(path: Path, identity: str, lens: Lens, cfg: AuditionConfig) -> None:
-    """Write a cache the gate will actually accept: real corpus and prompt hashes, the
-    configured repetition count, recorded now. Anything less and the entry is discarded
-    as not-about-this-harness and the gate passes for the wrong reason."""
+def unfit_cache(
+    path: Path,
+    identity: str,
+    lens: Lens,
+    cfg: AuditionConfig,
+    require_verbatim_spans: bool = True,
+) -> None:
+    """Write a cache the gate will actually accept: real corpus, prompt and rubric
+    hashes, the span-validation regime it was measured under, the configured repetition
+    count, recorded now. Anything less and the entry is discarded as
+    not-about-this-harness and the gate passes for the wrong reason."""
     silent = metrics(
         identity=identity, lens=lens, planted_total=6, obvious_total=6,
         control_runs=4, control_clean_runs=4,
@@ -705,6 +802,8 @@ def unfit_cache(path: Path, identity: str, lens: Lens, cfg: AuditionConfig) -> N
                 metrics=silent,
                 corpus_hash=audition.load_fixtures().corpus_hash,
                 prompt_hash=audition.prompt_hash(),
+                rubric_hash=audition.rubric_hash(),
+                require_verbatim_spans=require_verbatim_spans,
                 repetitions=cfg.repetitions,
                 recorded_at=time.time(),
             )
@@ -716,14 +815,14 @@ def test_enforce_off_lets_an_unfit_critic_through(tmp_path):
     """The shipped posture: a loud warning, never a block."""
     cfg = AuditionConfig(cache_path=tmp_path / "c.json")
     unfit_cache(cfg.cache_path, "p/good", Lens.LOGIC, cfg)
-    audition.enforce_fitness(cfg, roster(), IDENTITIES)  # does not raise
+    audition.enforce_fitness(cfg, roster(), IDENTITIES, True)  # does not raise
 
 
 def test_enforce_on_refuses_to_start_with_an_unfit_assigned_critic(tmp_path):
     cfg = AuditionConfig(enforce=True, cache_path=tmp_path / "c.json")
     unfit_cache(cfg.cache_path, "p/good", Lens.LOGIC, cfg)
     with pytest.raises(ConfigError) as exc:
-        audition.enforce_fitness(cfg, roster(), IDENTITIES)
+        audition.enforce_fitness(cfg, roster(), IDENTITIES, True)
     assert "c_good" in str(exc.value) and "logic" in str(exc.value)
 
 
@@ -732,18 +831,46 @@ def test_enforce_ignores_a_verdict_about_a_model_no_longer_rostered(tmp_path):
     the cache still holds its verdict, but it staffs nothing."""
     cfg = AuditionConfig(enforce=True, cache_path=tmp_path / "c.json")
     unfit_cache(cfg.cache_path, "p/dropped", Lens.LOGIC, cfg)
-    audition.enforce_fitness(cfg, roster(), IDENTITIES)  # does not raise
+    audition.enforce_fitness(cfg, roster(), IDENTITIES, True)  # does not raise
 
 
 def test_enforce_does_not_block_on_stale_or_unmeasured_verdicts(tmp_path):
     """Absence of evidence is not evidence of incapacity. Blocking here would couple
     every run to a cache only a paid, rate-limited proxy can refill."""
     cfg = AuditionConfig(enforce=True, cache_path=tmp_path / "c.json")
-    audition.enforce_fitness(cfg, roster(), IDENTITIES)  # empty cache: does not raise
+    audition.enforce_fitness(cfg, roster(), IDENTITIES, True)  # empty cache: no raise
 
     unfit_cache(cfg.cache_path, "p/good", Lens.LOGIC, cfg)
     later = time.time() + (cfg.max_age_days + 1) * 86400
-    audition.enforce_fitness(cfg, roster(), IDENTITIES, now=later)  # stale: does not raise
+    # stale: does not raise
+    audition.enforce_fitness(cfg, roster(), IDENTITIES, True, now=later)
+
+
+def test_a_rubric_version_bump_drops_cached_verdicts_to_not_audited(tmp_path, monkeypatch):
+    """D-audition-rubric-identity. The verdict below was produced by grading rules that
+    no longer exist, so it must stop being authoritative the moment they change — and it
+    must degrade to *not audited*, the same direction a corpus edit degrades in."""
+    cfg = AuditionConfig(enforce=True, cache_path=tmp_path / "c.json")
+    unfit_cache(cfg.cache_path, "p/good", Lens.LOGIC, cfg)
+    assert audition.cached_judgements(cfg, roster(), IDENTITIES, True)
+
+    monkeypatch.setattr(audition, "RUBRIC_VERSION", audition.RUBRIC_VERSION + 1)
+    assert audition.cached_judgements(cfg, roster(), IDENTITIES, True) == {}
+    audition.enforce_fitness(cfg, roster(), IDENTITIES, True)  # does not raise
+
+
+def test_flipping_require_verbatim_spans_drops_cached_verdicts_to_not_audited(tmp_path):
+    """A loose quote fails the lens closed when spans are required, so the flag changes
+    what a critic can score. A verdict measured under one regime says nothing about the
+    other, in either direction."""
+    cfg = AuditionConfig(enforce=True, cache_path=tmp_path / "c.json")
+    unfit_cache(cfg.cache_path, "p/good", Lens.LOGIC, cfg, require_verbatim_spans=True)
+    assert audition.cached_judgements(cfg, roster(), IDENTITIES, False) == {}
+    audition.enforce_fitness(cfg, roster(), IDENTITIES, False)  # does not raise
+
+    unfit_cache(cfg.cache_path, "p/good", Lens.LOGIC, cfg, require_verbatim_spans=False)
+    assert audition.cached_judgements(cfg, roster(), IDENTITIES, True) == {}
+    assert audition.cached_judgements(cfg, roster(), IDENTITIES, False)
 
 
 def test_the_gate_takes_no_client_and_so_can_never_spend(tmp_path):
