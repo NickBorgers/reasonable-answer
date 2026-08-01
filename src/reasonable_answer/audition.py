@@ -792,8 +792,10 @@ def rubric_hash() -> str:
     `inspect.getsource` over them would be automatic, and was rejected: this file is
     deliberately comment-dense, an audition costs |models| x |fixtures| x repetitions
     calls against a paid proxy, and billing a full re-measurement of the roster for a
-    typo fix in a docstring would teach operators to distrust the invalidation. The
-    honest trade is a constant with a comment listing what requires a bump.
+    typo fix in a docstring conflicts with the operational goal of invalidating only
+    when measurement semantics change. It also breaks under a source-less install. The
+    chosen trade is a manually maintained constant for code rules, with automatic
+    hashing where the rubric is already represented as data.
     """
     payload = json.dumps(
         {
