@@ -2699,11 +2699,24 @@ enforces it. Two fixtures are added to close the gap this decision found:
 | fixture | lens | tier | the planted defect |
 |---|---|---|---|
 | `misrepresented-source-01` | evidence | obvious | A real, accurately listed source ([Durkin et al. 2022](https://doi.org/10.1037/dev0001301), *… through sixth grade*) is described in the body as reporting twelfth-grade outcomes it cannot contain. The paragraph before it cites the same paper correctly. |
-| `overstated-claim-01` | logic | moderate | Randomized support establishing a small average effect is restated as a flat "prevents" with an individual-level expectation attached. The 2017 IPD meta-analysis reports aOR 0.88 and NNT 33 overall, with stronger protection in the daily-or-weekly subgroup below 25 nmol/L ([Martineau et al. 2017](https://doi.org/10.1136/bmj.i6583)); the aggregate update reports OR 0.92 ([Jolliffe et al. 2021](https://doi.org/10.1016/S2213-8587(21)00051-6)); and two later large trials report no reduction ([CORONAVIT](https://doi.org/10.1136/bmj-2022-071230); [Brunvoll et al. 2022](https://doi.org/10.1136/bmj-2022-071245)). |
+| `overstated-claim-01` | logic | moderate | Randomized support establishing a small average effect is restated as a flat "prevents" with an individual-level expectation attached. The 2017 IPD meta-analysis reports aOR 0.88 (95% CI 0.81–0.96) and NNT 33 (95% CI 20–101) overall, with a markedly stronger effect in the daily-or-weekly dosing subgroup (aOR 0.81 vs. 0.97 for bolus dosing) and below 25 nmol/L baseline (aOR 0.30 vs. 0.75) ([Martineau et al. 2017, fetched via PMC5310969](https://pmc.ncbi.nlm.nih.gov/articles/PMC5310969/)); two later large trials report no reduction ([CORONAVIT, fetched via PMC9449358](https://pmc.ncbi.nlm.nih.gov/articles/PMC9449358/); [Brunvoll et al. 2022, fetched via PMC9449357](https://pmc.ncbi.nlm.nih.gov/articles/PMC9449357/)). |
 
 Both are authored in `prompts.REPORT_SKELETON` shape — no `#` title, `## Conclusion` first, `[n]`
 citations, a numbered `## Sources` — because a fixture that does not look like production input
 measures the critic on a document shape it never sees.
+
+**Every cited number is fetch-verified, per QP9/QP10.** The first draft cited a 2021 aggregate-data
+update (Jolliffe et al., *Lancet Diabetes & Endocrinology*, reporting OR 0.92) alongside the 2017
+IPD meta-analysis. Neither its publisher DOI nor its medRxiv preprint mirror returns fetchable full
+text through the review pipeline's fetch boundary — both return a 403 or a bare landing page — so
+the claim was unverifiable and the `quality` reviewer correctly blocked on it twice
+(`qual-claim-unsupported-1`). It is removed rather than patched with a better link, because no
+fetchable full text exists for it: `overstated-claim-01` now rests entirely on the 2017 IPD
+meta-analysis (fetched via PMC5310969, which hosts the full text openly) plus the two null trials
+(PMC9449358, PMC9449357), and the planted defect — S5.P2 flattening a hedged, subgroup-concentrated
+finding into an unqualified "prevents" — needs only that one paper's aOR, NNT and two subgroup
+splits to be licensed. `misrepresented-source-01`'s citation (Durkin et al. 2022) was already
+fetch-verifiable and is unchanged.
 
 **Why the rule stops at the material floor.** `_is_material` gates every hit in `grade`, so a
 detection on a minor-floor category scores only when a critic volunteers an escalation above the
@@ -2741,6 +2754,15 @@ rostered evidence critics actually catch an on-its-face misrepresentation, and w
 `misrepresented-source-01` is honestly `obvious`. If a re-audition shows competent models missing it
 while catching the other three evidence fixtures, the tier is wrong and should drop to `moderate`
 rather than the roster being re-cut around it.
+
+An adversarial review round caught an accidental second instance of this fixture's own category:
+three loci attributed third-grade outcomes to source [1] (Puma et al. 2010), whose own follow-up
+window is fetch-verified (ERIC ED507845) to end at 1st grade. A doctrine-compliant critic scoring
+that would have been graded a miss on an `obvious` fixture for catching the wrong instance, or
+credited once for catching both. Fixed by re-citing those loci to the 2012 Third Grade Follow-Up
+report (a new source [9], ERIC ED539264, fetch-verified) rather than by deleting the claims — the
+report is still allowed to say preschool's advantage fades by third grade, it now just cites the
+paper that actually says that. Exactly one planted defect remains, at S4.P3.
 
 **Invariants.** None in reach. Fixtures are test data: they enter no production path, and author
 exclusion, the blind `OrchestratorView`, fail-closed lenses, the severity floors and controller

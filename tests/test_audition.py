@@ -820,25 +820,47 @@ def test_all_repetitions_failing_one_fixture_leaves_that_fixture_uncovered():
     it out of schema — fails 3 of 15 evidence calls, which the strict `>` schema gate
     admits at exactly 20%. Before coverage accounting, the fixture then contributed
     nothing to any denominator: sensitivity was computed as though it did not exist.
+
+    The evidence lens now owes 6 fixtures, not 5 (D-category-coverage planted
+    `misrepresented-source-01`), so one fixture failing every repetition no longer lands
+    the rate exactly on `max_schema_failure_rate` by itself (1/6, not 1/5). To keep
+    exercising the boundary the gate is calibrated against — "admitted at exactly the
+    threshold, not merely under it" — a second, otherwise-clean fixture is made to fail
+    schema validation on exactly one of its calls too. `repetitions=5` is chosen so the
+    arithmetic is exact: 5 (the fully-failed fixture) + 1 (the single flake) = 6 failing
+    calls out of 6 fixtures x 5 repetitions = 30, i.e. 20% on the nose. The flaky fixture
+    still has four gradable calls, so it stays covered; only the target is uncovered.
     """
     fixtures = audition.load_fixtures(CORPUS)
     slot = audition.Assignment(alias="a", identity="p/m", lens=Lens.EVIDENCE, position=0)
+    owed = fixtures.for_lens(Lens.EVIDENCE)
     target = "one-sided-sourcing-01"
-    target_question = next(f for f in fixtures.fixtures if f.id == target).question
+    target_question = next(f for f in owed if f.id == target).question
+    flaky = next(f for f in owed if f.id != target and not f.is_control)
+    flaky_question = flaky.question
+    repetitions = 5
+    flaky_calls_seen = {"n": 0}
 
     def respond(alias, user):
         if target_question in user:
             # Out of scope for `evidence`, so triage fails the lens closed and keeps
             # failing it — no repair can turn a logic category into an evidence one.
             return [issue(Category.INVALID_INFERENCE, 1, 1)]
+        if flaky_question in user:
+            flaky_calls_seen["n"] += 1
+            if flaky_calls_seen["n"] == 1:
+                # One out-of-scope call, then clean — a single flake, not a break.
+                return [issue(Category.INVALID_INFERENCE, 1, 1)]
+            return []
         return []
 
-    m = audition.run_assignment(ScriptedClient(respond), slot, fixtures, repetitions=3)
-    assert m.calls == 15
-    assert m.schema_failures == 3
+    m = audition.run_assignment(ScriptedClient(respond), slot, fixtures, repetitions=repetitions)
+    total_calls = len(owed) * repetitions
+    assert m.calls == total_calls == 30
+    assert m.schema_failures == repetitions + 1 == 6
     assert m.schema_failure_rate == pytest.approx(THRESHOLDS.max_schema_failure_rate)
     assert m.uncovered_fixtures == (target,)
-    assert m.fixtures_covered == 4
+    assert m.fixtures_covered == len(owed) - 1
 
     judgement = audition.judge(m, THRESHOLDS)
     assert judgement.verdict is audition.Verdict.UNFIT

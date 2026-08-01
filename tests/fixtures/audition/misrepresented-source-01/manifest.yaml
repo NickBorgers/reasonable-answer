@@ -34,3 +34,13 @@ defects:
       report with one overreach in it — and it costs nothing here, because the logic
       lens never sees this fixture (`FixtureSet.for_lens`) and the evidence lens cannot
       raise `contradicted_claim`.
+      Fixed, not planted: an earlier draft also attributed third-grade outcomes to
+      source [1] — Puma et al. (2010), whose follow-up window is verified (ERIC
+      ED507845) to end at 1st grade — in S1.P1, the Key findings bullet, and S4.P1.
+      That would have been a second, unplanted instance of this fixture's own category,
+      graded a total miss for a critic that caught the planted S4.P3 tell but not this
+      one and a double credit for a critic that caught both. All three loci now cite the
+      2012 Third Grade Follow-Up report (source [9], ERIC ED539264, fetch-verified) for
+      the third-grade claim specifically, leaving source [1] cited only for what it
+      actually establishes: the study's initial random assignment. Exactly one planted
+      defect remains, at S4.P3.
