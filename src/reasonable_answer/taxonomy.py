@@ -110,6 +110,25 @@ def clamp_to_floor(category: Category, proposed: Severity) -> Severity:
     return proposed if SEVERITY_RANK[proposed] > SEVERITY_RANK[floor] else floor
 
 
+def counts_for_convergence(category: Category, proposed: Severity) -> bool:
+    """Whether triage would count this finding as a material issue.
+
+    The order of the two rules is the whole content of this function. `stylistic` is
+    out **unconditionally**, before severity is read: escalation is doctrine (RC-005)
+    and `validate_issue` checks category scope, locus and spans but never severity, so
+    a critic may legally file a `stylistic` issue at `major`. Testing severity first
+    would let that nitpick read as material for a category every other consumer
+    ignores. Everything else counts once the mechanical floor has been applied.
+
+    One definition, because two callers have to agree: triage, which decides what a run
+    converges on, and the audition grader, which measures what a critic would contribute
+    to a run and misreports it whenever the two drift (D-audition-stylistic-parity).
+    """
+    if category is Category.STYLISTIC:
+        return False
+    return is_material(clamp_to_floor(category, proposed))
+
+
 LENS_BRIEF: dict[Lens, str] = {
     Lens.LOGIC: (
         "Assess only the internal logic of the report: whether claims contradict "
