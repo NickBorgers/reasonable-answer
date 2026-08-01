@@ -409,7 +409,7 @@ def test_silent_critic_is_unfit_under_every_threshold_setting():
 
 def test_flagging_everything_is_also_unfit():
     """Perfect sensitivity, and useless: it manufactures work every round, drains the
-    critique budget and drives the run to rule 13 on a sound report."""
+    critique budget and drives the run to rule 13's terminal on a sound report."""
     noisy = metrics(
         planted_total=6,
         strict_hits=6,

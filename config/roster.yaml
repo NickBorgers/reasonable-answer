@@ -258,10 +258,41 @@ audition:
     warn_control_material_rate: 0.34
     max_schema_failure_rate: 0.2
 
+# How a writer is asked to apply a defect list (D-scoped-revision). Both settings below are
+# the code defaults and are spelled out here because they are the knob you reach for
+# when comparing convergence, not because they need setting.
+#
+# `patch` tells the writer to change only the paragraphs a fix task named and return
+# the rest byte-identical. It exists because six consecutive production runs finished
+# with zero `accepted`: the writer was applying essentially every fix task, and the
+# material count still would not fall (mean 5.39 before a regeneration, 4.81 after),
+# because re-rolling ~1,800 words to repair ~5 paragraphs grows about as many fresh
+# defects as it retires. `rewrite` restores the old prompt byte for byte, so the two
+# arms are comparable from configuration rather than from a checkout.
+#
+# What it does NOT change, and this is the point: critics still read the whole document
+# every tick, writers still rotate so no model ever patches its own last draft, and a
+# new draft is still a new hash and therefore a fresh clean-record set (RC-002). The
+# decorrelation layer is the critic roster (docs/isolation.md), not the rewrite.
+#
+# `scope_check: warn` records what the revision actually touched on the `generate`
+# event (`changed_paragraphs`, `in_scope`, `out_of_scope`, `defect_loci_untouched`) and
+# never rejects a draft — a rejection would burn one of three `writer_attempts`.
+revision:
+  mode: patch
+  scope_check: warn
+
 budgets:
   min_ticks: 2
   hard_cap: 8
   polish_cap: 1
+  # Whole-document rewrites a stalled run may spend before rule 13 gives up
+  # (D-scoped-revision). Patching can only accrete, and an accreted document is what the
+  # completeness lens punishes; one rewrite by a fresh writer is the escape valve. It
+  # also gives rule 13 a job at all — the stagnation signature has to be byte-identical
+  # for `stagnation_limit` ticks, and real trajectories jitter, so it never fired.
+  # Set to 0 to make stagnation terminal on sight, as it was before.
+  rewrite_cap: 1
   critique_attempts: 12
   confirmation_attempts: 6
   stagnation_limit: 3

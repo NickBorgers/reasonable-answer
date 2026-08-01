@@ -24,9 +24,9 @@ category matching plus a structural-locus window, and nothing else.
 
 **Both directions gate.** A critic that flags everything scores perfect sensitivity
 and is worse than useless: it never lets a run converge, it drains the critique
-budget, it drives `stagnation_count` to the limit, and rule 13 terminates
-`exhausted_unresolved` on a report that was fine. Silence and noise are two ways to
-fail the same job.
+budget, it drives `stagnation_count` to the limit, and rule 13 — after spending its
+bounded rewrite (D-scoped-revision) — terminates `exhausted_unresolved` on a report that
+was fine. Silence and noise are two ways to fail the same job.
 """
 
 from __future__ import annotations
