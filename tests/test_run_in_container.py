@@ -103,6 +103,13 @@ EMPTY_CLEAN = "exit 0\n"
 WRITES_THEN_CRASHES = (
     'mkdir -p "$(dirname "$RESULT_PATH")"; printf \'{"ok":true}\' > "$RESULT_PATH"; exit 5\n'
 )
+# Succeeds, and records the argv it was called with. The other shims discard their arguments,
+# so nothing they do can tell whether a flag actually reached the CLI.
+ARGV_REL = "argv.txt"
+RECORDS_ARGV = (
+    f'printf "%s\\n" "$@" > {ARGV_REL}; '
+    'mkdir -p "$(dirname "$RESULT_PATH")"; printf \'{"ok":true}\' > "$RESULT_PATH"\n'
+)
 
 
 # ── resume mode: every failure is contained so the cold fallback can run ──────
@@ -242,6 +249,27 @@ def test_an_unpinned_model_is_refused_on_the_codex_path(tmp_path: Path) -> None:
     assert not (tmp_path / RESULT_REL).exists()
     # And no config was left behind naming some fallback model.
     assert not (tmp_path / ".codex" / "config.toml").exists()
+
+
+def test_the_claude_path_forwards_the_pinned_model_to_the_cli(tmp_path: Path) -> None:
+    """The positive half for claude, mirroring the codex config.toml test below.
+
+    The refusal test above fires on the *shared* top-level `AGENT_MODEL` guard, so it would
+    still pass if this branch reverted to `model_args=()` — silently restoring the
+    CLI-default-following behaviour D-ci-model-pinning exists to remove, on both Claude
+    reviewer roles. Asserting the flag reaches the CLI is what closes that.
+    """
+    r = _run(
+        tmp_path,
+        claude_body=RECORDS_ARGV,
+        resume=False,
+        timeout="30s",
+        model="claude-sonnet-5",
+    )
+    assert r.returncode == 0, r.stderr
+    argv = (tmp_path / ARGV_REL).read_text().splitlines()
+    assert "--model" in argv, f"--model never reached the CLI; argv was {argv}"
+    assert argv[argv.index("--model") + 1] == "claude-sonnet-5"
 
 
 def test_the_codex_path_writes_the_pinned_model_into_its_config(tmp_path: Path) -> None:

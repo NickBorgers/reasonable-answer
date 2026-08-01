@@ -113,7 +113,8 @@ default author, since setting it back to `claude` takes effect without a commit.
 ### Models the proxy must serve
 
 Every role names its model rather than following a CLI default (D-ci-model-pinning), so the
-proxy has to resolve all five aliases below or the job fails closed at `review-agent-run`.
+proxy has to resolve each of the four distinct aliases below, across the six surfaces that use
+them, or the job fails closed at `review-agent-run`.
 Reviewer pins live in `review-pipeline.yml` beside the `agent:` they qualify; the two stages
 that pick their agent at runtime carry an `agent_model()` map inline instead.
 
