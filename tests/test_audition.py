@@ -7,6 +7,7 @@ grows an LLM call, that test stops being satisfiable.
 
 from __future__ import annotations
 
+import json
 import re
 import time
 from pathlib import Path
@@ -24,7 +25,8 @@ from reasonable_answer.config import (
     Roster,
 )
 from reasonable_answer.schemas import CritiqueOutput, LensResult, RawIssue, StructuralRef
-from reasonable_answer.taxonomy import Category, Lens, Severity
+from reasonable_answer.taxonomy import LENS_CATEGORIES, Category, Lens, Severity
+from reasonable_answer.triage import clean_records
 
 CORPUS = Path(__file__).parent / "fixtures" / "audition"
 
@@ -77,6 +79,43 @@ def test_shipped_corpus_loads_and_covers_both_directions():
     # INSUFFICIENT forever and the harness silently covers nothing.
     for lens in Lens:
         assert any(f.lens is lens for f in planted), f"lens {lens.value} has no planted fixture"
+
+
+def test_every_lens_has_an_obvious_tier_fixture():
+    """D-obvious-per-lens. Both fail-closed sensitivity gates in `judge` count planted
+    defects on `tier: obvious` fixtures only. A lens whose whole planted set is
+    `moderate` has `obvious_total == 0`, so both gates are skipped and a critic that
+    returns nothing on every call grades MARGINAL — which `enforce_fitness` does not
+    block. The completeness lens shipped in exactly that state.
+    """
+    fixtures = audition.load_fixtures(CORPUS)
+    planted = [f for f in fixtures.fixtures if not f.is_control]
+    for lens in Lens:
+        mine = [f for f in planted if f.lens is lens]
+        assert any(f.tier is audition.Tier.OBVIOUS and f.defects for f in mine), (
+            f"lens {lens.value} has no tier: obvious planted fixture — both fail-closed "
+            f"gates in judge() are dead for it and a silent critic grades marginal"
+        )
+
+
+def test_every_lens_has_a_locus_anchored_planted_defect():
+    """D-obvious-per-lens, the other half. `anywhere: true` skips the locus window
+    entirely, so a lens whose every planted defect sets it measures only "did the critic
+    name a category from my lens", not "did it find the defect" — and a critic that
+    reflexively raises one material issue of a fixed category on every artifact scores
+    perfect sensitivity on that lens.
+    """
+    fixtures = audition.load_fixtures(CORPUS)
+    for lens in Lens:
+        anchored = [
+            f.id
+            for f in fixtures.fixtures
+            if f.lens is lens and any(not d.anywhere for d in f.defects)
+        ]
+        assert anchored, (
+            f"lens {lens.value} has no planted defect with a real locus — its sensitivity "
+            f"score would not depend on where the critic looked"
+        )
 
 
 def test_every_lens_sees_all_controls():
@@ -363,6 +402,31 @@ def test_minor_severity_issue_does_not_count_as_a_detection():
     assert found[0].same_lens is False
 
 
+@pytest.mark.parametrize("severity", [Severity.MAJOR, Severity.BLOCKING])
+def test_escalated_stylistic_issue_does_not_count_as_a_detection(severity):
+    """Escalation is legal — `validate_issue` never checks severity — and production
+    discards `stylistic` anyway. A critic that filed only a `major` nitpick on the
+    planted paragraph would have let the defect through, so the grader must not credit
+    it (D-audition-stylistic-parity)."""
+    fixture = audition.Fixture(
+        id="f",
+        lens=Lens.COMPLETENESS,
+        question="q",
+        artifact="x",
+        defects=(
+            audition.PlantedDefect(
+                category=Category.OMITTED_COUNTERARGUMENT,
+                locus=StructuralRef(section=2, paragraph=1),
+            ),
+        ),
+    )
+    found = audition.grade(
+        fixture, result(Lens.COMPLETENESS, issue(Category.STYLISTIC, 2, 1, severity))
+    )
+    assert found[0].strict is False
+    assert found[0].same_lens is False
+
+
 def test_material_count_applies_the_severity_floor():
     """A critic under-rating a blocking category still raised a material issue —
     triage would clamp it up, so the noise measure must too."""
@@ -374,11 +438,37 @@ def test_material_count_applies_the_severity_floor():
     assert audition.material_issue_count(noisy) == 1
 
 
+@pytest.mark.parametrize("severity", [Severity.MAJOR, Severity.BLOCKING])
+def test_escalated_stylistic_issue_on_a_control_is_not_noise(severity):
+    """The unfit gate this feeds says such a critic would make "runs stagnate rather
+    than converge". A stylistic finding cannot stagnate a run — `tally` ignores it and
+    it never withholds a clean record — so it is not noise the gate may count."""
+    noisy = result(Lens.LOGIC, issue(Category.STYLISTIC, 1, 1, severity))
+    assert audition.material_issue_count(noisy) == 0
+
+
+@pytest.mark.parametrize("lens", list(Lens))
+@pytest.mark.parametrize("severity", list(Severity))
+def test_grader_materiality_agrees_with_triage_for_every_category(lens, severity):
+    """The anti-drift test. For every (category, severity) a critic could legally
+    report, the grader counts an issue exactly when triage withholds the lens's clean
+    record for it. Both read one predicate; this pins that they keep doing so."""
+    for category in LENS_CATEGORIES[lens]:
+        one = result(lens, issue(category, 1, 1, severity))
+        graded_material = audition.material_issue_count(one) == 1
+        blocks_clearance = not clean_records([one])
+        assert graded_material is blocks_clearance, (category, severity)
+
+
 # ------------------------------------------------------------------ verdicts
 
 
 def metrics(**kwargs) -> audition.Metrics:
-    base = dict(alias="a", identity="provider/model", lens=Lens.EVIDENCE, calls=10)
+    # `fixtures_owed=0` keeps the coverage gate vacuous by default so each verdict test
+    # exercises the gate it names; the coverage tests below pass it explicitly.
+    base = dict(
+        alias="a", identity="provider/model", lens=Lens.EVIDENCE, calls=10, fixtures_owed=0
+    )
     return audition.Metrics(**{**base, **kwargs})
 
 
@@ -425,6 +515,72 @@ def test_flagging_everything_is_also_unfit():
     assert any("invents" in r for r in judgement.reasons)
 
 
+def test_a_critic_that_is_never_clean_on_a_sound_report_is_unfit():
+    """D-obvious-per-lens. The cheapest degenerate strategy: raise exactly one material
+    issue of the right category on every artifact. It scores perfect sensitivity, and
+    its `control_material_rate` lands on exactly 1.00 — which is not *greater than* the
+    1.0 default, so the noise gate let it through and the verdict was MARGINAL, which
+    `enforce_fitness` does not block.
+    """
+    always_fires = metrics(
+        planted_total=4,
+        strict_hits=4,
+        same_lens_hits=4,
+        obvious_total=2,
+        obvious_hits=2,
+        control_runs=4,
+        control_material_issues=4,
+        control_clean_runs=0,
+    )
+    assert always_fires.control_material_rate == 1.0
+    assert always_fires.control_material_rate <= THRESHOLDS.max_control_material_rate
+    judgement = audition.judge(always_fires, THRESHOLDS)
+    assert judgement.verdict is audition.Verdict.UNFIT
+    assert any("clean" in r for r in judgement.reasons)
+
+
+def test_never_clean_is_unfit_under_every_threshold_setting():
+    """The mirror of `test_silent_critic_is_unfit_under_every_threshold_setting`: a
+    critic that never lets a sound report through blocks convergence whatever the
+    calibration says, so the gate is hardcoded rather than tunable."""
+    always_fires = metrics(
+        planted_total=4,
+        strict_hits=4,
+        same_lens_hits=4,
+        obvious_total=2,
+        obvious_hits=2,
+        control_runs=4,
+        control_material_issues=4,
+        control_clean_runs=0,
+    )
+    permissive = AuditionThresholds(
+        min_obvious_sensitivity=0.0,
+        warn_lens_sensitivity=0.0,
+        max_control_material_rate=99.0,
+        warn_control_material_rate=99.0,
+        max_schema_failure_rate=1.0,
+    )
+    assert audition.judge(always_fires, permissive).verdict is audition.Verdict.UNFIT
+
+
+def test_an_occasional_false_positive_is_not_the_never_clean_gate():
+    """The gate is about *never*, not about noise in degrees — a critic clean on some
+    sound reports and not others is what `warn_control_material_rate` is for."""
+    occasionally_noisy = metrics(
+        planted_total=4,
+        strict_hits=4,
+        same_lens_hits=4,
+        obvious_total=2,
+        obvious_hits=2,
+        control_runs=4,
+        control_material_issues=2,
+        control_clean_runs=2,
+    )
+    judgement = audition.judge(occasionally_noisy, THRESHOLDS)
+    assert judgement.verdict is audition.Verdict.MARGINAL
+    assert not any("clean" in r for r in judgement.reasons)
+
+
 def test_schema_failures_are_unfit_and_distinct_from_silence():
     broken = metrics(calls=10, schema_failures=8, planted_total=2, obvious_total=2, obvious_hits=2)
     judgement = audition.judge(broken, THRESHOLDS)
@@ -463,6 +619,91 @@ def test_partial_sensitivity_is_marginal_not_unfit():
 def test_unmeasured_is_insufficient_never_fit():
     assert audition.judge(metrics(calls=0), THRESHOLDS).verdict is audition.Verdict.INSUFFICIENT
     assert audition.judge(metrics(calls=4), THRESHOLDS).verdict is audition.Verdict.INSUFFICIENT
+
+
+# ------------------------------------------------- coverage (D-audition-failure-coverage)
+
+
+def censored_by_failure(**kwargs) -> audition.Metrics:
+    """A model with perfect rates on the fixtures it did not fail on.
+
+    The evidence lens owes 5 fixtures x 3 repetitions = 15 calls, so failing every
+    repetition of one fixture is 3/15 — exactly `max_schema_failure_rate`, which the
+    strict `>` gate admits.
+    """
+    base = dict(
+        calls=15,
+        schema_failures=3,
+        fixtures_owed=5,
+        planted_total=6,
+        strict_hits=6,
+        same_lens_hits=6,
+        obvious_total=6,
+        obvious_hits=6,
+        control_runs=6,
+        control_material_issues=0,
+        control_clean_runs=6,
+    )
+    return metrics(**{**base, **kwargs})
+
+
+def test_a_fixture_no_call_ever_graded_is_unfit_not_fit():
+    """The censoring: a fixture whose every repetition failed leaves `planted_total`,
+    `obvious_total` and `control_runs` with it, so every headline rate is computed over
+    a corpus subset the model selected by failing — and reads as `fit`."""
+    censored = censored_by_failure(uncovered_fixtures=("one-sided-sourcing-01",))
+    # The schema gate does not fire: 20% is at the maximum, not over it.
+    assert censored.schema_failure_rate <= THRESHOLDS.max_schema_failure_rate
+
+    judgement = audition.judge(censored, THRESHOLDS)
+    assert judgement.verdict is audition.Verdict.UNFIT
+    assert "one-sided-sourcing-01" in judgement.reasons[0]
+
+    # Same rates, same schema failures, fixture actually measured: fit. That contrast is
+    # the whole finding — nothing but coverage separates these two verdicts.
+    measured = censored.model_copy(update={"uncovered_fixtures": ()})
+    assert audition.judge(measured, THRESHOLDS).verdict is audition.Verdict.FIT
+
+
+def test_coverage_is_not_tunable_away():
+    """Like the zero-obvious rule: not a question of degree. A rate no call contributed
+    to is not a lenient measurement, it is the absence of one."""
+    censored = censored_by_failure(uncovered_fixtures=("uncited-claim-01",))
+    permissive = AuditionThresholds(
+        min_obvious_sensitivity=0.0,
+        warn_lens_sensitivity=0.0,
+        max_control_material_rate=99.0,
+        warn_control_material_rate=99.0,
+        max_schema_failure_rate=1.0,
+    )
+    assert audition.judge(censored, permissive).verdict is audition.Verdict.UNFIT
+
+
+def test_failing_every_control_does_not_read_as_clean():
+    """The noise direction censors the same way, and more quietly: `_ratio` returns 0.0
+    for a zero denominator, and `judge` gates the noise checks on `control_runs`, so a
+    model that breaks on controls specifically switches those gates off rather than
+    failing them."""
+    censored = censored_by_failure(
+        schema_failures=6,
+        uncovered_fixtures=("control-sound-01", "control-sound-02"),
+        control_runs=0,
+        control_material_issues=0,
+        control_clean_runs=0,
+    )
+    assert censored.control_material_rate == 0.0, "unmeasured is indistinguishable from clean"
+
+    # Under the shipped thresholds 6/15 also trips the schema gate; the point here is
+    # that coverage catches it independently, for a deployment that tuned that gate up.
+    tolerant = AuditionThresholds(max_schema_failure_rate=1.0)
+    judgement = audition.judge(censored, tolerant)
+    assert judgement.verdict is audition.Verdict.UNFIT
+    assert "control-sound-01" in judgement.reasons[0]
+
+
+def test_metrics_cannot_claim_more_uncovered_fixtures_than_it_owed():
+    with pytest.raises(ValueError, match="contradicts itself"):
+        metrics(fixtures_owed=1, uncovered_fixtures=("a", "b"))
 
 
 # ------------------------------------------------------- roster-level warnings
@@ -564,6 +805,18 @@ def test_corrupt_cache_reads_as_empty_never_as_passing(tmp_path):
     assert audition.load_cache(path) == {}
 
 
+def test_a_cached_verdict_predating_coverage_reads_as_not_audited(tmp_path):
+    """`fixtures_owed` is required rather than defaulted, so an entry written before
+    coverage accounting existed fails validation and is dropped. It cannot say whether
+    it measured the whole corpus, and a record that cannot say that must degrade to
+    unmeasured — never carry its old rates forward as a pass."""
+    legacy = entry().model_dump(mode="json")
+    legacy["metrics"].pop("fixtures_owed")
+    path = tmp_path / "cache.json"
+    path.write_text(json.dumps({audition.cache_key("p/m", Lens.EVIDENCE): legacy}))
+    assert audition.load_cache(path) == {}
+
+
 def test_cache_roundtrip(tmp_path):
     path = tmp_path / "nested" / "cache.json"
     entries = {audition.cache_key("p/m", Lens.EVIDENCE): entry()}
@@ -618,6 +871,8 @@ def test_run_assignment_measures_both_directions_offline():
     m = audition.run_assignment(ScriptedClient(respond), slot, fixtures, repetitions=1)
     assert m.calls == len(fixtures.for_lens(Lens.EVIDENCE))
     assert m.schema_failures == 0
+    assert m.fixtures_owed == len(fixtures.for_lens(Lens.EVIDENCE))
+    assert m.uncovered_fixtures == (), "a graded zero is a measured miss, not a gap"
     assert m.strict_hits == 1
     assert m.control_runs == 2
     assert m.control_material_issues == 0
@@ -671,7 +926,44 @@ def test_failed_lens_counts_as_schema_failure_not_as_silence():
     assert m.schema_failures == m.calls
     assert m.planted_total == 0
     assert m.control_runs == 0
-    assert audition.judge(m, THRESHOLDS).verdict is audition.Verdict.UNFIT
+    judgement = audition.judge(m, THRESHOLDS)
+    assert judgement.verdict is audition.Verdict.UNFIT
+    # The reported *cause* stays mechanical, ahead of the coverage gate this model also
+    # trips: an operator told "never graded 6 fixtures" would go looking for a judgement
+    # problem, when the fix is a prompt or an output mode.
+    assert "schema" in judgement.reasons[0]
+
+
+def test_all_repetitions_failing_one_fixture_leaves_that_fixture_uncovered():
+    """The attack the coverage gate closes, end to end and offline.
+
+    A model that deterministically breaks on one fixture — that artifact reliably drives
+    it out of schema — fails 3 of 15 evidence calls, which the strict `>` schema gate
+    admits at exactly 20%. Before coverage accounting, the fixture then contributed
+    nothing to any denominator: sensitivity was computed as though it did not exist.
+    """
+    fixtures = audition.load_fixtures(CORPUS)
+    slot = audition.Assignment(alias="a", identity="p/m", lens=Lens.EVIDENCE, position=0)
+    target = "one-sided-sourcing-01"
+    target_question = next(f for f in fixtures.fixtures if f.id == target).question
+
+    def respond(alias, user):
+        if target_question in user:
+            # Out of scope for `evidence`, so triage fails the lens closed and keeps
+            # failing it — no repair can turn a logic category into an evidence one.
+            return [issue(Category.INVALID_INFERENCE, 1, 1)]
+        return []
+
+    m = audition.run_assignment(ScriptedClient(respond), slot, fixtures, repetitions=3)
+    assert m.calls == 15
+    assert m.schema_failures == 3
+    assert m.schema_failure_rate == pytest.approx(THRESHOLDS.max_schema_failure_rate)
+    assert m.uncovered_fixtures == (target,)
+    assert m.fixtures_covered == 4
+
+    judgement = audition.judge(m, THRESHOLDS)
+    assert judgement.verdict is audition.Verdict.UNFIT
+    assert target in judgement.reasons[0]
 
 
 def test_audition_warns_by_default_and_has_no_inert_enabled_flag():

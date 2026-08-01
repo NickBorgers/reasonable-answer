@@ -635,7 +635,12 @@ def _cache_usable(cache, slot, corpus_hash, ph, cfg, now) -> bool:
 
 def _render_audition(rows) -> None:
     table = Table(title="critic audition")
-    for column in ("alias", "lens", "pos", "strict", "lens sens", "obvious", "ctrl/run", "verdict"):
+    # `cover` sits beside the rates because it says what they were measured over: a
+    # fixture no call ever graded is absent from every denominator to its right
+    # (D-audition-failure-coverage).
+    columns = ("alias", "lens", "pos", "cover", "strict", "lens sens", "obvious", "ctrl/run",
+               "verdict")
+    for column in columns:
         table.add_column(column)
     colour = {
         audition_mod.Verdict.FIT: "green",
@@ -647,15 +652,17 @@ def _render_audition(rows) -> None:
         if metrics is None or judgement is None:
             # Never blank: a blank cell reads as a pass.
             table.add_row(
-                slot.alias, slot.lens.value, str(slot.position + 1), "-", "-", "-", "-",
+                slot.alias, slot.lens.value, str(slot.position + 1), "-", "-", "-", "-", "-",
                 f"[dim]{audition_mod.Status.NOT_AUDITED.value}[/dim]",
             )
             continue
         style = colour[judgement.verdict]
+        cover = f"{metrics.fixtures_covered}/{metrics.fixtures_owed}"
         table.add_row(
             slot.alias,
             slot.lens.value,
             str(slot.position + 1),
+            cover if metrics.fixtures_covered == metrics.fixtures_owed else f"[red]{cover}[/red]",
             f"{metrics.strict_sensitivity:.2f}",
             f"{metrics.lens_sensitivity:.2f}",
             f"{metrics.obvious_sensitivity:.2f}",
