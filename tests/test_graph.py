@@ -118,6 +118,129 @@ def test_stagnation_exits_early(identities, tmp_path, roster):
     assert final["round"] < cfg.budgets.hard_cap  # stopped early, did not burn the cap
 
 
+def test_stagnation_spends_one_rewrite_then_exits(identities, tmp_path, roster):
+    """D-scoped-revision: the valve fires once, is bounded, and does not become a loop."""
+    cfg = Config(
+        roster=roster,
+        budgets=Budgets(min_ticks=2, hard_cap=20, stagnation_limit=2, rewrite_cap=1),
+        runs_dir=tmp_path / "runs",
+    )
+    client = make_client(identities, critique_fn=always_material)
+    client.report_fn = lambda n: REPORT.replace("A claim", f"Draft {n}: a claim")
+    final = run(cfg, question="Is it so?", seed=REPORT, client=client)
+
+    assert final["terminal_status"] == "exhausted_unresolved"
+    assert final["round"] < cfg.budgets.hard_cap
+    assert final["rewrites_used"] == 1
+
+    events = _events(cfg, final)
+    rewrites = [e for e in events if e["kind"] == "generate" and e.get("full_rewrite")]
+    assert len(rewrites) == 1, "the cap must bind — one rewrite, not one per stagnant tick"
+    # Rule 13 fired twice: once to spend the rewrite, once to give up.
+    rule_13 = [e for e in events if e["kind"] == "control" and e["rule"] == 13]
+    assert [e["action"] for e in rule_13] == ["generate", "terminal"]
+
+
+def test_two_rewrites_are_separated_by_a_judged_draft(identities, tmp_path, roster):
+    """D-scoped-revision, the load-bearing `stagnation_count = 0` reset in `_control`:
+    with `rewrite_cap=2` the two rewrites must be spent one per fresh stall, separated by
+    at least one ordinary (rule-14) generation whose draft is judged — never in
+    consecutive control ticks. Deleting the reset leaves `stagnation_count` at the limit,
+    so rule 13 re-fires the very next tick and the two `full_rewrite` generations land
+    adjacent; this test is what fails when that happens (`rewrite_cap=1` cannot see it,
+    because the second firing is terminal regardless of the reset)."""
+    cfg = Config(
+        roster=roster,
+        budgets=Budgets(min_ticks=2, hard_cap=20, stagnation_limit=2, rewrite_cap=2),
+        runs_dir=tmp_path / "runs",
+    )
+    client = make_client(identities, critique_fn=always_material)
+    # A genuinely new draft each tick: the per-category signal stays stationary (so
+    # stagnation recurs) while the artifact hash keeps changing (so the cycle detector
+    # stays out of it) — each rewrite is granted on a fresh stall, not a repeated hash.
+    client.report_fn = lambda n: REPORT.replace("A claim", f"Draft {n}: a claim")
+    final = run(cfg, question="Is it so?", seed=REPORT, client=client)
+
+    assert final["terminal_status"] == "exhausted_unresolved"
+    assert final["round"] < cfg.budgets.hard_cap
+    assert final["rewrites_used"] == 2
+
+    events = _events(cfg, final)
+    generates = [e for e in events if e["kind"] == "generate"]
+    rewrite_idx = [i for i, e in enumerate(generates) if e.get("full_rewrite")]
+    assert len(rewrite_idx) == 2, "the cap must bind at two — one rewrite per stall"
+    between = generates[rewrite_idx[0] + 1 : rewrite_idx[1]]
+    assert any(not e.get("full_rewrite") for e in between), (
+        "a rewritten draft must be judged before the next rewrite is granted; the "
+        "budget must not be spent in consecutive control ticks (the stagnation_count reset)"
+    )
+    # Rule 13 fired three times: spend, spend, give up.
+    rule_13 = [e for e in events if e["kind"] == "control" and e["rule"] == 13]
+    assert [e["action"] for e in rule_13] == ["generate", "generate", "terminal"]
+
+
+def test_a_stagnant_run_with_no_rewrite_budget_behaves_exactly_as_before(
+    identities, tmp_path, roster
+):
+    cfg = Config(
+        roster=roster,
+        budgets=Budgets(min_ticks=2, hard_cap=20, stagnation_limit=2, rewrite_cap=0),
+        runs_dir=tmp_path / "runs",
+    )
+    client = make_client(identities, critique_fn=always_material)
+    client.report_fn = lambda n: REPORT.replace("A claim", f"Draft {n}: a claim")
+    final = run(cfg, question="Is it so?", seed=REPORT, client=client)
+
+    assert final["terminal_status"] == "exhausted_unresolved"
+    assert final["rewrites_used"] == 0
+    assert not [e for e in _events(cfg, final) if e.get("full_rewrite")]
+
+
+def test_patch_mode_measures_scope_without_rejecting_anything(identities, tmp_path, roster):
+    """The scope check is warn-only: a writer that rewrites everything still ships."""
+    cfg = Config(
+        roster=roster,
+        budgets=Budgets(min_ticks=2, hard_cap=4),
+        runs_dir=tmp_path / "runs",
+    )
+    assert cfg.revision.mode == "patch"  # the shipped default
+    client = make_client(identities, critique_fn=always_material)
+    # Every fix task names S1.P1; this writer leaves S1.P1 alone and rewrites the
+    # paragraph nobody asked about — precisely the behaviour the check exists to see.
+    client.report_fn = lambda n: REPORT.replace("A real-looking source.", f"Source variant {n}.")
+    final = run(cfg, question="Is it so?", seed=REPORT, client=client)
+
+    assert final["terminal_status"] in ("exhausted_unresolved", "needs_human_review")
+    revisions = [
+        e
+        for e in _events(cfg, final)
+        if e["kind"] == "generate" and "changed_paragraphs" in e
+    ]
+    assert revisions, "a revision under patch mode must carry the scope measurement"
+    assert any(e["out_of_scope"] > 0 for e in revisions)
+    # Warn-only: nothing was rejected, so no writer attempt was burned on it.
+    assert not [e for e in _events(cfg, final) if e["kind"] == "generate_failed"]
+
+
+def test_the_first_draft_carries_no_scope_measurement(identities, tmp_path, roster):
+    """Absent means "not applicable", never "in scope" — the A/B must not average the
+    first draft, a polish pass, or a rule-13 rewrite into the out-of-scope rate."""
+    cfg = Config(
+        roster=roster,
+        budgets=Budgets(min_ticks=2, hard_cap=4),
+        runs_dir=tmp_path / "runs",
+    )
+    client = make_client(identities, critique_fn=always_material)
+    final = run(cfg, question="Is it so?", client=client)
+    first = [e for e in _events(cfg, final) if e["kind"] == "generate"][0]
+    assert "changed_paragraphs" not in first
+
+
+def _events(cfg: Config, final: dict) -> list[dict]:
+    path = Path(cfg.runs_dir) / final["run_id"] / "events.jsonl"
+    return [json.loads(line) for line in path.read_text().splitlines() if line.strip()]
+
+
 def test_a_blocking_issue_at_the_cap_needs_human_review(identities, config):
     def blocking(_alias, _user) -> CritiqueOutput:
         return CritiqueOutput(

@@ -52,3 +52,48 @@ def test_no_top_level_title():
 
 def test_first_draft_references_the_frame():
     assert "required section frame" in prompts.writer_first_draft("q")
+
+
+# ------------------------------------------------- revision scope (D-scoped-revision)
+
+
+def _defect():
+    from reasonable_answer.schemas import Defect, StructuralRef
+    from reasonable_answer.taxonomy import Category, Severity
+
+    return Defect(
+        locus=StructuralRef(section=2, paragraph=1),
+        category=Category.UNCITED_CLAIM,
+        severity=Severity.MAJOR,
+        claim_span="Water boils at 100 degrees Celsius",
+        rationale="no citation attached",
+        instruction="cite a source or remove the claim",
+    )
+
+
+def test_rewrite_mode_is_byte_identical_to_the_pre_scoped_revision_prompt():
+    """`revision.mode: rewrite` is the A/B control arm. If it drifts, the comparison
+    it exists to enable is measuring two changes at once."""
+    text = prompts.writer_revision("q", "r", [_defect()], polish=False, mode="rewrite")
+    assert text.endswith(prompts.WRITER_REWRITE_CLOSE)
+    assert prompts.WRITER_PATCH_CLOSE not in text
+    # The default is the control arm, so every existing call site is unaffected.
+    assert prompts.writer_revision("q", "r", [_defect()], polish=False) == text
+
+
+def test_patch_mode_demands_byte_identical_untouched_paragraphs():
+    text = prompts.writer_revision("q", "r", [_defect()], polish=False, mode="patch")
+    assert text.endswith(prompts.WRITER_PATCH_CLOSE)
+    # "byte-identical" is the load-bearing wording: "keep the meaning" licenses exactly
+    # the paraphrase this exists to stop.
+    assert "byte-identical" in prompts.WRITER_PATCH_CLOSE
+    # Still the whole document — the artifact hash is taken over the whole document.
+    assert "the whole document, not a diff" in text
+
+
+def test_a_polish_pass_is_never_scoped():
+    """Rule 9 fires only when `material == 0`, so there are no defect loci to scope to;
+    polish is a clarity pass over the entire report by definition."""
+    text = prompts.writer_revision("q", "r", [], polish=True, mode="patch")
+    assert text.endswith(prompts.WRITER_REWRITE_CLOSE)
+    assert prompts.WRITER_PATCH_CLOSE not in text
