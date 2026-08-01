@@ -34,7 +34,7 @@ from .taxonomy import (
     Lens,
     Severity,
     clamp_to_floor,
-    is_material,
+    counts_for_convergence,
 )
 
 #: How much of the source text a repair hint may quote back. A paragraph is normally
@@ -333,7 +333,7 @@ def defect_provenance(results: list[LensResult]) -> dict[str, list[str]]:
         if result.failed:
             continue
         for issue in clamp(result.issues):
-            if issue.category is Category.STYLISTIC or not is_material(issue.severity):
+            if not counts_for_convergence(issue.category, issue.severity):
                 continue
             cat, span = issue.category.value, _normalize(issue.claim_span)
             provenance.setdefault(f"{cat}|{span}", set()).add(result.critic_identity)
@@ -370,11 +370,9 @@ def clean_records(results: list[LensResult]) -> list[CleanRecord]:
         if result.failed:
             continue
         # A stylistic finding is ignored for convergence, so it must not withhold
-        # clearance either — even if the critic escalated its severity.
-        blocking_issues = [
-            i for i in clamp(result.issues) if i.category is not Category.STYLISTIC
-        ]
-        if any(is_material(i.severity) for i in blocking_issues):
+        # clearance either — even if the critic escalated its severity. That exclusion
+        # lives in `counts_for_convergence`, which the audition grader shares.
+        if any(counts_for_convergence(i.category, i.severity) for i in clamp(result.issues)):
             continue
         records.append(
             CleanRecord(
