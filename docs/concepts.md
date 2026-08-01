@@ -224,16 +224,20 @@ it — each one, again, a guard against a known LLM failure mode:
   the property it exists to measure. Model judges carry documented and reproducible biases —
   position, verbosity, and self-enhancement among them
   ([Zheng et al. 2023](https://arxiv.org/abs/2306.05685)) — so a grader built from one would
-  import exactly the failure modes the audition is supposed to detect. What the audition measures
-  is a **floor**, and deliberately a strict one: critics are graded with no fetched-source
-  scaffolding whatsoever, while a deployment with source verification switched on hands its
-  evidence critic a `fetched_sources_block` for every citation it attempted to fetch — including a
-  paywalled, blocked or offline one, which still renders as a named failure entry rather than
-  silence (D-audition-source-mode). So `fit` says only that the model can do the job on the
-  artifact text alone, with nothing about any citation to lean on, not that it reads a fetched page
-  well, and not even that it handles the weaker on-its-face prompt production runs on a citation
-  whose fetch failed. Certifying either needs deterministic offline source packets shipped with the
-  fixtures, which is an open item.
+  import exactly the failure modes the audition is supposed to detect. What the grader counts as
+  a finding is the production predicate itself — `taxonomy.counts_for_convergence`, shared with
+  triage (D-audition-stylistic-parity) — so a finding a real run would discard, such as a
+  `stylistic` note a critic escalated to `major`, scores as neither a detection nor as invented
+  noise. A grader that restates the rule instead of sharing it drifts from it. What the audition
+  measures is also a **floor**, and deliberately a strict one: critics are graded with no
+  fetched-source scaffolding whatsoever, while a deployment with source verification switched on
+  hands its evidence critic a `fetched_sources_block` for every citation it attempted to fetch —
+  including a paywalled, blocked or offline one, which still renders as a named failure entry
+  rather than silence (D-audition-source-mode). So `fit` says only that the model can do the job
+  on the artifact text alone, with nothing about any citation to lean on, not that it reads a
+  fetched page well, and not even that it handles the weaker on-its-face prompt production runs on
+  a citation whose fetch failed. Certifying either needs deterministic offline source packets
+  shipped with the fixtures, which is an open item.
 - **The dispute channel.** Critics can be wrong, and a false positive is otherwise
   indistinguishable from a real defect — floors escalate it, the blind referee counts it, and a
   compliant writer would "fix" the report into falsehood. An opt-in channel (D-writer-disputes) lets the writer

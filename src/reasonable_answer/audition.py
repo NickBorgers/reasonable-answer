@@ -69,7 +69,7 @@ from .config import AuditionConfig, AuditionThresholds, ConfigError, Roster
 from .critique import critique_once
 from .llm import LLMClient
 from .schemas import LensResult, RawIssue, StructuralRef
-from .taxonomy import LENS_CATEGORIES, SEVERITY_FLOOR, SEVERITY_RANK, Category, Lens, Severity
+from .taxonomy import LENS_CATEGORIES, SEVERITY_FLOOR, Category, Lens, counts_for_convergence
 
 #: Fixture corpus shipped with the source tree.
 DEFAULT_FIXTURE_DIR = Path(__file__).resolve().parent.parent.parent / "tests" / "fixtures" / "audition"
@@ -316,24 +316,34 @@ def _locus_matches(planted: StructuralRef, reported: StructuralRef) -> bool:
 
 
 def _is_material(issue: RawIssue) -> bool:
-    """Severity after the mechanical floor clamp, which is what triage would count."""
-    effective = max(issue.severity, SEVERITY_FLOOR[issue.category], key=_rank)
-    return effective in (Severity.BLOCKING, Severity.MAJOR)
+    """Whether production would count this issue at all — the production predicate
+    itself (`taxonomy.counts_for_convergence`), not a restatement of it.
 
-
-def _rank(severity: Severity) -> int:
-    return SEVERITY_RANK[severity]
+    So the severity floor is applied, and `stylistic` is discarded whatever severity
+    the critic gave it. Both halves matter here. A critic may legally escalate a
+    stylistic note to `major`; triage then drops it from the defect list, the tally,
+    the provenance registry and the clean-record test alike. Crediting that as a
+    detection would score a critic as having caught a defect that, in a real run,
+    would have sailed through — and counting it as invented noise would fail a critic
+    for findings that cannot stagnate anything (D-audition-stylistic-parity).
+    """
+    return counts_for_convergence(issue.category, issue.severity)
 
 
 def grade(fixture: Fixture, result: LensResult) -> tuple[Detection, ...]:
     """Match a critic's issues against ground truth. Pure — no client, no I/O.
 
     A planted defect counts as found when a reported issue lands within the locus
-    window and its category either matches exactly (`strict`) or belongs to the same
-    lens (`same_lens`). The relaxed form exists because critics reasonably disagree
-    between, say, `uncited_claim` and `misrepresented_source` on the same sentence,
-    and scoring that as a miss would penalize a critic that is doing its job. Both
-    numbers are reported; neither is the whole story alone.
+    window, would survive production triage (`_is_material`), and has a category that
+    either matches exactly (`strict`) or belongs to the same lens (`same_lens`). The
+    relaxed form exists because critics reasonably disagree between, say,
+    `uncited_claim` and `misrepresented_source` on the same sentence, and scoring that
+    as a miss would penalize a critic that is doing its job. It stays bounded by the
+    materiality test: `stylistic` is in every lens's category set, so without it a
+    nitpick on the right paragraph — at any severity — would score as a detection of
+    whatever was planted there.
+
+    Both numbers are reported; neither is the whole story alone.
     """
     detections: list[Detection] = []
     for defect in fixture.defects:
