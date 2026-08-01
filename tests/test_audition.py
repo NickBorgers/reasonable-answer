@@ -7,6 +7,7 @@ grows an LLM call, that test stops being satisfiable.
 
 from __future__ import annotations
 
+import re
 import time
 from pathlib import Path
 
@@ -159,6 +160,81 @@ def test_control_with_defects_is_rejected(tmp_path):
     )
     with pytest.raises(audition.FixtureError, match="control"):
         audition.load_fixtures(tmp_path / "corpus")
+
+
+def test_control_declaring_a_lens_is_rejected(tmp_path):
+    """D-control-soundness. `lens` on a control asserts a scope nothing honors: `for_lens`
+    hands controls to every lens regardless, so the field reads as a soundness claim
+    that was never checked — which is how two controls carrying real uncited claims
+    graded every competent evidence critic as an inventor of defects."""
+    d = tmp_path / "corpus" / "bad"
+    d.mkdir(parents=True)
+    (d / "artifact.md").write_text("# Q\n\nBody paragraph.\n")
+    (d / "manifest.yaml").write_text(
+        yaml.safe_dump({"lens": "evidence", "kind": "control", "question": "q"})
+    )
+    with pytest.raises(audition.FixtureError, match="declares lens"):
+        audition.load_fixtures(tmp_path / "corpus")
+
+
+def test_planted_fixture_without_a_lens_is_rejected(tmp_path):
+    """The other direction: nothing would ever grade it."""
+    d = tmp_path / "corpus" / "bad"
+    d.mkdir(parents=True)
+    (d / "artifact.md").write_text("# Q\n\nBody paragraph.\n")
+    (d / "manifest.yaml").write_text(
+        yaml.safe_dump(
+            {
+                "question": "q",
+                "defects": [{"category": "uncited_claim", "locus": {"section": 1, "paragraph": 1}}],
+            }
+        )
+    )
+    with pytest.raises(audition.FixtureError, match="declares no lens"):
+        audition.load_fixtures(tmp_path / "corpus")
+
+
+#: `Surname (Year)` / `Surname et al. (Year)` / `A, B and C (Year)` — the last
+#: capitalised word before the year is the one that must appear in `## Sources`.
+_INTEXT_CITE = re.compile(r"([A-Z][A-Za-z-]+)(?:\s+et\s+al\.)?\s*\((\d{4})\)")
+_SOURCE_ENTRY = re.compile(r"^-\s+([A-Z][A-Za-z-]+)[^(]*\((\d{4})\)")
+
+#: A contested question sourced from one or two places earns `one_sided_sourcing`,
+#: which floors to `major` — a finding the critic would be right to raise, scored
+#: against it as invention. Four is the floor, not a target.
+MIN_CONTROL_SOURCES = 4
+
+
+def _split_sources(artifact: str) -> tuple[str, list[str]]:
+    body, _, sources = artifact.partition("\n## Sources")
+    return body, [ln for ln in sources.splitlines() if ln.startswith("- ")]
+
+
+@pytest.mark.parametrize("fixture_id", ["control-sound-01", "control-sound-02"])
+def test_control_citations_resolve_in_both_directions(fixture_id):
+    """D-control-soundness, the mechanically checkable part.
+
+    Catches a dangling in-text citation and an orphan Sources entry. It does NOT catch
+    the failure that motivated the decision — a claim with no citation marker at all,
+    which no regex can distinguish from prose that needs none. That half rests on the
+    soundness contract in each manifest and on review.
+    """
+    fixture = next(
+        f for f in audition.load_fixtures(CORPUS).fixtures if f.id == fixture_id
+    )
+    body, entries = _split_sources(fixture.artifact)
+    assert entries, f"{fixture_id}: no '## Sources' section"
+    assert len(entries) >= MIN_CONTROL_SOURCES, (
+        f"{fixture_id}: {len(entries)} sources — thin enough to earn `one_sided_sourcing`"
+    )
+
+    for name, year in sorted(set(_INTEXT_CITE.findall(body))):
+        assert any(name in entry and year in entry for entry in entries), (
+            f"{fixture_id}: in-text '{name} ({year})' resolves to no Sources entry"
+        )
+    for match in filter(None, map(_SOURCE_ENTRY.match, entries)):
+        surname, year = match.group(1), match.group(2)
+        assert surname in body, f"{fixture_id}: Sources entry '{surname} ({year})' is never cited"
 
 
 # ------------------------------------------------------------------- grading

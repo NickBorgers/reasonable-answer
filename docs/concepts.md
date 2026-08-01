@@ -213,7 +213,10 @@ it — each one, again, a guard against a known LLM failure mode:
 - **Auditioning the critics.** Trusting a critic because it's an LLM would repeat the original
   sin. So critics are auditioned offline against reports with *planted* defects and known-sound
   controls, and graded by plain code — measuring both whether they catch what's there and whether
-  they invent what isn't. An LLM grader is expressly forbidden: the harness must not depend on
+  they invent what isn't. A control is graded by every lens, so it has to be sound under every
+  lens (D-control-soundness): a "sound" control carrying one real uncited claim scores every
+  competent evidence critic as an inventor of defects, which is what it did. An LLM grader is
+  expressly forbidden: the harness must not depend on
   the property it exists to measure. Model judges carry documented and reproducible biases —
   position, verbosity, and self-enhancement among them
   ([Zheng et al. 2023](https://arxiv.org/abs/2306.05685)) — so a grader built from one would
