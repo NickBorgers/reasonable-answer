@@ -215,7 +215,12 @@ it — each one, again, a guard against a known LLM failure mode:
   controls, and graded by plain code — measuring both whether they catch what's there and whether
   they invent what isn't. A control is graded by every lens, so it has to be sound under every
   lens (D-control-soundness): a "sound" control carrying one real uncited claim scores every
-  competent evidence critic as an inventor of defects, which is what it did. A verdict also has to
+  competent evidence critic as an inventor of defects, which is what it did. The corpus also has to
+  hold up its end per lens: every lens carries at least one *obvious*-tier fixture, because the two
+  fail-closed gates count only those, and at least one defect pinned to a real paragraph, because a
+  defect matchable anywhere measures only which category the critic named (D-obvious-per-lens). The
+  two failures that defeat the harness completely — never firing, and never once letting a sound
+  report through — are hardcoded as unfit rather than left to a threshold. A verdict also has to
   cover the whole corpus: a call that fails the schema is graded as neither a hit nor a miss, so a
   model that reliably breaks on one fixture would have that fixture quietly dropped from its own
   denominators — a fixture nothing ever graded is now `unfit`, not a better score
