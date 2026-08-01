@@ -2296,21 +2296,25 @@ arrives with a notion and should meet the strongest version of the other side ea
 conclusion itself, and in a dedicated section ahead of the topical detail — never as an
 afterthought at the tail. The persuasion literature was checked before leaning on it, and it
 carries less than the folklore says: refutational two-sided messages beat one-sided, which beat
-non-refutational two-sided (O'Keefe 1999, k=107, r≈.08 vs r≈−.05), but the classic claim that
-two-sidedness works best on *opposed* audiences did not survive that meta-analysis, and the
-effects are small with prediction intervals spanning zero. The modern result (Xu & Petty 2022,
-2024) is narrower and more useful: for entrenched attitudes, a two-sided message increases
+non-refutational two-sided ([O'Keefe 1999](https://dokeefe.net/pub/OKeefe99AICA.pdf), k=107,
+r≈.08 vs r≈−.05), but the classic claim that two-sidedness works best on *opposed* audiences did
+not survive that meta-analysis, and the effects are small with prediction intervals spanning
+zero. The modern result ([Xu & Petty 2022](https://doi.org/10.1177/0146167220988371),
+[2024](https://doi.org/10.1177/01461672221128113)) is narrower and more useful: for entrenched
+attitudes, a two-sided message increases
 *openness*, mediated by the reader feeling their view was respectfully and strongly stated. So
 the frame is justified by what it forces the pipeline to do — confront the strongest opposing
 evidence where critics can see whether it was answered — with any persuasive benefit treated as
 upside, not as the load-bearing claim.
 
 **Two hazards the skeleton text guards against by name.** First, the strawman: presenting the
-opposing case weakly nulls the openness effect entirely (Xu & Petty 2022, study 2), and an LLM
+opposing case weakly nulls the openness effect entirely ([Xu & Petty 2022, study
+2](https://doi.org/10.1177/0146167220988371)), and an LLM
 asked for "the strongest counterargument" will happily manufacture a weak one — so the skeleton
 requires the form proponents would accept, and prefers an honest "reasonable objections exist,
 chiefly X" over a manufactured steelman. Second, the unanswered objection: raising a
-counterargument without engaging it is *worse than one-sided* in both meta-analyses, so the
+counterargument without engaging it is *worse than one-sided* in O'Keefe's meta-analysis (the
+non-refutational case), so the
 skeleton forbids raising an objection and leaving it unanswered, and tells topical sections to
 answer objections where they arise rather than deferring them all to the counterargument
 section (a quarantined block is the weakest-supported arrangement; interweaving is the
