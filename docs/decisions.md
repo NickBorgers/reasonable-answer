@@ -2698,8 +2698,8 @@ enforces it. Two fixtures are added to close the gap this decision found:
 
 | fixture | lens | tier | the planted defect |
 |---|---|---|---|
-| `misrepresented-source-01` | evidence | obvious | A real, accurately listed source (Durkin et al. 2022, *… through sixth grade*) is described in the body as reporting twelfth-grade outcomes it cannot contain. The paragraph before it cites the same paper correctly. |
-| `overstated-claim-01` | logic | moderate | Randomized support establishing a small average effect (aOR 0.88, NNT ≈ 33, concentrated in deficient participants, two null trials) is restated as a flat "prevents" with an individual-level expectation attached. |
+| `misrepresented-source-01` | evidence | obvious | A real, accurately listed source ([Durkin et al. 2022](https://doi.org/10.1037/dev0001301), *… through sixth grade*) is described in the body as reporting twelfth-grade outcomes it cannot contain. The paragraph before it cites the same paper correctly. |
+| `overstated-claim-01` | logic | moderate | Randomized support establishing a small average effect is restated as a flat "prevents" with an individual-level expectation attached. The 2017 IPD meta-analysis reports aOR 0.88 and NNT 33 overall, with stronger protection in the daily-or-weekly subgroup below 25 nmol/L ([Martineau et al. 2017](https://doi.org/10.1136/bmj.i6583)); the aggregate update reports OR 0.92 ([Jolliffe et al. 2021](https://doi.org/10.1016/S2213-8587(21)00051-6)); and two later large trials report no reduction ([CORONAVIT](https://doi.org/10.1136/bmj-2022-071230); [Brunvoll et al. 2022](https://doi.org/10.1136/bmj-2022-071245)). |
 
 Both are authored in `prompts.REPORT_SKELETON` shape — no `#` title, `## Conclusion` first, `[n]`
 citations, a numbered `## Sources` — because a fixture that does not look like production input
