@@ -69,6 +69,25 @@ DEFAULT_FIXTURE_DIR = Path(__file__).resolve().parent.parent.parent / "tests" / 
 #: list blocks, and a critic that names the neighbouring paragraph has still found it.
 LOCUS_PARAGRAPH_TOLERANCE = 1
 
+#: Bumped **by hand** when the grading *code* changes in a way a cached verdict cannot
+#: survive (D-audition-rubric-identity). `rubric_hash` mixes this into the cache key, so
+#: a bump invalidates every stored entry and every slot reads *not audited* until it is
+#: re-measured. Bump it when you change:
+#:
+#:   * `_is_material` — which effective severities count as material;
+#:   * `grade` — the strict / same-lens / severity-agreement matching rules, or the
+#:     handling of `PlantedDefect.anywhere`;
+#:   * `_locus_matches` — the shape of the locus window;
+#:   * `run_assignment`'s accounting — what increments which counter, the `Tier.OBVIOUS`
+#:     gate, or the treatment of a failed lens.
+#:
+#: A `judge` gate-order or threshold change needs no bump: `judge` runs at read time
+#: against the live `cfg.thresholds`, so the verdict already follows the current rules.
+#: The one `judge` change that would need one — a gate reading a `Metrics` counter older
+#: entries never collected, which defaults to 0 and reads as a measured zero — is caught
+#: automatically, because `rubric_hash` covers the `Metrics` field set.
+RUBRIC_VERSION = 1
+
 #: `{{slot}}` in a fixture artifact, substituted from the manifest's slot table.
 _SLOT = re.compile(r"\{\{([a-z0-9_]+)\}\}")
 
@@ -729,22 +748,48 @@ class CacheEntry(BaseModel):
     metrics: Metrics
     corpus_hash: str
     prompt_hash: str
+    #: Identity of the grading rules that turned calls into these `Metrics`.
+    rubric_hash: str
+    #: The span-validation regime the calls were made under. A loose quote fails the
+    #: lens closed when this is on, so it changes what a critic can score.
+    require_verbatim_spans: bool
     repetitions: int
     recorded_at: float
+
+    # `rubric_hash` and `require_verbatim_spans` are required, with no default, on
+    # purpose (D-audition-rubric-identity). An entry written before they existed fails
+    # `model_validate`, and `load_cache` drops anything that fails — so the pre-rubric
+    # cache degrades to *not audited*, never to a pass carried across a rule change.
 
     def is_stale(self, now: float, max_age_days: int) -> bool:
         return (now - self.recorded_at) > max_age_days * 86400
 
-    def matches(self, corpus_hash: str, prompt_hash: str, repetitions: int) -> bool:
-        """A cached verdict is only about the corpus and prompts that produced it.
+    def matches(
+        self,
+        corpus_hash: str,
+        prompt_hash: str,
+        repetitions: int,
+        *,
+        rubric_hash: str,
+        require_verbatim_spans: bool,
+    ) -> bool:
+        """A cached verdict is only about the measurement that produced it.
 
         `prompt_hash` is in the key because editing a lens prompt changes what the
         measurement *means*. Carrying a verdict across a prompt edit would report a
-        capability claim for a critic that no longer exists.
+        capability claim for a critic that no longer exists. `rubric_hash` and
+        `require_verbatim_spans` are in the key for exactly the same reason: the
+        grading rules and the span-validation regime are as much a part of what a
+        score means as the corpus and the prompt (D-audition-rubric-identity).
+
+        The two newer dimensions are keyword-only because both hashes are strings and
+        a transposed positional argument would silently compare the wrong pair.
         """
         return (
             self.corpus_hash == corpus_hash
             and self.prompt_hash == prompt_hash
+            and self.rubric_hash == rubric_hash
+            and self.require_verbatim_spans == require_verbatim_spans
             and self.repetitions == repetitions
         )
 
@@ -756,6 +801,45 @@ def prompt_hash() -> str:
     for lens in LENS_CATEGORIES:
         digest.update(prompts.critic_user(lens, "q", "body", None).encode())
     return digest.hexdigest()[:16]
+
+
+def rubric_hash() -> str:
+    """Hash of the grading rules a cached verdict was produced under.
+
+    Two halves, mixed into one digest — the same shape `refine_prompt_hash` already
+    uses, where a hashed surface is combined with a hand-bumped `PROMPT_VERSION`.
+
+    The rules that are *data* are hashed from the tables themselves, so they can never
+    be forgotten: the lens→category map decides what `same_lens` accepts, the severity
+    floors and ranks decide what `_is_material` clamps to, and the locus tolerance sets
+    the detection window. The `Metrics` field set is hashed too, so a new counter can
+    never read as a measured zero on an entry recorded before it existed.
+
+    The rules that are *code* — `grade`, `_is_material`, `_locus_matches`, and
+    `run_assignment`'s accounting — carry `RUBRIC_VERSION` instead. Hashing
+    `inspect.getsource` over them would be automatic, and was rejected: this file is
+    deliberately comment-dense, an audition costs |models| x |fixtures| x repetitions
+    calls against a paid proxy, and billing a full re-measurement of the roster for a
+    typo fix in a docstring conflicts with the operational goal of invalidating only
+    when measurement semantics change. It also breaks under a source-less install. The
+    chosen trade is a manually maintained constant for code rules, with automatic
+    hashing where the rubric is already represented as data.
+    """
+    payload = json.dumps(
+        {
+            "version": RUBRIC_VERSION,
+            "locus_paragraph_tolerance": LOCUS_PARAGRAPH_TOLERANCE,
+            "lens_categories": {
+                lens.value: sorted(c.value for c in categories)
+                for lens, categories in LENS_CATEGORIES.items()
+            },
+            "severity_floor": {c.value: s.value for c, s in SEVERITY_FLOOR.items()},
+            "severity_rank": {s.value: rank for s, rank in SEVERITY_RANK.items()},
+            "metrics_fields": sorted(Metrics.model_fields),
+        },
+        sort_keys=True,
+    )
+    return hashlib.sha256(payload.encode()).hexdigest()[:16]
 
 
 def cache_key(identity: str, lens: Lens) -> str:
@@ -804,6 +888,7 @@ def cached_judgements(
     cfg: AuditionConfig,
     roster: Roster,
     identities: dict[str, str],
+    require_verbatim_spans: bool,
     now: float | None = None,
 ) -> dict[tuple[str, Lens], Judgement]:
     """Verdicts for the roster's current critic slots, read from the cache only.
@@ -811,8 +896,14 @@ def cached_judgements(
     Never spends a call. Both callers — `ra doctor` and the `enforce` startup gate —
     sit on paths where quietly auditioning a roster's worth of models would be a
     surprise bill. A slot whose entry is missing, stale, or graded against a different
-    corpus, prompt surface or repetition count is simply absent from the result: an
-    unmeasured critic must read as unmeasured, never as a pass.
+    corpus, prompt surface, grading rubric, span-validation regime or repetition count
+    is simply absent from the result: an unmeasured critic must read as unmeasured,
+    never as a pass.
+
+    `require_verbatim_spans` is a required argument rather than a defaulted one because
+    it lives on `Config`, not `AuditionConfig`, and both callers hold a `Config`. A
+    default would let a caller silently compare against the wrong regime — the exact
+    class of bug D-audition-rubric-identity exists to close.
     """
     try:
         corpus_hash = load_fixtures().corpus_hash
@@ -820,12 +911,19 @@ def cached_judgements(
         return {}
     cache = load_cache(cfg.cache_path)
     ph = prompt_hash()
+    rh = rubric_hash()
     at = time.time() if now is None else now
 
     out: dict[tuple[str, Lens], Judgement] = {}
     for slot in assignments(roster, identities):
         entry = cache.get(cache_key(slot.identity, slot.lens))
-        if entry is None or not entry.matches(corpus_hash, ph, cfg.repetitions):
+        if entry is None or not entry.matches(
+            corpus_hash,
+            ph,
+            cfg.repetitions,
+            rubric_hash=rh,
+            require_verbatim_spans=require_verbatim_spans,
+        ):
             continue
         if entry.is_stale(at, cfg.max_age_days):
             continue
@@ -837,6 +935,7 @@ def enforce_fitness(
     cfg: AuditionConfig,
     roster: Roster,
     identities: dict[str, str],
+    require_verbatim_spans: bool,
     now: float | None = None,
 ) -> None:
     """Under `audition.enforce`, refuse to start with an `unfit` critic assigned.
@@ -851,7 +950,7 @@ def enforce_fitness(
     """
     if not cfg.enforce:
         return
-    judgements = cached_judgements(cfg, roster, identities, now=now)
+    judgements = cached_judgements(cfg, roster, identities, require_verbatim_spans, now=now)
     unfit = sorted(
         f"'{slot.alias}' ({slot.identity}) on {slot.lens.value}"
         for slot in assignments(roster, identities)
