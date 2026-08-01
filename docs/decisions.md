@@ -2702,11 +2702,11 @@ mixed into one digest — the shape `refine_prompt_hash` already uses, where a h
 is combined with a hand-bumped `PROMPT_VERSION`.
 
 The rules that are *data* are hashed from the tables directly (`LENS_CATEGORIES`, `SEVERITY_FLOOR`,
-`SEVERITY_RANK`, `LOCUS_PARAGRAPH_TOLERANCE`), because a table edit is exactly the change a human
-is least likely to recognise as a rubric change — it happens in `taxonomy.py`, a file away from
-the grader, usually while thinking about something else. The `Metrics` field set is hashed for the
-same reason: a new counter defaults to 0 on every older entry, and a `judge` gate reading it would
-score a stale entry as a measured zero rather than as an absence.
+`SEVERITY_RANK`, `LOCUS_PARAGRAPH_TOLERANCE`). Deriving that part of the identity from its source
+data removes the maintenance risk that a table edit in `taxonomy.py`, away from the grader, lands
+without the separate manual version bump. The `Metrics` field set is hashed for the same reason: a
+new counter defaults to 0 on every older entry, and a `judge` gate reading it would score a stale
+entry as a measured zero rather than as an absence.
 
 The rules that are *code* — `grade`, `_is_material`, `_locus_matches`, `run_assignment`'s
 accounting — carry `RUBRIC_VERSION`, a constant with a comment listing what requires a bump.
@@ -2714,10 +2714,10 @@ accounting — carry `RUBRIC_VERSION`, a constant with a comment listing what re
 forgotten, which is the whole argument for it. It was rejected because `audition.py` is
 deliberately comment-dense — the reasoning is the documentation — and an audition costs
 |models| x |fixtures| x repetitions calls against a paid, rate-limited proxy. Billing a full
-re-measurement of the roster for a typo fix in a docstring trains operators to route around the
-invalidation, which is worse than the drift it prevents. It also breaks under a source-less
-install. The honest trade is a constant a human maintains, with the automatic half covering the
-edits a human is worst at noticing.
+re-measurement of the roster for a typo fix in a docstring conflicts with the operational goal of
+invalidating only when measurement semantics change. It also breaks under a source-less install.
+The chosen trade is a manually maintained constant for code rules, with automatic hashing where
+the rubric is already represented as data.
 
 **Not covered, deliberately: `judge`'s gate order and `AuditionThresholds`.** Neither is stale-able.
 The cache stores `Metrics`, not a verdict; `judge(entry.metrics, cfg.thresholds)` runs at read time
