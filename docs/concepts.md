@@ -219,7 +219,7 @@ it — each one, again, a guard against a known LLM failure mode:
   written in the exact shape the writer prompt mandates — conclusion first, a counterargument
   section engaged on the merits, inline `[1]` citations resolving to a numbered `## Sources`
   section — because the harness uses the production critic prompt, and a corpus in any other shape
-  would audit critics on documents no production writer may emit (D-fixture-report-shape). Most
+  would audit critics on documents no production writer may emit (D-fixture-report-shape). Half the
   planted fixtures ship alongside the sound base they were mutated from, so class cannot be read
   off length, structure or topic: a model that passes by being conservative on long, balanced
   reports and aggressive on short ones has detected nothing. An LLM grader is

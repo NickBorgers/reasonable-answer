@@ -1,6 +1,6 @@
 ## Conclusion
 
-Not on levelized cost, for new build, in most markets studied [1][2]. Whether that settles the question depends on what is being bought: levelized cost prices energy, and a decarbonising system also buys firmness, which the metric does not score [3][4]. The strongest opposing view is that recent Western nuclear cost figures are contingent on how those particular projects were built rather than intrinsic to the technology, in which case the levelized comparison is a snapshot of a bad decade rather than a property of the plant — and the sources cited here do not resolve that dispute in either direction [5][6]. The defensible summary is therefore split: on levelized cost, no; on system cost, narrower and contested; on whether the gap is permanent, unsettled.
+Not on levelized cost, for new build, in most markets studied [1][2]. Whether that settles the question depends on what is being bought: levelized cost prices energy, and a decarbonising system also buys firmness, which the metric does not score [3][4]. The strongest opposing view is that recent Western nuclear cost figures are contingent on how those particular projects were built rather than intrinsic to the technology, in which case the levelized comparison is a snapshot of a bad decade rather than a property of the plant — and the sources cited here do not establish whether recent experience will generalise [5]. The defensible summary is therefore split: on levelized cost, no; on system cost, narrower and contested; on whether the gap is permanent, unsettled.
 
 ## Key findings
 
@@ -8,13 +8,13 @@ Not on levelized cost, for new build, in most markets studied [1][2]. Whether th
 - A different method applied across a wider set of countries also places new nuclear above onshore wind and utility solar at moderate discount rates, but at a narrower gap that closes further at low discount rates [2].
 - The market value of variable generation falls as its share of the system rises, so a comparison made at one penetration level does not transfer to another [3].
 - Whole-system models find a cost-reducing role for firm low-carbon resources across much of their scenario space, with the size of the effect heavily dependent on assumed storage costs [4].
-- Whether nuclear construction costs rise or fall with cumulative deployment is disputed between an analysis of the French programme and one assembling a wider set of national programmes [5][6].
+- Historical construction-cost evidence does not establish a universal learning pattern: some national programmes held costs flat or reduced them [5].
 
 ## The strongest counterargument
 
-The strongest case against the headline answer is that it prices a contingency as though it were a law. Recent Western nuclear costs come from a small number of first-of-a-kind projects built by supply chains that had not delivered a reactor in decades. Lovering, Yip and Nordhaus, assembling construction costs across several national programmes, argue that the escalating pattern is not universal and that some programmes held costs flat or reduced them [6]. On that reading, quoting the recent Western range as the cost of nuclear quotes the cost of a first unit and calls it the cost of the technology.
+The strongest case against the headline answer is that it prices a contingency as though it were a law. Recent Western nuclear costs come from a small number of first-of-a-kind projects built by supply chains that had not delivered a reactor in decades. Lovering, Yip and Nordhaus, assembling construction costs across several national programmes, argue that the escalating pattern is not universal and that some programmes held costs flat or reduced them [5]. On that reading, quoting the recent Western range as the cost of nuclear quotes the cost of a first unit and calls it the cost of the technology.
 
-What the objection has to overcome is Grubler's analysis of the French scale-up, which finds costs rising with cumulative deployment — negative learning by doing — in the one programme usually offered as the counterexample [5]. Nothing cited here reconciles the two readings, and the headline answer moves depending on which holds. What would settle it is a Western build completing near its estimate; until one does, the conclusion above reports the observed range and declines to project it forward as intrinsic.
+What the objection has to overcome is that evidence from earlier national programmes does not establish that a new Western build will reproduce their cost paths. Nothing cited here resolves that transfer, and the headline answer moves depending on whether recent overruns are contingent or persistent. What would settle it is a Western build completing near its estimate; until one does, the conclusion above reports the observed range and declines to project it forward as intrinsic [5].
 
 ## What the comparison assumes
 
@@ -40,5 +40,4 @@ Their own sensitivity analysis qualifies it: the size of the effect depends heav
 2. IEA & NEA (2020). *Projected Costs of Generating Electricity: 2020 Edition*. OECD Publishing.
 3. Hirth, L. (2013). The market value of variable renewables: The effect of solar wind power variability on their relative price. *Energy Economics*, 38, 218-236.
 4. Sepulveda, N. A., Jenkins, J. D., de Sisternes, F. J., & Lester, R. K. (2018). The Role of Firm Low-Carbon Electricity Resources in Deep Decarbonization of Power Generation. *Joule*, 2(11), 2403-2420.
-5. Grubler, A. (2010). The costs of the French nuclear scale-up: A case of negative learning by doing. *Energy Policy*, 38(9), 5174-5188.
-6. Lovering, J. R., Yip, A., & Nordhaus, T. (2016). Historical construction costs of global nuclear power reactors. *Energy Policy*, 91, 371-382.
+5. Lovering, J. R., Yip, A., & Nordhaus, T. (2016). Historical construction costs of global nuclear power reactors. *Energy Policy*, 91, 371-382.

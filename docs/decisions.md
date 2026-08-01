@@ -2674,7 +2674,7 @@ actually fired in production. The timeout containment bounds a hang, but the pat
 exercised, and this change puts more traffic on it.
 
 
-## D-fixture-report-shape — audition fixtures are production-shaped, and most ship with the sound base they were mutated from
+## D-fixture-report-shape — audition fixtures are production-shaped, and half ship with the sound base they were mutated from
 
 Found by adversarial review of the audition harness after D-control-soundness landed, and
 independently confirmed by a second reviewer. Two defects in the corpus, related closely enough
@@ -2721,13 +2721,14 @@ on length, structure, citation density and topic, and the only thing telling the
 defect. The other four bases are not shipped: rewriting every citation in the `one_sided_sourcing`
 fixture is not a minimal mutation, and the remaining three were held back to bound cost. Two
 unpaired controls remain, so the corpus is not merely a set of near duplicates. Corpus-wide the
-length spread is now 1.22x against 2.74x before, and
+length spread is now 1.26x against 2.74x before, and
 `test_corpus_class_is_not_readable_off_length` holds it under 1.5x with each class's median inside
-the other class's range. `test_corpus_class_is_not_readable_off_source_count` closes the same
-confound one step along, and does it per lens rather than corpus-wide: a lens only ever sees its
-own planted fixtures plus the controls, so a source-count gap that closes in aggregate can stay
-wide open inside `for_lens` — as it did on `completeness`, where the planted pair carried three and
-four sources against five and six for the controls.
+the other class's range. Every artifact now carries five sources, and
+`test_corpus_class_is_not_readable_off_source_count` requires the observed source-count values to
+be identical between controls and planted fixtures for every lens. A lens only ever sees its own
+planted fixtures plus the controls, so a source-count gap that closes in aggregate can stay wide
+open inside `for_lens` — as it did on `completeness`, where the planted pair carried three and four
+sources against five and six for the controls.
 
 *The control pool grows from two to six.* `control_material_rate` is a mean over
 `controls x repetitions` runs compared against a threshold of 1.0. At two controls and the shipped
@@ -2738,9 +2739,10 @@ evidence critic. Six controls bound one control's leverage at 0.167, and
 third control fixture" open item.
 
 **The cost, stated rather than buried.** `for_lens` hands every control to every lens, so four new
-controls raise a full audition from 14 fixture-runs per model-lens pair to 26 — roughly +86% on
-`ra audition`, not the +10% the old open item estimated for one extra control. That is the price
-of the measurement being worth anything, and it is paid per audition rather than per run: nothing
+controls raise the aggregate across the three model-lens assignments in a full audition from 14
+fixture-runs to 26 (9 evidence, 9 logic, 8 completeness) — roughly +86% on `ra audition`, not the
++10% the old open item estimated for one extra control. That is the price of the measurement being
+worth anything, and it is paid per audition rather than per run: nothing
 in the graph path calls the audition. Editing any fixture changes `corpus_hash` and so invalidates
 every cached verdict, by design (`load_fixtures` hashes raw bytes before slot substitution) — this
 rebuild invalidates the entire audition cache, and every rostered critic must be re-auditioned

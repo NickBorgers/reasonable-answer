@@ -1,6 +1,6 @@
 ## Conclusion
 
-Partly, and unevenly across the things that phrase covers — the report separates them rather than averaging them, because they do not point the same way [1][2]. On the institutional side, permanent health agencies and professional training, an acceleration effect is most plausible, and even there the evidence is suggestive rather than identified [1][3]. The sanitation and water works usually grouped under the same heading were already expanding on a trajectory that the pandemic does not visibly bend [4]. The strongest opposing view is that no such effect has ever actually been looked for in the form that would settle it, so "no visible acceleration" reports an absence of studies rather than an absence of effect — that is a fair description of the state of the literature, and it is why nothing below is stated more strongly than the evidence carries [5][6].
+Partly, and unevenly across the things that phrase covers — the report separates them rather than averaging them, because they do not point the same way [1][2]. On the institutional side, permanent health agencies and professional training, an acceleration effect is most plausible, and even there the evidence is suggestive rather than identified [1][3]. The sanitation and water works usually grouped under the same heading were already expanding on a trajectory that the pandemic does not visibly bend [4]. The strongest opposing view is that no such effect has ever actually been looked for in the form that would settle it, so "no visible acceleration" reports an absence of studies rather than an absence of effect — that is a fair description of the state of the literature, and it is why nothing below is stated more strongly than the evidence carries [5].
 
 ## Key findings
 
@@ -8,13 +8,13 @@ Partly, and unevenly across the things that phrase covers — the report separat
 - The Johns Hopkins School of Hygiene and Public Health opened in 1918 on a Rockefeller Foundation commitment made before the pandemic, and comparable schools expanded through the following decade [1].
 - Cities in 1918-1919 differed sharply in the administrative capacity they could bring to their pandemic response, which is the most direct handle the literature offers [3].
 - Much of the early-twentieth-century decline in US urban mortality is attributed to water filtration and chlorination adopted mainly between 1900 and 1920, dating the pandemic inside an expansion already underway [4].
-- Usable variation in pandemic severity exists and has been exploited for cohort outcomes, but no study cited here applies it to infrastructure spending [5][6].
+- Usable variation in pandemic severity exists and has been exploited for cohort outcomes, but no study cited here applies it to infrastructure spending [5].
 
 ## The strongest counterargument
 
 The case against the answer above is that it mistakes a gap in the literature for a finding. An acceleration effect would show up as a discontinuity at 1918 in health-department budgets or staffing, larger where the pandemic hit harder. That test is feasible: Almond's work on in-utero exposure establishes that usable severity variation exists and can identify long-run effects [5]. Nobody cited here has run it on infrastructure spending. So the honest reading of "the trajectory does not visibly bend" is that the sources examined were not designed to detect a bend, not that they looked and found none.
 
-That objection is largely right, and it is the reason the conclusion is hedged rather than negative. What would have to hold for a clean positive answer is a severity-exploiting design applied to spending or staffing, showing a step at 1918 that scales with local mortality. Karlsson, Nilsson and Pichler run the analogous exercise for Sweden and find effects on poverty and capital returns, but treat institutional response as background rather than as an outcome [6] — the same gap reappears in a second national setting, which suggests it is a feature of how this literature was built rather than a quirk of the US data.
+That objection is largely right, and it is the reason the conclusion is hedged rather than negative. What would have to hold for a clean positive answer is a severity-exploiting design applied to spending or staffing, showing a step at 1918 that scales with local mortality. No cited study runs that design on infrastructure spending, so the evidence here cannot distinguish a real absence of acceleration from a literature that was built to answer different questions [5].
 
 ## Institutions and training
 
@@ -35,4 +35,3 @@ Their estimate concerns mortality attributable to the technology rather than the
 3. Markel, H., Lipman, H. B., Navarro, J. A., et al. (2007). Nonpharmaceutical Interventions Implemented by US Cities During the 1918-1919 Influenza Pandemic. *JAMA*, 298(6), 644-654.
 4. Cutler, D., & Miller, G. (2005). The Role of Public Health Improvements in Health Advances: The Twentieth-Century United States. *Demography*, 42(1), 1-22.
 5. Almond, D. (2006). Is the 1918 Influenza Pandemic Over? Long-Term Effects of In Utero Influenza Exposure in the Post-1940 U.S. Population. *Journal of Political Economy*, 114(4), 672-712.
-6. Karlsson, M., Nilsson, T., & Pichler, S. (2014). The impact of the 1918 Spanish flu epidemic on economic performance in Sweden. *Journal of Health Economics*, 36, 1-19.

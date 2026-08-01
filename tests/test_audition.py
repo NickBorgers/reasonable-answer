@@ -351,10 +351,10 @@ def test_corpus_class_is_not_readable_off_source_count():
     for lens in Lens:
         planted = sorted(counts[f.id] for f in fixtures.for_lens(lens) if not f.is_control)
         assert planted, f"lens {lens.value} has no planted fixture"
-        assert planted[0] >= control[0] - 1, (
-            f"on {lens.value}, planted fixtures carry {planted[0]}-{planted[-1]} sources "
-            f"against {control[0]}-{control[-1]} for controls: thin sourcing would be a "
-            f"usable proxy for 'this one has a defect'"
+        assert set(planted) == set(control), (
+            f"on {lens.value}, planted fixtures have source counts {sorted(set(planted))} "
+            f"against {sorted(set(control))} for controls: a class-exclusive count would "
+            f"be a usable proxy for whether the artifact has a defect"
         )
 
 
