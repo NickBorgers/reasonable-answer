@@ -101,6 +101,32 @@ role's blockers in `addressed[]`/`skipped[]`. The `docs` role shipped with only 
 so for every PR since, a `docs` blocker was one the fixer could never claim to have
 addressed — its artifact would have failed validation against main's schema if it tried.
 
+**`blocking_issues[]` and `non_blocking_notes[]` must admit the same fields**
+(D-reviewer-confidence-field). They describe the same findings at different confidence — every
+prompt's 0.7 ladder is literally "same finding, other array" — and both set
+`additionalProperties: false`. So a field only the blocker admits is one a reviewer will
+eventually attach to a note, and that rejects the *whole* artifact: every finding that reviewer
+had is lost, not just the offending one. The run then looks like the reviewer never produced
+anything, and the judge fails closed on a reviewer that returned no valid artifact — correctly,
+but with a diagnostic pointing nowhere near the cause.
+
+This has cost a review cycle on `id`, `decision_ref` (#29), `category` (#35), and `confidence`
+(#75, and then seven cycles across six PRs in one afternoon, #131). Each was fixed by admitting
+the one field, which is why it kept returning: that closes an instance, not the class. Two things
+close the class. First, the leak-prone set is not "fields a blocker has" but *every field named
+anywhere in a reviewer's output contract or prompt* — `confidence` leaked because it is required
+on `fix_suggestions[]` and cited in every prompt's ladder, not because blockers carry it. Second,
+[`schema-parity.test.mjs`](https://github.com/NickBorgers/reasonable-answer/blob/main/.github/scripts/review/schema-parity.test.mjs)
+asserts the two property sets stay equal and that fields required on `fix_suggestions[]` appear on
+both, so admitting a field to one array fails PR validation until it is on both. A deliberately
+one-sided field goes in that test's `ASYMMETRIC` map with its reason. Both arrays keep
+`additionalProperties: false`, which the same test pins: parity is not a licence to accept
+whatever a reviewer invents.
+
+Note what this cannot protect against: a reviewer artifact is validated against **main's** copy of
+the schema, so a PR that admits a new field does not help its own reviewers. The fix has to be on
+main before the field stops killing artifacts.
+
 ### The judge fails closed
 
 [`aggregate.mjs`](https://github.com/NickBorgers/reasonable-answer/blob/main/.github/scripts/review/aggregate.mjs) returns NO-GO rather than
