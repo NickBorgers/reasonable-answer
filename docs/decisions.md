@@ -2756,20 +2756,21 @@ for one arithmetic coincidence is not a fix for the class.
 What is added instead is a second **hardcoded** gate, the mirror of the silence gate: `control_runs`
 non-zero and `control_clean_runs == 0` is `unfit`, whatever the thresholds say. It states the property
 that actually matters, which is not *how noisy* but *did this critic ever once let a sound report
-through*. Rule 3 needs a clean lens record; a critic that has never produced one on a report known to
-be sound cannot produce one on a report that merely is sound, so every run it staffs converges on
-nothing and terminates `exhausted_unresolved` (rule 13) after spending its bounded rewrite. Ordering:
-the new gate sits *after* the `max_control_material_rate` check, so the existing and more informative
-"invents N material issues per sound report" reason still wins wherever it applies, and the new one
-speaks only where the rate gate is silent. `control_clean_rate` as a *threshold* was considered and
-rejected for the same reason `>=` was: a tunable knob at the one point where the harness must be
-untunable.
+through in this audition*. The gate is a conservative fail-closed policy against the demonstrated
+always-fire strategy: zero clean results on the configured controls is sufficient to reject that
+audition, without claiming the observations predict how the critic would behave on another sound
+report. Ordering: the new gate sits *after* the `max_control_material_rate` check, so the existing and
+more informative "invents N material issues per sound report" reason still wins wherever it applies,
+and the new one speaks only where the rate gate is silent. `control_clean_rate` as a *threshold* was
+considered and rejected for the same reason `>=` was: a tunable knob at the one point where the
+harness must be untunable.
 
 This is deliberately not a judgement about noise in degrees. A critic clean on some sound reports and
 not others is `warn_control_material_rate`'s business and still grades `marginal`. The gate fires only
-on *never*, across a base of two controls times the configured repetitions — six runs at the default.
-Six sound reports and not one clean review is not a sampling accident. The thinness of that base is a
-real limitation and is already an open item below (a third control fixture).
+on *never*, across a base of two control artifacts times the configured repetitions — six evaluations
+at the default, and only two when `repetitions: 1`. Those repeated observations are not treated as
+independent samples or generalized beyond the audition corpus. The thinness of that base is a real
+limitation and is already an open item below (a third control fixture).
 
 **Cache and blast radius.** Adding a fixture changes `corpus_hash`, so every cached verdict stops
 matching in `cached_judgements` and reads *not audited* — never `unfit`. `enforce_fitness` blocks only
