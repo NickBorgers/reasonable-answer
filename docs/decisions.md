@@ -2661,8 +2661,7 @@ which gates weakening a row on new fetchable evidence, does not apply.
 is made here, because none can be supported: this repository has no per-role cost telemetry, no
 spend was measured before or after, and vendor list prices are neither cited in the register nor
 stable enough to state as fact in a normative document. So the tier assignments are a bet on task
-shape, not a demonstrated saving, and the direction of the net change is genuinely unknown — two
-roles moved to cheaper-listed tiers while three moved to a newer, more expensive-listed one.
+shape, not a demonstrated saving, and the direction of the net change is genuinely unknown.
 
 What *is* established, and is the actual justification for this decision, is the first half: the
 pipeline now names the model each role runs, which it previously did not. That claim needs no

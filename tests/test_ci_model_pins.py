@@ -19,6 +19,7 @@ Fully offline: it reads workflow YAML and one shell script from this repo, and r
 
 from __future__ import annotations
 
+import os
 import re
 import subprocess
 import textwrap
@@ -31,6 +32,7 @@ REPO_ROOT = Path(__file__).resolve().parents[1]
 PIPELINE = REPO_ROOT / ".github" / "workflows" / "review-pipeline.yml"
 REVIEWER = REPO_ROOT / ".github" / "workflows" / "review-reviewer.yml"
 FIXER = REPO_ROOT / ".github" / "workflows" / "review-fixer.yml"
+AGENT_ACTION = REPO_ROOT / ".github" / "actions" / "review-agent-run" / "action.yml"
 RUN_IN_CONTAINER = REPO_ROOT / ".github" / "actions" / "review-agent-run" / "run-in-container.sh"
 RESOLVER = REPO_ROOT / ".github" / "workflows" / "resolve-issue.yml"
 
@@ -109,6 +111,39 @@ def test_the_reviewer_workflow_requires_a_model() -> None:
     triggers = next(v for k, v in spec.items() if k is True or k == "on")
     model = triggers["workflow_call"]["inputs"]["model"]
     assert model["required"] is True
+
+
+def test_the_agent_composite_requires_a_model() -> None:
+    """The composite's public contract must declare the pin required too."""
+    spec = yaml.safe_load(AGENT_ACTION.read_text(encoding="utf-8"))
+    assert spec["inputs"]["model"]["required"] is True
+
+
+def test_the_agent_composite_refuses_an_unpinned_model_before_staging() -> None:
+    """Run the deployed guard, rather than restating its source as an assertion."""
+    spec = yaml.safe_load(AGENT_ACTION.read_text(encoding="utf-8"))
+    stage_env = next(step for step in spec["runs"]["steps"] if step["name"] == "Stage env file")
+    guard = re.search(r'^if \[ -z "\$MODEL" \]; then\n.*?^fi$', stage_env["run"], re.M | re.S)
+    assert guard, "Stage env file has no fail-closed MODEL guard"
+
+    environment = {**os.environ, "AGENT": "codex", "ROLE": "docs"}
+    refused = subprocess.run(
+        ["bash", "-c", guard.group(0)],
+        capture_output=True,
+        text=True,
+        env={**environment, "MODEL": ""},
+    )
+    assert refused.returncode != 0
+    assert "no model pinned" in refused.stdout
+
+    accepted = subprocess.run(
+        ["bash", "-c", guard.group(0)],
+        capture_output=True,
+        text=True,
+        env={**environment, "MODEL": "gpt-5.6-luna"},
+        check=True,
+    )
+    assert not accepted.stdout.strip()
 
 
 def test_no_model_literal_survives_in_the_container_script() -> None:
