@@ -18,6 +18,7 @@ from __future__ import annotations
 import os
 import re
 from pathlib import Path
+from typing import Literal
 
 import yaml
 from pydantic import BaseModel, ConfigDict, Field, model_validator
@@ -67,6 +68,14 @@ class Budgets(BaseModel):
     min_ticks: int = Field(default=2, ge=1, le=100)
     hard_cap: int = Field(default=8, ge=2, le=200)
     polish_cap: int = Field(default=1, ge=0, le=20)
+    # Full rewrites granted to a run whose patch chain has stalled (D-scoped-revision,
+    # controller rule 13). Under `revision.mode: patch` a revision edits only the
+    # paragraphs a fix task names, which is what stops each round re-rolling text the
+    # critics already cleared — but it also means the run can only ever accrete, and an
+    # accreted document is exactly what the completeness lens punishes. Stagnation buys
+    # one whole-document rewrite by a fresh writer before rule 13 gives up. Set to 0 to
+    # restore the old behavior, where stagnation is terminal on sight.
+    rewrite_cap: int = Field(default=1, ge=0, le=20)
     critique_attempts: int = Field(default=12, ge=0, le=100)
     confirmation_attempts: int = Field(default=6, ge=0, le=100)
     stagnation_limit: int = Field(default=3, ge=1, le=100)
@@ -581,6 +590,40 @@ class DisputeConfig(BaseModel):
     arbiter_max_tokens: int = Field(default=4000, ge=500, le=16000)
 
 
+class RevisionConfig(BaseModel):
+    """How a writer is asked to apply a defect list (D-scoped-revision).
+
+    `rewrite` is what the system did before this existed: the whole document is
+    regenerated every round, by a different model each time (`roles.next_writer`). Six
+    production runs measured what that costs — the writer applied essentially every fix
+    task (`defects_applied` tracked the material count round for round) and the material
+    count still did not fall, because re-rolling ~1,800 words to repair ~5 paragraphs
+    grows about as many fresh defects as it retires. The process was stationary from the
+    second critique pass onward and no run reached `accepted`.
+
+    `patch` narrows the *edit*, and nothing else. What every critic reads, who reviews,
+    author exclusion, and the per-hash reset of clean records (RC-002) are all unchanged
+    — so the decorrelation layer docs/isolation.md actually assigns the work to, the
+    critic roster, is untouched. Writer rotation is deliberately kept as well: a
+    different model still patches every round, so no single model's prose accumulates
+    unchallenged.
+
+    Both settings are here rather than in code so the two can be A/B'd from
+    configuration; `rewrite` reproduces the old prompt byte for byte.
+    """
+
+    model_config = ConfigDict(extra="forbid")
+
+    mode: Literal["patch", "rewrite"] = "patch"
+    #: The mechanical check that the writer honored the scope it was given. Warn-only:
+    #: it records what changed on the `generate` event and never rejects a draft. A
+    #: draft rejected here would burn one of `budgets.writer_attempts` (3), and a model
+    #: that reflows whitespace is not a reason to lose a run — the measurement comes
+    #: first, and an enforcing tier is only worth building if the measurement says the
+    #: prompt does not hold.
+    scope_check: Literal["warn", "off"] = "warn"
+
+
 class AuthConfig(BaseModel):
     """Who the web layer believes is asking.
 
@@ -725,6 +768,7 @@ class Config(BaseModel):
     auth: AuthConfig = Field(default_factory=AuthConfig)
     roster: Roster
     budgets: Budgets = Field(default_factory=Budgets)
+    revision: RevisionConfig = Field(default_factory=RevisionConfig)
     search: SearchConfig = Field(default_factory=SearchConfig)
     sources: SourcesConfig = Field(default_factory=SourcesConfig)
     audition: AuditionConfig = Field(default_factory=AuditionConfig)

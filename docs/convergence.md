@@ -252,8 +252,17 @@ the model that just failed.
 | 10 | `material == 0` **and** `weak_met` (every under-cleared lens is `roster_limited`) | **converged_unconfirmed** |
 | 11 | `material == 0` (not strong, not toppable, not weak — confirmation budget spent) | **exhausted_unresolved** (clean-but-unconfirmed) |
 | 12 | `cycle_detected` | **needs_human_review** (freeze best-scoring version) |
+| 13 | `material > 0` **and** `stagnation_count ≥ K` **and** `rewrites_used < rewrite_cap` | **continue** (generate — a **full-document rewrite** by a fresh writer, ignoring `revision.mode`; `rewrites_used += 1`, `stagnation_count := 0`) |
 | 13 | `material > 0` **and** `stagnation_count ≥ K` | early terminal: **needs_human_review** if `blocking>0` else **exhausted_unresolved** |
 | 14 | `material > 0` | **continue** (generate from defect list) |
+
+Rule 13's two branches are one rule, in the shape rule 13 already had (it branches internally on
+`blocking > 0` too). The rewrite branch exists because of **D-scoped-revision**: under
+`revision.mode: patch` every revision edits only the paragraphs a fix task named, so a run can only
+accrete, and a stuck signal has one thing left to try before it means "more ticks will not move it".
+With `rewrite_cap: 0` the rule is exactly the terminal it always was. Resetting `stagnation_count` is
+load-bearing — left at the limit, the next tick re-fires rule 13 and spends the whole rewrite budget
+in consecutive ticks without ever judging a rewritten draft on its own signal.
 
 Per-lens predicates: a lens is **`toppable`** when `cleared_count < 2` and a not-yet-used eligible
 non-author model remains; **`roster_limited`** when `eligible_count < 2` (can never be strongly-
@@ -263,13 +272,20 @@ cleared). `strong_met` = `material==0` ∧ every lens `cleared_count ≥ 2`. `we
 **Totality & termination:** first-match semantics selects exactly one rule for every input state,
 and rules 1–14 leave no state unhandled (every `material == 0` state matches one of 7–11; every
 `material > 0` state matches 5/6 at the cap, or 12/13/14 otherwise). Each continue action strictly
-decrements a finite measure: generation advances `round` toward `hard_cap` (rules 4, 9, 14) and —
+decrements a finite measure: generation advances `round` toward `hard_cap` (rules 4, 9, 13, 14) and —
 given the `min_ticks < hard_cap` config invariant — no rule generates once `round ≥ hard_cap`; the
 lens-failure retry budget bounds rule 2; `polish_cap`
 (and the `round < hard_cap` gate) bounds rule 9; **`confirmation_attempts_remaining`
 bounds rule 8** — critically, rule 8 re-critiques *without* generating, so it cannot loop forever
-and falls through to rule 10/11's terminal when the budget is spent. Cycle/stagnation (rules 12–13)
-force early exit. So the machine always halts.
+and falls through to rule 10/11's terminal when the budget is spent. Cycle (rule 12) and stagnation
+(rule 13, once its rewrite budget is spent) force early exit. So the machine always halts.
+
+**Rule 13's rewrite branch does not weaken that argument** (D-scoped-revision). It generates, so it is
+bounded twice over: `rewrite_cap` is finite and `rewrites_used` strictly increases toward it, and the
+generation advances `round` toward `hard_cap` exactly like rules 4, 9 and 14. It needs no `round <
+hard_cap` gate of its own, because rules 5 and 6 are cap-gated and precede it in the table for every
+state with `material > 0` — so rule 13 is already unreachable at or beyond the cap, and RI-001's
+"no rule generates once `round ≥ hard_cap`" still holds.
 
 **LLM authority is scoped to rule 9 only** — the minor-polish judgment. Every other rule is
 deterministic and overrides the orchestrator; the LLM can never skip `min_ticks`, pass the cap, or
@@ -288,10 +304,11 @@ reordering. The termination argument above survives unchanged:
   issues from the counts. It can flip a state from material to clean — reaching rules 7–11
   earlier — but it can never create a generating state at or beyond the cap.
 * A writer that keeps refusing an overruled task converges to the existing terminals: identical
-  drafts trip `cycle_detected` (rule 12), an unchanged signature trips stagnation (rule 13).
+  drafts trip `cycle_detected` (rule 12), an unchanged signature trips stagnation (rule 13 — which
+  may spend its bounded rewrite first, then terminates).
   The dispute budget bounds *spend*, not termination — termination was never its job.
 
-`round` still advances only in the generate node; rules 4/9/14 remain the only generating rules
+`round` still advances only in the generate node; rules 4/9/13/14 remain the only generating rules
 and keep their gates (RI-001, RH-001).
 
 - **material issue:** severity ≥ floor (`major`).
@@ -336,11 +353,11 @@ stateDiagram-v2
     Critiquing --> Triaging
     Triaging --> Controlling: OrchestratorView + ControllerInput
     Controlling --> Critiquing: rules 2 (lens-fail), 8 (confirm top-up — same artifact)
-    Controlling --> Generating: rules 4,9(polish),14 (continue)
+    Controlling --> Generating: rules 4,9(polish),13(rewrite),14 (continue)
     Controlling --> Accepted: rule 7
     Controlling --> ConvergedUnconfirmed: rule 10
-    Controlling --> ExhaustedUnresolved: rules 6,11,13(non-blocking)
-    Controlling --> NeedsHumanReview: rules 5,12,13(blocking)
+    Controlling --> ExhaustedUnresolved: rules 6,11,13(non-blocking, no rewrite left)
+    Controlling --> NeedsHumanReview: rules 5,12,13(blocking, no rewrite left)
     Controlling --> Aborted: rules 1,3
     Accepted --> [*]
     ConvergedUnconfirmed --> [*]
