@@ -211,6 +211,17 @@ flowchart TD
 `min_ticks` applies on the seed path too — a provided report is never accepted on its first
 critique. Intake validates size and normalizes.
 
+**Report shape is a fixed frame with a free middle (D-report-template).** Every writer call —
+first draft, revision, polish — carries `prompts.REPORT_SKELETON` in its system prompt:
+`## Conclusion` first (a direct, cited answer that also names the strongest opposing view),
+`## Key findings`, `## The strongest counterargument` (steelmanned and engaged, never merely
+listed), then writer-chosen topical sections, and `## Sources` last. The `## Sources` heading
+is byte-exact because `fetch._SOURCES_HEADING` matches only a heading whose text is the word
+"sources", and `triage._locate_url` assumes the section is last. The frame is prompt-only —
+a violation is the `unclear_structure` lens's business, not a new mechanical gate — and a
+seeded round-1 artifact keeps its own shape until the first revision steers it toward the
+frame.
+
 **Format conversion happens at the edge, not here.** `intake` requires markdown, because
 `report.parse` builds the `[S<n>.P<m>]` loci from `#` headings and `fetch.extract_source_urls`
 reads only a markdown `## Sources` section. The CLI and the web layer therefore run
