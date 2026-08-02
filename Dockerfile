@@ -74,6 +74,15 @@ RUN mkdir -p /data/runs /etc/ra \
     && cp /app/config/roster.default.yaml /etc/ra/roster.yaml \
     && chown -R ra:ra /data /etc/ra
 
+# The commit this image was built from, so every run it produces can name the code that
+# produced it (docs/run-provenance.md). CI passes it; a bare `docker build` leaves it
+# empty, which build.py treats as "unknown" rather than as an authoritative empty commit.
+#
+# Placed here on purpose. Folding it into the ENV block above would invalidate the mkdir
+# layer on every commit; everything below is metadata, so this costs no rebuild.
+ARG RA_BUILD_SHA=""
+ENV RA_BUILD_SHA=$RA_BUILD_SHA
+
 WORKDIR /data
 USER ra
 

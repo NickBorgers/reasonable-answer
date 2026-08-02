@@ -24,6 +24,7 @@ from dataclasses import dataclass
 from typing import TYPE_CHECKING, Any
 
 from .. import shutdown
+from ..build import build_identity
 from ..config import Config
 from ..graph import GracefulStop, ResumeMismatch
 from ..graph import run as run_graph
@@ -208,7 +209,7 @@ class RunWorker:
         # `queued` event that makes the run recoverable — so there is no window where
         # a run exists, survives a restart, and belongs to nobody.
         store.owner(identity)
-        store.event("queued", attempt=1, auto=False)
+        store.event("queued", attempt=1, auto=False, build=build_identity().as_dict())
         if refinement is not None:
             # Written right alongside the question, for the same reason: the run must be
             # auditable the instant it is queued, not only once it starts. Content goes to
@@ -245,7 +246,9 @@ class RunWorker:
             if run_id in self._status:
                 return run_id  # already queued or running; resuming again would double-run
             self._status[run_id] = "queued"
-        RunStore(self._config.runs_dir, run_id).event("queued", attempt=attempt, auto=auto)
+        RunStore(self._config.runs_dir, run_id).event(
+            "queued", attempt=attempt, auto=auto, build=build_identity().as_dict()
+        )
         self._queue.put(Job(run_id=run_id, question=question, seed=seed, resume=True))
         return run_id
 

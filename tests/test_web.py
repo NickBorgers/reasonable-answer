@@ -443,6 +443,52 @@ def test_audit_json_exposes_the_whole_event_stream(client, config):
     assert {"startup", "generate", "critique", "triage", "control", "finalize"} <= kinds
 
 
+def test_audit_json_names_the_build_every_stage_ran_on(client, config):
+    """D-run-build-stamp: the machine-readable surface is what an agent comparing runs
+    across a change actually reads, so the stamp has to survive the whole path from
+    `queued` to `final.json` without anyone re-serialising it by hand."""
+    response = client.post("/runs", data={"question": "Which build?"}, follow_redirects=False)
+    run_id = response.headers["location"].rsplit("/", 1)[-1]
+    _wait_for_final(config, run_id)
+
+    audit = client.get(f"/runs/{run_id}/audit.json").json()
+    build = audit["final"]["build"]
+    assert set(build) == {"commit", "dirty", "source"}
+    assert build["source"] in ("image", "git", "unknown")
+    assert audit["summary"]["build"] == build
+
+    # Every stamped event agrees with it: nothing here crossed a deploy.
+    stamped = [e["build"] for e in audit["events"] if "build" in e]
+    assert {e["kind"] for e in audit["events"] if "build" in e} == {"queued", "startup", "finalize"}
+    assert all(b == build for b in stamped)
+
+
+def test_a_run_with_no_final_json_still_reports_its_build(config, tmp_path):
+    """A run in flight is the one you most want to attribute — it is the run whose
+    behaviour you are watching. The summary falls back to the latest stamped event."""
+    from reasonable_answer.store import RunStore
+    from reasonable_answer.web.registry import Registry
+
+    store = RunStore(config.runs_dir, "run-inflight")
+    store.question("Still going?")
+    store.event("queued", attempt=1, auto=False, build={"commit": "b" * 40, "dirty": False, "source": "git"})
+
+    summary = Registry(config.runs_dir).summary("run-inflight", active={"run-inflight": "running"})
+    assert summary.build == {"commit": "b" * 40, "dirty": False, "source": "git"}
+
+
+def test_a_run_that_predates_stamping_reports_no_build(config):
+    """None, not a fabricated record: there is no backfill, by decision."""
+    from reasonable_answer.store import RunStore
+    from reasonable_answer.web.registry import Registry
+
+    store = RunStore(config.runs_dir, "run-ancient")
+    store.question("From before?")
+    store.event("queued", attempt=1, auto=False)
+
+    assert Registry(config.runs_dir).summary("run-ancient").build is None
+
+
 def test_healthz(client):
     assert client.get("/healthz").text == "ok"
 
