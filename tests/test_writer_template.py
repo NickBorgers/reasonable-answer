@@ -44,6 +44,14 @@ def test_counterargument_must_be_engaged_not_merely_raised():
     assert "Never present a weakened version" in s
 
 
+def test_every_explicit_question_part_is_an_answer_obligation():
+    system = prompts.WRITER_SYSTEM
+    assert "every explicit part of the question as an answer obligation" in system
+    assert "answer each in the conclusion and support each in the body" in system
+    assert "For a question about change or comparison, state the baseline and contrast" in system
+    assert "Do not substitute an adjacent question or invent an unstated goal" in system
+
+
 def test_no_top_level_title():
     # export_markdown already emits `# {question}` above the body; a template H1
     # would double it.

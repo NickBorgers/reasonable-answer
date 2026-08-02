@@ -84,7 +84,7 @@ decisions.
 | D-observable-categories | **Observable-category taxonomy** (no intent tags). | A critic can't infer intent from text; `uncited_claim`/`contradicted_claim`/`fabricated_citation` are checkable. |
 | D-in-artifact-citations | **Report carries its own citations; no external retrieval in v1.** Uncited material claims are challenged. *(Amended by D-retrieval-opt-in: retrieval is now implemented as an opt-in, off by default. With `search.enabled: false` this decision holds exactly as written.)* | Matches "the argument is sound" via in-artifact sourcing; output labeled *consensus-reviewed*, not fact-checked. |
 | D-isolation-boundary | **Structural isolation boundary** for the orchestrator (`OrchestratorView` DTO only; superseded the earlier `SignalReport` name — see D-split-view-input). | Makes blindness real, not a coding convention over shared state. |
-| D-cross-model-confirmation | **Cross-model confirmation** before `accepted` (refined by D-two-clean-critiques/D-three-model-roster). | A single clean critique is one model's opinion; strong acceptance needs **two distinct non-author models** clean on the identical artifact (≥3-model roster). |
+| D-cross-model-confirmation | **Cross-model confirmation** before `accepted` (refined by D-two-clean-critiques/D-three-model-roster, then cross-family by D-front-loaded-depth/QP2). | A single clean critique is one model's opinion; strong acceptance now needs clean records from **two distinct non-author model families** on the identical artifact. |
 | D-min-ticks-floor | **min_ticks floor.** | "The first tick should never be accepted." |
 
 ## Codex adversarial review — round 1 (verdict: CHANGES_REQUESTED, 20 findings)
@@ -107,7 +107,7 @@ decisions.
 | RA-014 | med | No round-identity/reducer contract; replay can fake convergence | **Fixed.** Keys `(run_id, round, artifact_hash, models, lens, attempt)`; idempotent reducers; stale-hash rejection. |
 | RA-015 | med | Single endpoint / no concurrency, timeout, capability checks | **Fixed.** Ops section: bounded concurrency, per-call timeout/retry, startup structured-output capability check, roster health check. |
 | RA-016 | med | Audit trail may hold sensitive data; no retention/access policy | **Fixed.** Data classification, least-privilege perms, retention/deletion, redaction; note LiteLLM proxy logging. |
-| RA-017 | med | "Distinct models" ≠ independent (aliases, fallback, same family) | **Fixed.** Enforce distinctness at resolved provider/model/version; no duplicate fallback; roster requirements generalized to per-lens eligibility by D-critic-only-specialists (≥2 eligible non-author models per lens for strong acceptance); fail closed. |
+| RA-017 | med | "Distinct models" ≠ independent (aliases, fallback, same family) | **Fixed.** Enforce distinctness at resolved provider/model/version and model family; no duplicate fallback; roster requirements generalized to per-lens eligibility by D-critic-only-specialists and D-front-loaded-depth (≥2 eligible non-author families per lens for strong acceptance); fail closed. |
 | RA-018 | med | Input routing for question/seed combinations undefined | **Fixed.** Intake routing table + validation in [architecture.md](./architecture.md). |
 | RA-019 | med | Only one isolation test mentioned | **Fixed.** Test matrix below. |
 | RA-020 | low | Orchestrator/triage trust models inconsistent (agent vs pure logic) | **Fixed (D-blind-orchestrator).** Orchestrator = blind LLM inside a deterministic controller; triage = mechanical. |
@@ -115,7 +115,7 @@ decisions.
 ## Operational requirements (RA-015 / RA-016 / RA-017)
 
 - **Roster (role-structured, superseded by D-per-lens-critics/D-critic-only-specialists):** a **writer pool** plus **per-lens critic
-  pools** (each ≥2 eligible non-author models for strong acceptance; critic-only specialists
+  pools** (each ≥2 eligible non-author model families for strong acceptance; critic-only specialists
   allowed). Resolve/record provider/model/version behind each LiteLLM alias; enforce distinctness at
   that level; no silent fallback to a duplicate; **fail closed** (abort) if the writer pool is empty
   or any lens has no eligible non-author model. Startup validates structured-output support and
@@ -157,7 +157,7 @@ keys and no network, honoring "clone → run tests."
 
 | # | Decision | Rationale |
 |---|----------|-----------|
-| D-two-clean-critiques | **Acceptance = two clean critiques by two distinct non-author models.** *(Generalized to **per-lens** by D-per-lens-critics; the 2-model consecutive-clean fallback was later **removed** — weak acceptance is now the per-lens `roster_limited` case, current-hash-only.)* | A two-model "confirm the same artifact" would be the author reviewing its own draft (RB-001). Preserves #7 and is honest about roster limits. |
+| D-two-clean-critiques | **Acceptance = two clean critiques by two distinct non-author witnesses.** *(Generalized to **per-lens** by D-per-lens-critics and to **cross-family** witnesses by D-front-loaded-depth/QP2; the 2-model consecutive-clean fallback was later removed.)* | A two-model "confirm the same artifact" would be the author reviewing its own draft (RB-001). The current family requirement preserves that exclusion and rejects correlated same-family checkpoints as a second witness. |
 | D-severity-floors | **Mechanical, category-specific severity floors; fail-closed on invalid output.** Triage clamps severity up to the floor; unknown/invalid fields fail the whole lens. | Stops a critic gaming severity (RB-006) or an adversarial/invalid critique collapsing into a fake-clean empty result (RB-007). |
 | D-split-view-input | **Split `OrchestratorView` (content-free, LLM-facing) from `ControllerInput` (identifiers, deterministic).** | The blind LLM must not see hashes/ids (correlation handles); the deterministic controller may. Makes noninterference testable (RB-004, RB-008). |
 | D-evidence-bearing-fields | **Evidence-bearing defect fields** (`claim_span`, `related_span`, `citation_id`, `expected_support`, bounded `rationale`). | `{locus,category,severity,instruction}` can't convey which propositions contradict etc., so a blocking defect could survive (RB-005). Fields are bounded/untrusted/validated. |
@@ -188,7 +188,7 @@ and confirmation-indistinguishability tests.
 | # | Decision | Rationale |
 |---|----------|-----------|
 | D-context-window-unit | **The isolation unit is the context window, not the model.** Fresh, blind contexts defeat the *primary* bias (social/context drift) regardless of model; model diversity is a *secondary* layer that decorrelates blind spots. | The dominant threat (sycophancy, contextual drag, in-session self-review) is caused by *shared context*, not model identity — so principle #7 is fundamentally "not the same context." (User insight.) |
-| D-three-model-roster | **Default roster = ≥3 distinct models.** Strong `accepted` = two distinct non-author models clean on the identical final artifact. 2-model rosters can only reach `converged_unconfirmed`. | Two models cannot give the final artifact two independent non-author reviews (RC-001); a third model closes it and adds blind-spot decorrelation. User confirmed 3 models is easy. |
+| D-three-model-roster | **Default roster = ≥3 distinct models.** *(Strong clearance was later tightened by D-front-loaded-depth/QP2 to two distinct non-author model families.)* | Two models cannot give the final artifact two non-author reviews when one authored it (RC-001); the later family rule also prevents same-family checkpoints from supplying the second witness. |
 
 ## Additional decisions (post-review design extension)
 
@@ -3583,6 +3583,343 @@ material-issue count and `judge` are untouched, and this decision is only about 
 contains. No change to the number of planted fixtures or to any lens's coverage. No change to
 `repetitions`, whose default remains 3.
 
+## D-answer-obligations — every explicit question clause is material, and a substitute objection is not a counterargument
+
+**Context.** The closed taxonomy could not name a fluent report that answers only one explicit
+question clause or substitutes an adjacent, easier question. Such a report can satisfy the section
+template and reach convergence even though a literal part of the user's question remains unanswered.
+
+The audition corpus exposed a related specification mismatch. After D-fixture-report-shape,
+`omitted-counterargument-01` deliberately contains a substantial `## The strongest counterargument`
+section aimed at cordon-boundary effects while omitting the load-bearing distributional objection.
+Its manifest correctly calls that the weakened substitute forbidden by the report template, but the
+taxonomy still defined `omitted_counterargument` only as an opposing view being absent. The fixture
+was testing a stronger and more useful rule than the production critic had been given.
+
+**Decision.** Add `incomplete_answer` to the completeness lens with a mechanical `major` floor. It
+means that an explicit, material part of the question is unanswered, or that the report answers an
+adjacent question in its place. The writer must treat every explicit part as an answer obligation:
+answer each in the conclusion and support each in the body. A question about change or comparison
+requires the baseline and contrast needed to make the answer intelligible.
+
+This category is deliberately literal. It does not license a critic to infer an unstated goal,
+invent a "question behind the question," demand an optional angle, or choose arbitrary additional
+depth. Those remain outside the report's obligations unless the question states them. A critic
+anchors the issue to the partial conclusion or closest present passage and puts the missing explicit
+obligation in `rationale`; span validation is unchanged.
+
+Broaden `omitted_counterargument` without adding a second counterargument category. It now also
+covers a purported opposing case that substitutes an easier adjacent objection and therefore does
+not challenge a load-bearing conclusion. The critic anchors either to that weak substitute or to the
+claim the absent view bears on, and puts the stronger missing case in `instruction`. A section heading
+never earns completeness by itself.
+
+**Measurement.** Add an obvious completeness fixture as a question-level matched pair. Its artifact
+is byte-identical to the sound Dust Bowl control; only its question adds a second explicit obligation
+about agricultural unionization, which the report never addresses. The pair therefore matches on
+length, structure, citations, topic, and prose quality. The new fixture intentionally increases the
+full-audition cost, and the corpus and prompt/rubric hashes invalidate old verdicts rather than
+pretending the changed measurement is comparable.
+
+**Invariants and limits.** Author exclusion, the blind orchestrator, fail-closed lens validation,
+upward-only severity clamping, termination, and the untrusted-text boundary are unchanged. The new
+category flows through the existing closed enum, per-lens allowlist, category-count map, and material
+total. The QP1/QP5/QP8 application is recorded in `quality-principles.md`: the category has a
+mechanical floor, changes no cross-context traffic, and is measured by the existing deterministic
+audition aggregation and rubric-identity boundary. This decision does not add more critics per lens
+(#135), conceptual-conflation checks (#136), writer-visible retrieved sources or claim-level
+traceability (#137), or observed verification coverage in exported reports (#138); those are
+separate changes with separate costs and failure modes.
+
+
+## D-run-build-stamp — a run names the commit that produced it, or says it does not know
+
+**The problem.** Runs recorded what they concluded and nothing about what produced them.
+`final.json` carried `artifact_hash`, but that hashes the *report text*, not the code; nothing in
+the store, the schemas, the events, the web API, the Dockerfile or CI recorded a commit, a version
+or an image tag. `pyproject.toml` pinned `version = "0.1.0"` and no runtime code read it.
+
+That made the most useful question about this system unanswerable from its own output. "We changed
+how revisions are scoped and we are still not converging — which of these runs already had that
+change?" could only be attacked by lining run timestamps up against `git log`, which is wrong
+whenever a deploy lags a merge, whenever one PR carries two fixes, and whenever a run was resumed.
+The system was accumulating exactly the evidence needed to evaluate its own changes, in a form that
+could not be sorted by change.
+
+**Decision.** Every run stamps `{"commit", "dirty", "source"}` — on each `queued` and `startup`
+event, and in the `final.json` summary, which carries it into the `finalize` event and
+`/runs/{id}/audit.json` for free. `build_identity()` resolves it once per process from, in order:
+`RA_BUILD_SHA` baked into the image by CI (`source: "image"`, the production path and the only
+authoritative one); the checkout the package sits in (`source: "git"`, covering `uv run`, the
+devcontainer and tests, and the only source that can report `dirty`); or nothing
+(`source: "unknown"`).
+
+**`unknown` is recorded, not guessed.** The alternative — inferring a commit, or defaulting to
+something plausible — produces a value indistinguishable from a measurement once written, and a
+confidently wrong attribution is worse than a missing one. `ra doctor` reports the source and warns
+on `unknown`, and the first run in the process logs a warning, so a deployment that has lost its
+stamp is visible immediately rather than as a month of unattributable runs. For the same reason
+there is no backfill of runs that predate this: they have no `build` key, and every display surface
+omits the row rather than printing "unknown".
+
+**Non-blank, not merely set.** `ENV RA_BUILD_SHA=$RA_BUILD_SHA` leaves the variable *always*
+defined — empty on any `docker build` without the argument. Testing for presence would have
+recorded `""` as an authoritative commit, which is the one failure mode this decision cannot
+tolerate, so the check is for a non-blank value after stripping.
+
+**Shelling out to git, in `src/`, for the first time.** Reading `.git/HEAD` directly would be
+cheaper and dependency-free, but it cannot answer `dirty`, and `dirty` is the entire value of the
+non-production path: a modified tree's commit is a starting point, not an identity. The call is
+anchored to the package location rather than the cwd (or the app would report the HEAD of whatever
+repository it was launched from), uses `--no-optional-locks` (the production rootfs is read-only
+and `git status` would otherwise refresh the index), and treats a missing binary, a non-zero exit
+and a timeout identically as "we do not know".
+
+**`final.json` names one build, not all of them.** `_run_fingerprint` deliberately does not pin the
+build, so a resumed run may cross a deploy — refusing to resume after an unrelated deploy would
+discard work for no epistemic gain. The summary therefore names the build that *finalized* the run,
+and the `startup` events are the full list. [run-provenance.md](./run-provenance.md) states this and
+gives the query.
+
+**Deliberately not done.** No `builds_seen` list in the summary: `_finalize` never reads
+`events.jsonl` today, and adding I/O plus a failure mode to the terminal write path is not worth
+data already recoverable from the events. No separate hash of the roster or the prompts — the
+roster is tracked, so the commit covers it, and the `startup` event already records the resolved
+identities and budgets, which is what actually varies between runs on the same commit. No
+invariant, no controller or isolation surface touched: `OrchestratorView` forbids extras and is
+built field by field, so a key in the store cannot reach it, and a test asserts the stamp never
+appears in `signals/views.jsonl`.
+
+## D-conceptual-conflation — a narrow `conceptual_conflation` logic category, and empirical anchors as an explicit widening of `overstated_claim`
+
+**The problem.** The taxonomy had no name for a report that slides between materially distinct
+propositions while keeping one label on them. The motivating report moved between formal policy
+eligibility, differential implementation and utilization, and downstream cultural reinforcement;
+between household form, access to suburban wealth-building, and representation in a promoted ideal;
+and it grouped populations whose exclusion ran through different mechanisms. Every sentence was
+individually defensible and every claim was cited, so `uncited_claim`, `misrepresented_source` and
+`contradicted_claim` all had nothing to say. `invalid_inference` was the nearest fit and a poor one:
+the inference is valid *given* the substitution, and a critic that files it there names the
+conclusion rather than the step that produced it, so the fix task tells a writer to fix the wrong
+sentence.
+
+The same report made scale, prevalence and change claims through thematic assertion — sources that
+described a phenomenon vividly and measured nothing about it. That defect also had no name, and it
+is not the same defect: conflation is about *which* proposition is being supported, anchoring is
+about *how much* the support licenses.
+
+### Decision 1 — `conceptual_conflation`, logic lens, floor `major`
+
+Two materially distinct concepts, mechanisms, units or populations are treated as interchangeable,
+**and** the substitution carries a load-bearing inference or conclusion. Both halves are required.
+The three distinctions named in the writer and critic rules — formal rule vs. mediated mechanism
+vs. observed outcome; measured units vs. claimed population; heterogeneous mechanisms behind a
+shared outcome — and the four exclusions (terminology preference, subgroup quotas, a distinction
+that makes no difference because one mechanism or one body of evidence genuinely covers both, and
+an aggregation the report draws and defends) are normative in
+[convergence.md](./convergence.md#conceptual-conflation-and-anchors-for-empirical-scope-claims-d-conceptual-conflation).
+
+**Why the logic lens rather than a fourth lens, or completeness.** The same reasoning D-social-bias
+recorded: a new lens needs its own critic pool, its own double-clearance for strong acceptance, and
+its own roster staffing, and this defect belongs to an existing dimension — it is a defect in how
+the argument moves, which is what the logic lens reads. Completeness is the wrong home because the
+defect is not an absence: the report says something, and what it says is a substitution.
+
+**Floor `major`.** `invalid_inference`'s sibling and floored with it. The substitution is the step
+the argument turns on, and only a material floor forces the revision. Not `blocking`: unlike a
+contradiction, nothing in the report is thereby shown false, and the resolution — draw the
+distinction, or restrict the claim to the concept the support covers — is always available inside
+the report.
+
+**`related_span` is verbatim-anchored** (added to `triage.IN_ARTIFACT_RELATED`), unlike the three
+bias categories. Their related material is a *pattern* — a source cluster, the question's framing —
+with no second span to quote. Both poles of a substitution are passages the report contains, which
+is `invalid_inference`'s premise/conclusion shape. The field stays optional, so a single sentence
+that fuses the two concepts with no second passage anywhere is still reportable, and this narrows
+what a critic may forward to a writer rather than widening it.
+
+### Decision 2 — a missing empirical anchor is `overstated_claim`, widened in the open
+
+The issue asked for this to be settled explicitly rather than absorbed silently, and the three
+candidates were weighed:
+
+* **A new evidence category.** *Rejected.* The defect survives a perfect citation — a real source,
+  accurately described, that characterizes a phenomenon and measures nothing about it — so it is
+  not a sourcing failure, and the evidence lens would be raising something its own guarantee does
+  not concern. Worse, an evidence category whose fix is "produce a figure" is unsatisfiable under
+  `search.enabled: false`, where the writer has no retrieval at all, and would collide with the
+  resolvability contract every critic instruction carries.
+* **A report-mode (writer-side) requirement only.** *Rejected as sufficient, adopted as a
+  component.* A standard no lens can raise is not detectable, and the whole design's claim is that
+  no eligible reviewer can find a material defect — not that writers were told not to make one. The
+  writer standards ship (below), and a critic can raise the failure.
+* **`overstated_claim`, widened explicitly.** *Adopted.* A claim that turns on magnitude,
+  prevalence, timing or change, resting on a thematic assertion rather than a concrete figure or a
+  source that states it, *is* a claim stronger than its support. The widening is stated in
+  `_CATEGORY_MEANING`, in the logic lens brief, in convergence.md and here — which is what
+  distinguishes it from the drift the issue warned against. No floor change: `overstated_claim` was
+  already `major`.
+
+Two narrowings are part of the decision, not commentary: a claim about **kind, mechanism or
+character** turns on none of the four and owes no anchor, and the instruction may never demand a
+specific dataset or document as the only acceptable fix — qualifying the claim to what the support
+establishes is always a complete resolution.
+
+### Decision 3 — the floor ships with the measurement, because a minor floor here is unmeasurable
+
+The issue asked to measure sensitivity and control noise **before** enabling a material floor. That
+sequencing is not available in this harness, and saying so is part of the decision rather than a
+deviation from it. `_check_planted_floor_is_material` (D-minor-floor-fixtures) refuses to load a
+fixture planting a category floored below `major`, because every detection credit in `grade`
+requires post-clamp materiality — a critic reporting a minor-floor category at its own floor scores
+as blind. So a `conceptual_conflation` shipped at `minor` could not enter the corpus at all, and
+would land in exactly the un-auditable state the tail of this file already records as an open item
+for `loaded_language`: a category in production that the audition cannot see.
+
+The measurement therefore ships **in the same change as the floor**, which is the closest faithful
+reading of the request:
+
+* `conceptual-conflation-01` (logic, moderate) plants the substitution, paired with
+  `control-base-paid-leave-01` — the identical artifact with one paragraph rewritten to draw the
+  same distinctions correctly. The pair is what separates "detects the conflation" from "distrusts
+  reports about paid leave".
+* `overstated-claim-03` (logic, moderate) plants the unanchored scope claim, paired with
+  `control-base-open-source-01`, the **qualitative-evidence control**: a report built on interview
+  and account evidence that makes claims about kind, declines the prevalence claim explicitly, and
+  says why. A critic that demands a figure there is inventing a material issue.
+* Both controls reach **every** lens (`for_lens`), so the noise direction is measured on all three,
+  and `control_material_rate` / the never-clean gate are what would catch a widened
+  `overstated_claim` reading as "quantify everything".
+
+`prompt_hash` changes (the logic lens brief and two category meanings) and `rubric_hash` changes
+(`LENS_CATEGORIES` and `SEVERITY_FLOOR` are hashed as data), so **every cached audition verdict is
+invalidated by design** — operators re-run `ra audition` after upgrading, and `audition.enforce`
+reads *not audited* until they do. The corpus grows from 17 fixtures to 21 (13 planted, 8 controls);
+per-control leverage on `control_material_rate` falls from 0.167 to 0.125, and the aggregate rises
+from 29 fixture-runs to 37 (12 evidence, 14 logic, 11 completeness). Two of the eight added runs are
+this decision's planted fixtures on the logic lens; the other six are the two new controls, which
+every lens owes. Corpus-class confounds hold:
+the length spread stays 1.348x with each class's median inside the other's range, and every new
+artifact carries exactly five sources like the rest.
+
+`test_all_repetitions_failing_one_fixture_leaves_that_fixture_uncovered` is re-derived rather than
+re-tuned: two more controls change the per-lens fixture count, so its `repetitions` moves to 5 and
+its failure budget is computed from `max_schema_failure_rate` instead of hardcoded. Five is chosen
+because `owed x repetitions / 5` is a whole number for *every* corpus size when `repetitions` is a
+multiple of five, so the next fixture addition does not silently stop exercising the boundary; the
+exact-rate assertion is what would catch it if it did.
+
+**Writer standards** are symmetric with the critic categories, in `WRITER_SYSTEM`: keep a formal
+rule, its implementing mechanism and the observed outcome as three separately supported claims;
+keep a finding attached to the units it was measured on rather than restating it about a wider
+group; name the difference, or narrow the claim, where a claim covers groups reaching one outcome
+by different mechanisms; and give a figure or a source, or qualify the claim, where a claim turns
+on magnitude, prevalence, timing or change — while not manufacturing a number for a claim about
+kind.
+
+**Known residual, accepted.** Same shape as D-social-bias's: the rules catch what they name. A
+substitution between two things the critic does not recognize as distinct passes through, and the
+`load-bearing` half of the trigger is a judgement no mechanical check can make. The exclusions bound
+the false-positive direction and the controls measure it; nothing bounds the false-negative
+direction except the critic's own reading, which is what the audition's sensitivity rate is for.
+
+**Deliberately not done.** No new `docs/` page: the rules live in convergence.md, beside the
+taxonomy table they govern, rather than in a `bias.md`-style file of their own. No change to the
+controller, `OrchestratorView`, the decision table, or any floor other than the new category's own.
+No `tier: obvious` fixture for either new plant — both shipped fixtures are moderate by
+construction, and an obvious-tier fixture gates `judge` fail-closed, which is not a claim this
+measurement has earned yet.
+## D-front-loaded-depth — two independent critics read every draft, per lens, before it is revised
+
+**The problem.** Strong acceptance requires two cross-family non-author clean records per lens
+(RC-001/QP2), but only one critic per lens ever read a draft. The second was deferred to
+controller **rule 8**, which fires only after a pass has already reported `material == 0`. So the
+second opinion was never part of *discovery*: the run acted on the first review's silence before
+asking the second witness. Front-loading the configured slate makes every selected witness's
+findings available to the same triage pass, which is mechanically checkable against the code and
+`tests/test_review_depth.py` without relying on private run history (QP9).
+
+**Decision.** Review depth is configuration, and the production default is **2 eligible non-author
+critics per lens on every generated artifact**.
+
+```yaml
+review:
+  depth: 2                 # critics per lens per pass; 1 restores single-critic discovery
+  per_lens: {evidence: 3}  # optional per-lens override
+```
+
+`roles.critic_slate` draws the whole slate for a lens at once, because drawing one model at a time
+from the same "already used" set returns the same alias every time. It is a **ceiling, not a
+quota**: the slate is taken from *fresh* eligible models only, so a lens the roster can staff once
+runs one critic and reaches `converged_unconfirmed` through rule 10, exactly as before. Every
+existing eligibility rule applies per slot — `eligible_critics` drops the author and deduplicates
+by resolved provider/model; `critic_slate` admits at most one model from each family; and
+`assert_author_exclusion` re-checks at the moment of the call. No slate can contain the author, the
+same model twice, or two same-family checkpoints presented as independent however large `depth`
+is. `lens_statuses` likewise counts distinct clean families, so same-family records cannot satisfy
+QP2's second-witness requirement.
+
+Each critic in a slate is a separate `critique_once` — the same production prompt, a fresh context,
+no knowledge that another critic is reading the same artifact and no sight of what it found. The
+two are as blind to each other as the three lenses always were (isolation.md).
+
+**Rule 8 keeps its job and loses its shift.** It is still the only way an under-cleared *clean*
+artifact reaches `strong_met`, and it is still bounded by `confirmation_attempts`. What changes is
+that at depth 2 a clean pass normally arrives already strongly-cleared, so rule 8 becomes the
+top-up for **incomplete depth** — a critic that failed, a pool that ran short — rather than the
+normal discovery path. No rule was added, removed, renumbered or reordered; no `ControllerInput` or
+`OrchestratorView` field changed. The termination argument in convergence.md is untouched: depth
+multiplies the calls a critique pass makes, and every measure that bounds the loop counts passes,
+generations and budgets, not calls.
+
+**Fail-closed keeps its meaning, at the right unit.** One bad field still fails the *review* it
+appeared in, whole, after the repair budget — nothing is salvaged, nothing is dropped. What is
+re-scoped is `lenses_failed`, which now counts lenses with **no completed review of this artifact**
+(`triage.unreviewed_lenses`) rather than lenses whose latest result failed. The readings coincide
+on every depth-1 discovery pass, but differ on one pre-existing path: a rule-8 confirmation that
+fails after the lens already holds a completed review. Previously the failed confirmation
+overwrote that review, made `lenses_failed == 1`, sent the run through rule 2, and exhausted at
+rule 3 (`aborted`). The completed review now remains in the list, so the controller returns to
+rule 8 when another qualified witness remains or falls through to rule 10/11. The same distinction
+appears within a depth-2 slate when one critic completes and another fails. Aborting a clean,
+reviewed artifact because a confirmation provider failed is the wrong answer to a flaky provider;
+the shortfall is still not forgiven, because it lands on family-counted `cleared_count` and cannot
+satisfy `strong_met`.
+
+**Counting distinct findings, not reports of them.** Two critics on one lens routinely land on the
+same defect, and with `search.verify_sources` on, both evidence critics are handed the *same*
+mechanical `fabricated_citation` for the same dead URL. `triage.distinct_issues` collapses on the
+key `to_defects` already used — `(section, paragraph, category, claim_span)` — so `tally`, the
+defect list and the stagnation signature all see one finding once. Where two critics disagree on
+severity the **higher** survives, which is the direction the mechanical floor already clamps in
+(RC-005): letting whichever review was stored first decide would give a second reviewer the power
+to soften the first. At depth 1 this is a no-op — categories are partitioned by lens, so two lenses
+cannot raise the same key.
+
+**Auditioning follows the front-loading.** `audition.roster_warnings` was position-aware on the
+premise that "position ≥ 2 is unreachable on the first pass"; at depth 2 that sentence is false for
+position 2, so the threshold is now read from `review.depth_for(lens)`. A marginal or unfit model
+inside the depth window gets its own warning saying it now runs on **every** draft, and one outside
+it keeps the old rule-8 warning. `audition.enforce` is unchanged and already gates every assigned
+slot regardless of position: a cached `unfit` verdict on any critic in a lens pool fails startup
+closed before the graph runs. Re-auditioning the newly front-loaded slots against the
+production-shaped corpus is an operator step (`ra audition`), not something this diff can perform —
+it needs the paid proxy.
+
+**Cost.** A pass makes `depth × |lenses|` critic calls instead of `|lenses|`. `budgets.max_concurrency`
+is unchanged, so the instantaneous load on the proxy is the same and the extra depth is paid in
+wall-clock. The expected trade is fewer generations, which are the expensive step: a round avoided
+saves a writer call, three-to-six critic calls and an orchestrator call.
+
+**Deliberately not done.** No change to the decision table, to `OrchestratorView`, to author
+exclusion, to the severity floors, or to what any critic is shown. `review` is deliberately **not**
+part of `_run_fingerprint`: depth is read fresh at each pass and every per-artifact accumulator
+resets on generation, so changing it mid-run is safe, and adding it would cost every in-flight run
+its checkpoint. `graph._lens_results` accepts the pre-existing one-result-per-lens state shape for
+the same reason. No A/B harness: `depth: 1` reproduces the previous single-critic discovery pass
+from configuration, while the intentional failed-confirmation divergence above is pinned
+separately; comparing the arms on real questions remains an operator measurement.
+
 ## D-observed-source-coverage — the run reports what verification reached, not that verification was switched on
 
 **The problem.** `graph._finalize` derived its sourcing label from a runtime boolean. With
@@ -3617,6 +3954,22 @@ terminal `_finalize` ships the best-scoring draft, which need not be the last on
 #93), so coverage keys the same way the outstanding-defect list does. A draft with no entry reads as
 *not recorded*, which is neither zero coverage nor a pass.
 
+*One record per artifact, however many critics read it.* D-front-loaded-depth gives each lens
+`review.depth` critics per pass, so at the shipped default the evidence lens tallies the same
+bibliography twice, concurrently, against a fetch cache that is monotone but last-write-wins
+(`fetch.SourceFetcher.fetch`). Two critics that both miss the cache on the same URL can therefore
+observe genuinely different outcomes, and no aggregate of the two exists to read back afterwards.
+`graph._record_coverage` keeps the observation that **reached furthest** — entries independently
+checked first, bodies read breaking the tie — rather than whichever thread happened to finish
+first. Two properties follow, and both are what the choice is for: the record does not depend on
+thread scheduling, and it can only ever move toward more coverage. Taking the maximum is not the
+same as claiming both critics saw it: it is the honest reading of "what did verification reach for
+this draft", which is a question about the run, not about a critic. Only a tally that takes the
+record is emitted as a `source_coverage` event, so the **last** such event for an artifact is
+always the one `final.json` carries. This is deliberately not true of `fetch_sources`, which still
+fires once per evidence critic and therefore double-counts a depth-2 pass; it was never a coverage
+measurement, which is the gap this decision exists to close.
+
 *Persisted and rendered.* `final.json` gains `source_coverage`; `export.Provenance` carries it; the
 markdown export, the HTML export and the run page render the same breakdown from one definition, as
 they already do for the defect list. Every row is a bounded non-negative integer derived from the
@@ -3649,7 +4002,9 @@ was achieved, which is the only direction a claim about verification is allowed 
 counts are therefore reported as observed, never as a completeness claim.
 
 **Deliberately not done.** No controller change: coverage does not gate acceptance, does not enter
-`OrchestratorView`, and mints no defect. A bibliography that is entirely unaddressable is a fact the
+`OrchestratorView`, and mints no defect. No deduplication of `fetch_sources`, which fires once per
+evidence critic and so reports a depth-2 pass twice — pre-existing, visible only in the audit trail,
+and a change to an event this decision does not own. A bibliography that is entirely unaddressable is a fact the
 export now states, not a blocking finding — turning it into one is a severity-floor decision with
 its own failure modes and needs its own entry. No new fetching at finalize: the tally comes from
 outcomes the evidence lens already produced, so `_finalize` still performs no I/O and a resumed run

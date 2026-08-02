@@ -13,10 +13,10 @@ The roster is **role-structured**, not a flat swap:
 
 The one hard invariant: **a report is never critiqued — on any lens — by the model that authored
 it.** With disjoint writer/critic pools this holds automatically; with overlap it is enforced per
-tick. For a strong `accepted`, each lens pool must contain **≥2 eligible non-author models** so the
-dimension can be independently double-checked (see Acceptance in
-[convergence.md](./convergence.md)); a lens with only one eligible model degrades that dimension to
-`converged_unconfirmed`.
+tick. For a strong `accepted`, each lens pool must contain **≥2 eligible non-author model families**
+so the dimension can be independently double-checked (see Acceptance in
+[convergence.md](./convergence.md)); a lens with only one eligible family degrades that dimension
+to `converged_unconfirmed`.
 
 "Eligible" in this structural sense — non-author, distinct identity, distinct family — is what the
 convergence controller counts. D-critic-audition adds an orthogonal **demonstrated-capability** term: `ra audition`
@@ -43,9 +43,10 @@ flowchart LR
     K2 -->|defect list| G3
 ```
 
-Each `critique` box is three per-lens critic models (logic / evidence / completeness), each a
-fresh blind context and each excluded if it authored the report under review. Writers rotate; a
-model may be a critic-only specialist (never a writer).
+Each `critique` box is three lenses (logic / evidence / completeness), and each lens is read by
+`review.depth` critic models — **two** by default (D-front-loaded-depth). Every one of them is a
+fresh blind context, distinct at the resolved provider/model level, and excluded if it authored the
+report under review. Writers rotate; a model may be a critic-only specialist (never a writer).
 
 Invariants (enforced in code, covered by tests):
 - `critic(Rₙ) ≠ generator(Rₙ)` — production ≠ review (holds for confirmation critiques too).
@@ -60,7 +61,7 @@ Invariants (enforced in code, covered by tests):
 | **intake** | question + **markdown** seed | normalized `question` / `seed`; routing | none | deterministic |
 | **generate** | question + latest report + **defect list** | next report (with citations) — under `revision.mode: patch` only the paragraphs a fix task named are edited, the rest returned byte-identical (D-scoped-revision) | non-author (alternating) | LLM (untrusted output) |
 | **adjudicate** *(D-writer-disputes, opt-in)* | pending disputes + finding + one paragraph | `AdjudicationRecord[]` | mechanical fetch-check, else an arbiter ≠ disputer ≠ raiser | mechanical, or LLM inside a closed 2-field schema |
-| **critique** | report + question + **one lens** + taxonomy | `Issue[]` per lens | per-lens non-author model | LLM (untrusted output) |
+| **critique** | report + question + **one lens** + taxonomy | `Issue[]` per critic | `review.depth` non-author models per lens, drawn as one slate (`roles.critic_slate`) | LLM (untrusted output) |
 | **triage** | this tick's `Issue[]` (minus **upheld-adjudication suppressions**, D-writer-disputes) | `OrchestratorView` + `DefectList` | none — **mechanical** | deterministic |
 | **orchestrate** | `OrchestratorView` **only** | recommendation (minor-polish judgment) | LLM, blind | LLM inside guardrails |
 | **controller** | `ControllerInput` | decision + terminal status | none | **deterministic — owns termination** |
@@ -70,16 +71,16 @@ Invariants (enforced in code, covered by tests):
 > the minor-polish judgment; the **deterministic controller** owns every hard transition and
 > termination. See the ordered decision table in [convergence.md](./convergence.md).
 
-## The 3 lenses (per-lens critic models, three fresh contexts)
+## The 3 lenses (per-lens critic pools, a fresh context per critic)
 
-Each lens is assigned its own critic model (D-per-lens-critics) — pick the best tool per dimension. The only hard
+Each lens is assigned its own critic pool (D-per-lens-critics) — pick the best tool per dimension. The only hard
 rule is that a lens's model must **not** be the author of the artifact under review.
 
 ```mermaid
 flowchart TD
-    R["report Rₙ"] --> L1["logic lens · model: strong reasoner<br/>contradicted_claim · invalid_inference · overstated_claim"]
+    R["report Rₙ"] --> L1["logic lens · model: strong reasoner<br/>contradicted_claim · invalid_inference · overstated_claim · conceptual_conflation"]
     R --> L2["evidence lens · model: lowest hallucination<br/>uncited_claim · fabricated_citation · misrepresented_source"]
-    R --> L3["completeness lens · model: most decorrelated priors<br/>omitted_counterargument · unclear_structure"]
+    R --> L3["completeness lens · model: most decorrelated priors<br/>incomplete_answer · omitted_counterargument · unclear_structure"]
     L1 --> TR["triage (mechanical)"]
     L2 --> TR
     L3 --> TR
@@ -87,8 +88,15 @@ flowchart TD
     TR --> DL["DefectList → next generator (fix-tasks)"]
 ```
 
-Each lens runs on its assigned critic model, in a **fresh context**, blind to the others. They
+Each lens runs on the head of its assigned pool, in a **fresh context**, blind to the others. They
 emit `Issue[]` against a closed schema.
+
+At `review.depth: 2` (the default, D-front-loaded-depth) each of those boxes is **two** critics
+rather than one: the next distinct eligible non-author model in the pool reads the same artifact
+under the same prompt, in its own fresh context, blind to the first critic and to what it found.
+Depth is a ceiling — a lens the roster can staff only once runs one critic — and the union of the
+slate's findings is triaged before any revision, with one finding counted once however many critics
+report it (`triage.distinct_issues`).
 
 ## The DefectList — enough to actually fix a blocking issue (RB-005)
 
@@ -123,11 +131,12 @@ failed lens" vs. "unknown categories dropped") is resolved **in favor of fail-cl
 |---------|----------|
 | Unknown enum / invalid or over-length field in any issue | **fails the entire lens** — never silently dropped |
 | Malformed / schema-violating critic output | up to *R* bounded repair retries; then lens **failed** |
-| Any **failed lens** in a tick | `lenses_failed > 0` ⇒ review incomplete ⇒ controller rule 2 (re-critique); budget exhausted ⇒ rule 3 `fatal` → `aborted` |
+| A **lens with no completed review** in a tick | `lenses_failed > 0` ⇒ review incomplete ⇒ controller rule 2 (re-critique); budget exhausted ⇒ rule 3 `fatal` → `aborted` |
+| One critic of a lens fails while another **completes** (only possible at `review.depth ≥ 2`) | the failed review contributes nothing — no issue, no clean record; the lens is *reviewed*, so rules 2/3 do not fire. The missing depth lands on `cleared_count`, so the artifact cannot be accepted: rule 8 tops it up if clean, rule 14 replaces it if not (D-front-loaded-depth) |
 | A **dispute** cannot be adjudicated (no eligible arbiter, arbiter down/malformed, budget spent) | recorded `dismissed` with the concrete method; **the finding stands** — every non-`upheld` path is the status quo ante (D-writer-disputes) |
 | The **dispute-elicitation** call fails or returns garbage | `dispute_pass_failed` event; the revision proceeds with no disputes — never fatal (D-writer-disputes) |
 | Per-call timeout | retry within budget; exhausted ⇒ `fatal` |
-| Empty `Issue[]` | counts as clean **only if** all lenses completed successfully |
+| Empty `Issue[]` | mints a clean record for **that critic** only if its own call completed; the lens counts as clean only if every lens has a completed review |
 | Generator failure | retry within budget; exhausted ⇒ `fatal` |
 | **Confirmation** critique failure | handled identically to any critique (RB-003) — triaged, budgeted, returned through the controller |
 
@@ -227,8 +236,10 @@ That same section is the **denominator** of a run's source-verification coverage
 `fetch.coverage` tallies them against the outcomes the evidence lens's fetches produced. The tally
 is written into checkpointed state under the artifact's hash in `_critique_one`, read back in
 `_finalize` for the draft actually shipped — which on a non-accepted terminal need not be the last
-one written — and rendered by `export.py` on all three surfaces. It is observation only: no
-controller rule reads it, no `OrchestratorView` field carries it, and it mints no defect.
+one written — and rendered by `export.py` on all three surfaces. Each of a lens's critics tallies
+independently, so `_record_coverage` arbitrates: one record per artifact, the observation that
+reached furthest, and an audit event only for a tally that took the record. It is observation only:
+no controller rule reads it, no `OrchestratorView` field carries it, and it mints no defect.
 
 **Format conversion happens at the edge, not here.** `intake` requires markdown, because
 `report.parse` builds the `[S<n>.P<m>]` loci from `#` headings and `fetch.extract_source_urls`
@@ -242,8 +253,8 @@ carried no headings is accepted with a warning; the warning rides the run's exis
 ## Operational requirements (RA-015, RA-016, RA-017)
 
 - **Roster (role-structured):** a **writer pool** plus **per-lens critic pools**; each lens pool
-  sized to **≥2 eligible non-author models** for a strong `accepted` (a single-model lens degrades
-  that dimension to `converged_unconfirmed`). Critic-only specialists are allowed and are how the
+  sized to **≥2 eligible non-author model families** for a strong `accepted` (a single-family lens
+  degrades that dimension to `converged_unconfirmed`). Critic-only specialists are allowed and are how the
   strongest model reviews every draft. Resolve/record provider/model/version behind each LiteLLM
   alias — including the orchestrator's — and enforce distinctness at that level; no silent fallback
   to a duplicate. **Fail closed** (abort) if any lens has zero eligible non-author model or the
@@ -259,9 +270,15 @@ carried no headings is accepted with a warning; the warning rides the run's exis
   round** — i.e. at least three writers — or one flaky response is an aborted run rather than a
   retry. This is a sizing recommendation, not a fail-closed check: a two-writer roster is legal and
   still runs, it just has no lateral move when its one eligible writer misbehaves.
-- **Concurrency/limits:** bounded concurrency (the 3 lenses may run in parallel), per-call timeout +
-  retry budget, token/context budgeting for the slow local model, backpressure so parallel lenses
-  don't overload one proxy/model.
+- **Concurrency/limits:** bounded concurrency (a pass fans out over every critic slot — `review.depth`
+  per lens — as one flat work list under `budgets.max_concurrency`, so raising the depth costs
+  wall-clock and never instantaneous proxy load), per-call timeout + retry budget, token/context
+  budgeting for the slow local model, backpressure so parallel lenses don't overload one
+  proxy/model.
+- **Review depth (D-front-loaded-depth):** `review.depth` (default 2, per-lens overridable) is how
+  many eligible non-author critics read each lens on **every** draft. Depth is a ceiling clamped by
+  the fresh eligible pool, so it can never turn a `roster_limited` lens into an abort; every slot is
+  a separate fresh context and re-checks author exclusion at the call.
 - **Transient-failure posture (D-provider-retry):** every retry waits — exponential with jitter, bounded by
   `budgets.retry_backoff_seconds` / `retry_backoff_max_seconds`, and a provider's own `Retry-After`
   wins where it sends one. Failures whose status says the *request* is wrong (400/401/403/404/413/
@@ -295,13 +312,13 @@ sequenceDiagram
     autonumber
     participant C as Controller (deterministic)
     participant O as Orchestrator (blind LLM)
-    participant K as Per-lens critics (each ≠ author)
+    participant K as Per-lens critics (review.depth each, all ≠ author)
     participant T as Triage (mechanical)
     participant G as Generator (non-author)
     participant S as Report store
 
-    C->>K: critique Rₙ (question + lens ×3) — identical interface for normal & confirm critiques
-    Note over K: fresh context per lens, blind to each other, author, and confirm-state
+    C->>K: critique Rₙ (question + lens ×3, ×review.depth critics per lens) — identical interface for normal & confirm critiques
+    Note over K: fresh context per critic, blind to each other, author, and confirm-state
     K-->>T: Issue[] (closed schema, unknown field ⇒ lens fails)
     T-->>C: OrchestratorView (counts) + ControllerInput (ids)
     T-->>G: DefectList (fix-tasks) — held for next generate
@@ -312,7 +329,7 @@ sequenceDiagram
         C->>G: generate Rₙ₊₁ from question + Rₙ + DefectList (author always differs from every lens critic)
         G-->>S: report Rₙ₊₁ (new hash ⇒ clean-record set resets)
     else re-critique SAME artifact (rules 2, 8 — no generation)
-        C->>K: re-critique failed/under-cleared lens by an eligible non-author (decrements a finite budget)
+        C->>K: re-critique unreviewed/under-cleared lens up to its depth, by fresh eligible non-authors (decrements a finite budget)
     else terminal (rules 1,3,5,6,7,10,11,12,13)
         C->>S: emit terminal status + audit trail
     end

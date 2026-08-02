@@ -265,6 +265,10 @@ jobs:
           push: false
           load: true
           tags: reasonable-answer:pr
+          # Mirrors docker-release.yml so the smoke-tested image is built the same way
+          # the published one is, provenance stamp included.
+          build-args: |
+            RA_BUILD_SHA=${{ github.event.pull_request.head.sha }}
           cache-from: type=gha
           cache-to: type=gha,mode=max
 

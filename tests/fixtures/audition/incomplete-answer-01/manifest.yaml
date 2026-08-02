@@ -1,0 +1,19 @@
+# Question-level matched pair (D-answer-obligations): the artifact is byte-identical to
+# `control-base-dust-bowl-01`; only the question adds a second explicit obligation. This
+# isolates answer coverage from report length, structure, sourcing, and prose quality.
+lens: completeness
+tier: obvious
+question: "Did the Dust Bowl migration permanently depress wages in California, and how did it change agricultural unionization in the state?"
+defects:
+  - category: incomplete_answer
+    locus: {section: 1, paragraph: 1}
+    anywhere: true
+    note: >
+      The report directly and carefully answers the wage question, but never answers the
+      equally explicit question about how the migration changed agricultural unionization.
+      It contains no discussion of unions, organizing, collective bargaining, or a
+      limitation saying that effect is unknown. The artifact is the sound Dust Bowl
+      control without a byte changed; under that control's original single-part question
+      it has no planted defect. `anywhere` is set because the absent answer has no honest
+      locus: a critic may anchor it to the partial conclusion in S1.P1 or the closest
+      topical discussion.

@@ -1,0 +1,48 @@
+lens: logic
+tier: moderate
+question: "How has maintenance of widely used open-source software changed since corporate sponsorship programs became common?"
+defects:
+  - category: overstated_claim
+    locus: {section: 4, paragraph: 1}
+    note: >
+      The empirical-anchor half of D-conceptual-conflation, planted as `overstated_claim`
+      because that decision resolves it there rather than in a new evidence category: the
+      support is real, cited and accurately described, and it is the *claim* that outruns
+      it.
+
+      S4.P1 makes three claims that turn on scale, prevalence and timing — sponsorship is
+      "the ordinary funding arrangement for the great majority of widely used projects",
+      unsponsored maintenance "is now rare at that tier of usage", and the change ran
+      "faster than any earlier shift in how this work was paid for" — and cites [1] and
+      [4] for all three. S2.P1 says what those two are: twenty-two semi-structured
+      interviews, and twelve written accounts solicited from maintainers who already held
+      sponsorship. Neither reports a denominator, neither samples unsponsored projects,
+      and neither dates anything. A thematic description of an arrangement is being offered
+      where a proportion, a base rate and an interval are claimed.
+
+      It is load-bearing: the closing sentence uses the prevalence claim to convert the
+      whole report from a description of sponsored projects into a description of the
+      ecosystem.
+
+      The fix is available inside the report, which is why this is not an evidence-lens
+      demand for a dataset: qualifying the paragraph to what the accounts establish is a
+      complete resolution, and `control-base-open-source-01` is that paragraph written
+      that way.
+
+      Tier is moderate rather than obvious. The rest of the report is careful with the
+      same evidence — S5.P2 says outright that neither collection quantified the shift and
+      that the interview study did not ask — so the overstatement sits in one paragraph of
+      an otherwise measured document, which is where this defect actually occurs.
+
+      Grading note: a critic may reasonably file this locus as `invalid_inference` (the
+      ecosystem-wide reading does not follow from a sponsored-only sample) or, once the
+      category exists, as `conceptual_conflation` (the sampled units are substituted for
+      the population claimed about). Both are the same defect seen from a different side,
+      the fixture grades the same-lens window, and any material logic finding at S4 scores.
+
+      Directory is `-03` because `overstated-claim-01` and `-02` already name different
+      fixtures — a hedge dropped from a small average effect, and a counterfactual
+      certainty about a municipal budget. A third is not redundant: this one is the only
+      fixture in the corpus where the overstatement is specifically a magnitude/prevalence/
+      timing claim resting on qualitative support, which is the reading D-conceptual-conflation
+      adds to the category and which nothing measured before.

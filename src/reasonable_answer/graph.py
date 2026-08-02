@@ -28,6 +28,7 @@ from . import critique as critique_mod
 from . import dispute as dispute_mod
 from . import fetch, prompts, resolve, roles, search, triage
 from . import report as report_mod
+from .build import build_identity
 from .config import Config, ConfigError, validate_roster_health
 from .controller import acceptance_state, decide, detect_cycle
 from .llm import LLMClient, MalformedOutputError, ModelCallError
@@ -75,7 +76,13 @@ class State(TypedDict, total=False):
     hash_history: list[str]
 
     pending_lenses: list[str]
-    lens_results: dict[str, Any]
+    #: lens -> every review of the CURRENT artifact for that lens, in the order they
+    #: completed. A list rather than a single entry because review depth runs several
+    #: independent critics per lens per pass (D-front-loaded-depth); a failed review stays on
+    #: the list and is skipped by every consumer, so it can neither add an issue nor
+    #: mint a clean record. Reset on every generation, like the other per-artifact
+    #: accumulators below.
+    lens_results: dict[str, list[dict]]
     used_critics: dict[str, list[str]]
     #: Per-lens count of critique attempts made on THIS artifact. `used_critics` is a
     #: set of distinct identities and so stops growing once the eligible pool is
@@ -198,6 +205,9 @@ def build_runtime(
         read_pdfs=read_pdfs,
         resolve_tiers=sorted(_enabled_tiers(config)),
         audition_enforced=config.audition.enforce,
+        # Per attempt, not per run: a resumed run can cross a deploy, and the set of
+        # startup events is the only place that shows it (docs/run-provenance.md).
+        build=build_identity().as_dict(),
     )
     for warning in warnings:
         log.warning("roster: %s", warning)
@@ -853,40 +863,78 @@ def _resolution_tiers(sources: list) -> dict[str, int]:
     return counts
 
 
+#: Serialises the read-modify-write in `_record_coverage`. A module-level lock rather
+#: than one per sink because the sink is a plain dict owned by `_critique`, and the
+#: contention is one comparison per evidence critic per pass.
+_COVERAGE_LOCK = threading.Lock()
+
+
+def _coverage_reach(observed: dict) -> tuple[int, int]:
+    """How far verification actually got, as a key two tallies can be ranked on.
+
+    Entries *independently checked* comes first — `cited` minus the ones nothing
+    reached, which counts a definitive not-found as checked, because it is
+    (D-notfound-fabrication). Bodies read breaks the tie, since reading a body reaches
+    further than a registry confirming the entry exists (D-existence-vs-body).
+    """
+    cited = observed.get("cited", 0)
+    checked = cited - observed.get("not_independently_checked", 0)
+    return (checked, observed.get("bodies_read", 0))
+
+
+def _record_coverage(sink: dict[str, dict], artifact_hash: str, observed: dict) -> bool:
+    """Put `observed` on the record for this artifact if it reached furthest; say whether
+    it did.
+
+    At review depth above 1 an artifact's bibliography is tallied once per evidence
+    critic, concurrently, against a fetch cache that is monotone but last-write-wins
+    (`fetch.SourceFetcher.fetch`). Two critics that both miss the cache on the same URL
+    can therefore observe different outcomes, and there is no aggregate to read back
+    afterwards — so the run keeps the observation that reached furthest rather than
+    whichever thread happened to finish first. That makes the record independent of
+    scheduling, and it can only ever move toward more coverage, never less.
+
+    Returning the decision is what keeps the audit trail honest: only a tally that became
+    the record is emitted, so the last `source_coverage` event for an artifact is always
+    the one `final.json` will carry.
+    """
+    with _COVERAGE_LOCK:
+        current = sink.get(artifact_hash)
+        if current is not None and _coverage_reach(current) >= _coverage_reach(observed):
+            return False
+        sink[artifact_hash] = observed
+        return True
+
+
 def _critique_one(
     rt: Runtime,
     lens: Lens,
+    alias: str,
     question: str,
     report_text: str,
     artifact_hash: str,
     author_identity: str,
-    used: set[str],
     attempt: int,
     run_date: str | None = None,
     coverage_sink: dict[str, dict] | None = None,
 ) -> LensResult:
-    """One lens, one fresh context. Failure is recorded as a *failed lens*, never as
-    'no issues found' — a failed review can never manufacture a clean record.
+    """One lens, one critic, one fresh context. Failure is recorded as a *failed lens*,
+    never as 'no issues found' — a failed review can never manufacture a clean record.
+
+    The critic is chosen by the caller (`_critic_slots`), because at review depth above
+    1 the slate for a lens has to be drawn as a whole: picking one model at a time from
+    the same `used` set would return the same alias every time.
 
     `coverage_sink` is the one thing this reports back other than its `LensResult`: the
     evidence lens is where a bibliography is read against real fetch outcomes, and that
     tally has to reach `_finalize` for the artifact it was taken on, not for whichever
     draft the loop stopped at (D-observed-source-coverage). It is an out-parameter rather
-    than a second return value so the direct callers in the test suite keep their shape;
-    only the evidence lens writes to it, so the thread pool has one writer per key.
+    than a second return value so the direct callers in the test suite keep their shape.
+    At review depth above 1 the lens has several critics, so the sink has several writers
+    per key and `_record_coverage` — not this function — decides which tally is kept.
     """
+    identity = rt.identities[alias]
     try:
-        alias = roles.pick_critic(
-            rt.config.roster,
-            rt.identities,
-            lens,
-            author_identity,
-            used,
-            # `attempt` counts this lens's tries on this artifact, so once the pool is
-            # exhausted each further attempt lands on a different model.
-            rotation=attempt - 1,
-        )
-        identity = rt.identities[alias]
         roles.assert_author_exclusion(identity, author_identity, lens)
     except roles.RosterExhausted as exc:
         # A lens with no eligible non-author is fatal, but it must reach that verdict
@@ -906,6 +954,11 @@ def _critique_one(
     # widen what those lenses can see without widening what they may raise, and the
     # extra context is a channel for smuggling material into a scope that has no use
     # for it (docs/isolation.md).
+    # Kept per critic rather than hoisted to the pass, so each critic's prompt is built
+    # from exactly what that critic was shown. `SourceFetcher` caches per URL under a
+    # lock for the run's lifetime, so a depth-2 evidence slate costs one fetch per URL —
+    # except in the narrow window where both critics miss the cache simultaneously on
+    # the first pass, which costs a duplicate GET and is why the cache is monotone.
     sources = None
     if lens is Lens.EVIDENCE:
         by_url: dict[str, fetch.FetchedSource] = {}
@@ -947,10 +1000,10 @@ def _critique_one(
             observed = fetch.coverage(
                 report_text, by_url, verification_enabled=rt.verify_sources
             )
-            coverage_sink[artifact_hash] = observed.as_dict()
-            rt.store.event(
-                "source_coverage", artifact_hash=artifact_hash, **observed.as_dict()
-            )
+            if _record_coverage(coverage_sink, artifact_hash, observed.as_dict()):
+                rt.store.event(
+                    "source_coverage", artifact_hash=artifact_hash, **observed.as_dict()
+                )
 
     result = critique_mod.critique_once(
         rt.client,
@@ -981,6 +1034,90 @@ def _critique_one(
     return result
 
 
+def _lens_results(state: State) -> dict[str, list[dict]]:
+    """`lens_results` as a list per lens, tolerating the one-result-per-lens shape a
+    run checkpointed before review depth existed (D-front-loaded-depth) still carries."""
+    out: dict[str, list[dict]] = {}
+    for lens, value in (state.get("lens_results") or {}).items():
+        out[lens] = list(value) if isinstance(value, list) else [value]
+    return out
+
+
+def _flat_results(state: State) -> list[LensResult]:
+    return [
+        LensResult.model_validate(r) for group in _lens_results(state).values() for r in group
+    ]
+
+
+@dataclass(frozen=True)
+class _CritiqueSlot:
+    """One critic's turn at one lens: everything `_critique_one` needs, resolved before
+    any call is made so the whole pass fans out over a flat work list."""
+
+    lens: Lens
+    alias: str
+    attempt: int
+    #: Set when selection itself failed, so the slot becomes a failed `LensResult`
+    #: instead of a call. A lens with no eligible non-author is fatal, but it must
+    #: reach that verdict through the controller (rule 1/3), not by raising here.
+    unstaffed_reason: str | None = None
+
+
+def _critic_slots(state: State, rt: Runtime, pending: list[Lens]) -> list[_CritiqueSlot]:
+    """The full slate this pass will run, across every pending lens.
+
+    Two things are decided here, sequentially and without I/O, because both need the
+    whole picture: *which* models (a slate has to be drawn at once, or every draw
+    returns the same first-eligible alias) and *how many* — enough to bring the lens up
+    to its configured review depth on this artifact, and never fewer than one, since a
+    pass the controller routed here must make a call or the loop would spin.
+
+    Depth counts **completed distinct reviewers**, so a rule-2 retry after a total lens
+    failure restores the full depth while a rule-8 top-up asks only for the reviewers
+    the lens is actually short of.
+    """
+    used = {k: set(v) for k, v in (state.get("used_critics") or {}).items()}
+    rounds: dict[str, int] = dict(state.get("critique_rounds") or {})
+    completed: dict[str, set[str]] = {}
+    for lens_value, group in _lens_results(state).items():
+        completed[lens_value] = {
+            roles.model_family(r["critic_identity"]) for r in group if not r["failed"]
+        }
+
+    author_identity = state["author_identity"]
+    slots: list[_CritiqueSlot] = []
+    for lens in pending:
+        attempt = rounds.get(lens.value, 0)
+        depth = rt.config.review.depth_for(lens)
+        wanted = max(1, depth - len(completed.get(lens.value, set())))
+        try:
+            slate = roles.critic_slate(
+                rt.config.roster,
+                rt.identities,
+                lens,
+                author_identity,
+                used.get(lens.value, set()),
+                depth=wanted,
+                # `attempt` counts this lens's tries on this artifact, so once the pool
+                # is exhausted each further attempt lands on a different model.
+                rotation=attempt,
+            )
+        except roles.RosterExhausted as exc:
+            log.warning("lens %s has no eligible critic: %s", lens.value, exc)
+            slots.append(
+                _CritiqueSlot(
+                    lens=lens,
+                    alias="(none)",
+                    attempt=attempt + 1,
+                    unstaffed_reason=str(exc)[:400],
+                )
+            )
+            continue
+        for offset, alias in enumerate(slate):
+            slots.append(_CritiqueSlot(lens=lens, alias=alias, attempt=attempt + offset + 1))
+    return slots
+
+
 def _critique(state: State, rt: Runtime) -> dict:
     pending = [Lens(v) for v in state.get("pending_lenses") or [lens.value for lens in LENSES]]
     question = state["question"]
@@ -988,39 +1125,56 @@ def _critique(state: State, rt: Runtime) -> dict:
     artifact_hash = state["artifact_hash"]
     author_identity = state["author_identity"]
 
-    used_raw: dict[str, list[str]] = dict(state.get("used_critics", {}))
-    used = {k: set(v) for k, v in used_raw.items()}
+    used = {k: set(v) for k, v in (state.get("used_critics") or {}).items()}
     # Count of tries per lens on this artifact. Unlike `used`, this keeps climbing after
     # the eligible pool is exhausted, so rule-2 retries keep rotating (docs/convergence.md)
-    # rather than freezing `attempt` — and so the rotation index passed to `pick_critic`.
-    rounds: dict[str, int] = dict(state.get("critique_rounds", {}))
-    results = dict(state.get("lens_results", {}))
+    # rather than freezing `attempt` — and so the rotation index passed to `critic_slate`.
+    rounds: dict[str, int] = dict(state.get("critique_rounds") or {})
+    results = _lens_results(state)
 
     run_date = state.get("run_date")
+    slots = _critic_slots(state, rt, pending)
     # Keyed by artifact hash and merged rather than replaced, exactly as `used_critics`
     # is: the shipped draft on a non-accepted terminal need not be the last one written,
     # so an earlier round's coverage has to survive the rounds after it
     # (D-observed-source-coverage).
     coverage_by_artifact: dict[str, dict] = dict(state.get("source_coverage", {}))
 
-    def work(lens: Lens) -> LensResult:
-        attempt = rounds.get(lens.value, 0) + 1
+    def work(slot: _CritiqueSlot) -> LensResult:
+        if slot.unstaffed_reason is not None:
+            return LensResult(
+                lens=slot.lens,
+                artifact_hash=artifact_hash,
+                critic_alias="(none)",
+                critic_identity="(none)",
+                artifact_author_identity=author_identity,
+                failed=True,
+                failure_reason=slot.unstaffed_reason,
+                attempt=slot.attempt,
+            )
         return _critique_one(
             rt,
-            lens,
+            slot.lens,
+            slot.alias,
             question,
             report_text,
             artifact_hash,
             author_identity,
-            used.get(lens.value, set()),
-            attempt,
+            slot.attempt,
             run_date=run_date,
             coverage_sink=coverage_by_artifact,
         )
 
+    # Bounded by `max_concurrency` exactly as before — review depth multiplies the
+    # number of calls a pass makes, not the load it puts on the proxy at any instant.
     with ThreadPoolExecutor(max_workers=rt.config.budgets.max_concurrency) as pool:
-        for result in pool.map(work, pending):
-            results[result.lens.value] = result.model_dump(mode="json")
+        for result in pool.map(work, slots):
+            # Appended, never replaced: at depth > 1 a lens holds several independent
+            # reviews of the same artifact, and a failed one stays on the record so the
+            # audit trail shows what was attempted. Only completed reviews are counted
+            # (triage skips failures), so a lingering failure can neither add an issue
+            # nor mint a clean record.
+            results.setdefault(result.lens.value, []).append(result.model_dump(mode="json"))
             used.setdefault(result.lens.value, set()).add(result.critic_identity)
             rounds[result.lens.value] = rounds.get(result.lens.value, 0) + 1
             rt.store.critique(artifact_hash, result.lens.value, result.attempt, result)
@@ -1047,7 +1201,7 @@ def _critique(state: State, rt: Runtime) -> dict:
 
 def _triage(state: State, rt: Runtime) -> dict:
     cfg = rt.config
-    results = [LensResult.model_validate(r) for r in state["lens_results"].values()]
+    results = _flat_results(state)
     artifact_hash = state["artifact_hash"]
 
     # Suppression (D-writer-disputes) is applied ONCE, here, before anything is counted — so
@@ -1061,7 +1215,10 @@ def _triage(state: State, rt: Runtime) -> dict:
     for entry in suppressed:
         rt.store.event("suppression", artifact_hash=artifact_hash, **entry)
 
-    lenses_failed = sum(1 for r in results if r.failed) + (len(LENSES) - len(results))
+    # A lens is incomplete when it has no *completed* review of this artifact — not
+    # when one of several reviews failed (D-front-loaded-depth). At review depth 1 the two
+    # readings coincide, which is the behaviour rules 2/3 were written against.
+    lenses_failed = len(triage.unreviewed_lenses(results))
     per_category, totals = triage.tally(results)
     material = triage.material_count(totals)
     round_no = state.get("round", 0)
@@ -1214,7 +1371,7 @@ def _control(state: State, rt: Runtime) -> dict:
         if state.get("view")
         else _empty_view(cfg, state.get("round", 0))
     )
-    results = {k: LensResult.model_validate(v) for k, v in state["lens_results"].items()}
+    results = _flat_results(state)
     records = [CleanRecord.model_validate(r) for r in state.get("clean_records", [])]
 
     # These defaults only matter on the fatal-before-any-draft path; every other
@@ -1253,14 +1410,7 @@ def _control(state: State, rt: Runtime) -> dict:
     if decision.rule == 2:
         # the concrete failed lenses are operational detail the table abstracts over
         decision = decision.model_copy(
-            update={
-                "recritique_lenses": [
-                    Lens(name)
-                    for name, r in results.items()
-                    if r.failed
-                ]
-                or list(LENSES)
-            }
+            update={"recritique_lenses": triage.unreviewed_lenses(results) or list(LENSES)}
         )
 
     rt.store.decision(view.round, decision)
@@ -1417,6 +1567,11 @@ def _finalize(state: State, rt: Runtime) -> dict:
         "source_coverage": observed,
         "warnings": state.get("warnings", []),
         "note": Decision.model_validate(state["decision"]).note if state.get("decision") else "",
+        # The build that *finalized* this run. A resume may legitimately cross a deploy —
+        # `_run_fingerprint` deliberately does not pin the build — so this names one build,
+        # not all of them. The `startup` events in events.jsonl are the full list
+        # (docs/run-provenance.md).
+        "build": build_identity().as_dict(),
         "label": _sourcing_label(rt, observed),
     }
     rt.store.final(text, summary)

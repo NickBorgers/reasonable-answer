@@ -251,11 +251,11 @@ def test_the_evidence_lens_records_coverage_for_the_artifact_it_read(
     _critique_one(
         rt,
         Lens.EVIDENCE,
+        "evidence-spec",
         "q?",
         REPORT,
         "h" * 64,
         "vendor-a/model-a",
-        set(),
         attempt=1,
         coverage_sink=sink,
     )
@@ -276,11 +276,11 @@ def test_another_lens_records_no_coverage(tmp_path, identities, config):
     _critique_one(
         rt,
         Lens.LOGIC,
+        "logic-spec",
         "q?",
         REPORT,
         "h" * 64,
         "vendor-a/model-a",
-        set(),
         attempt=1,
         coverage_sink=sink,
     )
@@ -297,11 +297,11 @@ def test_verification_off_still_counts_the_bibliography(tmp_path, identities, co
     _critique_one(
         rt,
         Lens.EVIDENCE,
+        "evidence-spec",
         "q?",
         REPORT,
         "h" * 64,
         "vendor-a/model-a",
-        set(),
         attempt=1,
         coverage_sink=sink,
     )
@@ -322,11 +322,11 @@ def test_coverage_reaches_the_audit_trail_as_counts_only(tmp_path, identities, c
     _critique_one(
         rt,
         Lens.EVIDENCE,
+        "evidence-spec",
         "q?",
         REPORT,
         "h" * 64,
         "vendor-a/model-a",
-        set(),
         attempt=1,
         coverage_sink={},
     )
@@ -457,3 +457,279 @@ def test_a_malformed_coverage_record_is_ignored_rather_than_rendered():
     for broken in ("not-an-object", {"cited": "many"}, {"bodies_read": 3}):
         prov = export.provenance("Q?", {**_FINAL, "source_coverage": broken}, "run-x")
         assert prov.source_coverage == {}
+
+
+# ------------------------------------------- several critics, one record per artifact
+
+
+def test_the_tally_that_reached_furthest_takes_the_record():
+    """At review depth above 1 the evidence lens tallies the same bibliography once per
+    critic. The record is the observation that reached furthest, so which thread finished
+    first cannot change what the run reports (D-front-loaded-depth x D-observed-source-coverage)."""
+    from reasonable_answer.graph import _record_coverage
+
+    rich = fetch.coverage(REPORT, _mixed_outcomes()).as_dict()
+    poor = fetch.coverage(REPORT, {}).as_dict()
+
+    sink: dict[str, dict] = {}
+    assert _record_coverage(sink, "h" * 64, poor) is True
+    assert _record_coverage(sink, "h" * 64, rich) is True
+    assert sink["h" * 64] == rich
+
+    # The other arrival order reaches the same record — that is the whole property.
+    sink = {}
+    assert _record_coverage(sink, "h" * 64, rich) is True
+    assert _record_coverage(sink, "h" * 64, poor) is False
+    assert sink["h" * 64] == rich
+
+
+def test_a_body_read_outranks_a_registry_confirmation_at_equal_reach():
+    """Two tallies can check the same number of entries and still differ in how far they
+    got: reading the body reaches past a registry saying the entry exists
+    (D-existence-vs-body)."""
+    from reasonable_answer.graph import _record_coverage
+
+    body = fetch.coverage(REPORT, _mixed_outcomes()).as_dict()
+    registry = {**body, "bodies_read": 0, "metadata_only": 2}
+
+    sink: dict[str, dict] = {}
+    _record_coverage(sink, "h" * 64, registry)
+    assert _record_coverage(sink, "h" * 64, body) is True
+    assert sink["h" * 64]["bodies_read"] == 1
+
+
+def test_an_equal_tally_does_not_displace_the_record():
+    """Two critics that saw the same thing produce one record and one audit event, not a
+    second write that says nothing new."""
+    from reasonable_answer.graph import _record_coverage
+
+    observed = fetch.coverage(REPORT, _mixed_outcomes()).as_dict()
+    sink: dict[str, dict] = {}
+    assert _record_coverage(sink, "h" * 64, observed) is True
+    assert _record_coverage(sink, "h" * 64, dict(observed)) is False
+
+
+class _DegradingFetcher:
+    """Hands the first caller a bibliography it could barely reach and the second one it
+    read properly — the simultaneous-cache-miss window, made deterministic.
+
+    `SourceFetcher`'s real cache is monotone but last-write-wins, so two evidence critics
+    that both miss on the same URL can genuinely observe different outcomes. Which critic
+    gets which is up to the thread pool; the record must not be.
+    """
+
+    def __init__(self) -> None:
+        import threading
+
+        self._lock = threading.Lock()
+        self._calls = 0
+
+    def fetch_all(self, urls):
+        with self._lock:
+            self._calls += 1
+            first = self._calls == 1
+        if first:
+            return [
+                FetchedSource(url=url, status=403, error="HTTP 403") for url in urls
+            ]
+        mapping = _mixed_outcomes()
+        return [mapping[url] for url in urls]
+
+
+def _critique_state(identities) -> dict:
+    return {
+        "question": "Is it so?",
+        "report": REPORT,
+        "artifact_hash": _hash(REPORT),
+        "author_identity": identities["writer-a"],
+        "pending_lenses": ["evidence"],
+        "run_date": "2026-07-28",
+    }
+
+
+def _hash(text: str) -> str:
+    from reasonable_answer import report as report_mod
+
+    return report_mod.artifact_hash(text)
+
+
+def _coverage_events(rt) -> list[dict]:
+    events = [
+        json.loads(line) for line in (rt.store.dir / "events.jsonl").read_text().splitlines()
+    ]
+    return [e for e in events if e["kind"] == "source_coverage"]
+
+
+def _events(cfg, run_id: str) -> list[dict]:
+    path = cfg.runs_dir / run_id / "events.jsonl"
+    return [json.loads(line) for line in path.read_text().splitlines() if line.strip()]
+
+
+def test_two_evidence_critics_leave_one_record_for_the_artifact(
+    tmp_path, identities, config
+):
+    """Review depth 2 is the shipped default, so the evidence lens reads every draft
+    twice. The artifact still gets exactly one coverage record."""
+    from reasonable_answer.graph import _critique
+
+    assert config.review.depth_for(Lens.EVIDENCE) == 2
+    rt = _runtime(tmp_path, identities, config, fetcher=_MixedFetcher())
+    out = _critique(_critique_state(identities), rt)
+
+    assert len(out["lens_results"]["evidence"]) == 2  # both critics really ran
+    assert set(out["source_coverage"]) == {_hash(REPORT)}
+
+
+def test_the_record_is_the_furthest_reaching_critics_tally_not_the_first_to_finish(
+    tmp_path, identities, config
+):
+    """Whichever critic wins the race, the run reports the bibliography that was actually
+    read — never the degraded observation that happened to land first."""
+    from reasonable_answer.graph import _critique
+
+    rt = _runtime(tmp_path, identities, config, fetcher=_DegradingFetcher())
+    out = _critique(_critique_state(identities), rt)
+
+    observed = out["source_coverage"][_hash(REPORT)]
+    assert observed["bodies_read"] == 1
+    assert observed["not_independently_checked"] == 2  # not the all-blocked 5
+
+
+def test_the_last_coverage_event_is_always_the_one_the_record_carries(
+    tmp_path, identities, config
+):
+    """Only a tally that took the record is emitted, so reconstructing a run's coverage
+    from the audit trail means reading the last event for the artifact — the same
+    convention `fetch_sources` already uses."""
+    from reasonable_answer.graph import _critique
+
+    rt = _runtime(tmp_path, identities, config, fetcher=_DegradingFetcher())
+    out = _critique(_critique_state(identities), rt)
+
+    events = _coverage_events(rt)
+    assert events, "the evidence lens must record what it reached"
+    last = {k: v for k, v in events[-1].items() if k not in ("kind", "ts", "artifact_hash")}
+    assert last == out["source_coverage"][_hash(REPORT)]
+
+
+def test_verification_off_gives_both_critics_the_same_thing_to_see(
+    tmp_path, identities, config
+):
+    """With no fetching there is no race at all: the tally is derived from the artifact's
+    own text, so both critics compute it identically and one event is emitted."""
+    from reasonable_answer.graph import _critique
+
+    rt = _runtime(tmp_path, identities, config, fetcher=None, searcher=object())
+    out = _critique(_critique_state(identities), rt)
+
+    assert len(_coverage_events(rt)) == 1
+    assert out["source_coverage"][_hash(REPORT)]["not_independently_checked"] == 5
+
+
+def test_each_artifacts_record_survives_the_rounds_after_it(
+    tmp_path, identities, config
+):
+    """`source_coverage` is merged, not replaced: a later draft's tally must not evict the
+    earlier draft's, because the run may ship the earlier one (issue #93)."""
+    from reasonable_answer.graph import _critique
+
+    rt = _runtime(tmp_path, identities, config, fetcher=_MixedFetcher())
+    state = _critique_state(identities)
+    state |= _critique(state, rt)
+
+    revised = REPORT.replace("A claim [1]", "A revised claim [1]")
+    state |= {
+        "report": revised,
+        "artifact_hash": _hash(revised),
+        "pending_lenses": ["evidence"],
+        "lens_results": {},
+    }
+    out = _critique(state, rt)
+
+    assert set(out["source_coverage"]) == {_hash(REPORT), _hash(revised)}
+
+
+# ------------------------------------------------------- the whole graph, end to end
+
+
+def test_a_verified_run_carries_its_measured_coverage_all_the_way_out(
+    tmp_path, identities, roster, monkeypatch
+):
+    """The first end-to-end exercise of `verify_sources` through the whole graph: the
+    evidence lens fetches on every pass, both critics of the depth-2 slate tally the same
+    bibliography, and one measurement reaches `final.json`, the label and the export.
+
+    Offline like the rest of the suite — the real `SourceFetcher` is used, cache, lock and
+    all, with only its network rung replaced. That is deliberate: the per-URL cache is
+    exactly what makes a depth-2 slate cost one fetch per URL, so a fake fetcher would
+    skip the thing this test is here to cover.
+    """
+    from reasonable_answer.config import Budgets, Config, SearchConfig
+    from reasonable_answer.graph import run
+    from reasonable_answer.schemas import CritiqueOutput
+
+    outcomes = _mixed_outcomes()
+    fetched: list[str] = []
+
+    def offline(self, url, depth=0):
+        fetched.append(url)
+        return outcomes[url]
+
+    monkeypatch.setattr(fetch.SourceFetcher, "_resolved", offline)
+
+    cfg = Config(
+        roster=roster,
+        budgets=Budgets(min_ticks=2, hard_cap=5, retry_backoff_seconds=0.0),
+        search=SearchConfig(verify_sources=True),
+        runs_dir=tmp_path / "runs",
+    )
+    client = FakeClient(
+        identities=identities,
+        critique_fn=lambda a, u: CritiqueOutput(issues=[]),
+        report_fn=lambda n: REPORT,
+    )
+    state = run(cfg, question="Is it so?", seed=REPORT, client=client)
+    summary = json.loads(
+        (cfg.runs_dir / state["run_id"] / "final.json").read_text()
+    )
+
+    observed = summary["source_coverage"]
+    assert observed["cited"] == 5
+    assert observed["bodies_read"] == 1
+    assert observed["existence_confirmed"] == 2
+    assert observed["not_independently_checked"] == 2
+    assert observed["verification_enabled"] is True
+
+    # Keyed to the draft that shipped — `intake` normalises the seed, so the shipped
+    # artifact is not the literal text this module holds, which is exactly why the
+    # lookup goes through the hash rather than assuming the terminal draft.
+    assert state["source_coverage"][summary["artifact_hash"]] == observed
+
+    # The label is the arithmetic, not a posture — the whole point of the decision.
+    assert "source review: 5 cited" in summary["label"]
+    assert "2 existence confirmed" in summary["label"]
+    assert "verified sourcing" not in summary["label"]
+
+    # D-run-build-stamp rides out on the same record; the merge that brought these two
+    # together must not have dropped either.
+    assert summary["build"]["source"] in ("image", "git", "unknown")
+
+    # One record for the artifact however many critics and passes read it, and the audit
+    # trail agrees with what shipped.
+    coverage_events = [
+        e for e in _events(cfg, state["run_id"]) if e["kind"] == "source_coverage"
+    ]
+    assert [e["artifact_hash"] for e in coverage_events] == [summary["artifact_hash"]]
+
+    # The per-URL cache is what keeps a depth-2 slate to one fetch per URL, across every
+    # pass of the run — not one per critic.
+    assert sorted(set(fetched)) == sorted(fetched) == sorted(outcomes)
+
+    document = export.export_markdown(
+        "Is it so?", state["report"], summary, state["run_id"], exported_on="2026-01-01"
+    )
+    assert "### Source review" in document
+    assert "- Entries cited: 5" in document
+    assert export.COVERAGE_CAVEAT in document
+    # Both provenance surfaces the merge joined, on one page.
+    assert "- Built from: `" in document
