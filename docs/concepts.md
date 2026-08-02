@@ -221,7 +221,12 @@ it — each one, again, a guard against a known LLM failure mode:
   controls, and graded by plain code — measuring both whether they catch what's there and whether
   they invent what isn't. A control is graded by every lens, so it has to be sound under every
   lens (D-control-soundness): a "sound" control carrying one real uncited claim scores every
-  competent evidence critic as an inventor of defects, which is what it did. The fixtures are
+  competent evidence critic as an inventor of defects, which is what it did. That cuts both ways,
+  and usefully: the noise metric is a joint measurement of the model and the corpus, so a spike in
+  it is a hypothesis about either. Five more control defects — a miscount, a source decomposed
+  backwards, two self-contradictions and an unsupported attribution — were found by the critics
+  the controls were grading, on the run that was grading them, and fixed
+  (D-control-defect-sweep). The fixtures are
   written in the exact shape the writer prompt mandates — conclusion first, a counterargument
   section engaged on the merits, inline `[1]` citations resolving to a numbered `## Sources`
   section — because the harness uses the production critic prompt, and a corpus in any other shape

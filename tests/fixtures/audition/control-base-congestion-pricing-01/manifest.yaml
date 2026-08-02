@@ -14,5 +14,13 @@
 # rather than by minimising the burden; five sources spanning two transport authorities,
 # an overview paper and two peer-reviewed equity analyses put `one_sided_sourcing` out
 # of honest reach.
+#
+# D-control-defect-sweep correction: S1.P1 read "none of the four reviewed here has been
+# repealed" against three implementations (London [1], Stockholm [2], New York [3]) — the
+# count `## Key findings` and `## Evidence from implementations` both give, and the count
+# `omitted-counterargument-01` kept when this base was cut from it. Critics filed it as
+# `overstated_claim` and as `uncited_claim` and were right on both readings; it is now
+# "three". The "claims no more than the implementations support" clause above covers
+# arithmetic about those implementations too.
 kind: control
 question: "Should cities adopt congestion pricing?"
