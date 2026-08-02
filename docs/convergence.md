@@ -9,7 +9,12 @@ report, and it is bounded so it **always terminates**.
 > a diverse roster is a *secondary* layer that decorrelates model blind spots and enables strong
 > same-artifact acceptance. The roster is **role-structured** (D-per-lens-critics/D-critic-only-specialists): a writer pool plus
 > per-lens critic pools headed by the model best matched to each lens, sized to give **≥2
-> eligible non-author models per lens** for strong acceptance.
+> eligible non-author model families per lens** for strong acceptance.
+>
+> Those two models both read **every** draft (D-front-loaded-depth, `review.depth: 2`): review depth
+> is what a pass spends, not what the end of a run collects. See
+> [Review depth](#review-depth-both-reviewers-read-every-draft-d-front-loaded-depth) below for
+> what that does and does not change about the table.
 >
 > *Eligible* throughout this document means **structurally** eligible — non-author, distinct
 > identity, distinct family — which is all the controller reads. D-critic-audition adds a separate
@@ -34,13 +39,15 @@ but **triage clamps it up to a mechanical, category-specific floor** — the cri
 | logic | `invalid_inference` | conclusion does not follow from premises | **major** |
 | logic | `overstated_claim` | claim stronger than its support | **major** |
 | logic | `conceptual_conflation` | two materially distinct things are treated as interchangeable, and the substitution carries an inference | **major** |
-| completeness | `omitted_counterargument` | a material opposing view is missing | **major** |
+| completeness | `incomplete_answer` | an explicit, material part of the question is unanswered or replaced by an adjacent question | **major** |
+| completeness | `omitted_counterargument` | a material opposing view is missing, or a purported opposing case substitutes an easier objection that does not challenge a load-bearing conclusion | **major** |
 | completeness | `unclear_structure` | organization/clarity impedes evaluation | minor |
 | any | `stylistic` | cosmetic preference | minor (**ignored** for convergence) |
 
 **Severity floor for convergence = `major`.** `material = blocking + major`. Convergence requires
 `material == 0`; `minor`/`stylistic` never block. (Flooring `overstated_claim`/
-`omitted_counterargument` at `major` is deliberately conservative and config-tunable.)
+`incomplete_answer`/`omitted_counterargument` at `major` is deliberately conservative and
+config-tunable.)
 
 ### Conceptual conflation, and anchors for empirical scope claims (D-conceptual-conflation)
 
@@ -244,10 +251,10 @@ rewrite budget to the LLM would widen the RB-008 noninterference surface to buy 
 
 ## Acceptance evidence — immutable, hash-keyed records (RC-001, RC-002)
 
-Records are **per-lens** (D-per-lens-critics): each lens can be assigned its own critic model (the evidence lens
-takes the lowest-hallucination model, since a fabricated citation is an attribution failure). A **per-lens
-clean record** is created only when *that lens* completes (not failed) and finds no material issue
-for its categories. Each record is immutable and keyed by:
+Records are **per-lens** (D-per-lens-critics): each lens has its own ordered critic pool, from which
+`roles.critic_slate` draws the configured cross-family slate. Every completed critic can contribute
+a **per-lens clean record**, created only when that review finds no material issue for the lens's
+categories. Each record is immutable and keyed by:
 
 ```
 CleanRecord { artifact_hash, lens, critic_resolved_identity, artifact_author_identity }
@@ -256,26 +263,86 @@ CleanRecord { artifact_hash, lens, critic_resolved_identity, artifact_author_ide
 **Any new generation or polish output is a new `artifact_hash`, which resets the current
 artifact's clean-record set** — stale attestations never satisfy acceptance (closes RC-002).
 
-A lens is **strongly-cleared** for the current hash when **≥2 distinct non-author models** hold a
-clean record for it; **weakly-cleared** when exactly one does (because the roster has only one
-model eligible for that lens, or only one has reviewed so far). Then:
+A lens is **strongly-cleared** for the current hash when clean records cover **≥2 distinct
+non-author model families**; **weakly-cleared** when exactly one family does (because the roster
+has only one eligible family for that lens, or only one has reviewed cleanly so far). Then:
 
 - **`strong_met`** (default): `material == 0` **and every lens is strongly-cleared** → terminal
   **`accepted`**. Every dimension has been independently double-checked by different, blind-spot-
   decorrelated models; no model ever reviews its own draft.
 - **`weak_met`**: `material == 0` **and every lens is at least weakly-cleared**, with at least one
-  lens only weakly-cleared **because the roster cannot supply a second eligible non-author model**
+  lens only weakly-cleared **because the roster cannot supply a second eligible non-author family**
   for it (`roster_limited`) → terminal **`converged_unconfirmed`**. An honest, weaker guarantee that
   names exactly which dimension lacked a second reviewer. (All evidence is current-hash-only; there
   is no cross-artifact "consecutive-clean" mechanism.)
 
-Why a lens with one capable model can't be strongly-cleared: the only other reviewer of the
-author's content would have to be the author (or the same specialist), sharing its blind spots —
-so a second *distinct* eligible model per lens is required (RC-001, generalized per-lens).
+Why a lens with one capable family can't be strongly-cleared: another checkpoint from that family
+shares the blind spots QP2 is meant to decorrelate, so a second *distinct eligible family* per lens
+is required (RC-001, generalized per-lens).
 
 The confirming critique runs through the **identical critique interface/prompt**; `confirm_state`
 is a controller-side label applied **after** output, invisible to the model, fresh context, no
 cache reuse (RB-010).
+
+## Review depth: both reviewers read every draft (D-front-loaded-depth)
+
+`review.depth` (default **2**, overridable per lens via `review.per_lens`) is how many eligible
+non-author critics read a lens on **every** generated artifact, before any revision. Each is a
+separate call through the same interface as any other critique — same prompt, fresh context, blind
+to the other critic and to what it found.
+
+```
+review:
+  depth: 2                 # critics per lens per pass; 1 is the old single-critic pass
+  per_lens: {evidence: 3}  # optional per-lens override
+```
+
+Depth was previously 1 in all but name: the second reviewer was collected by **rule 8**, which
+fires only after a pass has already reported `material == 0`. So the second opinion could not
+participate in discovery, and when it disagreed the run had already paid for a clean pass to find
+out. D-front-loaded-depth records the mechanically testable scheduling change.
+
+Three properties bound it:
+
+* **A ceiling, not a quota.** A pass runs `min(depth, fresh eligible non-author families)` critics.
+  A `roster_limited` lens still runs one critic and still terminates `converged_unconfirmed`
+  through rule 10 — depth can never turn a weak guarantee into an abort.
+* **Eligibility is enforced per slot.** The slate is drawn by `roles.critic_slate` from
+  `eligible_critics`, which has already dropped the author and deduplicated by resolved
+  provider/model; the slate then admits at most one critic from each model family, and
+  `assert_author_exclusion` re-checks at the moment of the call. No slate contains the author, one
+  model twice behind aliases (RA-017), or same-family checkpoints presented as independent (QP2).
+* **One finding is counted once.** Two critics on a lens routinely report the same defect;
+  `triage.distinct_issues` collapses them on `(section, paragraph, category, claim_span)` — the
+  key the defect list already used — keeping the highest severity, so a second reviewer may
+  escalate a finding and can never soften it (RC-005). `tally`, the defect list and the
+  stagnation signature therefore all see one finding once.
+
+**The decision table is unchanged** — no rule added, removed, renumbered or reordered, and no new
+`ControllerInput` or `OrchestratorView` field. Rule 8 keeps its job (it is still the only way an
+under-cleared clean artifact reaches `strong_met`, still bounded by `confirmation_attempts`) and
+loses its shift: at depth 2 a clean pass normally arrives already strongly-cleared, so rule 8
+becomes the top-up for **incomplete depth** rather than the normal discovery path. Termination
+survives untouched, because every measure that bounds the loop counts passes, generations and
+budgets — never calls.
+
+### What `lenses_failed` counts (rules 2 and 3)
+
+`lenses_failed` is the number of lenses with **no completed review of the current artifact**
+(`triage.unreviewed_lenses`). That matches the old latest-result reading on every depth-1 discovery
+pass, but deliberately differs after a rule-8 confirmation fails while the lens already holds a
+completed review. The same distinction also applies within a depth-2 slate when one critic
+completed and the other failed:
+
+* Fail-closed still applies to a **review**, whole: one bad field fails the call it appeared in,
+  after the repair budget, and nothing from it is salvaged or silently dropped.
+* Counting the *lens* as failed there would discard a complete, valid review in order to re-ask,
+  which is the opposite of what fail-closed protects. Before D-front-loaded-depth, a failed rule-8
+  confirmation overwrote the completed review, sent the run to rule 2, and exhausted at rule 3
+  (`aborted`). It now returns to rule 8 when another qualified witness remains, or ends through
+  rule 10/11 (`converged_unconfirmed` / `exhausted_unresolved`).
+* The shortfall is not forgiven. It lands on `cleared_count`, so the artifact cannot be accepted:
+  if it is clean, rule 8 restores the depth; if it is not, rule 14 replaces the artifact anyway.
 
 ## The stop decision — one exhaustive ordered table (RB-009, RC-003, RC-004)
 
@@ -297,7 +364,10 @@ rule generates once `round ≥ hard_cap`** and the hard cap is genuinely hard (R
 | # | Condition | Action / terminal |
 |---|-----------|-------------------|
 | 1 | `fatal` (writer pool empty, a lens has no eligible non-author, repeated malformed) | **aborted** |
-| 2 | `lenses_failed > 0` **and** `critique_attempts_remaining > 0` | **re-critique** failed lens(es) (→ Critiquing); `critique_attempts_remaining -= 1`; partial counts never used |
+| 2 | `lenses_failed > 0` **and** `critique_attempts_remaining > 0` | **re-critique** the unreviewed lens(es) (→ Critiquing); `critique_attempts_remaining -= 1`; partial counts never used |
+
+`lenses_failed` counts lenses with **no completed review** of the current artifact, not
+lenses one of whose reviews failed — see [Review depth](#what-lenses_failed-counts-rules-2-and-3).
 
 A lens only reaches rule 2 once the critic has already been given
 `budgets.critic_repair_retries` chances to correct itself *within its own call*, shown
@@ -312,7 +382,7 @@ the model that just failed.
 | 5 | `round ≥ hard_cap` **and** `blocking > 0` | **needs_human_review** |
 | 6 | `round ≥ hard_cap` **and** `major > 0` | **exhausted_unresolved** |
 | 7 | `material == 0` **and** `strong_met` | **accepted** |
-| 8 | `material == 0` **and** `top_up_possible` (some lens `toppable` **and** `confirmation_attempts_remaining > 0`) | **re-critique** a toppable lens by a fresh eligible non-author model (→ Critiquing, **no** generation); `confirmation_attempts_remaining -= 1` |
+| 8 | `material == 0` **and** `top_up_possible` (some lens `toppable` **and** `confirmation_attempts_remaining > 0`) | **re-critique** a toppable lens by a fresh eligible non-author model (→ Critiquing, **no** generation); `confirmation_attempts_remaining -= 1`. At `review.depth ≥ 2` this is the top-up for *incomplete depth*, not the normal discovery path (D-front-loaded-depth) |
 | 9 | `material == 0` **and** `round < hard_cap` **and** `minor > 0` **and** `polish_recommended` **and** `polish_used < polish_cap` | **continue** (polish → generate; `polish_used += 1`) |
 | 10 | `material == 0` **and** `weak_met` (every under-cleared lens is `roster_limited`) | **converged_unconfirmed** |
 | 11 | `material == 0` (not strong, not toppable, not weak — confirmation budget spent) | **exhausted_unresolved** (clean-but-unconfirmed) |

@@ -62,7 +62,8 @@ def date_line(current_date: str | None) -> str:
 #:   forfeits the reason the section exists (see D-report-template).
 REPORT_SKELETON = (
     "Report shape — every report you produce follows this frame:\n"
-    "1. `## Conclusion` — the first section: a direct answer to the question in two to "
+    "1. `## Conclusion` — the first section: a direct answer to every explicit part of "
+    "the question in two to "
     "four plain-language sentences, each cited or marked as inference, so a reader who "
     "stops here leaves with the answer — including one sentence naming the strongest "
     "opposing view and how it qualifies, or fails to overturn, that answer.\n"
@@ -90,6 +91,10 @@ WRITER_SYSTEM = (
     "in the form [1], [2] with a '## Sources' section at the end listing each one.\n\n"
     f"{REPORT_SKELETON}\n\n"
     "Standards you hold yourself to:\n"
+    "- Treat every explicit part of the question as an answer obligation: answer each "
+    "in the conclusion and support each in the body. For a question about change or "
+    "comparison, state the baseline and contrast. Do not substitute an adjacent "
+    "question or invent an unstated goal.\n"
     "- Every material factual claim carries a citation, or is explicitly marked as an "
     "inference from cited material.\n"
     "- You never invent a source, a title, an author, a date, or a URL. If you do not "
@@ -561,7 +566,15 @@ _CATEGORY_MEANING: dict[Category, str] = {
         "a descriptor or framing carries an evaluative verdict the cited support "
         "does not establish — the wording asserts what the text does not argue"
     ),
-    Category.OMITTED_COUNTERARGUMENT: "a material opposing view a careful reader expects is absent",
+    Category.INCOMPLETE_ANSWER: (
+        "an explicit, material part of the question is unanswered, or the report "
+        "answers an adjacent question in its place"
+    ),
+    Category.OMITTED_COUNTERARGUMENT: (
+        "a material opposing view a careful reader expects is absent, or the purported "
+        "opposing case substitutes an easier adjacent objection that does not challenge "
+        "a load-bearing conclusion"
+    ),
     Category.UNEXAMINED_PRESUPPOSITION: (
         "the report adopts a contested presupposition — inherited from the question "
         "or introduced by its own framing — as settled fact, without stating or "
@@ -579,9 +592,10 @@ _CATEGORY_MEANING: dict[Category, str] = {
 #: contains: the overstated wording, the uncited sentence, the claim a citation is
 #: misdescribed as supporting. Quote the offending text and you are done.
 #:
-#: The completeness categories are the opposite. `omitted_counterargument` and
-#: `unexamined_presupposition` are defects of *absence* (both material); `unclear_structure`
-#: is a property of arrangement rather than of any span (and stays minor) — so for all three
+#: The completeness categories are the opposite. `incomplete_answer`,
+#: `omitted_counterargument`, and `unexamined_presupposition` are defects of *absence*
+#: (all material); `unclear_structure` is a property of arrangement rather than of any span
+#: (and stays minor) — so for all four
 #: "quote the offending text" has no obvious referent, and a critic reaches for material that
 #: is not in the paragraph. That material by construction fails `_require_quote`, fails it again
 #: on both repair attempts (the hint hands back the paragraph, which is the right text but
@@ -613,11 +627,17 @@ _CATEGORY_ANCHOR: dict[Category, str] = {
         "report has one)"
     ),
     Category.LOADED_LANGUAGE: "the loaded descriptor or framing, in the report's own words",
-    # The three below are the reason this table exists: each names the present text a
+    # The four below are the reason this table exists: each names the present text a
     # missing thing is missing *from*, because there is no span of the missing thing.
+    Category.INCOMPLETE_ANSWER: (
+        "the conclusion or closest passage that answers only part of the explicit "
+        "question, or answers an adjacent question — NOT the missing answer; put the "
+        "unanswered explicit obligation in `rationale`"
+    ),
     Category.OMITTED_COUNTERARGUMENT: (
-        "the claim in the report that the absent opposing view bears on — NOT the opposing "
-        "view itself, which is not in the report; put what is missing in `instruction`"
+        "the load-bearing claim the absent opposing view bears on, or the purported "
+        "counterargument that substitutes an easier objection — NOT missing text; put "
+        "the stronger opposing case in `instruction`"
     ),
     Category.UNEXAMINED_PRESUPPOSITION: (
         "the wording that treats the contested presupposition as settled — NOT the "

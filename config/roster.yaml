@@ -227,9 +227,11 @@ disputes:
 #
 # NOTE on this roster specifically: `gemma4` is the same model as the gemma-4-31b-it
 # that flagged nothing in that run, now at position 3 on both evidence and completeness.
-# Position 3 is unreachable on the first pass and is reached on the rule 8 confirmation
-# top-up — where a false clean raises cleared_count to 2, satisfies strong_met, and
-# terminates the run `accepted`. Audition it before trusting that lineup.
+# At `review.depth: 2` positions 1 and 2 read every draft and position 3 is still
+# unreachable on the first pass, so gemma4 is reached on the rule 8 confirmation top-up —
+# where a false clean raises cleared_count to 2, satisfies strong_met, and terminates the
+# run `accepted`. Audition it before trusting that lineup, and re-audition the whole
+# lineup before raising `review.depth` to 3, which would pull it into every pass.
 # Measuring is opt-in by being its own command (`ra audition`) — there is no `enabled`
 # flag here. Everything below only shapes what that command measures and what the two
 # cache readers, `ra doctor` and the `enforce` gate, make of the result.
@@ -257,6 +259,32 @@ audition:
     max_control_material_rate: 1.0
     warn_control_material_rate: 0.34
     max_schema_failure_rate: 0.2
+
+# How many independent critics read each draft, per lens (D-front-loaded-depth). These are the
+# code defaults, spelled out here for the same reason `revision` below is: this is the knob you
+# reach for when comparing convergence.
+#
+# `depth: 2` means every generated artifact is read by TWO eligible non-author model families on every
+# lens, and the union is triaged before any revision. It used to be one, with the second critic
+# deferred to controller rule 8 — which only fires after a pass has already reported the draft
+# clean. Front-loading makes the configured witnesses' findings available to that same triage pass.
+#
+# `depth: 1` restores the old single-critic discovery pass. A failed rule-8 confirmation now stays
+# beside the completed review instead of replacing it, so that top-up path no longer aborts only
+# because a confirmation provider failed.
+#
+# It is a CEILING, not a quota: a pass runs min(depth, fresh eligible non-author model families),
+# so a lens the roster can staff from only one family still runs one critic and still ends
+# `converged_unconfirmed` rather than aborting. Cost scales with depth in calls and wall-clock, not in proxy load —
+# `budgets.max_concurrency` still bounds how many run at any instant.
+#
+# Before raising this, re-run `ra audition`: every pool position below `depth` now reads every
+# draft, so a critic that used to be a rule-8 formality is now part of ordinary discovery.
+# `ra doctor` warns about exactly those slots.
+review:
+  depth: 2
+  # Per-lens overrides, e.g. `per_lens: {evidence: 3}`. Absent lenses use `depth`.
+  per_lens: {}
 
 # How a writer is asked to apply a defect list (D-scoped-revision). Both settings below are
 # the code defaults and are spelled out here because they are the knob you reach for

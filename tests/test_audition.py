@@ -22,6 +22,7 @@ from reasonable_answer.config import (
     AuditionThresholds,
     Budgets,
     ConfigError,
+    ReviewConfig,
     Roster,
 )
 from reasonable_answer.schemas import CritiqueOutput, LensResult, RawIssue, StructuralRef
@@ -514,6 +515,18 @@ def test_corpus_class_is_not_readable_off_source_count():
             f"against {sorted(set(control))} for controls: a class-exclusive count would "
             f"be a usable proxy for whether the artifact has a defect"
         )
+
+
+def test_incomplete_answer_fixture_changes_the_question_not_the_report():
+    """D-answer-obligations: isolate answer coverage from every artifact-level cue."""
+    fixtures = {f.id: f for f in audition.load_fixtures(CORPUS).fixtures}
+    control = fixtures["control-base-dust-bowl-01"]
+    planted = fixtures["incomplete-answer-01"]
+
+    assert planted.artifact == control.artifact
+    assert planted.question != control.question
+    assert "unionization" in planted.question
+    assert Category.INCOMPLETE_ANSWER in {defect.category for defect in planted.defects}
 
 
 # ------------------------------------------------------------------- grading
@@ -1055,8 +1068,9 @@ IDENTITIES = {
 
 
 def test_warns_when_a_weak_critic_sits_in_the_confirmation_position():
-    """Position 3 is unreachable on pass 1 and reached on the rule 8 top-up, where a
-    false clean raises cleared_count to 2 and terminates the run `accepted`."""
+    """Position 3 is outside the default review depth of 2, so it is unreachable on
+    pass 1 and reached on the rule 8 top-up, where a false clean raises cleared_count
+    to 2 and terminates the run `accepted`."""
     judgements = {
         ("p/weak", Lens.EVIDENCE): audition.Judgement(audition.Verdict.UNFIT, ("silent",)),
     }
@@ -1064,12 +1078,39 @@ def test_warns_when_a_weak_critic_sits_in_the_confirmation_position():
     assert any("position 3" in w and "strong_met" in w for w in warnings)
 
 
-def test_no_position_warning_when_the_weak_critic_is_first():
+def test_no_position_warning_for_the_head_of_the_pool():
+    """Position 1 has always read every draft, so its own verdict is the whole story
+    and a position warning would say nothing the verdict does not."""
     judgements = {
-        ("p/weak", Lens.LOGIC): audition.Judgement(audition.Verdict.UNFIT, ("silent",)),
+        ("p/good", Lens.LOGIC): audition.Judgement(audition.Verdict.UNFIT, ("silent",)),
     }
     warnings = audition.roster_warnings(roster(), IDENTITIES, judgements)
     assert not any("position" in w for w in warnings)
+
+
+def test_a_front_loaded_weak_critic_is_flagged_as_reading_every_draft():
+    """D-front-loaded-depth: at review depth 2, position 2 is no longer a rule-8
+    formality — it reads every draft, so the warning has to say so rather than repeat
+    the old 'unreachable on the first pass' line, which is now false."""
+    judgements = {
+        ("p/weak", Lens.LOGIC): audition.Judgement(audition.Verdict.UNFIT, ("silent",)),
+    }
+    warnings = audition.roster_warnings(
+        roster(), IDENTITIES, judgements, ReviewConfig(depth=2)
+    )
+    assert any("position 2" in w and "EVERY draft" in w for w in warnings)
+    assert not any("unreachable" in w for w in warnings)
+
+
+def test_depth_one_puts_the_second_critic_back_on_the_rule_8_top_up():
+    """The threshold is the deployment's own depth, not a constant."""
+    judgements = {
+        ("p/weak", Lens.LOGIC): audition.Judgement(audition.Verdict.UNFIT, ("silent",)),
+    }
+    warnings = audition.roster_warnings(
+        roster(), IDENTITIES, judgements, ReviewConfig(depth=1)
+    )
+    assert any("position 2" in w and "rule 8 confirmation top-up" in w for w in warnings)
 
 
 def test_warns_when_an_entire_lens_is_unstaffed():

@@ -21,6 +21,7 @@ from reasonable_answer.taxonomy import (
 #: The categories whose defect is an absence or a property of arrangement, so no span of
 #: "the offending text" exists and `claim_span` must anchor to present text instead (D-absence-anchor).
 ABSENCE_CATEGORIES = (
+    Category.INCOMPLETE_ANSWER,
     Category.OMITTED_COUNTERARGUMENT,
     Category.UNEXAMINED_PRESUPPOSITION,
     Category.UNCLEAR_STRUCTURE,
@@ -135,7 +136,16 @@ def test_absence_categories_anchor_to_present_text():
     for category in ABSENCE_CATEGORIES:
         assert category in LENS_CATEGORIES[Lens.COMPLETENESS]
         assert _CATEGORY_ANCHOR[category] in prompt
-    # The two whose defect is missing *content* must redirect that content to a field
+    # The three whose defect is missing *content* must redirect that content to a field
     # that is not span-validated, or the advice is "drop the issue" by implication.
+    assert "`rationale`" in _CATEGORY_ANCHOR[Category.INCOMPLETE_ANSWER]
     assert "`instruction`" in _CATEGORY_ANCHOR[Category.OMITTED_COUNTERARGUMENT]
     assert "`rationale`" in _CATEGORY_ANCHOR[Category.UNEXAMINED_PRESUPPOSITION]
+
+
+def test_completeness_scope_covers_literal_obligations_and_rejects_easy_substitutes():
+    prompt = critic_user(Lens.COMPLETENESS, "q", "# r\n\nbody\n")
+    assert "every explicit, material part of the question" in prompt
+    assert "answers an adjacent question in its place" in prompt
+    assert "does not challenge a load-bearing conclusion" in prompt
+    assert "Do not invent an unstated goal" in prompt
