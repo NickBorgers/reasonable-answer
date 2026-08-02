@@ -165,9 +165,10 @@ def test_stylistic_findings_cannot_authorize_a_polish_rewrite():
 
 
 def test_a_lens_with_no_eligible_critic_becomes_a_failed_lens(identities, config, tmp_path):
-    """Selection failure inside a worker thread must come back as a failed LensResult
-    and terminate through the controller, not escape the graph."""
-    from reasonable_answer.graph import Runtime, _critique_one
+    """Selection failure must come back as a failed LensResult and terminate through
+    the controller, not escape the graph. Driven through `_critique` because that is
+    where the slate for a pass is drawn (D-front-loaded-depth)."""
+    from reasonable_answer.graph import Runtime, _critique
     from reasonable_answer.store import RunStore
 
     client = FakeClient(
@@ -185,17 +186,19 @@ def test_a_lens_with_no_eligible_critic_becomes_a_failed_lens(identities, config
     collapsed = dict.fromkeys(identities, "vendor-a/model-a")
     rt.identities = collapsed
 
-    result = _critique_one(
+    out = _critique(
+        {
+            "question": "q?",
+            "report": REPORT,
+            "artifact_hash": "h" * 64,
+            "author_identity": "vendor-a/model-a",
+            "pending_lenses": [Lens.LOGIC.value],
+        },
         rt,
-        Lens.LOGIC,
-        "q?",
-        REPORT,
-        "h" * 64,
-        "vendor-a/model-a",
-        set(),
-        attempt=1,
     )
-    assert result.failed and "eligible non-author" in (result.failure_reason or "")
+    results = out["lens_results"][Lens.LOGIC.value]
+    assert len(results) == 1
+    assert results[0]["failed"] and "eligible non-author" in (results[0]["failure_reason"] or "")
 
 
 def test_a_run_whose_every_lens_fails_aborts(identities, tmp_path):

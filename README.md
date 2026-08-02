@@ -19,8 +19,10 @@ about running it.
 ## How it works, in one paragraph
 
 Models take turns **writing** and **critiquing** a report, and a report is never critiqued — on any
-dimension — by the model that wrote it. Three per-lens critics (logic / evidence / completeness)
-each run in a fresh, authorship-blind context and emit issues against a closed schema. A mechanical
+dimension — by the model that wrote it. By default, three lenses (logic / evidence / completeness)
+read every draft, each through two cross-family critics; `review.depth` and `review.per_lens`
+configure that depth. Each critic runs in a fresh, authorship-blind context and emits issues against
+a closed schema. A mechanical
 triage step clamps severities to category floors, turns the issues into depersonalized fix-tasks for
 the next writer, and projects a content-free count summary for a **blind referee**. The referee — a
 deterministic controller, assisted by an LLM whose only authority is a cosmetic-polish judgment —
@@ -303,17 +305,18 @@ cloud and local models alike. At startup each alias is resolved to its underlyin
 `provider/model`, and **distinctness is enforced at that level** — two aliases pointing at one
 model do not count as two independent reviewers.
 
-Every lens wants **≥2 eligible non-author models**. `make doctor` tells you whether you have them:
+Every lens wants **≥2 eligible non-author model families**. `make doctor` tells you whether you
+have them:
 
 | roster shape | strongest possible outcome |
 |---|---|
-| ≥2 eligible non-author models on every lens | `accepted` |
-| some lens has only one | `converged_unconfirmed`, naming the under-reviewed dimension |
+| ≥2 eligible non-author families on every lens | `accepted` |
+| some lens has only one family | `converged_unconfirmed`, naming the under-reviewed dimension |
 | some lens has none | fails closed at startup |
 
-That count is over distinct *identities*, not families — two checkpoints of the same base model
-satisfy it while decorrelating very little. `make doctor` warns separately when a lens pool
-collapses to a single family.
+Resolved identity still prevents aliases from duplicating one model, while the acceptance count is
+over distinct model families: two checkpoints of the same base model remain one witness. `make
+doctor` warns when author exclusion leaves a lens with only one eligible family.
 
 Structural eligibility is necessary but not sufficient: a model can be non-author and distinct yet
 still unable to perform its lens. `make doctor` therefore also reports each critic's **cached

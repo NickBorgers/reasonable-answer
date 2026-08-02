@@ -62,21 +62,25 @@ unconfirmed and the open-weight roster as the portable thing.
 
 The heart of the system is an alternating game: models take turns **writing** and **critiquing** a
 report, and a report is always critiqued by models that did **not** author it. The system is
-**role-structured** — a writer pool plus **per-lens critic models** (the table below shows one tick
-per row):
+**role-structured** — a writer pool plus **per-lens critic pools** (the table below shows one tick
+per row, at the default `review.depth: 2`; **GLM** is critic-only, and W1/W2 also sit in critic
+pools and drop out of them on the tick they authored):
 
-| tick | report | writer | logic critic | evidence critic | completeness critic |
-|------|--------|--------|--------------|-----------------|---------------------|
-| 1 | R1 | W1 | **GLM** | **GLM** | Ca |
-| 2 | R2 | W2 | **GLM** | **GLM** | Cb |
-| 3 | R3 | W1 | **GLM** | **GLM** | Ca |
+| tick | report | writer | logic critics | evidence critics | completeness critics |
+|------|--------|--------|---------------|------------------|----------------------|
+| 1 | R1 | W1 | **GLM**, W2 | **GLM**, W2 | W2, **GLM** |
+| 2 | R2 | W2 | **GLM**, W1 | **GLM**, W1 | W1, **GLM** |
+| 3 | R3 | W1 | **GLM**, W2 | **GLM**, W2 | W2, **GLM** |
 
-Each report has one **writer** (from the writer pool) and **three per-lens critic models**, none of
-which may be the writer of *that* report. A model can be a **critic-only specialist** — `glm-5.2`,
+Each report has one **writer** (from the writer pool) and, per lens, `review.depth` **critic
+models** — two by default (D-front-loaded-depth) — none of which may be the writer of *that*
+report. A model can be a **critic-only specialist** — `glm-5.2`,
 the strongest model in the roster, never authors — so it reviews every tick without ever violating
 author-exclusion. Had it been a writer instead, it would have been barred from reviewing its own
-drafts and the roster would have lost its best reviewer on half of all rounds. For a strong `accepted`, each lens pool holds **≥2 eligible non-author
-models** so every dimension gets a second, distinct reviewer (see D-per-lens-critics/D-critic-only-specialists in
+drafts and the roster would have lost its best reviewer on half of all rounds. Each lens pool holds
+**≥2 eligible non-author model families**, and both read every draft, so every dimension gets its
+second, cross-family reviewer *before* the draft is revised rather than after a pass has already reported it
+clean (see D-per-lens-critics/D-critic-only-specialists/D-front-loaded-depth in
 [decisions.md](./decisions.md) and [architecture.md](./architecture.md)).
 
 Invariants that make this work:
@@ -101,7 +105,7 @@ A **blind referee** (the orchestrator) watches only a content-free *Orchestrator
 ```mermaid
 flowchart TD
     IN["intake<br/>question (+ optional seed)"] --> G1["generate R1 (writer W1)"]
-    G1 --> CRIT["critique current report<br/>3 blind lenses · each a NON-AUTHOR per-lens critic model"]
+    G1 --> CRIT["critique current report<br/>3 blind lenses × review.depth critics<br/>each a distinct NON-AUTHOR model in its own fresh context"]
     CRIT --> SUM["triage → OrchestratorView<br/>(category × severity counts only)"]
     SUM --> CTRL{"controller<br/>deterministic guardrails +<br/>blind LLM orchestrator<br/>reads OrchestratorView ONLY"}
     CTRL -->|"material issues, or round &lt; min"| GEN["generate next report<br/>generator = a non-author writer<br/>inputs: question + latest report + structured defect list"]

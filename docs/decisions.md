@@ -84,7 +84,7 @@ decisions.
 | D-observable-categories | **Observable-category taxonomy** (no intent tags). | A critic can't infer intent from text; `uncited_claim`/`contradicted_claim`/`fabricated_citation` are checkable. |
 | D-in-artifact-citations | **Report carries its own citations; no external retrieval in v1.** Uncited material claims are challenged. *(Amended by D-retrieval-opt-in: retrieval is now implemented as an opt-in, off by default. With `search.enabled: false` this decision holds exactly as written.)* | Matches "the argument is sound" via in-artifact sourcing; output labeled *consensus-reviewed*, not fact-checked. |
 | D-isolation-boundary | **Structural isolation boundary** for the orchestrator (`OrchestratorView` DTO only; superseded the earlier `SignalReport` name — see D-split-view-input). | Makes blindness real, not a coding convention over shared state. |
-| D-cross-model-confirmation | **Cross-model confirmation** before `accepted` (refined by D-two-clean-critiques/D-three-model-roster). | A single clean critique is one model's opinion; strong acceptance needs **two distinct non-author models** clean on the identical artifact (≥3-model roster). |
+| D-cross-model-confirmation | **Cross-model confirmation** before `accepted` (refined by D-two-clean-critiques/D-three-model-roster, then cross-family by D-front-loaded-depth/QP2). | A single clean critique is one model's opinion; strong acceptance now needs clean records from **two distinct non-author model families** on the identical artifact. |
 | D-min-ticks-floor | **min_ticks floor.** | "The first tick should never be accepted." |
 
 ## Codex adversarial review — round 1 (verdict: CHANGES_REQUESTED, 20 findings)
@@ -107,7 +107,7 @@ decisions.
 | RA-014 | med | No round-identity/reducer contract; replay can fake convergence | **Fixed.** Keys `(run_id, round, artifact_hash, models, lens, attempt)`; idempotent reducers; stale-hash rejection. |
 | RA-015 | med | Single endpoint / no concurrency, timeout, capability checks | **Fixed.** Ops section: bounded concurrency, per-call timeout/retry, startup structured-output capability check, roster health check. |
 | RA-016 | med | Audit trail may hold sensitive data; no retention/access policy | **Fixed.** Data classification, least-privilege perms, retention/deletion, redaction; note LiteLLM proxy logging. |
-| RA-017 | med | "Distinct models" ≠ independent (aliases, fallback, same family) | **Fixed.** Enforce distinctness at resolved provider/model/version; no duplicate fallback; roster requirements generalized to per-lens eligibility by D-critic-only-specialists (≥2 eligible non-author models per lens for strong acceptance); fail closed. |
+| RA-017 | med | "Distinct models" ≠ independent (aliases, fallback, same family) | **Fixed.** Enforce distinctness at resolved provider/model/version and model family; no duplicate fallback; roster requirements generalized to per-lens eligibility by D-critic-only-specialists and D-front-loaded-depth (≥2 eligible non-author families per lens for strong acceptance); fail closed. |
 | RA-018 | med | Input routing for question/seed combinations undefined | **Fixed.** Intake routing table + validation in [architecture.md](./architecture.md). |
 | RA-019 | med | Only one isolation test mentioned | **Fixed.** Test matrix below. |
 | RA-020 | low | Orchestrator/triage trust models inconsistent (agent vs pure logic) | **Fixed (D-blind-orchestrator).** Orchestrator = blind LLM inside a deterministic controller; triage = mechanical. |
@@ -115,7 +115,7 @@ decisions.
 ## Operational requirements (RA-015 / RA-016 / RA-017)
 
 - **Roster (role-structured, superseded by D-per-lens-critics/D-critic-only-specialists):** a **writer pool** plus **per-lens critic
-  pools** (each ≥2 eligible non-author models for strong acceptance; critic-only specialists
+  pools** (each ≥2 eligible non-author model families for strong acceptance; critic-only specialists
   allowed). Resolve/record provider/model/version behind each LiteLLM alias; enforce distinctness at
   that level; no silent fallback to a duplicate; **fail closed** (abort) if the writer pool is empty
   or any lens has no eligible non-author model. Startup validates structured-output support and
@@ -157,7 +157,7 @@ keys and no network, honoring "clone → run tests."
 
 | # | Decision | Rationale |
 |---|----------|-----------|
-| D-two-clean-critiques | **Acceptance = two clean critiques by two distinct non-author models.** *(Generalized to **per-lens** by D-per-lens-critics; the 2-model consecutive-clean fallback was later **removed** — weak acceptance is now the per-lens `roster_limited` case, current-hash-only.)* | A two-model "confirm the same artifact" would be the author reviewing its own draft (RB-001). Preserves #7 and is honest about roster limits. |
+| D-two-clean-critiques | **Acceptance = two clean critiques by two distinct non-author witnesses.** *(Generalized to **per-lens** by D-per-lens-critics and to **cross-family** witnesses by D-front-loaded-depth/QP2; the 2-model consecutive-clean fallback was later removed.)* | A two-model "confirm the same artifact" would be the author reviewing its own draft (RB-001). The current family requirement preserves that exclusion and rejects correlated same-family checkpoints as a second witness. |
 | D-severity-floors | **Mechanical, category-specific severity floors; fail-closed on invalid output.** Triage clamps severity up to the floor; unknown/invalid fields fail the whole lens. | Stops a critic gaming severity (RB-006) or an adversarial/invalid critique collapsing into a fake-clean empty result (RB-007). |
 | D-split-view-input | **Split `OrchestratorView` (content-free, LLM-facing) from `ControllerInput` (identifiers, deterministic).** | The blind LLM must not see hashes/ids (correlation handles); the deterministic controller may. Makes noninterference testable (RB-004, RB-008). |
 | D-evidence-bearing-fields | **Evidence-bearing defect fields** (`claim_span`, `related_span`, `citation_id`, `expected_support`, bounded `rationale`). | `{locus,category,severity,instruction}` can't convey which propositions contradict etc., so a blocking defect could survive (RB-005). Fields are bounded/untrusted/validated. |
@@ -188,7 +188,7 @@ and confirmation-indistinguishability tests.
 | # | Decision | Rationale |
 |---|----------|-----------|
 | D-context-window-unit | **The isolation unit is the context window, not the model.** Fresh, blind contexts defeat the *primary* bias (social/context drift) regardless of model; model diversity is a *secondary* layer that decorrelates blind spots. | The dominant threat (sycophancy, contextual drag, in-session self-review) is caused by *shared context*, not model identity — so principle #7 is fundamentally "not the same context." (User insight.) |
-| D-three-model-roster | **Default roster = ≥3 distinct models.** Strong `accepted` = two distinct non-author models clean on the identical final artifact. 2-model rosters can only reach `converged_unconfirmed`. | Two models cannot give the final artifact two independent non-author reviews (RC-001); a third model closes it and adds blind-spot decorrelation. User confirmed 3 models is easy. |
+| D-three-model-roster | **Default roster = ≥3 distinct models.** *(Strong clearance was later tightened by D-front-loaded-depth/QP2 to two distinct non-author model families.)* | Two models cannot give the final artifact two non-author reviews when one authored it (RC-001); the later family rule also prevents same-family checkpoints from supplying the second witness. |
 
 ## Additional decisions (post-review design extension)
 
@@ -3689,6 +3689,98 @@ identities and budgets, which is what actually varies between runs on the same c
 invariant, no controller or isolation surface touched: `OrchestratorView` forbids extras and is
 built field by field, so a key in the store cannot reach it, and a test asserts the stamp never
 appears in `signals/views.jsonl`.
+
+## D-front-loaded-depth — two independent critics read every draft, per lens, before it is revised
+
+**The problem.** Strong acceptance requires two cross-family non-author clean records per lens
+(RC-001/QP2), but only one critic per lens ever read a draft. The second was deferred to
+controller **rule 8**, which fires only after a pass has already reported `material == 0`. So the
+second opinion was never part of *discovery*: the run acted on the first review's silence before
+asking the second witness. Front-loading the configured slate makes every selected witness's
+findings available to the same triage pass, which is mechanically checkable against the code and
+`tests/test_review_depth.py` without relying on private run history (QP9).
+
+**Decision.** Review depth is configuration, and the production default is **2 eligible non-author
+critics per lens on every generated artifact**.
+
+```yaml
+review:
+  depth: 2                 # critics per lens per pass; 1 restores single-critic discovery
+  per_lens: {evidence: 3}  # optional per-lens override
+```
+
+`roles.critic_slate` draws the whole slate for a lens at once, because drawing one model at a time
+from the same "already used" set returns the same alias every time. It is a **ceiling, not a
+quota**: the slate is taken from *fresh* eligible models only, so a lens the roster can staff once
+runs one critic and reaches `converged_unconfirmed` through rule 10, exactly as before. Every
+existing eligibility rule applies per slot — `eligible_critics` drops the author and deduplicates
+by resolved provider/model; `critic_slate` admits at most one model from each family; and
+`assert_author_exclusion` re-checks at the moment of the call. No slate can contain the author, the
+same model twice, or two same-family checkpoints presented as independent however large `depth`
+is. `lens_statuses` likewise counts distinct clean families, so same-family records cannot satisfy
+QP2's second-witness requirement.
+
+Each critic in a slate is a separate `critique_once` — the same production prompt, a fresh context,
+no knowledge that another critic is reading the same artifact and no sight of what it found. The
+two are as blind to each other as the three lenses always were (isolation.md).
+
+**Rule 8 keeps its job and loses its shift.** It is still the only way an under-cleared *clean*
+artifact reaches `strong_met`, and it is still bounded by `confirmation_attempts`. What changes is
+that at depth 2 a clean pass normally arrives already strongly-cleared, so rule 8 becomes the
+top-up for **incomplete depth** — a critic that failed, a pool that ran short — rather than the
+normal discovery path. No rule was added, removed, renumbered or reordered; no `ControllerInput` or
+`OrchestratorView` field changed. The termination argument in convergence.md is untouched: depth
+multiplies the calls a critique pass makes, and every measure that bounds the loop counts passes,
+generations and budgets, not calls.
+
+**Fail-closed keeps its meaning, at the right unit.** One bad field still fails the *review* it
+appeared in, whole, after the repair budget — nothing is salvaged, nothing is dropped. What is
+re-scoped is `lenses_failed`, which now counts lenses with **no completed review of this artifact**
+(`triage.unreviewed_lenses`) rather than lenses whose latest result failed. The readings coincide
+on every depth-1 discovery pass, but differ on one pre-existing path: a rule-8 confirmation that
+fails after the lens already holds a completed review. Previously the failed confirmation
+overwrote that review, made `lenses_failed == 1`, sent the run through rule 2, and exhausted at
+rule 3 (`aborted`). The completed review now remains in the list, so the controller returns to
+rule 8 when another qualified witness remains or falls through to rule 10/11. The same distinction
+appears within a depth-2 slate when one critic completes and another fails. Aborting a clean,
+reviewed artifact because a confirmation provider failed is the wrong answer to a flaky provider;
+the shortfall is still not forgiven, because it lands on family-counted `cleared_count` and cannot
+satisfy `strong_met`.
+
+**Counting distinct findings, not reports of them.** Two critics on one lens routinely land on the
+same defect, and with `search.verify_sources` on, both evidence critics are handed the *same*
+mechanical `fabricated_citation` for the same dead URL. `triage.distinct_issues` collapses on the
+key `to_defects` already used — `(section, paragraph, category, claim_span)` — so `tally`, the
+defect list and the stagnation signature all see one finding once. Where two critics disagree on
+severity the **higher** survives, which is the direction the mechanical floor already clamps in
+(RC-005): letting whichever review was stored first decide would give a second reviewer the power
+to soften the first. At depth 1 this is a no-op — categories are partitioned by lens, so two lenses
+cannot raise the same key.
+
+**Auditioning follows the front-loading.** `audition.roster_warnings` was position-aware on the
+premise that "position ≥ 2 is unreachable on the first pass"; at depth 2 that sentence is false for
+position 2, so the threshold is now read from `review.depth_for(lens)`. A marginal or unfit model
+inside the depth window gets its own warning saying it now runs on **every** draft, and one outside
+it keeps the old rule-8 warning. `audition.enforce` is unchanged and already gates every assigned
+slot regardless of position: a cached `unfit` verdict on any critic in a lens pool fails startup
+closed before the graph runs. Re-auditioning the newly front-loaded slots against the
+production-shaped corpus is an operator step (`ra audition`), not something this diff can perform —
+it needs the paid proxy.
+
+**Cost.** A pass makes `depth × |lenses|` critic calls instead of `|lenses|`. `budgets.max_concurrency`
+is unchanged, so the instantaneous load on the proxy is the same and the extra depth is paid in
+wall-clock. The expected trade is fewer generations, which are the expensive step: a round avoided
+saves a writer call, three-to-six critic calls and an orchestrator call.
+
+**Deliberately not done.** No change to the decision table, to `OrchestratorView`, to author
+exclusion, to the severity floors, or to what any critic is shown. `review` is deliberately **not**
+part of `_run_fingerprint`: depth is read fresh at each pass and every per-artifact accumulator
+resets on generation, so changing it mid-run is safe, and adding it would cost every in-flight run
+its checkpoint. `graph._lens_results` accepts the pre-existing one-result-per-lens state shape for
+the same reason. No A/B harness: `depth: 1` reproduces the previous single-critic discovery pass
+from configuration, while the intentional failed-confirmation divergence above is pinned
+separately; comparing the arms on real questions remains an operator measurement.
+
 
 ## Open items for a future round
 

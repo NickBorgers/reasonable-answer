@@ -42,9 +42,20 @@ across fresh contexts, a diverse roster decorrelates those errors — and, conve
 makes a *strong* acceptance possible: each dimension blessed by **≥2 distinct non-author** models
 on the identical final report (see [convergence.md](./convergence.md)). Context separation handles
 the primary (social) bias; model diversity handles the secondary (blind-spot) bias. The system
-uses **both**. Assigning **each lens its own critic model** (D-per-lens-critics — best model matched per dimension)
-pushes model diversity further: three different models examine the artifact per tick, one per
-dimension, and each dimension is confirmed by a *second* distinct model before strong acceptance.
+uses **both**. Assigning **each lens its own critic pool** (D-per-lens-critics — best model matched per dimension)
+pushes model diversity further: each dimension is examined by `review.depth` different models per
+tick — **two** by default (D-front-loaded-depth) — so six fresh contexts read a draft, and both of
+a lens's reviewers are already in hand when the artifact is triaged rather than one arriving after
+the other has reported the draft clean.
+
+**Two critics on one lens are as blind to each other as the three lenses are.** Each is a separate
+`critique_once`: the same production prompt, its own fresh context, no signal that another model is
+reading the same artifact and no sight of what it found. There is no aggregation step in which one
+reads the other, and none of the seven principles below moves — this is more of #2 and #6, not less.
+What it buys is that the second reviewer's disagreement is part of *discovery* rather than a late
+audit of a conclusion the run has already acted on. What it deliberately does **not** buy is
+independence in the strong sense: [Kim et al. 2025](https://arxiv.org/abs/2506.07962) bounds that
+for any roster, and two correlated models finding the same nothing is still one blind spot.
 
 **Social/content bias is the one bias the first two layers cannot reach.** Fresh contexts remove
 the social trigger and a diverse roster decorrelates *idiosyncratic* failure modes — but loaded
@@ -67,9 +78,9 @@ flowchart TB
         Gin["SEES: question + latest report + DEFECT LIST (fix-tasks)"]
         Gno["NEVER: raw critique prose · other reports' history · who critiqued"]
     end
-    subgraph CRIT["Per-lens critics — 3 lenses, each its own model &amp; fresh context"]
+    subgraph CRIT["Per-lens critics — 3 lenses × review.depth models, each its own fresh context"]
         Cin["SEES: report + question + its ONE lens + taxonomy"]
-        Cno["NEVER: who wrote the report · the tick number · whether this is a confirmation critique · other lenses' output · prior critiques"]
+        Cno["NEVER: who wrote the report · the tick number · whether this is a confirmation critique · other lenses' output · the OTHER critic on its own lens · prior critiques"]
     end
     subgraph ORC["Orchestrator (blind LLM)"]
         Oin["SEES: OrchestratorView (category × severity counts, bounded ints/enums)"]
@@ -101,7 +112,7 @@ flowchart LR
     P1["#1 only report + defect list forwarded"] --> E1["no reasoning/verdicts in context<br/>→ no contextual drag"]
     P2["#2 critics blind to each other &amp; prior critiques"] --> E2["no social trigger → no sycophancy"]
     P3["#3 authorship + tick hidden from critics"] --> E3["blind evaluation → judge work, not author"]
-    P4["#4 one lens per critic"] --> E4["orthogonal coverage, no drift"]
+    P4["#4 one lens per critic (however many critics per lens)"] --> E4["orthogonal coverage, no drift"]
     P5["#5 alternating refinement, never debate"] --> E5["no MAD social pressure"]
     P6["#6 fresh, small context per agent"] --> E6["no context rot / lost-in-the-middle"]
     P7["#7 critic(Rn) ≠ writer(Rn), any lens"] --> E7["output never anchors its own review"]

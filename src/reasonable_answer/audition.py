@@ -68,7 +68,7 @@ import yaml
 from pydantic import BaseModel, ConfigDict, Field, model_validator
 
 from . import prompts
-from .config import AuditionConfig, AuditionThresholds, ConfigError, Roster
+from .config import AuditionConfig, AuditionThresholds, ConfigError, ReviewConfig, Roster
 from .critique import critique_once
 from .llm import LLMClient
 from .schemas import LensResult, RawIssue, StructuralRef
@@ -689,7 +689,8 @@ class Assignment:
     alias: str
     identity: str
     lens: Lens
-    #: Index in the lens pool. Position >= 2 is only reachable on the rule 8
+    #: Index in the lens pool. Positions below the lens's `review.depth` read every
+    #: draft (D-front-loaded-depth); the rest are only reachable on the rule 8
     #: confirmation top-up, which is where a false clean grants `strong_met`.
     position: int
 
@@ -1082,29 +1083,44 @@ def roster_warnings(
     roster: Roster,
     identities: dict[str, str],
     judgements: dict[tuple[str, Lens], Judgement],
+    review: ReviewConfig | None = None,
 ) -> list[str]:
     """Roster-level consequences of the per-model verdicts.
 
-    Two checks that no single-model verdict can express.
+    Two checks that no single-model verdict can express, plus the position check below,
+    whose threshold is the deployment's own review depth.
     """
     warnings: list[str] = []
     slots = assignments(roster, identities)
+    review = review or ReviewConfig()
 
     for slot in slots:
         judgement = judgements.get((slot.identity, slot.lens))
         if judgement is None or judgement.verdict in (Verdict.FIT, Verdict.INSUFFICIENT):
             continue
-        # Position-aware: a weak critic is far more dangerous late in the pool than
-        # early. `pick_critic` prefers an identity that has not yet reviewed this
-        # artifact, so index >= 2 is unreachable on the first pass and is reached on
-        # the rule 8 confirmation top-up — where clearing the lens is the whole point.
-        if slot.position >= 2:
+        # Position-aware: a weak critic is dangerous in a different way depending on
+        # where in the pool it sits, and review depth is what decides which. A pass
+        # draws the first `depth` fresh eligible models (`roles.critic_slate`), so every
+        # slot inside that window reads every draft and every slot outside it is only
+        # reached on the rule 8 confirmation top-up.
+        depth = review.depth_for(slot.lens)
+        if slot.position >= depth:
             warnings.append(
                 f"'{slot.alias}' is {judgement.verdict.value} on {slot.lens.value} and sits "
                 f"at position {slot.position + 1} in that pool. It is unreachable on the "
                 f"first pass and will be reached on the rule 8 confirmation top-up, where "
                 f"a false clean raises cleared_count to 2, satisfies strong_met, and "
                 f"terminates the run 'accepted'"
+            )
+        elif slot.position >= 1:
+            # Front-loaded by D-front-loaded-depth: this slot used to be a top-up and is
+            # now part of ordinary discovery, so its verdict is worth re-measuring
+            # against the production-shaped corpus before the roster ships.
+            warnings.append(
+                f"'{slot.alias}' is {judgement.verdict.value} on {slot.lens.value} and sits "
+                f"at position {slot.position + 1} in that pool, inside a review depth of "
+                f"{depth}. It reads EVERY draft, so a false clean satisfies strong_met on "
+                f"the first pass — re-audition it before trusting this lineup"
             )
 
     for lens in LENS_CATEGORIES:

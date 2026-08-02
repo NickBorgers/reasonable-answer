@@ -86,6 +86,35 @@ def test_clean_records_for_another_hash_never_count(roster, identities):
     assert all(s.cleared_count == 0 for s in status)
 
 
+def test_same_family_clean_records_count_as_one_witness():
+    roster = Roster(
+        writers=["writer"],
+        critics={lens.value: ["claude-a", "claude-b", "gemma"] for lens in LENSES},
+    )
+    identities = {
+        "writer": "openrouter/z-ai/glm-5.2",
+        "claude-a": "anthropic/claude-sonnet-4-5",
+        "claude-b": "openrouter/anthropic/claude-opus-4.1",
+        "gemma": "openrouter/google/gemma-4-31b-it",
+    }
+    records = [
+        CleanRecord(
+            artifact_hash="h" * 64,
+            lens=Lens.LOGIC,
+            critic_identity=identities[alias],
+            artifact_author_identity=identities["writer"],
+        )
+        for alias in ("claude-a", "claude-b")
+    ]
+
+    logic = roles.lens_statuses(
+        roster, identities, identities["writer"], "h" * 64, records, {}
+    )[0]
+
+    assert logic.cleared_count == 1
+    assert logic.eligible_count == 2
+
+
 def test_roster_health_fails_closed_when_a_lens_has_no_non_author(identities):
     bad = Roster(
         writers=["writer-a"],
