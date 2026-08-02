@@ -313,6 +313,19 @@ def test_audition_pins_the_production_structured_output_mode_before_measuring(
     assert modes["writer-a"] == "json_schema"
 
 
+def test_audition_fails_closed_when_an_alias_cannot_be_pinned(
+    audition_client, doctor_config, tmp_path
+):
+    _with_audition_cache(doctor_config, tmp_path)
+    audition_client.unprobeable.add("logic-spec")
+
+    result = runner.invoke(cli.app, ["audition", "--config", str(doctor_config)])
+
+    assert result.exit_code == 2
+    assert "fail closed" in result.stdout
+    assert "logic-spec" in result.stdout
+
+
 def test_audition_re_measures_a_verdict_taken_under_another_mode(
     audition_client, doctor_config, tmp_path, monkeypatch
 ):
@@ -391,6 +404,22 @@ def test_audition_refine_also_measures_under_the_pinned_mode(
     assert seen == {"referee": "json_object"}
     cache = refine_audition.load_refine_cache(tmp_path / "refine-cache.json")
     assert {e.structured_output_mode for e in cache.values()} == {"json_object"}
+
+
+def test_audition_refine_fails_closed_when_the_alias_cannot_be_pinned(
+    audition_client, doctor_config, tmp_path
+):
+    data = yaml.safe_load(doctor_config.read_text())
+    data["refine"] = {"enabled": True}
+    data["audition"] = {"refine": {"cache_path": str(tmp_path / "refine-cache.json")}}
+    doctor_config.write_text(yaml.safe_dump(data))
+    audition_client.unprobeable.add("referee")
+
+    result = runner.invoke(cli.app, ["audition-refine", "--config", str(doctor_config)])
+
+    assert result.exit_code == 2
+    assert "fail closed" in result.stdout
+    assert "referee" in result.stdout
 
 
 # ------------------------------------------------------------------- logging

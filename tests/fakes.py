@@ -14,7 +14,7 @@ from typing import Any
 
 from pydantic import ValidationError
 
-from reasonable_answer.config import Budgets
+from reasonable_answer.config import Budgets, ConfigError
 from reasonable_answer.llm import Completion, MalformedOutputError
 from reasonable_answer.schemas import (
     ArbiterVerdict,
@@ -84,6 +84,9 @@ class FakeClient:
     polish_recommended: bool = False
     calls: list[Call] = field(default_factory=list)
     modes: dict[str, str] = field(default_factory=dict)
+    #: aliases whose structured-output mode cannot be pinned. Mirrors the real
+    #: client's fail-closed probe path without requiring a live proxy.
+    unprobeable: set[str] = field(default_factory=set)
     #: aliases `probe_structured_output` has been asked about, in order. Recorded so a
     #: test can assert a command probed *before* it spent (D-audition-probe-parity);
     #: memoised like the real client, so a repeat probe is one entry, not two.
@@ -116,6 +119,8 @@ class FakeClient:
         return self.identities[alias]
 
     def probe_structured_output(self, alias: str) -> str:
+        if alias in self.unprobeable:
+            raise ConfigError(f"fail closed: alias '{alias}' cannot produce structured output")
         if alias not in self.probes:
             self.probes.append(alias)
         return self.modes.get(alias, "json_schema")
