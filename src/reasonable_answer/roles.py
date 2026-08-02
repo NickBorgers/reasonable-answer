@@ -8,7 +8,7 @@ can never masquerade as two independent reviewers (RA-017).
 
 from __future__ import annotations
 
-from .config import Roster
+from .config import Roster, model_family
 from .schemas import CleanRecord, LensStatus
 from .taxonomy import LENSES, Lens
 
@@ -105,9 +105,20 @@ def critic_slate(
     if not eligible:
         raise RosterExhausted(f"lens '{lens.value}' has no eligible non-author critic")
     fresh = [alias for alias in eligible if identities[alias] not in used_identities]
-    if not fresh:
-        return [eligible[rotation % len(eligible)]]
-    return fresh[: max(1, depth)]
+    used_families = {model_family(identity) for identity in used_identities}
+    family_fresh: list[str] = []
+    selected_families = set(used_families)
+    for alias in fresh:
+        family = model_family(identities[alias])
+        if family in selected_families:
+            continue
+        selected_families.add(family)
+        family_fresh.append(alias)
+    if family_fresh:
+        return family_fresh[: max(1, depth)]
+    if fresh:
+        return [fresh[rotation % len(fresh)]]
+    return [eligible[rotation % len(eligible)]]
 
 
 def pick_critic(
@@ -138,6 +149,7 @@ def lens_statuses(
     for lens in LENSES:
         eligible = eligible_critics(roster, identities, lens, author_identity)
         eligible_ids = {identities[a] for a in eligible}
+        eligible_families = {model_family(identity) for identity in eligible_ids}
         # Defence in depth: a record counts only if it attests THIS artifact, under
         # THIS author, by a model that is still an eligible non-author critic. Any
         # one of these failing means the record is evidence about something else.
@@ -150,13 +162,20 @@ def lens_statuses(
             and r.critic_identity != author_identity
             and r.critic_identity in eligible_ids
         }
+        cleared_families = {model_family(identity) for identity in cleared}
         used_ids = used.get(lens.value, set())
+        unused_families = {
+            model_family(identities[alias])
+            for alias in eligible
+            if identities[alias] not in used_ids
+            and model_family(identities[alias]) not in cleared_families
+        }
         out.append(
             LensStatus(
                 lens=lens,
-                cleared_count=len(cleared),
-                eligible_count=len(eligible_ids),
-                unused_eligible=len(eligible_ids - used_ids),
+                cleared_count=len(cleared_families),
+                eligible_count=len(eligible_families),
+                unused_eligible=len(unused_families),
             )
         )
     return out

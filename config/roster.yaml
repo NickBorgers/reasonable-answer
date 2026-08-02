@@ -264,19 +264,18 @@ audition:
 # code defaults, spelled out here for the same reason `revision` below is: this is the knob you
 # reach for when comparing convergence.
 #
-# `depth: 2` means every generated artifact is read by TWO eligible non-author models on every
+# `depth: 2` means every generated artifact is read by TWO eligible non-author model families on every
 # lens, and the union is triaged before any revision. It used to be one, with the second critic
 # deferred to controller rule 8 — which only fires after a pass has already reported the draft
-# clean. In run-c4c0e64b4128 five successive artifacts cleared their first logic critic and the
-# second logic critic then found 2, 4, 6, 3 and 5 issues: the depth was always going to be paid
-# for, five rounds later than it was useful.
+# clean. Front-loading makes the configured witnesses' findings available to that same triage pass.
 #
-# `depth: 1` restores the old single-critic pass byte for byte, so the two arms are comparable
-# from configuration rather than from a checkout.
+# `depth: 1` restores the old single-critic discovery pass. A failed rule-8 confirmation now stays
+# beside the completed review instead of replacing it, so that top-up path no longer aborts only
+# because a confirmation provider failed.
 #
-# It is a CEILING, not a quota: a pass runs min(depth, fresh eligible non-author models), so a
-# lens the roster can staff only once still runs one critic and still ends `converged_unconfirmed`
-# rather than aborting. Cost scales with depth in calls and wall-clock, not in proxy load —
+# It is a CEILING, not a quota: a pass runs min(depth, fresh eligible non-author model families),
+# so a lens the roster can staff from only one family still runs one critic and still ends
+# `converged_unconfirmed` rather than aborting. Cost scales with depth in calls and wall-clock, not in proxy load —
 # `budgets.max_concurrency` still bounds how many run at any instant.
 #
 # Before raising this, re-run `ra audition`: every pool position below `depth` now reads every

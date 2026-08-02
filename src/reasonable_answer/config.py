@@ -630,22 +630,23 @@ class ReviewConfig(BaseModel):
     """How many independent critics read each draft, per lens (D-front-loaded-depth).
 
     `depth: 2` is the production default and the thing this section exists to say:
-    every generated artifact is read by **two** eligible non-author models on every
+    every generated artifact is read by **two** eligible non-author model families on every
     lens, before any revision. It used to be one, with the second critic deferred to
     controller rule 8 — which only fires once a pass has already reported the draft
-    clean. In `run-c4c0e64b4128` five successive artifacts looked clean on that first
-    pass and the second logic critic then found 2, 4, 6, 3 and 5 issues apiece: the
-    depth was always going to be paid for, just five rounds later than it was useful.
+    clean. Front-loading makes the configured witnesses' findings available to the
+    same triage pass instead of after the run has acted on the first review's silence.
 
-    `depth: 1` restores the old single-critic pass exactly, so the two arms are
-    comparable from configuration rather than from a checkout (the same discipline
-    `revision.mode` follows).
+    `depth: 1` restores the old single-critic discovery pass. A failed rule-8
+    confirmation now remains alongside the completed review instead of replacing it,
+    so that pre-existing top-up path no longer aborts merely because a confirmation
+    provider failed (D-front-loaded-depth).
 
     The depth is a **ceiling, not a quota**: a pass runs `min(depth, fresh eligible
     non-author models)` critics, so a roster-limited lens still runs one critic and
     still terminates `converged_unconfirmed` rather than aborting. Author exclusion and
-    resolved-identity distinctness are enforced per slot by `roles.critic_slate`, so no
-    slate can contain the author or the same model twice.
+    resolved-identity and model-family distinctness are enforced per slot by
+    `roles.critic_slate`, so no slate can contain the author, the same model twice, or
+    two same-family models presented as independent witnesses.
     """
 
     model_config = ConfigDict(extra="forbid")
@@ -894,10 +895,11 @@ def validate_roster_health(config: Config, identities: dict[str, str]) -> list[s
                     f"fail closed: lens '{lens.value}' has no eligible non-author critic "
                     f"when '{writer}' is the author"
                 )
-            if len(eligible) < 2:
+            eligible_families = {model_family(identity) for identity in eligible}
+            if len(eligible_families) < 2:
                 warnings.append(
                     f"lens '{lens.value}' is roster_limited when '{writer}' authors "
-                    f"(only {len(eligible)} eligible model) — acceptance will degrade to "
+                    f"(only {len(eligible_families)} eligible model family) — acceptance will degrade to "
                     f"converged_unconfirmed"
                 )
         if len(pool_ids) < len(roster.critics_for(lens)):
@@ -905,7 +907,7 @@ def validate_roster_health(config: Config, identities: dict[str, str]) -> list[s
                 f"lens '{lens.value}' has aliases resolving to the same underlying model; "
                 f"they do not count as distinct reviewers"
             )
-        families = {_family(identities[a]) for a in roster.critics_for(lens)}
+        families = {model_family(identities[a]) for a in roster.critics_for(lens)}
         if len(families) < 2:
             warnings.append(
                 f"lens '{lens.value}' critic pool shares one model family {sorted(families)} — "
@@ -931,7 +933,7 @@ def validate_roster_health(config: Config, identities: dict[str, str]) -> list[s
     return warnings
 
 
-def _family(identity: str) -> str:
+def model_family(identity: str) -> str:
     """Coarse model-family key taken from the model *name*, ignoring the provider or
     serving-backend prefix: 'openrouter/google/gemma-4-31b-it' and
     'ollama_chat/gemma4:26b-a4b-it-q8_0' are both 'gemma'.
@@ -943,3 +945,6 @@ def _family(identity: str) -> str:
     stem = identity.split("/")[-1].split(":")[0].lower()
     match = _FAMILY_STEM.match(stem)
     return match.group(0) if match else stem
+
+
+_family = model_family

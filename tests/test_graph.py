@@ -10,7 +10,7 @@ import pytest
 from fakes import FakeClient
 
 from reasonable_answer.config import Budgets, Config, ConfigError
-from reasonable_answer.graph import run
+from reasonable_answer.graph import _lens_results, run
 from reasonable_answer.schemas import CritiqueOutput, RawIssue, StructuralRef
 from reasonable_answer.taxonomy import Category, Lens, Severity
 
@@ -22,6 +22,22 @@ A claim that is fully supported [1].
 
 [1] A real-looking source.
 """
+
+
+def test_legacy_single_result_checkpoint_shape_is_wrapped_for_resume():
+    legacy = {
+        "lens": "logic",
+        "artifact_hash": "h" * 64,
+        "critic_alias": "logic-spec",
+        "critic_identity": "vendor/logic",
+        "artifact_author_identity": "vendor/writer",
+        "issues": [],
+        "failed": False,
+        "failure_reason": None,
+        "attempt": 1,
+    }
+
+    assert _lens_results({"lens_results": {"logic": legacy}}) == {"logic": [legacy]}
 
 
 def lens_of(user: str) -> str:

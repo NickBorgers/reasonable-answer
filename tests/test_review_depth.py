@@ -11,6 +11,7 @@ from pathlib import Path
 
 import pytest
 from fakes import FakeClient
+from pydantic import ValidationError
 
 from reasonable_answer import roles, triage
 from reasonable_answer.config import Budgets, Config, ConfigError, ReviewConfig, Roster
@@ -165,7 +166,18 @@ def test_depth_one_restores_the_single_critic_pass(identities, roster, tmp_path)
     assert [e for e in events(cfg, final) if e["kind"] == "control" and e["rule"] == 8]
 
 
-def test_depth_is_configurable_per_lens(identities, roster, tmp_path):
+def test_depth_is_configurable_per_lens(tmp_path):
+    roster = Roster(
+        writers=["writer-a", "writer-b"],
+        critics={lens.value: ["c1", "c2", "c3"] for lens in LENSES},
+    )
+    identities = {
+        "writer-a": "vendor-a/model-a",
+        "writer-b": "vendor-b/model-b",
+        "c1": "vendor-c/one",
+        "c2": "vendor-d/two",
+        "c3": "vendor-e/three",
+    }
     cfg = make_config(tmp_path, roster, depth=1, per_lens={"evidence": 3})
     client = FakeClient(identities=identities, critique_fn=clean, report_fn=lambda n: REPORT)
     final = run(cfg, question="Is it so?", seed=REPORT, client=client)
@@ -184,6 +196,12 @@ def test_an_unknown_lens_in_per_lens_fails_closed():
 def test_an_out_of_range_per_lens_depth_fails_closed():
     with pytest.raises(ConfigError, match="between 1 and 4"):
         ReviewConfig(per_lens={"logic": 9})
+
+
+@pytest.mark.parametrize("depth", [0, 5])
+def test_an_out_of_range_default_depth_fails_closed(depth):
+    with pytest.raises(ValidationError):
+        ReviewConfig(depth=depth)
 
 
 # ---------------------------------------------------- eligibility is not spent for depth
@@ -208,6 +226,25 @@ def test_the_slate_never_repeats_one_model_behind_two_aliases():
     ids = {"w1": "p/w1", "w2": "p/w2", "a": "p/same", "b": "p/same"}
     slate = roles.critic_slate(r, ids, Lens.LOGIC, "p/w1", set(), depth=2)
     assert slate == ["a"]
+
+
+def test_the_slate_uses_distinct_model_families_for_independent_witnesses():
+    roster = Roster(
+        writers=["writer"],
+        critics={lens.value: ["claude-a", "claude-b", "gemma"] for lens in LENSES},
+    )
+    identities = {
+        "writer": "openrouter/z-ai/glm-5.2",
+        "claude-a": "anthropic/claude-sonnet-4-5",
+        "claude-b": "openrouter/anthropic/claude-opus-4.1",
+        "gemma": "openrouter/google/gemma-4-31b-it",
+    }
+
+    slate = roles.critic_slate(
+        roster, identities, Lens.LOGIC, identities["writer"], set(), depth=2
+    )
+
+    assert slate == ["claude-a", "gemma"]
 
 
 def test_a_roster_limited_lens_still_runs_one_critic_and_converges(identities, tmp_path):
@@ -280,6 +317,27 @@ def test_one_failed_critic_does_not_discard_the_other_review(
     _, totals = triage.tally(results)
     assert totals.major == 1
     assert triage.clean_records(results) == []
+
+
+def test_depth_one_failed_confirmation_does_not_become_a_lens_failure(
+    identities, roster, tmp_path
+):
+    def specialists_only(alias, _user):
+        if alias.endswith("-spec"):
+            return CritiqueOutput(issues=[])
+        raise ModelCallError("confirmation provider exploded")
+
+    cfg = make_config(tmp_path, roster, depth=1)
+    client = FakeClient(
+        identities=identities, critique_fn=specialists_only, report_fn=lambda n: REPORT
+    )
+    final = run(cfg, question="Is it so?", seed=REPORT, client=client)
+
+    controls = [event for event in events(cfg, final) if event["kind"] == "control"]
+    assert any(event["rule"] == 8 for event in controls)
+    assert controls[-1]["rule"] == 11
+    assert not any(event["rule"] in {2, 3} for event in controls)
+    assert final["terminal_status"] == "exhausted_unresolved"
 
 
 def test_a_lens_whose_every_critic_fails_is_still_an_incomplete_review(

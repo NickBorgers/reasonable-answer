@@ -39,8 +39,8 @@ UNREADABLE_RECORD = "unreadable_record"
 #: it without the web extra installed, and because these words end up in a file someone
 #: keeps — they are part of the result, not part of the page.
 STATUS_MEANING = {
-    "accepted": "every lens cleared by two distinct non-author models on the final artifact",
-    "converged_unconfirmed": "every lens cleared, but a lens had only one eligible reviewer",
+    "accepted": "every lens cleared by two cross-family non-author models on the final artifact",
+    "converged_unconfirmed": "every lens cleared, but a lens had only one eligible model family",
     "exhausted_unresolved": "reached the cap or stagnated with only non-blocking issues left",
     "needs_human_review": "reached the cap, stagnated or cycled with blocking issues present",
     "aborted": "fatal: a model was unavailable or a review could not be completed",

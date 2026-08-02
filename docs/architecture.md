@@ -13,10 +13,10 @@ The roster is **role-structured**, not a flat swap:
 
 The one hard invariant: **a report is never critiqued — on any lens — by the model that authored
 it.** With disjoint writer/critic pools this holds automatically; with overlap it is enforced per
-tick. For a strong `accepted`, each lens pool must contain **≥2 eligible non-author models** so the
-dimension can be independently double-checked (see Acceptance in
-[convergence.md](./convergence.md)); a lens with only one eligible model degrades that dimension to
-`converged_unconfirmed`.
+tick. For a strong `accepted`, each lens pool must contain **≥2 eligible non-author model families**
+so the dimension can be independently double-checked (see Acceptance in
+[convergence.md](./convergence.md)); a lens with only one eligible family degrades that dimension
+to `converged_unconfirmed`.
 
 "Eligible" in this structural sense — non-author, distinct identity, distinct family — is what the
 convergence controller counts. D-critic-audition adds an orthogonal **demonstrated-capability** term: `ra audition`
@@ -243,8 +243,8 @@ carried no headings is accepted with a warning; the warning rides the run's exis
 ## Operational requirements (RA-015, RA-016, RA-017)
 
 - **Roster (role-structured):** a **writer pool** plus **per-lens critic pools**; each lens pool
-  sized to **≥2 eligible non-author models** for a strong `accepted` (a single-model lens degrades
-  that dimension to `converged_unconfirmed`). Critic-only specialists are allowed and are how the
+  sized to **≥2 eligible non-author model families** for a strong `accepted` (a single-family lens
+  degrades that dimension to `converged_unconfirmed`). Critic-only specialists are allowed and are how the
   strongest model reviews every draft. Resolve/record provider/model/version behind each LiteLLM
   alias — including the orchestrator's — and enforce distinctness at that level; no silent fallback
   to a duplicate. **Fail closed** (abort) if any lens has zero eligible non-author model or the

@@ -177,7 +177,9 @@ def doctor(
     for warning in warnings:
         console.print(f"[yellow]warning:[/yellow] {warning}")
     if not warnings:
-        console.print("[green]roster healthy: every lens has >=2 eligible non-author models[/green]")
+        console.print(
+            "[green]roster healthy: every lens has >=2 eligible non-author model families[/green]"
+        )
 
     # Surfaced here because `unknown` is otherwise invisible: it costs nothing at the time
     # and only shows up much later, as a month of runs that cannot be attributed to a

@@ -127,14 +127,14 @@ Three roster rules do the heavy lifting:
 - **Consecutive drafts have different authors.** The model fixing the defects is never the model
   that made them — and since it receives a task list rather than someone's opinion, there is no
   peer verdict to be sycophantic toward.
-- **A verdict needs two distinct witnesses, and both are called at once.** Full acceptance means
-  every lens was cleared by at least **two different non-author models** looking at the *identical*
-  final text. Both of them read **every** draft (`review.depth: 2`, D-front-loaded-depth) — the
-  second is not held back for a confirmation pass at the end, because a second reviewer who
-  disagrees is most useful before the run has already acted on the first one's silence. They never
-  see each other. One model's approval is an opinion; a second model with different blind spots
-  finding nothing is meaningfully stronger evidence — though never proof, because no two capable
-  models fail fully independently.
+- **A verdict needs two cross-family witnesses, and both are called at once by default.** Full
+  acceptance means every lens was cleared by at least **two different non-author model families**
+  looking at the *identical* final text. With the shipped `review.depth: 2` default, both read every
+  draft; `review.depth` and `review.per_lens` can configure that discovery depth. The second is not
+  normally held back for a confirmation pass at the end, because a reviewer who disagrees is most
+  useful before the run has acted on the first one's silence. They never see each other. One
+  family's approval is an opinion; another family finding nothing is meaningfully stronger evidence
+  — though never proof, because no two capable models fail fully independently.
 
 One deliberate asymmetry: the strongest model in the roster never writes — it is a
 **critic-only specialist**. If it wrote drafts, the no-self-review rule would bar it from
@@ -147,7 +147,7 @@ runs an alternating game, in rounds called **ticks**:
 
 ```mermaid
 flowchart LR
-    G["write<br/>a fresh writer revises the draft"] --> K["critique<br/>3 lenses × 2 critics, all non-author models"]
+    G["write<br/>a fresh writer revises the draft"] --> K["critique (default)<br/>3 lenses × 2 cross-family critics"]
     K --> TR["triage<br/>mechanical: count, classify, floor"]
     TR --> D{"controller<br/>14 ordered rules"}
     D -->|"defects remain"| G

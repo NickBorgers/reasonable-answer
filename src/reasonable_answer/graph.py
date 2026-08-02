@@ -1006,7 +1006,9 @@ def _critic_slots(state: State, rt: Runtime, pending: list[Lens]) -> list[_Criti
     rounds: dict[str, int] = dict(state.get("critique_rounds") or {})
     completed: dict[str, set[str]] = {}
     for lens_value, group in _lens_results(state).items():
-        completed[lens_value] = {r["critic_identity"] for r in group if not r["failed"]}
+        completed[lens_value] = {
+            roles.model_family(r["critic_identity"]) for r in group if not r["failed"]
+        }
 
     author_identity = state["author_identity"]
     slots: list[_CritiqueSlot] = []

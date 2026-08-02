@@ -78,8 +78,8 @@ report. A model can be a **critic-only specialist** — `glm-5.2`,
 the strongest model in the roster, never authors — so it reviews every tick without ever violating
 author-exclusion. Had it been a writer instead, it would have been barred from reviewing its own
 drafts and the roster would have lost its best reviewer on half of all rounds. Each lens pool holds
-**≥2 eligible non-author models**, and both read every draft, so every dimension gets its second,
-distinct reviewer *before* the draft is revised rather than after a pass has already reported it
+**≥2 eligible non-author model families**, and both read every draft, so every dimension gets its
+second, cross-family reviewer *before* the draft is revised rather than after a pass has already reported it
 clean (see D-per-lens-critics/D-critic-only-specialists/D-front-loaded-depth in
 [decisions.md](./decisions.md) and [architecture.md](./architecture.md)).
 
