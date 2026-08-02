@@ -1485,10 +1485,8 @@ def _sourcing_label(rt: Runtime, observed: dict | None) -> str:
 
     `search.verify_sources: true` used to produce *consensus-reviewed with verified
     sourcing* on every run that had it switched on, whatever the fetches actually
-    returned. Run `run-c4c0e64b4128` listed fifteen sources, could address three of them
-    and read three bodies, and shipped under a label that reads as though all fifteen had
-    been checked. The label now states the observed coverage of the *shipped* draft, so
-    an enabled feature can no longer imply a completeness the run did not reach
+    returned. The label now states the observed coverage of the *shipped* draft, so an
+    enabled feature can no longer imply a completeness the run did not reach
     (D-observed-source-coverage).
 
     The two non-verification arms are unchanged: neither claims verification, so neither

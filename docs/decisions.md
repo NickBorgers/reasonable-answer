@@ -3924,15 +3924,14 @@ separately; comparing the arms on real questions remains an operator measurement
 
 **The problem.** `graph._finalize` derived its sourcing label from a runtime boolean. With
 `search.verify_sources: true` every run shipped as *consensus-reviewed with verified sourcing*,
-whatever the fetches actually returned. Run `run-c4c0e64b4128` is the worked example: the shipped
-report listed **fifteen** sources, three of its entries carried a URL this pipeline could address,
-three bodies were read, and twelve entries were never checked by anything. The label said
-"verified sourcing" for all fifteen. Nothing in it was a lie about the configuration and all of it
-was a lie about the artifact — which is the failure mode the whole labelling discipline of
-D-in-artifact-citations, D-retrieval-opt-in and D-source-verification exists to prevent. A reader
-holding the export had no way to see the gap, because the only number the run recorded was
-`fetch_sources`' count of URLs it had already decided to fetch. A bibliography's *denominator* was
-never measured at all.
+whatever the fetches actually returned. The failure is structural: the label described enabled
+configuration while `fetch_sources` counted only URLs already selected for fetching, so neither
+recorded the bibliography's denominator or whether each entry was checked. The repository's
+offline mixed-outcome fixture in `tests/test_source_coverage.py` pins the resulting distinction:
+addressable, unaddressable, body-read, metadata-only, blocked, and not-found entries can coexist in
+one artifact, while a boolean label cannot report any of those observed differences. That is the
+failure mode the labelling discipline of D-in-artifact-citations, D-retrieval-opt-in and
+D-source-verification exists to prevent.
 
 **Decision.** Coverage is measured, keyed to an artifact, persisted, and rendered; the categorical
 label is replaced by the measurement.
