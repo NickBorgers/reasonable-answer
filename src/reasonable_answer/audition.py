@@ -853,13 +853,19 @@ class CacheEntry(BaseModel):
     #: The span-validation regime the calls were made under. A loose quote fails the
     #: lens closed when this is on, so it changes what a critic can score.
     require_verbatim_spans: bool
+    #: The structured-output mode `LLMClient` was pinned to for every call behind these
+    #: `Metrics` — the extraction path a `schema_failures` count is a count *of*
+    #: (D-audition-probe-parity). Recorded because a verdict measured under prompt-mode
+    #: extraction is not the same claim as one measured under `json_schema`.
+    structured_output_mode: str
     repetitions: int
     recorded_at: float
 
-    # `rubric_hash` and `require_verbatim_spans` are required, with no default, on
-    # purpose (D-audition-rubric-identity). An entry written before they existed fails
-    # `model_validate`, and `load_cache` drops anything that fails — so the pre-rubric
-    # cache degrades to *not audited*, never to a pass carried across a rule change.
+    # `rubric_hash`, `require_verbatim_spans` and `structured_output_mode` are required,
+    # with no default, on purpose (D-audition-rubric-identity, D-audition-probe-parity).
+    # An entry written before they existed fails `model_validate`, and `load_cache` drops
+    # anything that fails — so the older cache degrades to *not audited*, never to a pass
+    # carried across a rule change or across a regime the entry cannot name.
 
     def is_stale(self, now: float, max_age_days: int) -> bool:
         return (now - self.recorded_at) > max_age_days * 86400
@@ -872,6 +878,7 @@ class CacheEntry(BaseModel):
         *,
         rubric_hash: str,
         require_verbatim_spans: bool,
+        structured_output_mode: str | None,
     ) -> bool:
         """A cached verdict is only about the measurement that produced it.
 
@@ -882,14 +889,30 @@ class CacheEntry(BaseModel):
         grading rules and the span-validation regime are as much a part of what a
         score means as the corpus and the prompt (D-audition-rubric-identity).
 
-        The two newer dimensions are keyword-only because both hashes are strings and
-        a transposed positional argument would silently compare the wrong pair.
+        The newer dimensions are keyword-only because the hashes are all strings and a
+        transposed positional argument would silently compare the wrong pair.
+
+        `structured_output_mode` is the one term a caller may decline to compare, and
+        it must pass `None` explicitly to decline. Unlike every other dimension here,
+        the mode is knowable neither from config nor from the corpus: it is discovered
+        by probing the proxy, which costs a call. So the paths that already hold a
+        client and are already spending — `ra audition`, `ra audition-refine` — compare
+        it and re-measure on a mismatch, while the cache-read-only paths that must never
+        spend (`cached_judgements`, and through it the `enforce` startup gate) pass
+        `None` and read a verdict whatever mode produced it. D-audition-probe-parity
+        argues that asymmetry; the short version is that a free read which dropped a
+        mode-mismatched entry would turn a non-deterministic probe into a randomly
+        disarmed enforcement gate, and `mode_drift` reports the divergence instead.
         """
         return (
             self.corpus_hash == corpus_hash
             and self.prompt_hash == prompt_hash
             and self.rubric_hash == rubric_hash
             and self.require_verbatim_spans == require_verbatim_spans
+            and (
+                structured_output_mode is None
+                or self.structured_output_mode == structured_output_mode
+            )
             and self.repetitions == repetitions
         )
 
@@ -1018,6 +1041,11 @@ def cached_judgements(
     it lives on `Config`, not `AuditionConfig`, and both callers hold a `Config`. A
     default would let a caller silently compare against the wrong regime — the exact
     class of bug D-audition-rubric-identity exists to close.
+
+    The structured-output mode is deliberately *not* compared here (`None` below,
+    D-audition-probe-parity): learning it costs a probe call, which is precisely what
+    this function promises never to spend. `mode_drift` reports the divergence for
+    callers that have probed anyway.
     """
     try:
         corpus_hash = load_fixtures().corpus_hash
@@ -1037,11 +1065,46 @@ def cached_judgements(
             cfg.repetitions,
             rubric_hash=rh,
             require_verbatim_spans=require_verbatim_spans,
+            structured_output_mode=None,
         ):
             continue
         if entry.is_stale(at, cfg.max_age_days):
             continue
         out[(slot.identity, slot.lens)] = judge(entry.metrics, cfg.thresholds)
+    return out
+
+
+def mode_drift(
+    cfg: AuditionConfig,
+    roster: Roster,
+    identities: dict[str, str],
+    probed_modes: dict[str, str],
+) -> list[str]:
+    """Slots whose cached verdict was measured under a different structured-output mode
+    than the alias pins to now (D-audition-probe-parity).
+
+    `cached_judgements` cannot compare the mode without spending a probe, so it reads
+    across a divergence rather than silently discarding the entry. This is where the
+    divergence is said out loud, for a caller that has probed for its own reasons —
+    `ra doctor` fills a whole column with the probe results already, so the report is
+    free there.
+
+    Takes the modes as data, not a client, for the same reason the gate does: a
+    reporting helper on the doctor path must not be able to bill an audition.
+    """
+    cache = load_cache(cfg.cache_path)
+    out: list[str] = []
+    for slot in assignments(roster, identities):
+        probed = probed_modes.get(slot.alias)
+        entry = cache.get(cache_key(slot.identity, slot.lens))
+        if probed is None or entry is None or entry.structured_output_mode == probed:
+            continue
+        out.append(
+            f"'{slot.alias}' on {slot.lens.value} was auditioned under structured-output "
+            f"mode '{entry.structured_output_mode}' but now probes to '{probed}' — the "
+            f"cached verdict measures a different extraction path than a run would use. "
+            f"Re-measure with `ra audition --alias {slot.alias}`"
+        )
     return out
 
 

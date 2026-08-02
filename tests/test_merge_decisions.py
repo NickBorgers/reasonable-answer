@@ -158,6 +158,42 @@ def test_text_before_first_heading_in_suffix_abstains() -> None:
     assert merge_decisions.try_fast_path(BASE, ours, theirs) is None
 
 
+def test_main_falls_back_for_non_utf8_input(tmp_path: Path) -> None:
+    base = tmp_path / "base"
+    ours = tmp_path / "ours"
+    theirs = tmp_path / "theirs"
+    expected_base = tmp_path / "expected-base"
+    expected_ours = tmp_path / "expected-ours"
+    expected_theirs = tmp_path / "expected-theirs"
+
+    base.write_bytes(b"base\n")
+    ours.write_bytes(b"ours\n\xff\n")
+    theirs.write_bytes(b"theirs\n")
+    expected_base.write_bytes(base.read_bytes())
+    expected_ours.write_bytes(ours.read_bytes())
+    expected_theirs.write_bytes(theirs.read_bytes())
+
+    expected = subprocess.run(
+        [
+            "git",
+            "merge-file",
+            "-L",
+            "ours",
+            "-L",
+            "base",
+            "-L",
+            "theirs",
+            expected_ours,
+            expected_base,
+            expected_theirs,
+        ]
+    )
+    actual = merge_decisions.main(["merge_decisions.py", str(base), str(ours), str(theirs)])
+
+    assert actual == expected.returncode
+    assert ours.read_bytes() == expected_ours.read_bytes()
+
+
 # ---------------------------------------------------------------------------
 # Tier 2: real git, end-to-end, through the driver's CLI contract.
 # ---------------------------------------------------------------------------

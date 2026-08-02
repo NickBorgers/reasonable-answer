@@ -26,7 +26,7 @@ Tomes documents the parallel public campaign through which municipal health auth
 
 Cutler and Miller attribute a large share of the early-twentieth-century decline in US urban mortality to water filtration and chlorination adopted mainly between 1900 and 1920 [4]. On their dating the pandemic falls inside an expansion already underway rather than initiating one.
 
-Their estimate concerns mortality attributable to the technology rather than the politics of the spending, so it constrains the acceleration claim without settling it [4]. This is the component on which the answer above is most confidently negative, and it is also the component with the clearest pre-existing trend.
+Their estimate concerns mortality attributable to the technology rather than the politics of the spending, so it constrains the acceleration claim without settling it [4]. This is the component on which the answer above is most confidently negative, and it is also the component with the clearest pre-existing trend — which is why the extra confidence here does not contradict the hedge above. The sanitation reading rests on something [4] positively documents, an adoption trajectory running on both sides of 1918; the counterargument section's complaint is about the institutional side, where no severity-exploiting design has been run and "no visible acceleration" would indeed be reporting an absence of studies. Even here the trend bounds an acceleration rather than excluding one [4].
 
 ## Sources
 
