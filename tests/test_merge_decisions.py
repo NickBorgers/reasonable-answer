@@ -60,6 +60,27 @@ def test_same_slug_different_content_abstains() -> None:
     assert merge_decisions.try_fast_path(BASE, ours, theirs) is None
 
 
+def test_appended_text_without_decision_heading_abstains() -> None:
+    ours = BASE.replace(TAIL, "arbitrary appended prose.\n\n" + TAIL)
+    theirs = BASE.replace(TAIL, "## D-bravo — second\n\nbody bravo.\n\n" + TAIL)
+    assert merge_decisions.try_fast_path(BASE, ours, theirs) is None
+
+
+def test_incomplete_decision_section_abstains() -> None:
+    ours = BASE.replace(TAIL, "## D-bravo — second\n\n" + TAIL)
+    theirs = BASE.replace(TAIL, "## D-charlie — third\n\nbody charlie.\n\n" + TAIL)
+    assert merge_decisions.try_fast_path(BASE, ours, theirs) is None
+
+
+def test_non_decision_level_two_heading_in_suffix_abstains() -> None:
+    ours = BASE.replace(
+        TAIL,
+        "## D-bravo — second\n\nbody bravo.\n\n## Notes\n\nnot a decision.\n\n" + TAIL,
+    )
+    theirs = BASE.replace(TAIL, "## D-charlie — third\n\nbody charlie.\n\n" + TAIL)
+    assert merge_decisions.try_fast_path(BASE, ours, theirs) is None
+
+
 def test_edit_to_open_items_section_abstains() -> None:
     ours = BASE.replace(TAIL, "## Open items for a future round\n\n- something open.\n- new item.\n")
     theirs = BASE.replace(TAIL, "## D-bravo — second\n\nbody bravo.\n\n" + TAIL)
@@ -68,6 +89,12 @@ def test_edit_to_open_items_section_abstains() -> None:
 
 def test_missing_marker_on_one_side_abstains() -> None:
     ours = BASE.replace(TAIL, "")
+    theirs = BASE.replace(TAIL, "## D-bravo — second\n\nbody bravo.\n\n" + TAIL)
+    assert merge_decisions.try_fast_path(BASE, ours, theirs) is None
+
+
+def test_duplicate_marker_on_one_side_abstains() -> None:
+    ours = BASE.replace(TAIL, TAIL + "\n" + TAIL)
     theirs = BASE.replace(TAIL, "## D-bravo — second\n\nbody bravo.\n\n" + TAIL)
     assert merge_decisions.try_fast_path(BASE, ours, theirs) is None
 

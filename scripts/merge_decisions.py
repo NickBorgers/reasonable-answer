@@ -22,23 +22,39 @@ import sys
 from pathlib import Path
 
 TAIL_MARKER = re.compile(r"^## Open items for a future round\s*$", re.MULTILINE)
-# Reuses scripts/validate-decision-numbers.sh's prose-heading regex verbatim, so a
-# "same slug, different body" collision is judged by the same rule that check enforces.
-SLUG_HEADING = re.compile(r"^## (D-[a-z0-9-]+) ", re.MULTILINE)
+# Accepts the decision-heading form required by the registry and extracts the same slug
+# token that scripts/validate-decision-numbers.sh checks for duplicates.
+SLUG_HEADING = re.compile(r"^## (D-[a-z0-9-]+) — .+$", re.MULTILINE)
+LEVEL_TWO_HEADING = re.compile(r"^## .+$", re.MULTILINE)
 
 
 def split_at_marker(text: str) -> tuple[str, str] | None:
-    m = TAIL_MARKER.search(text)
-    return None if m is None else (text[: m.start()], text[m.start():])
+    matches = list(TAIL_MARKER.finditer(text))
+    return None if len(matches) != 1 else (text[: matches[0].start()], text[matches[0].start():])
 
 
-def slug_sections(suffix: str) -> dict[str, str]:
+def slug_sections(suffix: str) -> dict[str, str] | None:
     """slug -> its full section body, from one `## D-<slug>` heading to the next (or EOF)."""
+    if not suffix:
+        return {}
     matches = list(SLUG_HEADING.finditer(suffix))
-    return {
-        m.group(1): suffix[m.start(): (matches[i + 1].start() if i + 1 < len(matches) else len(suffix))]
-        for i, m in enumerate(matches)
-    }
+    if not matches or matches[0].start() != 0 or not suffix.endswith("\n\n"):
+        return None
+    decision_starts = [match.start() for match in matches]
+    heading_starts = [match.start() for match in LEVEL_TWO_HEADING.finditer(suffix)]
+    if decision_starts != heading_starts:
+        return None
+
+    sections: dict[str, str] = {}
+    for index, match in enumerate(matches):
+        end = matches[index + 1].start() if index + 1 < len(matches) else len(suffix)
+        section = suffix[match.start():end]
+        body = section[match.end():].strip()
+        slug = match.group(1)
+        if not body or slug in sections:
+            return None
+        sections[slug] = section
+    return sections
 
 
 def try_fast_path(base: str, ours: str, theirs: str) -> str | None:
@@ -51,9 +67,11 @@ def try_fast_path(base: str, ours: str, theirs: str) -> str | None:
     if not head_a.startswith(head_o) or not head_b.startswith(head_o):
         return None  # not a pure trailing append (an existing section was edited)
     suffix_a, suffix_b = head_a[len(head_o):], head_b[len(head_o):]
+    slugs_a, slugs_b = slug_sections(suffix_a), slug_sections(suffix_b)
+    if slugs_a is None or slugs_b is None:
+        return None  # appended content is not entirely complete, unambiguous decision sections
     if suffix_a == suffix_b:
         return head_o + suffix_a + tail_o  # both sides appended byte-identical content
-    slugs_a, slugs_b = slug_sections(suffix_a), slug_sections(suffix_b)
     for slug, body in slugs_a.items():
         if slug in slugs_b and slugs_b[slug] != body:
             return None  # genuine same-slug collision -- abstain, do not silently pick one
