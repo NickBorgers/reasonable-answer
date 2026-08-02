@@ -99,6 +99,32 @@ search:
   fetch_max_bytes: 400000
   fetch_max_chars: 6000
 
+  # Let a writer READ a page before it cites it (D-writer-source-reads). A search
+  # result is a title, a URL and one line of snippet, so without this the writer picks
+  # what to claim having never seen the page — which is where bibliography-level
+  # citations and over-narrow claim/source pairings come from.
+  #
+  # Bounded to URLs a web_search returned IN THE SAME WRITER CALL: there is no
+  # arbitrary-URL reader, and a refused URL never reaches the network. It egresses
+  # through the same fetch boundary verify_sources uses, so the same caveat applies —
+  # these are model-chosen URLs, and the egress boundary is a deployment concern
+  # (docs/ssrf-egress-isolation.md). Hence OFF in the shipped roster, like verification.
+  #
+  # read_sources: false
+  # read_budget: 24            # whole-run reads
+  # read_max_chars: 6000       # page text shown per read
+  # read_char_budget: 200000   # whole-run page text handed to writers
+  #
+  # And the audit half: after each draft, ask its writer where each cited claim's
+  # support actually sits — citation id, URL, locator, verbatim span, claim — and check
+  # every span mechanically against the body that was read. Purely a record: no verdict
+  # here becomes a defect, reaches a critic, or touches the stop decision. Requires
+  # read_sources (with nothing read there is nothing to check a span against), and costs
+  # one extra structured call per draft.
+  #
+  # support_manifest: false
+  # support_max_chars: 60000   # already-read page text re-shown in that pass
+
 # Tiers tried when a plain fetch does not yield the cited document. All off; none of
 # this does anything unless search.verify_sources above is on, because nothing fetches.
 #

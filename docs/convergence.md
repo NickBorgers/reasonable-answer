@@ -61,6 +61,13 @@ well-formed/resolvable in format.
   tool calls, because such a writer would still produce a `## Sources` section and fill it from
   memory — and no downstream check distinguishes that from a retrieved citation.
 
+* **`search.read_sources: true`** (D-writer-source-reads, requires `enabled`) — the writer also
+  holds `read_source` and may open a page **its own** searches returned, so a citation can be
+  attached to text the writer read rather than to a snippet. This does **not** move the label: a
+  read page shows what a page says, not that the page is right, so the output stays
+  *consensus-reviewed with retrieved sourcing*. What it changes is what the writer is entitled to
+  assert and what the run can afterwards show — see the traceability paragraph below.
+
 **Retrieval alone does not make the report fact-checked.** It constrains where citations come from;
 it does not establish that a cited page *supports the specific claim attached to it* — the
 attributable-to-identified-sources distinction ([Rashkin et al. 2021](https://arxiv.org/abs/2112.12870)),
@@ -119,6 +126,25 @@ registry denies is a not-found and reaches the mechanical finding above — gate
 finding is blocking. With `sources.open_access.enabled` also true a free copy may be read; such a body
 is marked as coming from a mirror rather than the cited URL, and can never settle a dispute about
 that URL, because a preprint is not the version of record.
+
+**Claim-level traceability is recorded, and is not a stop input (D-writer-source-reads).** With
+`search.support_manifest` on (which requires `search.read_sources`), each draft is followed by a
+separate structured pass in which its writer records `citation_id -> url -> locator ->
+support_span -> claim` for every claim resting on a page it read. `support.check` rules on each
+entry mechanically — the claim must be in the report, and the span must be in the cited page's
+**own** body — and distinguishes "checked and false" (`span_not_found`) from the three ways an
+entry is simply not checkable: no body was read (`body_not_read`, which covers an abstract and a
+paywall), the body came from an open-access copy (`different_document`), or the writer never opened
+the source (`not_retrieved`).
+
+**None of this reaches the controller.** No verdict becomes a `Defect`, no count appears on
+`OrchestratorView`, and no rule in the table below reads any of it: the manifest goes to
+`support/rNN.json` and its verdict counts to `events.jsonl`, and that is the whole of its effect.
+Termination, acceptance, the severity floors and the 14 rules are exactly what they were. That is
+not caution for its own sake — the manifest's author is the writer whose report is under review, so
+a manifest that fed acceptance would let a writer grade its own review, which is the arrangement
+principle #7 exists to forbid. A `supported` verdict is a statement that the chain is traceable, not
+that the claim is true, and the label above is unchanged for the same reason.
 
 **Every prompt carries the run's date (D-run-date-grounding).** A date-plausibility judgement ("this citation is
 future-dated, so it must be fabricated") is only as good as the judge's sense of what day it is —

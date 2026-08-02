@@ -157,6 +157,67 @@ def test_injected_instructions_stay_inside_the_data_fence(identities, config):
         assert prompts.UNTRUSTED_NOTE in body
 
 
+def test_a_page_a_writer_read_reaches_no_other_role(tmp_path, identities, config):
+    """D-writer-source-reads widens the *writer's* context and nothing else.
+
+    Reading is enabled here and verification is not — the configuration a deployment
+    picks when it wants better-sourced drafts without handing pages to a critic. The
+    page body must therefore appear in exactly one place: the writer's own tool result.
+    A critic reading it would be `search.verify_sources` arriving by the back door, and
+    the orchestrator reading anything at all is the failure RB-008 exists to catch.
+    """
+    from reasonable_answer import reading, search
+    from reasonable_answer.config import SearchConfig
+    from reasonable_answer.fetch import FetchedSource
+    from reasonable_answer.graph import Runtime, _generate
+    from reasonable_answer.store import RunStore
+
+    url = "https://example.org/paper"
+    page = "PAGE BODY MARKER: the measured effect was 4.2 percent."
+
+    class _Fetcher:
+        def fetch(self, u):
+            return FetchedSource(url=u, title="A paper", text=page, status=200)
+
+    class _Searcher:
+        def __init__(self):
+            self.budget = search.QueryBudget(5)
+
+        def search(self, query, count=None):
+            return [search.SearchResult(title="A paper", url=url, description="D")]
+
+    config = config.model_copy(
+        update={"search": SearchConfig(enabled=True, read_sources=True)}
+    )
+    client = clean_client(identities)
+    client.tool_script = [
+        ("web_search", '{"query": "probe"}'),
+        ("read_source", f'{{"url": "{url}"}}'),
+    ]
+    rt = Runtime(
+        config=config,
+        client=client,
+        identities=identities,
+        store=RunStore(tmp_path, "run-read-isolation"),
+        searcher=_Searcher(),
+        reader=reading.SourceReader(
+            _Fetcher(),
+            budget=reading.ReadBudget(max_calls=5, max_chars=50_000),
+            max_chars=6_000,
+        ),
+    )
+    _generate({"question": "q?", "round": 0}, rt)
+
+    assert any("PAGE BODY MARKER" in result for result in client.tool_results)
+    for call in client.calls:
+        assert "PAGE BODY MARKER" not in call.system
+        assert "PAGE BODY MARKER" not in call.user
+    # And nothing about the read is reachable from the blind orchestrator's schema:
+    # `OrchestratorView` is bounded ints and enums, so there is no field to put it in.
+    assert "sources_read" not in OrchestratorView.model_fields
+    assert "read_outcomes" not in OrchestratorView.model_fields
+
+
 def test_a_critic_cannot_emit_a_free_form_instruction_channel():
     """Every generator-facing field is bounded and the category enum is closed."""
     from pydantic import ValidationError

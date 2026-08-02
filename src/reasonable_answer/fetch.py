@@ -116,6 +116,11 @@ class SourceOutcome(str, Enum):
     #: A tier that could have resolved this was out of per-run calls. Without this,
     #: an operator reads a column of `blocked` and blames the sites.
     BUDGET_EXHAUSTED = "budget_exhausted"
+    #: Nothing was fetched: a writer asked `read_source` for a URL that no search
+    #: result in its own context had offered (D-writer-source-reads). A refusal, not a
+    #: failure — the site was never contacted, so this says nothing whatever about the
+    #: source, and it must never be read alongside `blocked` or `not_found`.
+    NOT_RETRIEVED = "not_retrieved"
 
 
 #: Statuses that mean "refused", as distinct from "not there". 999 is LinkedIn's

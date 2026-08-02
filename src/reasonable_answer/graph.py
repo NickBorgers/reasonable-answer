@@ -26,7 +26,7 @@ from langgraph.graph import END, START, StateGraph
 from . import audition as audition_mod
 from . import critique as critique_mod
 from . import dispute as dispute_mod
-from . import fetch, prompts, resolve, roles, search, triage
+from . import fetch, prompts, reading, resolve, roles, search, support, triage
 from . import report as report_mod
 from .config import Config, ConfigError, validate_roster_health
 from .controller import acceptance_state, decide, detect_cycle
@@ -42,6 +42,7 @@ from .schemas import (
     OrchestratorRecommendation,
     OrchestratorView,
     SeverityCounts,
+    SupportManifest,
     WriterDisputes,
 )
 from .store import RunStore
@@ -128,8 +129,15 @@ class Runtime:
     #: None when search is disabled; writers then run exactly as they did before.
     searcher: Any | None = None
     #: None when source verification is off; the evidence lens then judges citations
-    #: on their face, exactly as it did before.
+    #: on their face, exactly as it did before. Set **only** for verification — a
+    #: deployment that turned on writer source reads alone must not silently acquire
+    #: fetched pages in a critic's context or mechanical dispute adjudication, so the
+    #: reader below holds its own reference to the shared fetcher rather than reusing
+    #: this field as a "something fetches" flag.
     fetcher: Any | None = None
+    #: None when writers may not read sources (D-writer-source-reads); they then work
+    #: from search snippets exactly as they did before.
+    reader: Any | None = None
 
     @property
     def search_enabled(self) -> bool:
@@ -138,6 +146,14 @@ class Runtime:
     @property
     def verify_sources(self) -> bool:
         return self.fetcher is not None
+
+    @property
+    def read_sources(self) -> bool:
+        return self.reader is not None
+
+    @property
+    def support_manifest(self) -> bool:
+        return self.read_sources and self.config.search.support_manifest
 
     @property
     def disputes_enabled(self) -> bool:
@@ -166,19 +182,30 @@ def build_runtime(
     searcher = _build_searcher(config, client)
     read_pdfs = _pdf_reading_enabled(config)
     resolver = _build_resolver(config, warnings)
-    fetcher = (
+    # One fetcher for both consumers, so the run-lifetime cache is shared: a page a
+    # writer read through `read_source` is not downloaded again when the evidence lens
+    # verifies the citation, and the two see the same bytes (D-writer-source-reads).
+    # Which consumers actually get it is decided below, separately, because the two
+    # switches are independent and each is opt-in on its own.
+    source_fetcher = (
         fetch.SourceFetcher(
             timeout=config.search.fetch_timeout_seconds,
             max_bytes=config.search.fetch_max_bytes,
-            max_chars=config.search.fetch_max_chars,
+            # The larger of the two consumers' caps, so neither is silently clipped to
+            # the other's. Each applies its own cap to what it renders.
+            max_chars=max(config.search.fetch_max_chars, config.search.read_max_chars)
+            if config.search.read_sources
+            else config.search.fetch_max_chars,
             read_pdfs=read_pdfs,
             pdf_max_bytes=config.sources.pdf.max_bytes,
             pdf_max_pages=config.sources.pdf.max_pages,
             resolver=resolver,
         )
-        if config.search.verify_sources
+        if (config.search.verify_sources or config.search.read_sources)
         else None
     )
+    fetcher = source_fetcher if config.search.verify_sources else None
+    reader = _build_reader(config, source_fetcher)
 
     run_id = run_id or f"run-{uuid.uuid4().hex[:12]}"
     store = RunStore(config.runs_dir, run_id)
@@ -190,7 +217,10 @@ def build_runtime(
         budgets=config.budgets.model_dump(),
         search_enabled=searcher is not None,
         search_query_budget=config.search.query_budget if searcher else 0,
-        verify_sources=fetcher is not None,
+        verify_sources=config.search.verify_sources,
+        read_sources=reader is not None,
+        read_budget=config.search.read_budget if reader else 0,
+        support_manifest=reader is not None and config.search.support_manifest,
         read_pdfs=read_pdfs,
         resolve_tiers=sorted(_enabled_tiers(config)),
         audition_enforced=config.audition.enforce,
@@ -198,7 +228,32 @@ def build_runtime(
     for warning in warnings:
         log.warning("roster: %s", warning)
     return Runtime(config=config, client=client, identities=identities, store=store,
-                   warnings=warnings, searcher=searcher, fetcher=fetcher)
+                   warnings=warnings, searcher=searcher, fetcher=fetcher, reader=reader)
+
+
+def _build_reader(config: Config, fetcher) -> reading.SourceReader | None:
+    """Construct the writer-facing source reader, or return None when it is off.
+
+    `SearchConfig` has already refused the incoherent combinations at load time
+    (reading without search, a manifest without reading), so there is nothing to fail
+    closed on here — this is composition, in the manner of `_build_searcher` and
+    `_build_resolver`, keeping network I/O out of the nodes and the suite offline.
+    """
+    if not config.search.read_sources or fetcher is None:
+        return None
+    log.info(
+        "writer source reads enabled: %d reads and %d characters for this run",
+        config.search.read_budget,
+        config.search.read_char_budget,
+    )
+    return reading.SourceReader(
+        fetcher,
+        budget=reading.ReadBudget(
+            max_calls=config.search.read_budget,
+            max_chars=config.search.read_char_budget,
+        ),
+        max_chars=config.search.read_max_chars,
+    )
 
 
 def _pdf_reading_enabled(config: Config) -> bool:
@@ -506,6 +561,55 @@ def _scope_fields(
     return scope.as_event_fields()
 
 
+def _retrieval_kwargs(rt: Runtime, session: reading.ReadSession) -> dict[str, Any]:
+    """The tool half of a writer call: `web_search`, and `read_source` when it is on.
+
+    Returns `{}` when retrieval is off, so a search-less build hands `complete` exactly
+    the argument list it always did.
+
+    Both tools go through one handler because `LLMClient.complete` drives a single
+    `(name, arguments) -> text` callback. Dispatch lives here rather than in either
+    module so neither has to import the other: `search` stays a Brave client and
+    `reading` stays a page reader, and the composition root — this module, which already
+    builds both — is what knows they are offered together.
+    """
+    if not rt.search_enabled:
+        return {}
+
+    searcher = rt.searcher
+    handlers: dict[str, Any] = {
+        "web_search": search.make_tool_handler(searcher, on_results=session.record_results)
+    }
+    tools = [search.SEARCH_TOOL]
+    reader = rt.reader
+    if reader is not None:
+        handlers["read_source"] = reading.make_tool_handler(reader, session)
+        tools.append(reading.READ_SOURCE_TOOL)
+
+    def route(name: str, raw_arguments: str) -> str:
+        handler = handlers.get(name)
+        if handler is None:
+            return prompts.search_error_block(f"unknown tool {name!r}")
+        return handler(name, raw_arguments)
+
+    def offering() -> bool:
+        # Withdraw the tools the moment their budgets are gone. Otherwise the handlers
+        # keep answering "budget exhausted" and a determined writer spends every
+        # remaining round asking again instead of writing (D-provider-retry). Both must
+        # be spent: a writer with reads left can still use a round well after search is
+        # finished, and vice versa.
+        if not searcher.budget.exhausted:
+            return True
+        return reader is not None and not reader.budget.exhausted
+
+    return {
+        "tools": tools,
+        "tool_handler": route,
+        "max_tool_rounds": rt.config.search.max_tool_rounds,
+        "should_offer_tools": offering,
+    }
+
+
 def _generate(state: State, rt: Runtime) -> dict:
     cfg = rt.config
     last_author = state.get("author_identity")
@@ -543,18 +647,11 @@ def _generate(state: State, rt: Runtime) -> dict:
     else:
         user = prompts.writer_first_draft(state["question"], current_date=run_date)
 
-    search_kwargs: dict[str, Any] = {}
-    if rt.search_enabled:
-        searcher = rt.searcher
-        search_kwargs = {
-            "tools": [search.SEARCH_TOOL],
-            "tool_handler": search.make_tool_handler(searcher),
-            "max_tool_rounds": cfg.search.max_tool_rounds,
-            # Withdraw the tool the moment its budget is gone. Otherwise the handler
-            # keeps answering "budget exhausted" and a determined writer spends every
-            # remaining round asking again instead of writing (D-provider-retry).
-            "should_offer_tools": lambda: not searcher.budget.exhausted,
-        }
+    # One session per writer call: the `read_source` allowlist is what *this* call's
+    # searches returned, and the read log it accumulates is what the support manifest
+    # is checked against (D-writer-source-reads).
+    session = reading.ReadSession()
+    search_kwargs = _retrieval_kwargs(rt, session)
 
     # One flaky response must not cost the run. Attempts rotate through the eligible
     # pool and wrap, so a model that is down, rate-limited, or answering with nothing
@@ -575,7 +672,7 @@ def _generate(state: State, rt: Runtime) -> dict:
         try:
             reply = rt.client.complete(
                 alias,
-                system=prompts.writer_system(rt.search_enabled),
+                system=prompts.writer_system(rt.search_enabled, rt.read_sources),
                 user=user,
                 max_tokens=32000,
                 **search_kwargs,
@@ -619,9 +716,13 @@ def _generate(state: State, rt: Runtime) -> dict:
         tokens=completion.completion_tokens,
         # Auditable after the fact: did this draft's citations come from a lookup?
         searches=completion.tool_calls,
+        # And the deeper version of the same question: did it read any of them?
+        # Counts only — a URL is content and events.jsonl outlives a content purge.
+        **_read_fields(session),
         **_scope_fields(cfg, previous, text, defects, polish=polish, full_rewrite=full_rewrite),
     )
 
+    _record_support(rt, alias, state["question"], text, round_no, session)
     pending_disputes = _elicit_disputes(state, rt, alias, text, defects, polish)
 
     return {
@@ -646,6 +747,101 @@ def _generate(state: State, rt: Runtime) -> dict:
         "pending_lenses": [lens.value for lens in LENSES],
         "pending_disputes": pending_disputes,
     }
+
+
+def _read_fields(session: reading.ReadSession) -> dict[str, Any]:
+    """What this draft's writer read, as counts and a closed-vocabulary tally.
+
+    Never a URL and never a character of page text: `events.jsonl` survives
+    `purge --content-only` and carries signal only (RA-016). `SourceOutcome` is the same
+    closed vocabulary `_failure_reasons` relies on for the verification path, so an
+    operator can read the two tallies side by side.
+    """
+    reads = session.reads
+    if not reads:
+        return {"sources_read": 0}
+    outcomes: dict[str, int] = {}
+    for source in reads.values():
+        key = source.outcome.value
+        outcomes[key] = outcomes.get(key, 0) + 1
+    return {
+        "sources_read": len(reads),
+        "sources_offered": session.offered_count,
+        "read_outcomes": outcomes,
+    }
+
+
+def _record_support(
+    rt: Runtime,
+    alias: str,
+    question: str,
+    report_text: str,
+    round_no: int,
+    session: reading.ReadSession,
+) -> None:
+    """The traceability pass (D-writer-source-reads): ask the writer where each cited
+    claim's support sits, then check it mechanically against the bodies it read.
+
+    Audit-side and nothing else. The manifest is written to `support/`, the verdict
+    counts to `events.jsonl`, and neither reaches another model's context, the defect
+    list, `OrchestratorView` or the controller — so a writer authoring its own manifest
+    has no lever on its own review.
+
+    Never fatal, in the manner of `_elicit_disputes`: any failure degrades to no
+    manifest and the run proceeds exactly as it would with the channel off.
+    """
+    if not rt.support_manifest:
+        return
+    bodies = session.reads
+    readable = [s for s in bodies.values() if s.ok]
+    if not readable:
+        # Nothing was read, so nothing can be checked, and asking anyway would collect
+        # spans no body can falsify — the failure the `support_manifest` config guard
+        # refuses at load time, arriving by another road.
+        return
+
+    budget = rt.config.search.support_max_chars
+    shown, used = [], 0
+    for source in readable:
+        if used >= budget:
+            break
+        shown.append(source)
+        used += len(source.text)
+
+    try:
+        manifest = rt.client.structured(
+            alias,
+            system=prompts.writer_system(False),
+            user=prompts.writer_support(question, report_text, shown),
+            schema=SupportManifest,
+            max_tokens=8000,
+        )
+    except (ModelCallError, MalformedOutputError) as exc:
+        # Only the exception TYPE, never `str(exc)` — a MalformedOutputError's message
+        # is built from validation text that echoes the rejected input, which here is
+        # verbatim report and page material (RA-016), the same rule `_elicit_disputes`
+        # follows.
+        log.warning("support manifest failed (%s); continuing", type(exc).__name__)
+        rt.store.event("support_manifest_failed", round=round_no, reason=type(exc).__name__)
+        return
+
+    checked = support.check(manifest, report_text, bodies)
+    rt.store.support(
+        round_no,
+        {
+            "round": round_no,
+            "artifact_author": rt.identities[alias],
+            "entries": support.record(checked),
+        },
+    )
+    rt.store.event(
+        "support_manifest",
+        round=round_no,
+        entries=len(checked),
+        verdicts=support.tally(checked),
+        with_locator=support.locator_coverage(checked),
+        bodies_shown=len(shown),
+    )
 
 
 def _elicit_disputes(
