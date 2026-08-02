@@ -28,6 +28,8 @@ import time
 from dataclasses import dataclass, field
 from typing import Any
 
+from .build import describe_build
+
 #: Not a terminal status — no controller rule produces it. It is what an export says
 #: when `final.json` will not parse: the verdict is *unknown*, which is a different
 #: claim from `aborted` and the only one the evidence supports.
@@ -127,6 +129,10 @@ class Provenance:
     #: older draft's list, which must be withheld rather than shown against this text
     #: (issue #93). Distinct from an empty `outstanding`, which means genuinely none.
     outstanding_withheld: bool = False
+    #: The stored build record, or None for a run that predates stamping
+    #: (D-run-build-stamp). Rendered through `build_line`, which is "" when there is
+    #: nothing to say, so an older run's record renders exactly as it always did.
+    build: dict[str, Any] | None = None
 
     @property
     def meaning(self) -> str:
@@ -143,6 +149,11 @@ class Provenance:
     @property
     def short_hash(self) -> str:
         return (self.artifact_hash or "")[:12]
+
+    @property
+    def build_line(self) -> str:
+        """The commit this run ran on, or "" if the record does not name one."""
+        return describe_build(self.build)
 
 
 def provenance(
@@ -193,6 +204,7 @@ def provenance(
         outstanding_withheld=bool(raw_defects) and not outstanding,
         warnings=list(final.get("warnings") or []),
         reviewers=_reviewers(final.get("clean_records") or [], artifact_hash),
+        build=final.get("build") if isinstance(final.get("build"), dict) else None,
     )
 
 
@@ -256,6 +268,7 @@ def export_markdown(
         f"- Rounds: {prov.rounds}"
         + (f" (shipped the draft from round {prov.chosen_round})" if prov.chosen_round else ""),
         f"- Run: `{prov.run_id}`" + (f" · artifact `{prov.short_hash}`" if prov.short_hash else ""),
+        f"- Built from: `{prov.build_line}`" if prov.build_line else "",
         f"- Exported: {prov.exported_on}",
     ]
     lines += [
@@ -365,6 +378,10 @@ def _record_rows(prov: Provenance) -> list[tuple[str, str]]:
     if prov.short_hash:
         run += f" · artifact <span class='mono'>{_esc(prov.short_hash)}</span>"
     rows.append(("Run", run))
+    # Omitted entirely for a run that predates stamping, rather than shown as "unknown":
+    # the record has nothing to say, and saying "unknown" implies it tried and failed.
+    if prov.build_line:
+        rows.append(("Built from", f"<span class='mono'>{_esc(prov.build_line)}</span>"))
     rows.append(("Exported", _esc(prov.exported_on)))
     return rows
 

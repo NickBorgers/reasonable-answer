@@ -43,6 +43,7 @@ NO-GO from CI review.
 | [docs/bias.md](./docs/bias.md) | the observable-text social-bias rules |
 | [docs/authentication.md](./docs/authentication.md) | who the web interface believes you are |
 | [docs/deployment-profile.md](./docs/deployment-profile.md) | how the production instance is actually configured |
+| [docs/run-provenance.md](./docs/run-provenance.md) | which build produced a run — **read this before comparing runs across a change** |
 | [docs/ssrf-egress-isolation.md](./docs/ssrf-egress-isolation.md) | the infrastructure half of the fetch boundary |
 | [docs/ci-pipeline.md](./docs/ci-pipeline.md) | the agentic review pipeline and the merge gate |
 

@@ -132,6 +132,7 @@ nav:
   - Operating it:
       - Authentication: authentication.md
       - Deployment profile: deployment-profile.md
+      - Run provenance: run-provenance.md
       - SSRF egress isolation: ssrf-egress-isolation.md
       - CI and the review pipeline: ci-pipeline.md
       - CI setup: ci-setup.md

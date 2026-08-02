@@ -87,6 +87,11 @@ class RunSummary:
     #: or was started from the CLI without `--owner`. None means the web layer will
     #: not serve it at all (D-question-refinement); the run itself is untouched and still resumes.
     owner: str | None = None
+    #: The build this run ran on — ``{"commit", "dirty", "source"}`` — or None for a run
+    #: that predates stamping (D-run-build-stamp). Read from the final summary once the run
+    #: has one, and from its latest stamped event before that, so a run still in flight is
+    #: attributable too.
+    build: dict[str, Any] | None = None
 
     @property
     def is_live(self) -> bool:
@@ -160,7 +165,24 @@ class Registry:
             finished_at=finished,
             terminal_note=note,
             owner=self.owner(run_id),
+            build=self._build(final, events),
         )
+
+    @staticmethod
+    def _build(final: dict[str, Any] | None, events: list[dict[str, Any]]) -> dict[str, Any] | None:
+        """Which build to show for this run.
+
+        The finalized summary wins, because that is the build that produced the report on
+        offer. Before there is one, the latest stamped event answers for the attempt
+        currently in flight. A run started before stamping existed has neither, and gets
+        None rather than a fabricated answer.
+        """
+        if final and isinstance(final.get("build"), dict):
+            return final["build"]
+        for event in reversed(events):
+            if isinstance(event.get("build"), dict):
+                return event["build"]
+        return None
 
     @staticmethod
     def _stopped_state(events: list[dict[str, Any]]) -> tuple[Status, str]:
