@@ -4,7 +4,7 @@ There is no general productivity penalty for remote work; there is a penalty for
 
 ## Key findings
 
-- A randomised trial at a Chinese travel agency found a 13 percent performance increase among call-centre staff working from home, roughly two-thirds from more calls per minute and one-third from more hours worked [1].
+- A randomised trial at a Chinese travel agency found a 13 percent performance increase among call-centre staff working from home, roughly two-thirds from more minutes worked per shift — fewer breaks and sick days — and one-third from more calls per minute [1].
 - A study of 4,000 software engineers found total hours worked rose 11 percent while output did not, so output per hour fell — the opposite sign to [1] on a job that looks superficially similar [2].
 - Call-centre workers at a large US retailer answered about 12 percent fewer calls per hour when remote, a result usually attributed to how the two firms selected workers into remote status [3].
 - Firm-wide remote work made collaboration networks more static and more siloed, with fewer bridging ties across teams [4].
@@ -18,7 +18,7 @@ For the conclusion to flip, that mechanism would have to be shown to reduce meas
 
 ## What the measurement studies show
 
-Bloom et al. randomised call-centre staff at a Chinese travel agency into home and office work and found a 13 percent performance increase for the home group, decomposing into more calls per minute and more hours worked [1]. The design is the strongest in this literature, and the job is also the most decomposable in it.
+Bloom et al. randomised call-centre staff at a Chinese travel agency into home and office work and found a 13 percent performance increase for the home group, decomposing into more minutes worked per shift and more calls per minute [1]. The design is the strongest in this literature, and the job is also the most decomposable in it.
 
 {{fabricated_author}} ({{fabricated_year}}) complicate the picture. Tracking 4,000 software engineers across 18 months at a single large firm, they report total hours worked rising 11 percent after the shift home while merged output stayed flat — a decline in output per hour on a job that involves substantially more coordination than answering calls, concentrated entirely in engineers with less than one year of tenure [2]. Emanuel and Harrington, working with a large US retailer's call centres, report remote workers answering about 12 percent fewer calls per hour — opposite in sign to [1] on nearly the same task, which is why selection is the usual explanation offered for the pair [3].
 

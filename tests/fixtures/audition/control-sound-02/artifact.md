@@ -26,7 +26,7 @@ This report accordingly gives the levelized answer and the system answer separat
 
 Lazard places unsubsidized utility-scale solar and onshore wind well below new nuclear per MWh in US conditions, with the nuclear range reflecting recent Western construction experience [1]. The IEA and NEA joint study, using a different method across a wider set of countries, also places new nuclear above onshore wind and utility solar at moderate discount rates, but at a narrower gap that closes further at low discount rates [2].
 
-Much of the distance between the two results is that discount-rate assumption rather than any disagreement about engineering cost [1][2]. A reader who takes only one number from this section should take the range, not the midpoint.
+What [2] establishes is that its own comparison is discount-rate sensitive: the gap it reports narrows as the assumed rate falls. That is a sensitivity within one study, not a decomposition of the distance between the two, which differ in method and in the countries they cover as well as in the rate they assume — and nothing cited here separates those contributions [1][2]. A reader who takes only one number from this section should take the range, not the midpoint.
 
 ## System-level cost
 
