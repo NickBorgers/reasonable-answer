@@ -601,16 +601,39 @@ class RefineCacheEntry(BaseModel):
     metrics: RefineMetrics
     corpus_hash: str
     prompt_hash: str
+    #: The structured-output mode the audited calls were made under. Required with no
+    #: default, so an entry written before the refine audition probed at all fails
+    #: validation and reads as unmeasured rather than as a verdict about a regime it
+    #: cannot name (D-audition-probe-parity, the shape `audition.CacheEntry` uses).
+    structured_output_mode: str
     repetitions: int
     recorded_at: float
 
     def is_stale(self, now: float, max_age_days: int) -> bool:
         return (now - self.recorded_at) > max_age_days * 86400
 
-    def matches(self, corpus_hash: str, prompt_hash: str, repetitions: int) -> bool:
+    def matches(
+        self,
+        corpus_hash: str,
+        prompt_hash: str,
+        repetitions: int,
+        *,
+        structured_output_mode: str | None,
+    ) -> bool:
+        """`audition.CacheEntry.matches`'s contract, for the refine corpus.
+
+        `structured_output_mode` is keyword-only and must be passed explicitly, `None`
+        included: `ra audition-refine` probes and so compares, while
+        `refine_cached_judgement` cannot probe without spending and so declines
+        (D-audition-probe-parity).
+        """
         return (
             self.corpus_hash == corpus_hash
             and self.prompt_hash == prompt_hash
+            and (
+                structured_output_mode is None
+                or self.structured_output_mode == structured_output_mode
+            )
             and self.repetitions == repetitions
         )
 
@@ -674,7 +697,11 @@ def refine_cached_judgement(
     """The refine verdict for one identity, read from the cache only — never spends
     a call (`ra doctor` and any startup warning sit on surprise-bill paths, same as
     `audition.cached_judgements`). None means unmeasured, and unmeasured must be
-    shown as unmeasured, never as a pass."""
+    shown as unmeasured, never as a pass.
+
+    The structured-output mode is not compared, for the reason `cached_judgements`
+    does not compare it: learning it costs the probe this function promises not to
+    spend (D-audition-probe-parity)."""
     try:
         corpus_hash = load_refine_fixtures().corpus_hash
     except FixtureError:
@@ -685,6 +712,8 @@ def refine_cached_judgement(
         return None
     ph = refine_prompt_hash(enabled_transforms)
     at = time.time() if now is None else now
-    if not entry.matches(corpus_hash, ph, cfg.repetitions) or entry.is_stale(at, cfg.max_age_days):
+    if not entry.matches(
+        corpus_hash, ph, cfg.repetitions, structured_output_mode=None
+    ) or entry.is_stale(at, cfg.max_age_days):
         return None
     return judge_refine(entry.metrics, thresholds or cfg.thresholds)

@@ -196,6 +196,7 @@ def _seed_refine_cache(config: Config, identity: str, *, obvious_violation_runs:
         metrics=metrics,
         corpus_hash=load_refine_fixtures().corpus_hash,
         prompt_hash=refine_prompt_hash(enabled),
+        structured_output_mode="json_schema",
         repetitions=cfg.repetitions,
         recorded_at=time.time(),
     )
