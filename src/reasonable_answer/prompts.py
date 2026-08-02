@@ -102,6 +102,18 @@ WRITER_SYSTEM = (
     "in the text rather than inventing support.\n"
     "- You state the strongest genuine counterargument and engage with it.\n"
     "- You claim exactly as much as your support licenses — no more.\n"
+    "- You keep materially distinct things distinct where the argument turns on "
+    "them: what a rule formally provides, what the mechanism implementing it "
+    "actually delivers, and what is observed downstream are three claims, each "
+    "supported separately. A finding stays attached to the units, cases or "
+    "population it was measured on — you name them rather than restating the "
+    "finding about a wider group. Where a claim covers groups that reach the same "
+    "outcome by different mechanisms, you say so or narrow the claim to the "
+    "mechanism your support covers.\n"
+    "- Where a claim turns on magnitude, prevalence, timing or change, you give a "
+    "concrete figure or a source that states it, or you qualify the claim to what "
+    "your support establishes. A claim about kind, mechanism or character needs no "
+    "number, and you do not manufacture one.\n"
     "- You use neutral, precise language: an evaluative characterization is "
     "attributed to a source or argued in the text, never smuggled in as "
     "description.\n"
@@ -374,9 +386,12 @@ def critic_user(
         "fails the whole review. Per category, quote:\n"
         f"{anchors}\n"
         "- `related_span` is the other text implicated, if any. For a contradiction, an "
-        "invalid inference or an overstatement it must be another VERBATIM quote from "
-        "the report — the claim being contradicted, or the premise that does not carry "
-        "the conclusion. For a citation issue it describes the cited source instead.\n"
+        "invalid inference, an overstatement or a conceptual conflation it must be "
+        "another VERBATIM quote from the report — the claim being contradicted, the "
+        "premise that does not carry the conclusion, or the passage that states the "
+        "concept the report then substitutes away from. Leave it out where the report "
+        "has no such second passage; a quote that is not in the report fails the whole "
+        "review. For a citation issue it describes the cited source instead.\n"
         "- `rationale` states the observable defect in one or two neutral sentences. No "
         "verdicts about the author, no praise, no severity language.\n"
         "- `instruction` is a concrete fix an editor could apply without further "
@@ -534,7 +549,19 @@ _CATEGORY_MEANING: dict[Category, str] = {
         "the claim contradicts another claim in the report, or a source the report cites"
     ),
     Category.INVALID_INFERENCE: "the conclusion does not follow from the stated premises",
-    Category.OVERSTATED_CLAIM: "the claim is stronger than the support offered for it",
+    # Explicitly widened by D-conceptual-conflation, never silently: a scope claim with
+    # no concrete anchor is not a new defect class, it is this one — the support is
+    # thematic and the claim is quantitative, so the claim outruns it.
+    Category.OVERSTATED_CLAIM: (
+        "the claim is stronger than the support offered for it — including a claim "
+        "turning on magnitude, prevalence, timing or change whose only support is a "
+        "thematic assertion rather than a concrete figure or a source that states it"
+    ),
+    Category.CONCEPTUAL_CONFLATION: (
+        "two materially distinct concepts, mechanisms, units or populations are "
+        "treated as interchangeable, and the substitution is what carries an "
+        "inference or a conclusion"
+    ),
     Category.LOADED_LANGUAGE: (
         "a descriptor or framing carries an evaluative verdict the cited support "
         "does not establish — the wording asserts what the text does not argue"
@@ -594,6 +621,11 @@ _CATEGORY_ANCHOR: dict[Category, str] = {
     ),
     Category.INVALID_INFERENCE: "the conclusion that does not follow",
     Category.OVERSTATED_CLAIM: "the wording that overstates",
+    Category.CONCEPTUAL_CONFLATION: (
+        "the wording that substitutes one concept for the other (put the report's own "
+        "statement of the concept being substituted away in `related_span`, where the "
+        "report has one)"
+    ),
     Category.LOADED_LANGUAGE: "the loaded descriptor or framing, in the report's own words",
     # The four below are the reason this table exists: each names the present text a
     # missing thing is missing *from*, because there is no span of the missing thing.

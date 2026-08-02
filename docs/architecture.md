@@ -78,7 +78,7 @@ rule is that a lens's model must **not** be the author of the artifact under rev
 
 ```mermaid
 flowchart TD
-    R["report Rₙ"] --> L1["logic lens · model: strong reasoner<br/>contradicted_claim · invalid_inference · overstated_claim"]
+    R["report Rₙ"] --> L1["logic lens · model: strong reasoner<br/>contradicted_claim · invalid_inference · overstated_claim · conceptual_conflation"]
     R --> L2["evidence lens · model: lowest hallucination<br/>uncited_claim · fabricated_citation · misrepresented_source"]
     R --> L3["completeness lens · model: most decorrelated priors<br/>incomplete_answer · omitted_counterargument · unclear_structure"]
     L1 --> TR["triage (mechanical)"]

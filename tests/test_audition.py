@@ -371,6 +371,57 @@ def test_control_citations_resolve_in_both_directions(fixture_id):
         assert n in cited, f"{fixture_id}: Sources entry {n} is never cited"
 
 
+#: Planted fixture -> the control that is the same artifact with the defect removed
+#: (D-conceptual-conflation). Only the pairs whose minimality is claimed in their manifests
+#: are listed: D-fixture-report-shape shipped four bases without asserting a
+#: one-paragraph mutation, and retrofitting that claim onto them is not this decision's
+#: work.
+MINIMAL_PAIRS = (
+    ("conceptual-conflation-01", "control-base-paid-leave-01"),
+    ("overstated-claim-03", "control-base-open-source-01"),
+)
+
+
+@pytest.mark.parametrize(("planted_id", "control_id"), MINIMAL_PAIRS)
+def test_a_paired_control_differs_from_its_plant_in_one_paragraph(planted_id, control_id):
+    """D-conceptual-conflation, the confound half of D-fixture-report-shape applied per pair.
+
+    A planted fixture and its control are graded on disjoint metrics — sensitivity on one,
+    noise on the other — so any difference between them other than the defect is a feature
+    a critic can score on without reading the argument. Both new categories are
+    especially exposed to this: "was there a conflation" and "did this report about paid
+    leave bother me" produce the same finding unless the two artifacts are otherwise
+    identical. Asserting the mutation is exactly one paragraph is what makes the pair
+    measure the defect.
+    """
+    from reasonable_answer import report as report_mod
+
+    fixtures = {f.id: f for f in audition.load_fixtures(CORPUS).fixtures}
+    planted, control = fixtures[planted_id], fixtures[control_id]
+    assert planted.question == control.question, "a pair must answer the same question"
+    assert control.is_control and not planted.is_control
+
+    left = [p.text for p in report_mod.parse(planted.artifact).paragraphs]
+    right = [p.text for p in report_mod.parse(control.artifact).paragraphs]
+    assert len(left) == len(right), (
+        f"{planted_id} has {len(left)} paragraphs against {len(right)} in {control_id}: "
+        f"paragraph count is itself a feature separating the two classes"
+    )
+    differing = [i for i, (a, b) in enumerate(zip(left, right, strict=True)) if a != b]
+    assert len(differing) == 1, (
+        f"{planted_id} and {control_id} differ in {len(differing)} paragraphs, not one"
+    )
+
+    # ...and the one that differs is the one the manifest plants the defect at, or its
+    # neighbour: a pair that mutates a paragraph the grader never looks at measures nothing.
+    (index,) = differing
+    changed = report_mod.parse(planted.artifact).paragraphs[index]
+    assert any(
+        audition._locus_matches(d.locus, StructuralRef(section=changed.section, paragraph=changed.paragraph))
+        for d in planted.defects
+    ), f"{planted_id}: the mutated paragraph S{changed.section}.P{changed.paragraph} is not a planted locus"
+
+
 def _headings(artifact: str) -> list[str]:
     return [ln[3:].strip() for ln in artifact.splitlines() if ln.startswith("## ")]
 
@@ -1391,29 +1442,39 @@ def test_all_repetitions_failing_one_fixture_leaves_that_fixture_uncovered():
     Before coverage accounting, the fixture then contributed nothing to any denominator:
     sensitivity was computed as though it did not exist.
 
-    The evidence lens owes 10 fixtures now: 4 planted (D-category-coverage's
-    `misrepresented-source-01` alongside the original 3) plus 6 controls
-    (D-fixture-report-shape), against every lens, every merged with this decision in the
-    same round. One fixture failing every repetition no longer lands the rate exactly on
-    `max_schema_failure_rate` by itself (1/10, not 1/5 or 1/6). To keep exercising the
-    boundary the gate is calibrated against — "admitted at exactly the threshold, not
-    merely under it" — every other non-control planted fixture (there are exactly three:
-    `fabricated-citation-01`, `misrepresented-source-01`, `uncited-claim-01`) is made to
-    fail schema validation on exactly one of its calls too. `repetitions=3` is chosen so
-    the arithmetic is exact: 3 (the fully-failed target) + 3 (one flake each from the
-    three other planted fixtures) = 6 failing calls out of 10 fixtures x 3 repetitions =
-    30, i.e. 20% on the nose. Each flaky fixture still has two gradable calls, so all
-    three stay covered; only the target is uncovered.
+    One fixture failing every repetition has not landed the rate on
+    `max_schema_failure_rate` by itself since the corpus outgrew five fixtures per lens.
+    To keep exercising the boundary the gate is calibrated against — "admitted at exactly
+    the threshold, not merely under it" — enough *other* fixtures are made to fail
+    validation on exactly one of their calls to make up the difference. Each of those
+    still has `repetitions - 1` gradable calls, so all of them stay covered; only the
+    target is uncovered.
+
+    The arithmetic is derived rather than hardcoded, because it has now been re-derived
+    twice as the corpus grew (D-category-coverage and D-fixture-report-shape added planted
+    fixtures and controls; D-conceptual-conflation added two more controls, which every
+    lens owes). `repetitions=5` is the one choice that survives the next growth too: the
+    threshold is 20%, so the wanted failure count is `owed * repetitions / 5`, which is a
+    whole number for every corpus size when `repetitions` is a multiple of 5. The exact-
+    rate assertion below is what would catch it if that ever stopped holding.
     """
     fixtures = audition.load_fixtures(CORPUS)
     slot = audition.Assignment(alias="a", identity="p/m", lens=Lens.EVIDENCE, position=0)
     owed = fixtures.for_lens(Lens.EVIDENCE)
     target = "one-sided-sourcing-01"
     target_question = next(f for f in owed if f.id == target).question
-    flaky = [f for f in owed if f.id != target and not f.is_control]
-    assert len(flaky) == 3, "expected exactly three other non-control planted fixtures"
+    repetitions = 5
+    total_calls = len(owed) * repetitions
+    wanted_failures = total_calls * THRESHOLDS.max_schema_failure_rate
+    assert wanted_failures == int(wanted_failures), (
+        f"{total_calls} calls cannot fail at exactly "
+        f"{THRESHOLDS.max_schema_failure_rate:.0%} — the boundary would go untested"
+    )
+    # The target burns `repetitions` of the failure budget on its own; the rest is spread
+    # one call each over other fixtures, taken in corpus order so the set is deterministic.
+    flaky = [f for f in owed if f.id != target][: int(wanted_failures) - repetitions]
+    assert 0 < len(flaky) < len(owed), "the flake budget must fit inside the corpus"
     flaky_questions = {f.question for f in flaky}
-    repetitions = 3
     flaky_calls_seen: dict[str, int] = {}
 
     def respond(alias, user):
@@ -1431,9 +1492,8 @@ def test_all_repetitions_failing_one_fixture_leaves_that_fixture_uncovered():
         return []
 
     m = audition.run_assignment(ScriptedClient(respond), slot, fixtures, repetitions=repetitions)
-    total_calls = len(owed) * repetitions
-    assert m.calls == total_calls == 30
-    assert m.schema_failures == repetitions + len(flaky) == 6
+    assert m.calls == total_calls
+    assert m.schema_failures == repetitions + len(flaky) == wanted_failures
     assert m.schema_failure_rate == pytest.approx(THRESHOLDS.max_schema_failure_rate)
     assert m.uncovered_fixtures == (target,)
     assert m.fixtures_covered == len(owed) - 1

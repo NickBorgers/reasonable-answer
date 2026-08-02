@@ -38,6 +38,7 @@ but **triage clamps it up to a mechanical, category-specific floor** — the cri
 | logic | `contradicted_claim` | claim contradicts another claim or a cited source | **blocking** |
 | logic | `invalid_inference` | conclusion does not follow from premises | **major** |
 | logic | `overstated_claim` | claim stronger than its support | **major** |
+| logic | `conceptual_conflation` | two materially distinct things are treated as interchangeable, and the substitution carries an inference | **major** |
 | completeness | `incomplete_answer` | an explicit, material part of the question is unanswered or replaced by an adjacent question | **major** |
 | completeness | `omitted_counterargument` | a material opposing view is missing, or a purported opposing case substitutes an easier objection that does not challenge a load-bearing conclusion | **major** |
 | completeness | `unclear_structure` | organization/clarity impedes evaluation | minor |
@@ -47,6 +48,66 @@ but **triage clamps it up to a mechanical, category-specific floor** — the cri
 `material == 0`; `minor`/`stylistic` never block. (Flooring `overstated_claim`/
 `incomplete_answer`/`omitted_counterargument` at `major` is deliberately conservative and
 config-tunable.)
+
+### Conceptual conflation, and anchors for empirical scope claims (D-conceptual-conflation)
+
+> **Normative.** This subsection governs `Category.CONCEPTUAL_CONFLATION`, the empirical-anchor
+> reading of `overstated_claim`, `LENS_BRIEF[Lens.LOGIC]`, and the three matching writer standards
+> in `prompts.py::WRITER_SYSTEM`. Changing one side without the other is docs-as-spec drift.
+
+**`conceptual_conflation` — the trigger.** Both halves are required:
+
+1. two **materially distinct** concepts, mechanisms, units or populations are treated as
+   interchangeable; **and**
+2. the substitution is what carries a **load-bearing** inference or conclusion — keep the two
+   apart and the conclusion no longer follows as stated.
+
+The taxonomy names three distinctions that can satisfy this trigger. A **formal rule** (what a
+statute, policy or specification provides), the **mediated mechanism** that implements it (who
+administers it, at what
+rate, subject to what other rule), and the **observed outcome** downstream are three propositions,
+each needing its own support. The **units actually measured** and the **wider population** a claim
+is made about are two different sets. And **groups that reach the same outcome by different
+mechanisms** are not one group; a claim that generalizes across them, or a remedy that assumes one
+lever reaches all of them, is where that shows.
+
+**What it is not.** These exclusions are load-bearing — without them the category becomes a licence
+to demand arbitrary distinctions, which is exactly the noise direction the audition measures:
+
+- **Not terminology preference.** A different word for the same thing is not a conflation, whatever
+  the critic would have called it.
+- **Not a subgroup quota.** The absence of a breakdown is not the defect; a substitution is. There
+  is no per-population disaggregation the report owes for its own sake.
+- **Not a distinction that makes no difference here.** Where one mechanism, or one body of evidence,
+  genuinely covers both things, treating them together is correct.
+- **Not a defended aggregation.** A report that draws the distinction and then aggregates,
+  explicitly, has done the work; disagreeing with the aggregation is `invalid_inference` territory
+  if it is anything.
+
+**Floor `major`, and not `blocking`.** It is `invalid_inference`'s sibling: the substitution is the
+step the argument turns on, so a material floor is what forces the revision. Not blocking, because
+unlike a contradiction nothing in the report is thereby shown false — and the fix is always
+available inside the report (draw the distinction, or restrict the claim to the concept the support
+covers). `related_span`, when supplied, must be a verbatim quote like the other logic categories'
+(`triage.IN_ARTIFACT_RELATED`): both poles of a substitution are passages the report contains. It
+stays optional, so a single sentence that fuses the two with no second passage is still reportable.
+
+**Empirical scope claims are `overstated_claim`, explicitly.** Where a claim turns on **magnitude,
+prevalence, timing or change**, and its only support is a thematic assertion rather than a concrete
+figure or a source that states it, the claim is stronger than its support — which is the definition
+of `overstated_claim`, widened here in the open rather than by drift. It is deliberately *not* a
+new evidence category: the defect survives a perfect citation (a real source that describes the
+phenomenon and measures nothing about it), so it is not a sourcing failure, and an evidence category
+demanding a number would be unsatisfiable under `search.enabled: false`. It is deliberately not
+writer-side-only either, because a writer standard nothing can raise is not detectable.
+
+Two narrowings keep it from becoming "quantify everything":
+
+- A claim about **kind, mechanism or character** turns on none of the four and owes no anchor;
+  neither does one already qualified to the cases its support covers.
+- The instruction may **never** demand a specific dataset or document as the only acceptable fix.
+  Qualifying the claim to what the support establishes is always a complete resolution — the same
+  resolvability contract every critic instruction carries.
 
 ### Evidence handling (RA-011, D-in-artifact-citations, D-retrieval-opt-in)
 

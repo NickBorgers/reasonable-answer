@@ -60,6 +60,42 @@ def test_bias_floors_match_bias_md():
     assert SEVERITY_FLOOR[Category.UNEXAMINED_PRESUPPOSITION] is Severity.MAJOR
 
 
+def test_conceptual_conflation_is_a_major_logic_category():
+    # docs/convergence.md is normative for both values (D-conceptual-conflation):
+    # `invalid_inference`'s sibling, floored with it, on the lens that reads how the
+    # argument moves.
+    assert SEVERITY_FLOOR[Category.CONCEPTUAL_CONFLATION] is Severity.MAJOR
+    assert SEVERITY_FLOOR[Category.CONCEPTUAL_CONFLATION] is SEVERITY_FLOOR[
+        Category.INVALID_INFERENCE
+    ]
+    owners = [lens for lens in LENSES if Category.CONCEPTUAL_CONFLATION in LENS_CATEGORIES[lens]]
+    assert owners == [Lens.LOGIC]
+
+
+def test_the_logic_brief_carries_both_triggers_and_their_exclusions():
+    """D-conceptual-conflation. The two rules the decision adds have a wide
+    false-positive surface, and the exclusions are the whole thing keeping them narrow:
+    without them `conceptual_conflation` becomes a licence to demand arbitrary
+    distinctions and the widened `overstated_claim` reads as "quantify everything".
+    Both directions are measured by the paired controls, but the critic only ever sees
+    the brief."""
+    prompt = critic_user(Lens.LOGIC, "q", "# r\n\nbody\n")
+
+    # Conflation: both halves of the trigger, and each named exclusion.
+    assert "materially distinct" in prompt
+    assert "carries an inference or a conclusion" in prompt
+    assert "NOT a different word for the same thing" in prompt
+    assert "NOT the absence of a subgroup breakdown" in prompt
+    assert "genuinely covers both" in prompt
+    assert "an aggregation the report" in prompt
+
+    # Anchoring: the trigger, the kind/mechanism carve-out, and the resolvability rule
+    # that keeps the fix inside the report even with retrieval off.
+    assert "magnitude, prevalence, timing or change" in prompt
+    assert "kind, mechanism or character needs no" in prompt
+    assert "Never demand a specific dataset or document as the only fix" in prompt
+
+
 def test_bias_categories_reach_their_lens_prompt():
     expected = {
         Lens.EVIDENCE: Category.ONE_SIDED_SOURCING,

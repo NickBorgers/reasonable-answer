@@ -79,8 +79,20 @@ def _quote_hint(field: str, scope: str, source_text: str) -> str:
 
 
 #: Categories whose `related_span` must itself be text from the artifact.
+#:
+#: `conceptual_conflation` joins the three original logic categories (D-conceptual-conflation)
+#: because both poles of a substitution are passages the report contains — the one that
+#: states the concept and the one that swaps the other in — exactly the premise/conclusion
+#: shape `invalid_inference` already has, and not the bias categories' *pattern* shape. The
+#: field stays optional, so a single sentence that fuses the two concepts with no second
+#: passage anywhere is still reportable with `related_span` omitted.
 IN_ARTIFACT_RELATED = frozenset(
-    {Category.CONTRADICTED_CLAIM, Category.INVALID_INFERENCE, Category.OVERSTATED_CLAIM}
+    {
+        Category.CONTRADICTED_CLAIM,
+        Category.INVALID_INFERENCE,
+        Category.OVERSTATED_CLAIM,
+        Category.CONCEPTUAL_CONFLATION,
+    }
 )
 
 
