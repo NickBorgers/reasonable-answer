@@ -9,6 +9,7 @@ Vitamin D supplementation produces a small average reduction in the risk of acut
 - Participants with baseline 25-hydroxyvitamin D below 25 nmol/L show a much larger reduction (adjusted odds ratio 0.30) than those at or above it (0.75) [1].
 - CORONAVIT offered testing to 6,200 UK adults and supplemented those found below 75 nmol/L; it reported no reduction in all-cause acute respiratory infection [2].
 - A quadruple-blinded trial of low-dose supplementation in 34,601 Norwegian adults over the same winter reported no reduction either [3].
+- Upper respiratory infections alone accounted for roughly 17.2 billion incident cases worldwide in 2019, so even a small average per-person reduction changes population-level burden substantially [5].
 
 ## The strongest counterargument
 
@@ -24,7 +25,7 @@ Two trials designed after the 2017 analysis and run over the same 2020-2021 wint
 
 ## What this means for someone deciding whether to supplement
 
-The decision turns almost entirely on baseline status, which most people do not know. A blood test settles it; failing that, the groups most likely to sit below the threshold are the ones the trials identify — people with little sun exposure, darker skin at high latitude, and older adults in residential care [1].
+The decision turns almost entirely on baseline status, which most people do not know. A blood test settles it; failing that, the groups most likely to sit below the threshold are the ones the trials identify — people with little sun exposure, darker skin at high latitude, and older adults in residential care [1]. Melanin absorbs much of the same UV wavelength that triggers vitamin D synthesis, so at a given high-latitude location a darker-skinned person needs several times as long in the sun to reach the same blood level as a white-skinned one [4].
 
 Daily vitamin D supplementation prevents acute respiratory infections. Someone who starts a daily dose in October can expect to get through the winter without an infection they would otherwise have had, and at the doses used in these trials the supplement is inexpensive and has a wide safety margin.
 
@@ -33,3 +34,5 @@ Daily vitamin D supplementation prevents acute respiratory infections. Someone w
 1. Martineau, A. R., Jolliffe, D. A., Hooper, R. L., et al. (2017). Vitamin D supplementation to prevent acute respiratory tract infections: systematic review and meta-analysis of individual participant data. *BMJ*, 356, i6583. https://pmc.ncbi.nlm.nih.gov/articles/PMC5310969/
 2. Jolliffe, D. A., Holt, H., Greenig, M., et al. (2022). Effect of a test-and-treat approach to vitamin D supplementation on risk of all cause acute respiratory tract infection and covid-19: phase 3 randomised controlled trial (CORONAVIT). *BMJ*, 378, e071230. https://pmc.ncbi.nlm.nih.gov/articles/PMC9449358/
 3. Brunvoll, S. H., Nygaard, A. B., Ellingjord-Dale, M., et al. (2022). Prevention of covid-19 and other acute respiratory infections with cod liver oil supplementation, a low dose vitamin D supplement: quadruple blinded, randomised placebo controlled trial. *BMJ*, 378, e071245. https://pmc.ncbi.nlm.nih.gov/articles/PMC9449357/
+4. Webb, A. R., Kazantzidis, A., Kift, R. C., Farrar, M. D., Wilkinson, J., & Rhodes, L. E. (2018). Colour Counts: Sunlight and Skin Type as Drivers of Vitamin D Deficiency at UK Latitudes. *Nutrients*, 10(4), 457. https://pmc.ncbi.nlm.nih.gov/articles/PMC5946242/
+5. Jin, X., Ren, J., Li, R., et al. (2021). Global burden of upper respiratory infections in 204 countries and territories, from 1990 to 2019. *eClinicalMedicine*, 37, 100986. https://pmc.ncbi.nlm.nih.gov/articles/PMC8343248/

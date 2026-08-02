@@ -1,11 +1,16 @@
+# Matched pair (D-fixture-report-shape): derived from `control-base-minimum-wage-01` by
+# replacing one cited, hedged sentence with an uncited sweeping one. Everything else is
+# byte-identical to the sound sibling.
 lens: evidence
 tier: obvious
 question: "Does raising the minimum wage reduce teen employment?"
 defects:
   - category: uncited_claim
-    locus: {section: 3, paragraph: 1}
+    locus: {section: 5, paragraph: 1}
     note: >
-      S3.P1 makes a sweeping empirical claim — "every credible study of the 2021-2023
+      S5.P1 makes a sweeping empirical claim — "every credible study of the 2021-2023
       period", a specific threshold, a specific effect size and a specific time window —
       with no citation at all, in a report where every other empirical paragraph carries
-      one. The contrast with its neighbours is the signal.
+      one. The contrast with its neighbours is the signal. Source [4], which the sound
+      base cites here, is still cited from S1.P1, S2.P1 and S5.P2, so the defect cannot
+      be found by noticing an orphaned Sources entry.

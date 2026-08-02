@@ -24,7 +24,7 @@ Cengiz, Dube, Lindner and Zipperer applied a bunching estimator across 138 state
 
 ## Where the effects concentrate
 
-Every credible study of the 2021-2023 period found that increases above 60 percent of the local median wage produced teen employment losses of at least 8 percent within two years, with the largest losses in rural counties. That is the practically important limitation on everything above: most of the studied increases sit well below that ratio.
+Dube's review of the international evidence reports that employment effects are larger where the minimum sits high relative to the local median, and notes that direct evidence above roughly 60 percent of the median is thin [4]. That is the practically important limitation on everything above: most of the studied increases sit well below that ratio.
 
 Effects also appear larger where an increase is large relative to the local wage distribution than where it is large in absolute terms, which is one reason national studies and place-specific studies frequently disagree [3][4].
 

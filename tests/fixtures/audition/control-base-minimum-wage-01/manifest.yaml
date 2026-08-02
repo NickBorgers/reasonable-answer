@@ -1,0 +1,17 @@
+# A control declares no `lens` and no `tier` (D-control-soundness): it is graded by
+# every lens, and it gates no sensitivity threshold because it plants nothing.
+#
+# This is the sound base of `uncited-claim-01` (D-fixture-report-shape). The two differ
+# in one paragraph: here the concentration claim is cited to [4] and hedged to what that
+# review reports; there it is an uncited sweeping assertion.
+#
+# Soundness contract, which no test can check and review therefore must: every empirical
+# claim carries an inline [n] citation resolving to a numbered `## Sources` entry; the
+# question is contested and the sourcing is deliberately drawn from both sides of the
+# live dispute, including a survey whose conclusion contradicts this report's own, so
+# `one_sided_sourcing` — which floors to `major` — cannot be earned honestly; the
+# strongest opposing case (that the null findings reflect study selection) has its own
+# section and is engaged rather than dismissed; the conclusion states the range of
+# increases the evidence covers instead of generalising past it.
+kind: control
+question: "Does raising the minimum wage reduce teen employment?"

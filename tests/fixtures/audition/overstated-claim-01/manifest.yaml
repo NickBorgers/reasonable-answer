@@ -48,6 +48,18 @@ defects:
       claim against its support finds nothing here. That is the point — the fixture
       measures whether the critic holds the claim against the support, not against a
       neighbouring sentence.
-      No slot rotation: nothing here is a fabricated surface form. The three sources are
+      No slot rotation: nothing here is a fabricated surface form. All five sources are
       real and accurately listed, and the defect lives in the strength of the prose, not
       in a name a model could memorize.
+
+      Sources 4 and 5 were added under D-fixture-report-shape to bring this fixture's
+      source count to the corpus-wide five that
+      `test_corpus_class_is_not_readable_off_source_count` now holds every logic-lens
+      planted fixture to, matching the six controls. Both are genuinely new supporting
+      claims, not padding: Webb et al. (2018) grounds the "darker skin at high latitude"
+      clause in S5.P1 in the melanin/UV mechanism rather than leaving it asserted, and
+      Jin et al. (2021) gives the population-scale context for why a small average effect
+      is worth measuring at all. Verified fetched, same discipline as sources 1-3: PMC5946242
+      supports the skin-type/sun-exposure claim as stated; PMC8343248 supports the 17.2
+      billion 2019 incident-case figure as stated. Neither touches S5.P2, the planted
+      locus.

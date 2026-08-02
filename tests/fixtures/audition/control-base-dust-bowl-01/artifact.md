@@ -34,8 +34,6 @@ Wartime manufacturing on the coast drew a large share of the arrivals out of agr
 
 By the end of that decade the receiving counties no longer stand out in that account as a distinct low-wage region within California [1]. That observation is the basis for the conclusion above, and it is a claim about counties.
 
-The wage suppression the migration caused was permanent, and the receiving counties never recovered the relative wage position they held before 1935 [1].
-
 ## Sources
 
 1. Gregory, J. N. (1989). *American Exodus: The Dust Bowl Migration and Okie Culture in California*. Oxford University Press.

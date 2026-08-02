@@ -43,3 +43,14 @@ defects:
       live audition shows competent critics anchoring there, the pre-registered
       remedy is to add a second obvious completeness fixture rather than to relax
       this one — see D-obvious-per-lens.
+
+      Source 5 (FHWA Traffic Monitoring Guide) was added under D-fixture-report-shape to
+      bring this fixture to the corpus-wide five sources
+      `test_corpus_class_is_not_readable_off_source_count` now holds every
+      completeness-lens planted fixture to, matching the controls. It supports a new
+      sentence in S4.P1 — that pneumatic road tubes are FHWA's standard portable
+      speed-collection method — genuinely new content, not padding, and nowhere near
+      S1.P1, the planted locus. Verified fetched: the PDF at the cited URL is FHWA's
+      October 2016 Traffic Monitoring Guide (FHWA-PL-17-003), and its Section 3.3.2 and
+      Appendix F describe pneumatic road tubes as the standard portable short-duration
+      speed and volume sensor, as stated.
