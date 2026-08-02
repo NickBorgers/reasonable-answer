@@ -416,7 +416,7 @@ Each run writes `runs/<run_id>/` (mode 0700):
 
 ```
 final.md              the report that shipped
-final.json            terminal status, clean records, outstanding defects, warnings
+final.json            terminal status, clean records, outstanding defects, warnings, build
 owner.txt             who submitted it; absent means the web interface will not serve it
 events.jsonl          every stage: startup, intake, generate, critique, triage, control
 reports/              every draft, with its author
@@ -428,6 +428,10 @@ signals/decisions.jsonl  which rule fired, per round
 
 `reports/` and `critiques/` hold the sensitive material; `ra purge <id> --content-only` drops them
 and keeps the decision record — and `owner.txt`, so a purged run stays in its owner's index.
+
+Every run also stamps the commit it ran on, in `final.json` and on each `startup` event, so runs
+can be sorted into before and after a given change — see
+[docs/run-provenance.md](./docs/run-provenance.md) for the query.
 
 `final.md` is the report on its own, which says nothing about how it ended. `ra export <run_id>`
 joins it to `final.json` and writes the document you would actually give someone — see

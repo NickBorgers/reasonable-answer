@@ -143,6 +143,18 @@ jobs:
       # A merge of main into the PR branch is not new content to review. Without this,
       # routinely resyncing a long-lived branch burns cycles and can push a PR into the
       # cap without a single substantive change having been made.
+      #
+      # The predicate is about the *push*, not about the head commit (D-inherit-whole-range).
+      # It used to ask "is HEAD a merge whose second parent is on the base branch", which
+      # says nothing about what sits underneath that merge. Push content, then
+      # `git merge origin/main`, and the whole push inherited the prior verdict with no
+      # reviewer reading a line of it — a stale NO-GO re-stamped over real fixes in the
+      # observed direction (#126, #127, #130), and a merge-gate bypass in the unobserved
+      # one. So the question asked here is now "did this push add anything to review",
+      # answered twice over: every commit added since the reviewed SHA must itself be a
+      # base-resync merge, *and* recreating that merge from the reviewed SHA must reproduce
+      # this commit's tree exactly. The second test is the one a conflict resolution — the
+      # place arbitrary content can hide inside a correctly-shaped merge — cannot pass.
       - name: Detect merge-from-main
         id: inherit
         working-directory: pr-head
@@ -156,8 +168,16 @@ jobs:
         run: |
           set -euo pipefail
 
-          inherit=false
-          inherited=""
+          # Every refusal is the same plain "review this normally". Written once so a newly
+          # added test cannot forget to emit the outputs the rest of the graph reads.
+          review_normally() {
+            echo "gather: $1; reviewing normally"
+            {
+              echo "inherit=false"
+              echo "inherited_verdict="
+            } >> "$GITHUB_OUTPUT"
+            exit 0
+          }
 
           # `/review` outranks this. Inheriting is an optimisation for automatic triggers —
           # a resync should not burn a cycle — but it also re-stamps the prior verdict
@@ -166,36 +186,88 @@ jobs:
           # answered by skipping the panel and re-publishing the old NO-GO. PR #56 sat in
           # exactly that state.
           if [ "$FORCE_REVIEW" = "true" ]; then
-            echo "gather: /review requested; not inheriting, reviewing this SHA on its merits"
-            {
-              echo "inherit=false"
-              echo "inherited_verdict="
-            } >> "$GITHUB_OUTPUT"
-            exit 0
+            review_normally "/review requested; not inheriting, reviewing this SHA on its merits"
+          fi
+
+          # Nothing to inherit, and no range to measure: the first cycle on a PR is read.
+          if [ -z "$PRIOR_CYCLE_SHA" ]; then
+            review_normally "no prior reviewed SHA"
           fi
 
           # A merge commit has two or more parents: "<sha> <parent1> <parent2>" is 3 words.
           parents=$(git rev-list --parents -n 1 "$SHA" | wc -w)
-          if [ "$parents" -ge 3 ]; then
-            git fetch --quiet origin "$BASE_REF"
-            # Second parent already on the base branch ⇒ this merged base INTO the PR,
-            # rather than bringing new work in from somewhere else.
-            if git merge-base --is-ancestor "${SHA}^2" "origin/${BASE_REF}"; then
-              if [ -n "$PRIOR_CYCLE_SHA" ]; then
-                inherited=$(gh api "repos/${REPO}/commits/${PRIOR_CYCLE_SHA}/statuses" \
-                  --jq '[.[] | select(.context == "review/verdict")] | sort_by(.created_at) | last | .description // empty')
-              fi
-              if [ -n "$inherited" ]; then
-                inherit=true
-                echo "gather: merge-from-${BASE_REF}; inheriting prior verdict '${inherited}'"
-              else
-                echo "gather: merge-from-${BASE_REF} but no prior verdict to inherit; reviewing normally"
-              fi
-            fi
+          if [ "$parents" -lt 3 ]; then
+            review_normally "${SHA} is not a merge commit"
           fi
 
+          git fetch --quiet origin "$BASE_REF"
+          base="origin/${BASE_REF}"
+
+          # Second parent already on the base branch ⇒ this merged base INTO the PR,
+          # rather than bringing new work in from somewhere else.
+          if ! git merge-base --is-ancestor "${SHA}^2" "$base"; then
+            review_normally "${SHA}^2 is not on ${BASE_REF}"
+          fi
+
+          # "Everything since the reviewed SHA" only means something while that SHA is still
+          # in this commit's history. A force-push replaces the chain and gets a fresh read.
+          if ! git merge-base --is-ancestor "$PRIOR_CYCLE_SHA" "$SHA"; then
+            review_normally "${PRIOR_CYCLE_SHA} is not an ancestor of ${SHA}"
+          fi
+
+          # Test 1 — whole-range shape. Every commit reachable from the head but from
+          # neither the reviewed SHA nor the base branch is something this push put on the
+          # PR's own side. Each must be a merge whose every merged-in parent is already on
+          # the base branch; anything else is content nobody read. `^$base` is what keeps a
+          # genuine resync from tripping this — the commits a resync brings across are
+          # reachable from the base branch, so they are never counted against the push.
+          added=0
+          while IFS= read -r commit; do
+            [ -n "$commit" ] || continue
+            mapfile -t cparents < <(git rev-parse "${commit}^@")
+            if [ "${#cparents[@]}" -lt 2 ]; then
+              echo "gather:   ${commit} is a content commit under the head merge"
+              added=$((added + 1))
+              continue
+            fi
+            for parent in "${cparents[@]:1}"; do
+              if ! git merge-base --is-ancestor "$parent" "$base"; then
+                echo "gather:   ${commit} merges ${parent}, which is not on ${BASE_REF}"
+                added=$((added + 1))
+              fi
+            done
+          done < <(git rev-list "${PRIOR_CYCLE_SHA}..${SHA}" "^${base}")
+
+          if [ "$added" -gt 0 ]; then
+            review_normally "${added} unreviewed change(s) since ${PRIOR_CYCLE_SHA}"
+          fi
+
+          # Test 2 — tree identity. Shape alone still trusts a merge to contain only the
+          # merge, and a conflict resolution can put arbitrary content into a commit that
+          # passes test 1 on every parent. So recreate the merge and compare trees: any
+          # difference — a hand resolution, a `-s ours` that dropped base content, an
+          # octopus third parent — is content no verdict was ever issued about.
+          #
+          # `--write-tree` needs git >= 2.38, and a recreate that conflicts exits non-zero.
+          # Both land on the same branch, which reviews rather than inherits. Fail-closed is
+          # the right direction: the cost is one spent cycle, never an unread merge.
+          if ! merged_tree=$(git merge-tree --write-tree "$PRIOR_CYCLE_SHA" "${SHA}^2" 2>/dev/null); then
+            review_normally "could not cleanly recreate the merge of ${PRIOR_CYCLE_SHA} and ${SHA}^2"
+          fi
+          head_tree=$(git rev-parse "${SHA}^{tree}")
+          if [ "$merged_tree" != "$head_tree" ]; then
+            review_normally "recreating the merge yields tree ${merged_tree}, not ${head_tree}"
+          fi
+
+          inherited=$(gh api "repos/${REPO}/commits/${PRIOR_CYCLE_SHA}/statuses" \
+            --jq '[.[] | select(.context == "review/verdict")] | sort_by(.created_at) | last | .description // empty')
+          if [ -z "$inherited" ]; then
+            review_normally "pure merge-from-${BASE_REF} but no prior verdict to inherit"
+          fi
+
+          echo "gather: pure merge-from-${BASE_REF} since ${PRIOR_CYCLE_SHA}; inheriting prior verdict '${inherited}'"
           {
-            echo "inherit=$inherit"
+            echo "inherit=true"
             echo "inherited_verdict=$inherited"
           } >> "$GITHUB_OUTPUT"
 
