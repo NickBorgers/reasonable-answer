@@ -210,20 +210,33 @@ it holds `contents: read`, so it could not push if it tried.
   billed humans for exactly the iteration the blockers had asked them to do; PR #49 walked
   to `cycle_capped` in three human pushes, one of which was repairing the CI failure that
   started the burn, and force-pushing was the only way out.
-- **A merge of the base branch into the PR inherits the previous verdict** instead of
-  burning a cycle. Without this, routinely resyncing a long-lived branch can push a PR
-  into the cap without a single substantive change. It re-stamps that verdict without
-  reading anything, which is why `/review` overrides it: inheriting a NO-GO is the right
-  answer to an automatic resync and the wrong answer to a person asking to be re-reviewed.
-- **A fixer-authored commit is inherited exactly like any other merge-from-base**, with no
-  per-author exemption. A prior version of this rule (PR #65, responding to PR #49) refused
+- **A push that is *only* a merge of the base branch inherits the previous verdict**
+  instead of burning a cycle. Without this, routinely resyncing a long-lived branch can
+  push a PR into the cap without a single substantive change. It re-stamps that verdict
+  without reading anything, which is why `/review` overrides it: inheriting a NO-GO is the
+  right answer to an automatic resync and the wrong answer to a person asking to be
+  re-reviewed.
+
+  **"Only" is measured across the whole push, and against the tree (D-inherit-whole-range).**
+  Two tests must both pass. Every commit reachable from the head but from neither the last
+  reviewed SHA nor the base branch has to be a merge whose every merged-in parent is
+  already on the base branch; and re-creating that merge — `git merge-tree --write-tree` of
+  the last reviewed SHA with the base commit the head merged — has to reproduce the head's
+  tree exactly. Either test failing means the panel reads the push. This replaced a test on
+  the *shape of the head commit alone*, which was silent about everything committed
+  underneath it: content, then `git merge origin/main`, inherited the prior verdict with no
+  reviewer reading a line. The tree test is what a conflict resolution cannot pass, and it
+  is deliberately fail-closed — a merge that cannot be re-created cleanly is reviewed.
+- **A fixer-authored commit has no per-author exemption from the merge-from-base rule.** A clean,
+  tree-identical base resync is inherited; a conflict-resolved merge is reviewed under
+  D-inherit-whole-range. A prior version of this rule (PR #65, responding to PR #49) refused
   to inherit onto a commit authored as `ci@reasonable-answer.local`, on the theory that "the
   fixed SHA earns its own cycle" was a property worth enforcing here. That was an agent's
   invention, not the owner's intent: the owner has since confirmed fixer output is meant to
   reach main without a further review cycle, matching the design this repository borrows
-  from, and the per-author check has been removed. See D-fixer-merges-not-rebases's residual: a fixer-authored
-  merge whose conflict resolutions are wrong-but-clean can still reach main unread, in the
-  same way any other wrong-but-clean fixer output can (below).
+  from, and the per-author check has been removed. See D-fixer-merges-not-rebases's residual:
+  wrong-but-clean fixer output can still reach main unread on the fixer's normal path (below),
+  where no successor inherit decision runs.
 - **A run that reviewed nothing does not consume a cycle.** `review/cycle` is written by
   `record-cycle`, after the panel has read the code, and only when at least one reviewer's
   guard cleared. Every guard refusing — PR Validation red on the reviewed SHA, the branch
@@ -325,10 +338,16 @@ comment naming the unresolved paths, and the job fails. That is the intended lan
 for a conflict the agent should not be guessing at: the prompts tell it to leave a marker
 it cannot reconcile honestly rather than invent a resolution nobody can check.
 
-The resulting merge commit lands on the merge-from-base inherit path like any other, so it
-does not burn a cycle. The conflicted-path list travels in a file rather than an
-environment variable: paths are contributor-controlled, and the agent's environment is
-assembled from an `--env-file`, where a newline in a path would inject arbitrary variables.
+A **clean** merge commit lands on the merge-from-base inherit path like any other, so it
+does not burn a cycle. A merge the agent had to **resolve** no longer does
+(D-inherit-whole-range): its tree is not the tree re-creating the merge produces, so the
+inherit test refuses it and the panel reads it. That is a deliberate narrowing of what this
+paragraph used to promise — a resolution is a judgement nobody has checked, and it is the
+one place arbitrary content can sit inside a correctly-shaped merge. It costs a cycle only
+on a PR that actually conflicted with its base. The conflicted-path list travels in a file
+rather than an environment variable: paths are contributor-controlled, and the agent's
+environment is assembled from an `--env-file`, where a newline in a path would inject
+arbitrary variables.
 
 **The sync still runs when the panel was guarded off (D-unguarded-sync).** Every reviewer guard refusing
 normally means the fixer does not run either, because `fix` was gated on `record-cycle`
@@ -379,12 +398,16 @@ where the review actually happened, and the successor stays clean for the run th
 it. Claim, stamp, and cycle have to move together; fixing any one alone puts the deadlock back
 somewhere else.
 
-One residual is worth naming rather than papering over: the successor is a merge-from-base,
-so if a prior verdict exists anywhere in its chain the inherit short-circuit above may
-re-stamp it instead of opening a panel. That is the fail-closed direction — a stale NO-GO,
-never a stale GO — and `/review` overrides it, which is what that gesture is for. The
-guarantee this path actually makes is narrower than "it will be reviewed": the successor is
-mergeable, validated, and *reachable* by a panel, where before it was none of the three.
+One residual is worth naming rather than papering over: the successor is a clean
+merge-from-base and nothing else — the pass abandons on conflict — so it is exactly the
+shape the inherit short-circuit is built to pass, and if a prior verdict exists on the
+pre-sync SHA it is re-stamped instead of opening a panel. What D-inherit-whole-range changed
+is the blast radius, not this case: the successor's tree really is the merge of a reviewed
+tree with the base, and nothing else is riding along under it. That is also the fail-closed
+direction — a stale NO-GO, never a stale GO — and `/review` overrides it, which is what that
+gesture is for. The guarantee this path actually makes is narrower than "it will be
+reviewed": the successor is mergeable, validated, and *reachable* by a panel, where before it
+was none of the three.
 
 It runs in one of two modes.
 
