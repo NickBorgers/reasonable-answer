@@ -1608,6 +1608,9 @@ main {
 .rec-row { display: grid; grid-template-columns: 9rem 1fr; gap: .6rem; font-size: .9rem; }
 .rec-row dt { color: var(--dim); }
 .rec-row dd { margin: 0; }
+/* The source-review rows name what a count means ("Blocked, paywalled or unreadable"),
+   which does not fit the 9rem label column the other record rows use. */
+.coverage-grid .rec-row { grid-template-columns: minmax(9rem, 24rem) 1fr; }
 .reviewers { list-style: none; margin: 0 0 1.2rem; padding: 0; font-size: .9rem; }
 .reviewers li { padding: .12rem 0; }
 .reviewers .lens-name { display: inline-block; min-width: 8rem; color: var(--dim); }

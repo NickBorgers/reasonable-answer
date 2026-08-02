@@ -127,6 +127,11 @@ class Provenance:
     #: older draft's list, which must be withheld rather than shown against this text
     #: (issue #93). Distinct from an empty `outstanding`, which means genuinely none.
     outstanding_withheld: bool = False
+    #: Observed source-verification coverage of the shipped draft, exactly as
+    #: `final.json` holds it (D-observed-source-coverage). Empty when no evidence lens
+    #: ever ran on this draft — which is not the same as a bibliography that came back
+    #: fully checked, and is rendered as the absence it is.
+    source_coverage: dict[str, Any] = field(default_factory=dict)
 
     @property
     def meaning(self) -> str:
@@ -193,6 +198,7 @@ def provenance(
         outstanding_withheld=bool(raw_defects) and not outstanding,
         warnings=list(final.get("warnings") or []),
         reviewers=_reviewers(final.get("clean_records") or [], artifact_hash),
+        source_coverage=_coverage(final.get("source_coverage")),
     )
 
 
@@ -215,6 +221,67 @@ def _for_artifact(
     if not artifact_hash:
         return []
     return [r for r in records if r.get("artifact_hash") == artifact_hash]
+
+
+#: The source-review breakdown, in the order a reader needs it: what was claimed, what
+#: could be reached, then each way a reach ended. The wording is observational — every
+#: row says what happened, none says whether the citation is any good
+#: (D-observed-source-coverage).
+COVERAGE_ROWS: tuple[tuple[str, str], ...] = (
+    ("cited", "Entries cited"),
+    ("addressable", "Addressable (carry a URL this pipeline can fetch)"),
+    ("not_addressable", "Not independently addressable"),
+    ("bodies_read", "Body read"),
+    ("metadata_only", "Existence confirmed by a registry, body not read"),
+    ("blocked_or_unreadable", "Blocked, paywalled or unreadable"),
+    ("not_found", "Definitively not found (404/410)"),
+    ("budget_exhausted", "Budget exhausted before it could be resolved"),
+    ("not_attempted", "Addressable but not attempted"),
+    ("existence_confirmed", "Existence confirmed in total"),
+    ("not_independently_checked", "Not independently checked"),
+)
+
+#: Said under every breakdown, because the counts alone invite two wrong readings: that
+#: an unchecked entry is a suspect one, and that a blocked or paywalled one is absent.
+#: Neither follows, and the second is the error D-notfound-fabrication exists to prevent.
+COVERAGE_CAVEAT = (
+    "These are observed counts for the report shipped here, not a verdict on its "
+    "citations. An entry that was not independently checked is unverified, which is not "
+    "evidence that it is wrong; a blocked or paywalled source was unreadable, not absent. "
+    "Only a definitive not-found establishes that a cited page does not exist."
+)
+
+#: Said when verification was off for this run: the entries were counted, and none of
+#: them could have been checked, so the zero rows are a configuration fact rather than a
+#: string of failed fetches.
+COVERAGE_VERIFICATION_OFF = (
+    "Source verification was not enabled for this run, so no cited page was fetched. "
+    "Every entry below is unchecked by configuration, not by outcome."
+)
+
+
+def _coverage(raw: Any) -> dict[str, Any]:
+    """The coverage record off `final.json`, coerced to counts this can render.
+
+    A non-object, or an object with no `cited`, is treated as no record at all rather
+    than as a bibliography of zero entries — the difference between "not measured" and
+    "nothing cited", which the rendering keeps apart.
+    """
+    if not isinstance(raw, dict) or not isinstance(raw.get("cited"), int):
+        return {}
+    out: dict[str, Any] = {
+        key: value
+        for key, value in raw.items()
+        if isinstance(value, int) and not isinstance(value, bool)
+    }
+    out["verification_enabled"] = bool(raw.get("verification_enabled", True))
+    return out
+
+
+def _coverage_rows(coverage: dict[str, Any]) -> list[tuple[str, int]]:
+    """(label, count) for every row the record actually carries, in `COVERAGE_ROWS`
+    order. A key an older record does not have is skipped, never rendered as zero."""
+    return [(label, coverage[key]) for key, label in COVERAGE_ROWS if key in coverage]
 
 
 def _reviewers(records: list[dict[str, Any]], artifact_hash: str | None) -> list[tuple[str, str]]:
@@ -272,6 +339,13 @@ def export_markdown(
         lines += [f"- {lens}: `{critic}`" for lens, critic in prov.reviewers]
         lines.append("")
 
+    if prov.source_coverage:
+        lines += ["### Source review", ""]
+        if not prov.source_coverage.get("verification_enabled", True):
+            lines += [COVERAGE_VERIFICATION_OFF, ""]
+        lines += [f"- {label}: {count}" for label, count in _coverage_rows(prov.source_coverage)]
+        lines += ["", COVERAGE_CAVEAT, ""]
+
     if prov.outstanding:
         lines += ["### Outstanding defects in this report", ""]
         lines += [
@@ -315,6 +389,25 @@ def provenance_html(prov: Provenance) -> str:
         )
         reviewers = f"<h3>Reviewed clean by</h3><ul class='reviewers'>{items}</ul>"
 
+    coverage = ""
+    if prov.source_coverage:
+        # The same `record-grid` the run rows use, so the counts read as part of the
+        # record rather than as a separate report about it.
+        cells = "".join(
+            f"<div class='rec-row'><dt>{_esc(label)}</dt><dd>{_esc(count)}</dd></div>"
+            for label, count in _coverage_rows(prov.source_coverage)
+        )
+        off = (
+            ""
+            if prov.source_coverage.get("verification_enabled", True)
+            else f'<p class="advice">{_esc(COVERAGE_VERIFICATION_OFF)}</p>'
+        )
+        coverage = (
+            f"<h3>Source review</h3>{off}"
+            f'<dl class="record-grid coverage-grid">{cells}</dl>'
+            f'<p class="advice">{_esc(COVERAGE_CAVEAT)}</p>'
+        )
+
     outstanding = ""
     if prov.outstanding:
         items = "".join(
@@ -346,6 +439,7 @@ def provenance_html(prov: Provenance) -> str:
   <p class="advice">{_esc(prov.advice)}</p>
   <dl class="record-grid">{rows}</dl>
   {reviewers}
+  {coverage}
   {outstanding}
   {warnings}
   <p class="colophon">Produced by reasonable-answer: models take turns writing and

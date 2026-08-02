@@ -383,14 +383,19 @@ invented one. (arXiv ids and PMCIDs are covered when arXiv and Europe PMC are ad
 mirror rather than the version of record. Neither tier sharpens `misrepresented_source`: an
 abstract is not the source's text. See D-existence-vs-body.
 
-**Known limitations.** Output is labelled *consensus-reviewed with in-artifact sourcing* by default,
-*…with retrieved sourcing* when `search.enabled: true`, and *…with verified sourcing* when
-`verify_sources` is also on. **None of the three is fact-checked.** Verification establishes that a
-cited source exists and, when a body can be read, that the page says something compatible with the
-claim — not that the page is correct, and not that the roster chose good sources. A
-registry-confirmed source whose body cannot be read proves existence only, and an open-access
-mirror is disclosed as a different document from the cited page. With verification off, whether a
-source supports the claim attached to it is unverified entirely. (See D-in-artifact-citations/D-retrieval-opt-in/D-source-verification/D-existence-vs-body in
+**Known limitations.** Output is labelled *consensus-reviewed with in-artifact sourcing* by default
+and *…with retrieved sourcing* when `search.enabled: true`. When `verify_sources` is also on the
+label is not a posture at all but the run's **measured** coverage of the draft it shipped —
+*consensus-reviewed — source review: 15 cited; 3 addressable; 3 existence confirmed; 3 bodies read;
+12 not independently checked* — because a feature being switched on says nothing about how much of a
+bibliography it reached (D-observed-source-coverage). Every export and the run page carry the full
+breakdown. **None of it is fact-checked.** Verification establishes that a cited source exists and,
+when a body can be read, that the page says something compatible with the claim — not that the page
+is correct, and not that the roster chose good sources. A registry-confirmed source whose body
+cannot be read proves existence only, and an open-access mirror is disclosed as a different document
+from the cited page. An entry counted as not independently checked is unverified, not suspect; a
+blocked or paywalled one was unreadable, not absent. With verification off, whether a source supports
+the claim attached to it is unverified entirely. (See D-in-artifact-citations/D-retrieval-opt-in/D-source-verification/D-existence-vs-body/D-observed-source-coverage in
 [decisions.md](docs/decisions.md) and the evidence section of [convergence.md](docs/convergence.md).)
 
 **Writer disputes (optional, off by default).** Set `disputes.enabled: true` and a writer that

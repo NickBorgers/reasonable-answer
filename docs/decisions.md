@@ -3491,6 +3491,77 @@ contains. No change to the number of planted fixtures or to any lens's coverage.
 `repetitions`, whose default remains 3.
 
 
+## D-observed-source-coverage — the run reports what verification reached, not that verification was switched on
+
+**The problem.** `graph._finalize` derived its sourcing label from a runtime boolean. With
+`search.verify_sources: true` every run shipped as *consensus-reviewed with verified sourcing*,
+whatever the fetches actually returned. Run `run-c4c0e64b4128` is the worked example: the shipped
+report listed **fifteen** sources, three of its entries carried a URL this pipeline could address,
+three bodies were read, and twelve entries were never checked by anything. The label said
+"verified sourcing" for all fifteen. Nothing in it was a lie about the configuration and all of it
+was a lie about the artifact — which is the failure mode the whole labelling discipline of
+D-in-artifact-citations, D-retrieval-opt-in and D-source-verification exists to prevent. A reader
+holding the export had no way to see the gap, because the only number the run recorded was
+`fetch_sources`' count of URLs it had already decided to fetch. A bibliography's *denominator* was
+never measured at all.
+
+**Decision.** Coverage is measured, keyed to an artifact, persisted, and rendered; the categorical
+label is replaced by the measurement.
+
+*Measured.* `fetch.coverage` reads the shipped draft's own `## Sources` section and tallies it in
+**entries**, not in fetches: `cited`, `addressable` / `not_addressable`, `attempted` /
+`not_attempted`, and a disposition for each attempt — `bodies_read`, `metadata_only`,
+`blocked_or_unreadable`, `not_found`, `budget_exhausted`. `existence_confirmed` and
+`not_independently_checked` are derived from those, never stored beside them, so the summary line
+and the breakdown cannot disagree. Entries rather than fetches because two entries citing one URL
+are two things the report stands on, and the per-run fetch cache collapses them into one call.
+
+*Keyed to an artifact.* The tally is taken in `_critique_one` where the evidence lens fetches, and
+written into checkpointed state under the artifact's hash — never latest-wins. On a non-accepted
+terminal `_finalize` ships the best-scoring draft, which need not be the last one written (issue
+#93), so coverage keys the same way the outstanding-defect list does. A draft with no entry reads as
+*not recorded*, which is neither zero coverage nor a pass.
+
+*Persisted and rendered.* `final.json` gains `source_coverage`; `export.Provenance` carries it; the
+markdown export, the HTML export and the run page render the same breakdown from one definition, as
+they already do for the defect list. Every row is a bounded non-negative integer derived from the
+artifact's own text — no URL, no page text, no model identity — so the record is safe for the audit
+trail on RA-016's terms, and `OrchestratorView` is untouched: the controller still sees none of it.
+
+*The label.* With verification on, the label is now the observation —
+`consensus-reviewed — source review: 15 cited; 3 addressable; 3 existence confirmed; 3 bodies read;
+12 not independently checked`. Verification on with nothing recorded says exactly that rather than
+falling back to the old wording, because an absent measurement must not read as a passing one. The
+two non-verification labels are unchanged: neither ever claimed verification, so neither was
+overstating anything — but their coverage is still measured and still rendered, so a retrieval-only
+run now states in its export how much of its bibliography went unchecked, which its label never
+could.
+
+**What the numbers must not be read as saying.** Two misreadings are invited by the counts and
+foreclosed in the rendering, which carries the caveat under every breakdown. An entry that was not
+independently checked is *unverified*, not suspect. A `blocked` or `paywalled` entry was
+*unreadable*, not absent — reading it as absence is precisely the inference D-notfound-fabrication
+forbids, and only a definitive not-found establishes that a cited page does not exist. The
+existence-vs-body doctrine of D-existence-vs-body survives intact in the columns:
+`metadata_only` confirms existence and is counted separately from `bodies_read`, because a registry
+record is not the source's text.
+
+**Where the measurement is deliberately conservative.** Entry splitting is a heuristic over
+model-written markdown — list markers where the section has them, one entry per line where it does
+not — and "addressable" means *carries an http(s) URL*, so a bare `doi:10.…` with no resolver URL
+counts as not independently addressable. Both choices err toward reporting **less** coverage than
+was achieved, which is the only direction a claim about verification is allowed to be wrong in. The
+counts are therefore reported as observed, never as a completeness claim.
+
+**Deliberately not done.** No controller change: coverage does not gate acceptance, does not enter
+`OrchestratorView`, and mints no defect. A bibliography that is entirely unaddressable is a fact the
+export now states, not a blocking finding — turning it into one is a severity-floor decision with
+its own failure modes and needs its own entry. No new fetching at finalize: the tally comes from
+outcomes the evidence lens already produced, so `_finalize` still performs no I/O and a resumed run
+reports the coverage its checkpoint carries. No change to `search.max_sources`, whose truncation is
+now visible as `not_attempted` rather than fixed.
+
+
 ## Open items for a future round
 
 - A non-gating diagnostic channel for minor-floor categories in `ra audition`
