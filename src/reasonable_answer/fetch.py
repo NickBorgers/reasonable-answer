@@ -478,8 +478,17 @@ class SourceCoverage:
     @property
     def not_independently_checked(self) -> int:
         """Every entry this run can say nothing about: unaddressable, unattempted,
-        refused, unreadable, out of budget. Never evidence that an entry is wrong."""
-        return self.cited - self.existence_confirmed
+        refused, unreadable, out of budget. Never evidence that an entry is wrong.
+
+        A definitive not-found is excluded: it is an independent determination that
+        the cited page is absent, not an entry the run can say nothing about.
+        """
+        return (
+            self.not_addressable
+            + self.not_attempted
+            + self.blocked_or_unreadable
+            + self.budget_exhausted
+        )
 
     def as_dict(self) -> dict[str, Any]:
         """The `final.json` shape. Derived counts are written out too, so a reader that

@@ -137,20 +137,23 @@ because a switch that is on says nothing about how much of a bibliography it rea
 `fetch.coverage` tallies the shipped draft's own `## Sources` section in **entries**: `cited`,
 `addressable` / `not_addressable`, `attempted` / `not_attempted`, and a disposition per attempt
 (`bodies_read`, `metadata_only`, `blocked_or_unreadable`, `not_found`, `budget_exhausted`), with
-`existence_confirmed` and `not_independently_checked` derived from those. The tally is taken where
-the evidence lens fetches and keyed to the artifact's hash, so a non-accepted terminal that ships an
-earlier draft reports *that* draft's coverage; a draft with no record reads as *not recorded*, which
-is neither zero coverage nor a pass. `final.json` carries it, and the markdown export, the HTML
-export and the run page render the same breakdown. Coverage is a report, never a gate: it enters no
-controller rule, no `OrchestratorView`, and mints no defect.
+`existence_confirmed` derived from body and registry hits, and `not_independently_checked` derived
+only from unaddressable, unattempted, blocked or unreadable, and budget-exhausted entries. A
+definitive not-found is independently checked and found absent, so it belongs in neither derived
+count. The tally is taken where the evidence lens fetches and keyed to the artifact's hash, so a
+non-accepted terminal that ships an earlier draft reports *that* draft's coverage; a draft with no
+record reads as *not recorded*, which is neither zero coverage nor a pass. `final.json` carries a
+record when one exists, and the markdown export, the HTML export and the run page render the same
+breakdown from it. Coverage is a report, never a gate: it enters no controller rule, no
+`OrchestratorView`, and mints no defect.
 
 Two readings the counts must never be given, carried as a caveat under every rendering of them. An
 entry that was **not independently checked is unverified, not suspect**. A **blocked or paywalled
 entry was unreadable, not absent** — reading it as absence is exactly the inference
-D-notfound-fabrication forbids, and only a definitive not-found establishes that a cited page does
-not exist. Coverage is measured with verification *off* too, where every entry is unchecked by
-configuration rather than by outcome and the rendering says so; the two labels for those postures
-are unchanged, because neither ever claimed verification.
+D-notfound-fabrication forbids. A definitive not-found is the contrasting case: it was independently
+checked and establishes that a cited page does not exist. Coverage is measured with verification
+*off* too, where every entry is unchecked by configuration rather than by outcome and the rendering
+says so; the two labels for those postures are unchanged, because neither ever claimed verification.
 
 Even with both options on, the output is **not fact-checked**. Verification establishes that a cited
 source exists and, when a body can be read, that the page says something compatible with the claim;

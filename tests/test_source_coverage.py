@@ -129,7 +129,15 @@ def test_existence_confirmed_counts_a_registry_hit_but_not_a_refusal():
     exists without being its text, and a 403 proves nothing either way."""
     observed = fetch.coverage(REPORT, _mixed_outcomes())
     assert observed.existence_confirmed == 2  # body read + metadata only
-    assert observed.not_independently_checked == 3  # blocked, gone, unaddressable
+    assert observed.not_independently_checked == 2  # blocked + unaddressable
+
+
+def test_a_definitive_not_found_is_checked_and_found_absent():
+    """D-notfound-fabrication: 404/410 is an independent determination, not an
+    unchecked entry, even though it cannot confirm existence."""
+    observed = fetch.coverage(REPORT, _mixed_outcomes())
+    assert observed.not_found == 1
+    assert observed.not_independently_checked == 2
 
 
 def test_a_blocked_entry_is_never_counted_as_absent():
@@ -188,7 +196,7 @@ def test_the_sentence_reads_off_the_persisted_shape():
     observed = fetch.coverage(REPORT, _mixed_outcomes())
     assert fetch.coverage_sentence(observed.as_dict()) == (
         "source review: 5 cited; 4 addressable; 2 existence confirmed; "
-        "1 body read; 3 not independently checked"
+        "1 body read; 2 not independently checked"
     )
 
 
@@ -255,7 +263,7 @@ def test_the_evidence_lens_records_coverage_for_the_artifact_it_read(
     assert set(sink) == {"h" * 64}
     assert sink["h" * 64]["cited"] == 5
     assert sink["h" * 64]["bodies_read"] == 1
-    assert sink["h" * 64]["not_independently_checked"] == 3
+    assert sink["h" * 64]["not_independently_checked"] == 2
     assert sink["h" * 64]["verification_enabled"] is True
 
 
@@ -396,7 +404,7 @@ def test_finalize_reports_the_chosen_rounds_coverage_not_the_last_rounds(
 _FINAL = {
     "terminal_status": "accepted",
     "label": "consensus-reviewed — source review: 5 cited; 4 addressable; "
-    "2 existence confirmed; 1 body read; 3 not independently checked",
+    "2 existence confirmed; 1 body read; 2 not independently checked",
     "rounds": 2,
     "chosen_round": 2,
     "artifact_hash": "a" * 64,
@@ -412,7 +420,7 @@ def test_the_markdown_export_renders_the_breakdown_and_the_caveat():
     assert "- Entries cited: 5" in document
     assert "- Body read: 1" in document
     assert "- Definitively not found (404/410): 1" in document
-    assert "- Not independently checked: 3" in document
+    assert "- Not independently checked: 2" in document
     assert export.COVERAGE_CAVEAT in document
     # The label is the measurement, and the old categorical claim is gone.
     assert "verified sourcing" not in document

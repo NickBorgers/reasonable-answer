@@ -243,12 +243,14 @@ COVERAGE_ROWS: tuple[tuple[str, str], ...] = (
 
 #: Said under every breakdown, because the counts alone invite two wrong readings: that
 #: an unchecked entry is a suspect one, and that a blocked or paywalled one is absent.
-#: Neither follows, and the second is the error D-notfound-fabrication exists to prevent.
+#: Neither follows. A definitive not-found is independently checked and found absent;
+#: treating any other failed fetch that way is the error D-notfound-fabrication prevents.
 COVERAGE_CAVEAT = (
     "These are observed counts for the report shipped here, not a verdict on its "
     "citations. An entry that was not independently checked is unverified, which is not "
     "evidence that it is wrong; a blocked or paywalled source was unreadable, not absent. "
-    "Only a definitive not-found establishes that a cited page does not exist."
+    "A definitive not-found was independently checked and establishes that the cited page "
+    "does not exist."
 )
 
 #: Said when verification was off for this run: the entries were counted, and none of

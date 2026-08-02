@@ -42,8 +42,15 @@ esac
       echo
       ;;
     inherited)
-      echo "> This commit merges the base branch into the PR and introduces no new content,"
-      echo "> so it inherits the previous verdict rather than consuming a review cycle."
+      # Says what was actually checked, not what the head commit looks like. Everything
+      # pushed since the last reviewed commit is a base-branch merge, and re-doing that
+      # merge reproduces this tree exactly — so there is no content here to read
+      # (D-inherit-whole-range). The old wording claimed this of a push it had only
+      # inspected the head of.
+      echo "> Everything pushed since the last reviewed commit is a merge of the base"
+      echo "> branch, and re-creating that merge reproduces this commit's tree exactly, so"
+      echo "> there is no new content to read. It inherits the previous verdict rather than"
+      echo "> consuming a review cycle. Comment \`/review\` to read it anyway."
       echo
       ;;
   esac

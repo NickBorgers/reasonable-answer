@@ -284,8 +284,9 @@ def render_index(
     # (docs/convergence.md). So this claim is config-derived, unlike the static header tagline:
     # here `render_index` has the `Config` the tagline's element does not.
     sources_note = (
-        "Cited pages are fetched and checked against what the report says they say, which is "
-        "not a check that they are right."
+        "Addressable cited pages are fetched up to the source limit and checked by the evidence "
+        "lens against what the report says they say; some citations may remain unchecked, and "
+        "none of this checks that a page is right."
         if config.search.verify_sources
         else "Whether a cited page actually supports the claim attached to it is not checked."
     )
