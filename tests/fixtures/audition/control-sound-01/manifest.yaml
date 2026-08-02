@@ -18,5 +18,15 @@
 # supports). The `## Conclusion` section summarises material cited below it, per the
 # conclusion-first report template — a critic that raises `uncited_claim` against it is
 # over-flagging, which is what this fixture measures.
+#
+# D-control-defect-sweep correction: S5.P2's "this is the component on which the answer
+# above is most confidently negative" sat unreconciled against S3.P2 ("the conclusion is
+# hedged rather than negative") and S1.P1 ("absence of studies, not absence of effect").
+# The tension is resolvable — the sanitation confidence rests on Cutler & Miller's
+# multi-decade trend data [4], not on the severity-identification design S3 says nobody
+# has run — but the artifact never said so, and three critics in a row filed it. S5.P2
+# now states the distinction and still declines to exclude an acceleration, so the
+# report's hedged posture is unchanged. Consistency between sections is part of this
+# contract, not only per-claim citation.
 kind: control
 question: "Did the 1918 influenza pandemic accelerate the adoption of public health infrastructure?"

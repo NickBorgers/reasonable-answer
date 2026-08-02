@@ -16,5 +16,17 @@
 # what would have to be shown rather than by dismissal; five sources spanning a field
 # experiment, personnel data, an administrative study, a network study and a survey put
 # `one_sided_sourcing` out of honest reach.
+#
+# D-control-defect-sweep correction: S2.P1 and S4.P1 inverted Bloom et al.'s own
+# decomposition, reporting the 13 percent gain as "roughly two-thirds from more calls per
+# minute and one-third from more hours worked". The paper reports the opposite split — 9
+# points of the 13 from more minutes worked per shift (fewer breaks and sick days) and 4
+# from more calls per minute (Bloom, Liang, Roberts & Ying 2015, QJE 130(1), abstract;
+# NBER w18871). That is `misrepresented_source` in a fixture declared sound, and a critic
+# caught it from parametric knowledge alone. Both sentences now state the published
+# decomposition, and the second no longer glosses "more minutes worked per shift" as
+# "more hours worked", which implies longer shifts rather than fewer breaks. The same two
+# sentences are corrected identically in `fabricated-citation-01`, because the pair's
+# whole value is that it differs *only* in source [2] and the sentences describing it.
 kind: control
 question: "Does remote work reduce team productivity?"

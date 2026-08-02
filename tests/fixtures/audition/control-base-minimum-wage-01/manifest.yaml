@@ -13,5 +13,17 @@
 # strongest opposing case (that the null findings reflect study selection) has its own
 # section and is engaged rather than dismissed; the conclusion states the range of
 # increases the evidence covers instead of generalising past it.
+#
+# D-control-defect-sweep correction: S4.P2 claimed the bunching design "answers the
+# comparison-group problem", which S3.P2 flatly contradicts two sections earlier ("the
+# bunching design in [3] and the border design in [1] both rest on contestable comparison
+# groups"). A logic critic that reports the pair as `contradicted_claim` is reading the
+# report correctly, so the soundness contract now includes internal consistency between
+# sections, not only per-claim citation. S4.P2 is qualified — the design *relocates* the
+# comparison-group assumption rather than eliminating it — which is what [3] supports and
+# what leaves S3.P2's hedge standing. S3.P2 is untouched, so the report's overall posture
+# is unchanged. The same sentence is corrected identically in `uncited-claim-01`: that
+# pair differs in exactly one paragraph (S5.P1, the planted uncited claim) and this edit
+# must not become a second.
 kind: control
 question: "Does raising the minimum wage reduce teen employment?"
