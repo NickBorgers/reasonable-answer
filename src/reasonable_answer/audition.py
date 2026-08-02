@@ -15,7 +15,7 @@ material defect* — into a tautology, and nothing downstream can tell the diffe
 So: fixtures with known planted defects, a **mechanical** grader, and a verdict per
 (model, lens).
 
-Two design commitments worth stating plainly.
+Four design commitments worth stating plainly.
 
 **The grader is a pure function and never an LLM.** An LLM grader is precisely the
 component whose reliability is in question here; using one would make the harness's
@@ -26,7 +26,30 @@ category matching plus a structural-locus window, and nothing else.
 and is worse than useless: it never lets a run converge, it drains the critique
 budget, it drives `stagnation_count` to the limit, and rule 13 — after spending its
 bounded rewrite (D-scoped-revision) — terminates `exhausted_unresolved` on a report that
-was fine. Silence and noise are two ways to fail the same job.
+was fine. Silence and noise are two ways to fail the same job, so each direction carries
+one hardcoded gate no threshold setting can reach — zero obvious planted defects found,
+and zero clean reviews of a sound control (D-obvious-per-lens). The thresholds around
+them are calibration; those two are not.
+
+**A verdict covers the whole corpus, or it is not a verdict.** A call that fails the
+schema is neither a miss nor a false positive, so it is excluded from grading — but
+excluding it from the *denominators* too would let a model that reliably breaks on one
+fixture have that fixture deleted from its own exam. Every rate below is therefore
+paired with a coverage count, and a fixture that never produced a single gradable
+review makes the verdict `unfit` before any rate is read (D-audition-failure-coverage).
+
+**The measurement is taken with no fetched sources**, which is a floor strictly below
+what production ever hands its evidence critic once a report cites anything at all
+(`AUDITION_SOURCE_MODE`, D-audition-source-mode). `sources=None` here matches only the
+"nothing to check" case of zero citations extracted from the report — production's
+failed-fetch case (a citation that is paywalled, blocked or offline) still renders a
+`fetched_sources_block` naming the failure, with the instruction not to re-raise a
+not-found `triage.mechanical_citation_issues` has already settled mechanically
+(D-existence-vs-body). A verdict here says the model can or cannot perform the lens with
+no source scaffolding whatsoever; it says nothing about the sharpened, sources-present
+prompt the deployment's evidence lens runs when a page arrives, and nothing about the
+weaker but still-present on-its-face prompt production runs on a citation it attempted
+and failed to fetch.
 """
 
 from __future__ import annotations
@@ -42,7 +65,7 @@ from enum import Enum
 from pathlib import Path
 
 import yaml
-from pydantic import BaseModel, ConfigDict, Field
+from pydantic import BaseModel, ConfigDict, Field, model_validator
 
 from . import prompts
 from .config import AuditionConfig, AuditionThresholds, ConfigError, Roster
@@ -56,7 +79,7 @@ from .taxonomy import (
     SEVERITY_RANK,
     Category,
     Lens,
-    Severity,
+    counts_for_convergence,
 )
 
 #: Fixture corpus shipped with the source tree.
@@ -66,6 +89,32 @@ DEFAULT_FIXTURE_DIR = Path(__file__).resolve().parent.parent.parent / "tests" / 
 #: count. Paragraph indexing is genuinely ambiguous at section boundaries and across
 #: list blocks, and a critic that names the neighbouring paragraph has still found it.
 LOCUS_PARAGRAPH_TOLERANCE = 1
+
+#: Bumped **by hand** when the grading *code* changes in a way a cached verdict cannot
+#: survive (D-audition-rubric-identity). `rubric_hash` mixes this into the cache key, so
+#: a bump invalidates every stored entry and every slot reads *not audited* until it is
+#: re-measured. Bump it when you change:
+#:
+#:   * `_is_material` — which effective severities count as material;
+#:   * `grade` — the strict / same-lens / severity-agreement matching rules, or the
+#:     handling of `PlantedDefect.anywhere`;
+#:   * `_locus_matches` — the shape of the locus window;
+#:   * `run_assignment`'s accounting — what increments which counter, the `Tier.OBVIOUS`
+#:     gate, or the treatment of a failed lens.
+#:
+#: A `judge` gate-order or threshold change needs no bump: `judge` runs at read time
+#: against the live `cfg.thresholds`, so the verdict already follows the current rules.
+#: The one `judge` change that would need one — a gate reading a `Metrics` counter older
+#: entries never collected, which defaults to 0 and reads as a measured zero — is caught
+#: automatically, because `rubric_hash` covers the `Metrics` field set.
+#:
+#: Bumped to 2 by D-minor-floor-fixtures: `grade`'s `severity_agrees` is now derived
+#: from `exact` (the same issues that produce `strict`) rather than computed
+#: independently, and the comparison is `>=` the floor rather than `==` it. A cached
+#: `Metrics.severity_agreements` recorded under version 1 could exceed `strict_hits` —
+#: exactly the bug this decision fixes — so it must not be read as though it meant the
+#: same thing as a version-2 count.
+RUBRIC_VERSION = 2
 
 #: `{{slot}}` in a fixture artifact, substituted from the manifest's slot table.
 _SLOT = re.compile(r"\{\{([a-z0-9_]+)\}\}")
@@ -302,7 +351,7 @@ def _check_planted_floor_is_material(fixture: Fixture) -> None:
     """
     for defect in fixture.defects:
         floor = SEVERITY_FLOOR[defect.category]
-        if _rank(floor) < _rank(MATERIAL_FLOOR):
+        if SEVERITY_RANK[floor] < SEVERITY_RANK[MATERIAL_FLOOR]:
             raise FixtureError(
                 f"fixture '{fixture.id}': category '{defect.category.value}' floors at "
                 f"'{floor.value}', below the material floor '{MATERIAL_FLOOR.value}' — a "
@@ -338,24 +387,34 @@ def _locus_matches(planted: StructuralRef, reported: StructuralRef) -> bool:
 
 
 def _is_material(issue: RawIssue) -> bool:
-    """Severity after the mechanical floor clamp, which is what triage would count."""
-    effective = max(issue.severity, SEVERITY_FLOOR[issue.category], key=_rank)
-    return effective in (Severity.BLOCKING, Severity.MAJOR)
+    """Whether production would count this issue at all — the production predicate
+    itself (`taxonomy.counts_for_convergence`), not a restatement of it.
 
-
-def _rank(severity: Severity) -> int:
-    return SEVERITY_RANK[severity]
+    So the severity floor is applied, and `stylistic` is discarded whatever severity
+    the critic gave it. Both halves matter here. A critic may legally escalate a
+    stylistic note to `major`; triage then drops it from the defect list, the tally,
+    the provenance registry and the clean-record test alike. Crediting that as a
+    detection would score a critic as having caught a defect that, in a real run,
+    would have sailed through — and counting it as invented noise would fail a critic
+    for findings that cannot stagnate anything (D-audition-stylistic-parity).
+    """
+    return counts_for_convergence(issue.category, issue.severity)
 
 
 def grade(fixture: Fixture, result: LensResult) -> tuple[Detection, ...]:
     """Match a critic's issues against ground truth. Pure — no client, no I/O.
 
     A planted defect counts as found when a reported issue lands within the locus
-    window and its category either matches exactly (`strict`) or belongs to the same
-    lens (`same_lens`). The relaxed form exists because critics reasonably disagree
-    between, say, `uncited_claim` and `misrepresented_source` on the same sentence,
-    and scoring that as a miss would penalize a critic that is doing its job. Both
-    numbers are reported; neither is the whole story alone.
+    window, would survive production triage (`_is_material`), and has a category that
+    either matches exactly (`strict`) or belongs to the same lens (`same_lens`). The
+    relaxed form exists because critics reasonably disagree between, say,
+    `uncited_claim` and `misrepresented_source` on the same sentence, and scoring that
+    as a miss would penalize a critic that is doing its job. It stays bounded by the
+    materiality test: `stylistic` is in every lens's category set, so without it a
+    nitpick on the right paragraph — at any severity — would score as a detection of
+    whatever was planted there.
+
+    Both numbers are reported; neither is the whole story alone.
 
     Every credit here is post-clamp material, so a planted category has to floor at or
     above `MATERIAL_FLOOR` for any of it to be reachable — `_check_planted_floor_is_material`
@@ -377,7 +436,7 @@ def grade(fixture: Fixture, result: LensResult) -> tuple[Detection, ...]:
         # denominator it is divided by. Testing `>=` rather than `==` the floor keeps a
         # legal escalation on the agreeing side.
         floor = SEVERITY_FLOOR[defect.category]
-        severity_agrees = any(_rank(i.severity) >= _rank(floor) for i in exact)
+        severity_agrees = any(SEVERITY_RANK[i.severity] >= SEVERITY_RANK[floor] for i in exact)
         detections.append(
             Detection(
                 defect=defect,
@@ -406,6 +465,18 @@ class Metrics(BaseModel):
     identity: str
     lens: Lens
 
+    #: Fixtures this (identity, lens) owed a measurement on — `for_lens`, controls
+    #: included. Required rather than defaulted on purpose: a record that cannot say
+    #: what it owed cannot say whether it measured all of it, so an entry written
+    #: before coverage accounting existed fails validation and `load_cache` drops it
+    #: to *not audited* — never to a pass (D-audition-failure-coverage).
+    fixtures_owed: int = Field(ge=0)
+    #: Ids of owed fixtures that never produced one gradable review, across every
+    #: repetition. Not the same as "looked and found nothing": a graded zero is a
+    #: measured miss and lands in the denominators below, whereas these fixtures are
+    #: absent from them entirely, which is what makes them dangerous.
+    uncovered_fixtures: tuple[str, ...] = ()
+
     planted_total: int = 0
     strict_hits: int = 0
     same_lens_hits: int = 0
@@ -421,6 +492,20 @@ class Metrics(BaseModel):
     calls: int = 0
     schema_failures: int = 0
     latencies: tuple[float, ...] = ()
+
+    @model_validator(mode="after")
+    def _coverage_is_consistent(self) -> Metrics:
+        if len(self.uncovered_fixtures) > self.fixtures_owed:
+            raise ValueError(
+                f"{len(self.uncovered_fixtures)} uncovered fixtures against "
+                f"{self.fixtures_owed} owed — the record contradicts itself"
+            )
+        return self
+
+    @property
+    def fixtures_covered(self) -> int:
+        """Owed fixtures that produced at least one gradable review."""
+        return self.fixtures_owed - len(self.uncovered_fixtures)
 
     @property
     def strict_sensitivity(self) -> float:
@@ -502,6 +587,9 @@ def judge(metrics: Metrics, thresholds: AuditionThresholds) -> Judgement:
 
     Order matters: every fail-closed condition is checked before any warn condition,
     so a model that is both noisy and blind reports `unfit` rather than `marginal`.
+    The mechanical gates — schema failures, then fixture coverage — come before the
+    judgement gates, so a model that cannot be measured is reported as unmeasurable
+    rather than graded on whatever fraction of the corpus survived.
     """
     reasons: list[str] = []
 
@@ -515,6 +603,23 @@ def judge(metrics: Metrics, thresholds: AuditionThresholds) -> Judgement:
         reasons.append(
             f"schema failure rate {metrics.schema_failure_rate:.0%} exceeds "
             f"{thresholds.max_schema_failure_rate:.0%} — lens results would fail closed"
+        )
+        return Judgement(Verdict.UNFIT, tuple(reasons))
+
+    # Coverage before any rate, because coverage is what the rates are *over*. A
+    # fixture whose every repetition failed contributes nothing to `planted_total`,
+    # `obvious_total` or `control_runs`, so the sensitivity and noise rates below would
+    # be computed across a corpus subset the model selected by failing — and a model
+    # failing under the schema gate's tolerance (3 of 15 calls is exactly one fixture
+    # of five, at 20%) could delete a whole fixture from its own exam and still read
+    # `fit`. `unfit` rather than `insufficient` for the same reason the schema gate
+    # above is: being asked `repetitions` times and returning nothing gradable every
+    # time is a definite, reproducible failure, not an absence of evidence.
+    if metrics.uncovered_fixtures:
+        reasons.append(
+            f"never produced a gradable review of {len(metrics.uncovered_fixtures)} of "
+            f"{metrics.fixtures_owed} fixtures ({', '.join(metrics.uncovered_fixtures)}) — "
+            f"every rate would be measured over the rest of the corpus only"
         )
         return Judgement(Verdict.UNFIT, tuple(reasons))
 
@@ -535,6 +640,21 @@ def judge(metrics: Metrics, thresholds: AuditionThresholds) -> Judgement:
         reasons.append(
             f"invents {metrics.control_material_rate:.2f} material issues per sound "
             f"report — runs would stagnate rather than converge"
+        )
+        return Judgement(Verdict.UNFIT, tuple(reasons))
+
+    # The mirror of the silence gate above, and unreachable by threshold tuning for the
+    # same reason (D-obvious-per-lens). A critic that never once returns a clean lens on
+    # a sound report never lets one converge: rule 3 needs a clean record, and this model
+    # cannot produce one whatever the report says. The rate gate above misses the cheapest
+    # version of that strategy — exactly one material issue per artifact scores a
+    # `control_material_rate` of 1.00, which is not *greater than* the 1.0 default — so
+    # the strategy that most perfectly defeats the harness slipped through the noise
+    # direction while scoring full marks on the sensitivity direction.
+    if metrics.control_runs and metrics.control_clean_runs == 0:
+        reasons.append(
+            f"never returned a clean review of a sound report (0 of {metrics.control_runs}) "
+            f"— no report could ever clear this lens"
         )
         return Judgement(Verdict.UNFIT, tuple(reasons))
 
@@ -599,6 +719,24 @@ def assignments(roster: Roster, identities: dict[str, str]) -> tuple[Assignment,
 #: without implying an authorship that does not exist.
 AUDITION_AUTHOR = "(audition-fixture)"
 
+#: The source mode every measurement here is taken under, named so it can be part of
+#: the cache identity (D-audition-source-mode).
+#:
+#: Every call the harness makes passes `sources=None`, so the critic sees the
+#: unsharpened category-meaning table and no fetched-pages block at all — while the
+#: production deployment runs `verify_sources` on (docs/deployment-profile.md) and its
+#: evidence critic sees a fetched-pages block on any citation it attempted to fetch,
+#: including a failed one (a `BLOCKED` or `NOT FOUND` entry, not silence). That is
+#: deliberate: this measures the capability floor a critic brings with no source
+#: scaffolding whatsoever, a strictly lower bar than production's failed-fetch case. It
+#: is not a claim about the sources-present surface, nor about the weaker but
+#: still-present on-its-face prompt production runs on an attempted-and-failed citation,
+#: and D-audition-source-mode records what both leave uncertified.
+#:
+#: The tag is hashed into `prompt_hash`, so a sources-present mode added later gets its
+#: own cache line rather than inheriting a verdict measured under this one.
+AUDITION_SOURCE_MODE = "sources:none"
+
 
 def run_assignment(
     client: LLMClient,
@@ -608,12 +746,21 @@ def run_assignment(
     require_verbatim_spans: bool = True,
 ) -> Metrics:
     """Audition one model on one lens across the whole corpus. Needs a client."""
+    owed = fixtures.for_lens(assignment.lens)
     metrics = Metrics(
-        alias=assignment.alias, identity=assignment.identity, lens=assignment.lens
+        alias=assignment.alias,
+        identity=assignment.identity,
+        lens=assignment.lens,
+        fixtures_owed=len(owed),
     )
     latencies: list[float] = []
+    #: Fixtures that produced at least one gradable review. Recorded per fixture rather
+    #: than as a count of failures, because "20% of calls failed" cannot distinguish a
+    #: model that stumbles once on each of five fixtures from one that is deterministically
+    #: broken on a single fixture and therefore never measured on it at all.
+    covered: set[str] = set()
 
-    for fixture in fixtures.for_lens(assignment.lens):
+    for fixture in owed:
         for _ in range(repetitions):
             started = time.monotonic()
             result = critique_once(
@@ -625,6 +772,10 @@ def run_assignment(
                 fixture.artifact,
                 hashlib.sha256(fixture.artifact.encode()).hexdigest(),
                 AUDITION_AUTHOR,
+                # Explicit, because it is a doctrine and not an omission: fixtures ship
+                # no source packet, so the measurement is of the source-less surface
+                # (AUDITION_SOURCE_MODE, D-audition-source-mode).
+                sources=None,
                 require_verbatim_spans=require_verbatim_spans,
             )
             latencies.append(time.monotonic() - started)
@@ -637,6 +788,8 @@ def run_assignment(
                 # fixes: one is a prompt/mode issue, the other means replace the model.
                 metrics.schema_failures += 1
                 continue
+
+            covered.add(fixture.id)
 
             if fixture.is_control:
                 metrics.control_runs += 1
@@ -655,7 +808,12 @@ def run_assignment(
                 metrics.obvious_total += len(detections)
                 metrics.obvious_hits += sum(1 for d in detections if d.same_lens)
 
-    return metrics.model_copy(update={"latencies": tuple(latencies)})
+    return metrics.model_copy(
+        update={
+            "latencies": tuple(latencies),
+            "uncovered_fixtures": tuple(f.id for f in owed if f.id not in covered),
+        }
+    )
 
 
 def run_audition(
@@ -688,33 +846,112 @@ class CacheEntry(BaseModel):
     metrics: Metrics
     corpus_hash: str
     prompt_hash: str
+    #: Identity of the grading rules that turned calls into these `Metrics`.
+    rubric_hash: str
+    #: The span-validation regime the calls were made under. A loose quote fails the
+    #: lens closed when this is on, so it changes what a critic can score.
+    require_verbatim_spans: bool
     repetitions: int
     recorded_at: float
+
+    # `rubric_hash` and `require_verbatim_spans` are required, with no default, on
+    # purpose (D-audition-rubric-identity). An entry written before they existed fails
+    # `model_validate`, and `load_cache` drops anything that fails — so the pre-rubric
+    # cache degrades to *not audited*, never to a pass carried across a rule change.
 
     def is_stale(self, now: float, max_age_days: int) -> bool:
         return (now - self.recorded_at) > max_age_days * 86400
 
-    def matches(self, corpus_hash: str, prompt_hash: str, repetitions: int) -> bool:
-        """A cached verdict is only about the corpus and prompts that produced it.
+    def matches(
+        self,
+        corpus_hash: str,
+        prompt_hash: str,
+        repetitions: int,
+        *,
+        rubric_hash: str,
+        require_verbatim_spans: bool,
+    ) -> bool:
+        """A cached verdict is only about the measurement that produced it.
 
         `prompt_hash` is in the key because editing a lens prompt changes what the
         measurement *means*. Carrying a verdict across a prompt edit would report a
-        capability claim for a critic that no longer exists.
+        capability claim for a critic that no longer exists. `rubric_hash` and
+        `require_verbatim_spans` are in the key for exactly the same reason: the
+        grading rules and the span-validation regime are as much a part of what a
+        score means as the corpus and the prompt (D-audition-rubric-identity).
+
+        The two newer dimensions are keyword-only because both hashes are strings and
+        a transposed positional argument would silently compare the wrong pair.
         """
         return (
             self.corpus_hash == corpus_hash
             and self.prompt_hash == prompt_hash
+            and self.rubric_hash == rubric_hash
+            and self.require_verbatim_spans == require_verbatim_spans
             and self.repetitions == repetitions
         )
 
 
 def prompt_hash() -> str:
-    """Hash of every prompt surface a critic sees, so an edit invalidates the cache."""
+    """Hash of the prompt surface this harness measures, so an edit invalidates the cache.
+
+    That surface is the source-less one, and only that one. It is not "every prompt
+    surface a critic sees": production's evidence critic also sees the sharpened
+    `misrepresented_source` meaning and the fetched-pages block, and neither is hashed
+    here. Deliberately — nothing in this harness measures a critic under them
+    (D-audition-source-mode), so folding them in would discard verdicts that remain
+    exactly as true as the day they were recorded, and would advertise a coverage the
+    corpus does not have.
+
+    What keeps the narrower hash honest is the mode tag: `AUDITION_SOURCE_MODE` is part
+    of the identity, so a sources-present mode added later cannot silently reuse a
+    verdict measured without sources.
+    """
     digest = hashlib.sha256()
+    digest.update(AUDITION_SOURCE_MODE.encode())
     digest.update(prompts.CRITIC_SYSTEM.encode())
     for lens in LENS_CATEGORIES:
         digest.update(prompts.critic_user(lens, "q", "body", None).encode())
     return digest.hexdigest()[:16]
+
+
+def rubric_hash() -> str:
+    """Hash of the grading rules a cached verdict was produced under.
+
+    Two halves, mixed into one digest — the same shape `refine_prompt_hash` already
+    uses, where a hashed surface is combined with a hand-bumped `PROMPT_VERSION`.
+
+    The rules that are *data* are hashed from the tables themselves, so they can never
+    be forgotten: the lens→category map decides what `same_lens` accepts, the severity
+    floors and ranks decide what `_is_material` clamps to, and the locus tolerance sets
+    the detection window. The `Metrics` field set is hashed too, so a new counter can
+    never read as a measured zero on an entry recorded before it existed.
+
+    The rules that are *code* — `grade`, `_is_material`, `_locus_matches`, and
+    `run_assignment`'s accounting — carry `RUBRIC_VERSION` instead. Hashing
+    `inspect.getsource` over them would be automatic, and was rejected: this file is
+    deliberately comment-dense, an audition costs |models| x |fixtures| x repetitions
+    calls against a paid proxy, and billing a full re-measurement of the roster for a
+    typo fix in a docstring conflicts with the operational goal of invalidating only
+    when measurement semantics change. It also breaks under a source-less install. The
+    chosen trade is a manually maintained constant for code rules, with automatic
+    hashing where the rubric is already represented as data.
+    """
+    payload = json.dumps(
+        {
+            "version": RUBRIC_VERSION,
+            "locus_paragraph_tolerance": LOCUS_PARAGRAPH_TOLERANCE,
+            "lens_categories": {
+                lens.value: sorted(c.value for c in categories)
+                for lens, categories in LENS_CATEGORIES.items()
+            },
+            "severity_floor": {c.value: s.value for c, s in SEVERITY_FLOOR.items()},
+            "severity_rank": {s.value: rank for s, rank in SEVERITY_RANK.items()},
+            "metrics_fields": sorted(Metrics.model_fields),
+        },
+        sort_keys=True,
+    )
+    return hashlib.sha256(payload.encode()).hexdigest()[:16]
 
 
 def cache_key(identity: str, lens: Lens) -> str:
@@ -763,6 +1000,7 @@ def cached_judgements(
     cfg: AuditionConfig,
     roster: Roster,
     identities: dict[str, str],
+    require_verbatim_spans: bool,
     now: float | None = None,
 ) -> dict[tuple[str, Lens], Judgement]:
     """Verdicts for the roster's current critic slots, read from the cache only.
@@ -770,8 +1008,14 @@ def cached_judgements(
     Never spends a call. Both callers — `ra doctor` and the `enforce` startup gate —
     sit on paths where quietly auditioning a roster's worth of models would be a
     surprise bill. A slot whose entry is missing, stale, or graded against a different
-    corpus, prompt surface or repetition count is simply absent from the result: an
-    unmeasured critic must read as unmeasured, never as a pass.
+    corpus, prompt surface, grading rubric, span-validation regime or repetition count
+    is simply absent from the result: an unmeasured critic must read as unmeasured,
+    never as a pass.
+
+    `require_verbatim_spans` is a required argument rather than a defaulted one because
+    it lives on `Config`, not `AuditionConfig`, and both callers hold a `Config`. A
+    default would let a caller silently compare against the wrong regime — the exact
+    class of bug D-audition-rubric-identity exists to close.
     """
     try:
         corpus_hash = load_fixtures().corpus_hash
@@ -779,12 +1023,19 @@ def cached_judgements(
         return {}
     cache = load_cache(cfg.cache_path)
     ph = prompt_hash()
+    rh = rubric_hash()
     at = time.time() if now is None else now
 
     out: dict[tuple[str, Lens], Judgement] = {}
     for slot in assignments(roster, identities):
         entry = cache.get(cache_key(slot.identity, slot.lens))
-        if entry is None or not entry.matches(corpus_hash, ph, cfg.repetitions):
+        if entry is None or not entry.matches(
+            corpus_hash,
+            ph,
+            cfg.repetitions,
+            rubric_hash=rh,
+            require_verbatim_spans=require_verbatim_spans,
+        ):
             continue
         if entry.is_stale(at, cfg.max_age_days):
             continue
@@ -796,6 +1047,7 @@ def enforce_fitness(
     cfg: AuditionConfig,
     roster: Roster,
     identities: dict[str, str],
+    require_verbatim_spans: bool,
     now: float | None = None,
 ) -> None:
     """Under `audition.enforce`, refuse to start with an `unfit` critic assigned.
@@ -810,7 +1062,7 @@ def enforce_fitness(
     """
     if not cfg.enforce:
         return
-    judgements = cached_judgements(cfg, roster, identities, now=now)
+    judgements = cached_judgements(cfg, roster, identities, require_verbatim_spans, now=now)
     unfit = sorted(
         f"'{slot.alias}' ({slot.identity}) on {slot.lens.value}"
         for slot in assignments(roster, identities)

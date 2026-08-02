@@ -474,8 +474,10 @@ class AuditionThresholds(BaseModel):
     """Where `fit` / `marginal` / `unfit` fall. Tunable because the right line depends
     on the corpus and on how much a deployment is willing to spend on false alarms.
 
-    No threshold can rescue a model that finds zero obvious defects; that case is
-    hardcoded in `audition.judge`. Everything here is a judgement call about degrees.
+    Two cases are hardcoded in `audition.judge` and no threshold can rescue either: a
+    model that finds zero obvious defects, and a model that never once returns a clean
+    review of a sound control (D-obvious-per-lens). Everything here is a judgement call
+    about degrees.
     """
 
     model_config = ConfigDict(extra="forbid")

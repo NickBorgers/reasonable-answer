@@ -155,7 +155,9 @@ def build_runtime(
     # actually find a defect (D-critic-audition). Cache-read only, so it costs nothing and stays put
     # ahead of the probes below — a roster with an unfit critic should not get as far
     # as spending tokens on structured-output detection.
-    audition_mod.enforce_fitness(config.audition, config.roster, identities)
+    audition_mod.enforce_fitness(
+        config.audition, config.roster, identities, config.require_verbatim_spans
+    )
 
     for alias in config.roster.all_aliases:
         mode = client.probe_structured_output(alias)

@@ -2674,6 +2674,605 @@ actually fired in production. The timeout containment bounds a hang, but the pat
 exercised, and this change puts more traffic on it.
 
 
+
+
+## D-category-coverage — every material category needs a planted fixture, and coverage is now a test
+
+**The problem.** The audition corpus covered every *lens* and was checked for exactly that
+(`test_shipped_corpus_loads_and_covers_both_directions`). Per-lens coverage is not per-category
+coverage, and the difference is load-bearing. `grade` scores the relaxed `same_lens` match and
+`judge` gates on lens-level rates, so a critic that is wholly blind to one category still clears
+every threshold on the strength of the categories its lens does cover. The lens reads as measured;
+the blind spot is invisible in the report and in the cached verdict alike.
+
+Three of the eleven non-stylistic categories had no planted fixture: `misrepresented_source`
+(evidence, floors `major`), `overstated_claim` (logic, floors `major`), and `unclear_structure`
+(completeness, floors `minor`). `misrepresented_source` is the sharpest case. The only instance
+the corpus ever contained was an *accidental* one — the statistic `control-sound-01` attributed to
+Tomes (1998), which D-control-soundness removed as a defect in a fixture declared sound — so the
+category has never been legitimately measured on any model, in either direction. It is also the
+category D-source-verification sharpens into a checkable fact once fetched pages are present, which
+makes a critic's baseline competence at it worth knowing before that switch is turned on.
+
+**Decision.** Every category whose mechanical severity floor is material — `major` or `blocking` —
+carries at least one planted fixture, and `test_every_material_category_has_a_planted_fixture`
+enforces it. Two fixtures are added to close the gap this decision found:
+
+| fixture | lens | tier | the planted defect |
+|---|---|---|---|
+| `misrepresented-source-01` | evidence | obvious | A real, accurately listed source ([Durkin et al. 2022](https://doi.org/10.1037/dev0001301), *… through sixth grade*) is described in the body as reporting twelfth-grade outcomes it cannot contain. The paragraph before it cites the same paper correctly. |
+| `overstated-claim-01` | logic | moderate | Randomized support establishing a small average effect is restated as a flat "prevents" with an individual-level expectation attached. The 2017 IPD meta-analysis reports aOR 0.88 (95% CI 0.81–0.96) and NNT 33 (95% CI 20–101) overall, with a markedly stronger effect in the daily-or-weekly dosing subgroup (aOR 0.81 vs. 0.97 for bolus dosing) and below 25 nmol/L baseline (aOR 0.30 vs. 0.75) ([Martineau et al. 2017, fetched via PMC5310969](https://pmc.ncbi.nlm.nih.gov/articles/PMC5310969/)); two later large trials report no reduction ([CORONAVIT, fetched via PMC9449358](https://pmc.ncbi.nlm.nih.gov/articles/PMC9449358/); [Brunvoll et al. 2022, fetched via PMC9449357](https://pmc.ncbi.nlm.nih.gov/articles/PMC9449357/)). |
+
+Both are authored in `prompts.REPORT_SKELETON` shape — no `#` title, `## Conclusion` first, `[n]`
+citations, a numbered `## Sources` — because a fixture that does not look like production input
+measures the critic on a document shape it never sees.
+
+**Every cited number is fetch-verified, per QP9/QP10.** The first draft cited a 2021 aggregate-data
+update (Jolliffe et al., *Lancet Diabetes & Endocrinology*, reporting OR 0.92) alongside the 2017
+IPD meta-analysis. Neither its publisher DOI nor its medRxiv preprint mirror returns fetchable full
+text through the review pipeline's fetch boundary — both return a 403 or a bare landing page — so
+the claim was unverifiable and the `quality` reviewer correctly blocked on it twice
+(`qual-claim-unsupported-1`). It is removed rather than patched with a better link, because no
+fetchable full text exists for it: `overstated-claim-01` now rests entirely on the 2017 IPD
+meta-analysis (fetched via PMC5310969, which hosts the full text openly) plus the two null trials
+(PMC9449358, PMC9449357), and the planted defect — S5.P2 flattening a hedged, subgroup-concentrated
+finding into an unqualified "prevents" — needs only that one paper's aOR, NNT and two subgroup
+splits to be licensed. `misrepresented-source-01`'s citation (Durkin et al. 2022) was already
+fetch-verifiable and is unchanged.
+
+**Why the rule stops at the material floor.** `_is_material` gates every hit in `grade`, so a
+detection on a minor-floor category scores only when a critic volunteers an escalation above the
+floor. Requiring a fixture for `unclear_structure` or `loaded_language` would therefore assert a
+measurement the grader cannot reliably make: the fixture would be graded as a miss against critics
+that found it and filed it honestly at `minor`. `loaded-language-01` already sits in the corpus and
+already has this problem; **it is diagnostic, not a sensitivity measurement**, and the same holds
+for any `unclear_structure` fixture. No fixture is added for `unclear_structure` here, and
+[concepts.md](./concepts.md) now says which categories the corpus can and cannot score. Whether the
+grader should credit a minor-floor detection at all is a separate question about scoring, not about
+coverage, and it belongs to the issue that raised it rather than to this one.
+
+**Why not simply require a fixture per category, floor be damned.** Because the resulting corpus
+would encode a claim the harness cannot honour. A coverage rule whose satisfaction leaves a
+category still unmeasured is worse than an acknowledged gap: it converts "we have not measured
+this" into "we have", which is the same substitution D-control-soundness was written to undo.
+
+**Tiering.** `obvious` gates a fail-closed verdict (`obvious_hits == 0` → `unfit`), so it is
+claimed only where a competent critic must catch the defect. `misrepresented-source-01` earns it:
+the tell is bibliographic and sits on the face of the Sources entry, the evidence lens brief names
+this exact case, and the same source is cited correctly one paragraph earlier.
+`overstated-claim-01` does not: it is a hedge-drop two sections after the numbers that constrain
+it, `prevents` is ordinary shorthand for `reduces the risk of`, and a fast reader can wave it
+through without being incompetent. Each fixture's manifest records that reasoning where the next
+author will read it.
+
+**Cache and blast radius.** New fixture directories change `corpus_hash`, so every cached verdict
+stops matching and drops to *not audited* — never to `unfit`, and `audition.enforce` blocks only on
+a positive `unfit`. Safe to land with enforcement on: it degrades to "re-measure", which is correct,
+because the corpus now measures something it did not measure before.
+
+**What this decision does not establish.** No model has been auditioned against either fixture —
+that costs a paid proxy run. Two things are therefore unknown and should be read as open: whether
+rostered evidence critics actually catch an on-its-face misrepresentation, and whether
+`misrepresented-source-01` is honestly `obvious`. If a re-audition shows competent models missing it
+while catching the other three evidence fixtures, the tier is wrong and should drop to `moderate`
+rather than the roster being re-cut around it.
+
+An adversarial review round caught an accidental second instance of this fixture's own category:
+three loci attributed third-grade outcomes to source [1] (Puma et al. 2010), whose own follow-up
+window is fetch-verified (ERIC ED507845) to end at 1st grade. A doctrine-compliant critic scoring
+that would have been graded a miss on an `obvious` fixture for catching the wrong instance, or
+credited once for catching both. Fixed by re-citing those loci to the 2012 Third Grade Follow-Up
+report (a new source [9], ERIC ED539264, fetch-verified) rather than by deleting the claims — the
+report is still allowed to say preschool's advantage fades by third grade, it now just cites the
+paper that actually says that. Exactly one planted defect remains, at S4.P3.
+
+**Invariants.** None in reach. Fixtures are test data: they enter no production path, and author
+exclusion, the blind `OrchestratorView`, fail-closed lenses, the severity floors and controller
+termination are all untouched. The audition already hands fixture text to a critic as untrusted
+report content under the sentinel author `AUDITION_AUTHOR`, and these two fixtures use that path
+unchanged.
+
+
+## D-audition-stylistic-parity — the grader counts what triage counts, from one predicate
+
+Found by adversarial review of the audition harness after D-control-soundness, and independently
+confirmed by a second reviewer. `audition._is_material` claimed to mirror production —
+"Severity after the mechanical floor clamp, which is what triage would count" — and did not.
+It computed `max(severity, SEVERITY_FLOOR[category])` and stopped there. Production excludes
+`stylistic` from convergence **unconditionally**, in four places: `to_defects` skips it, `tally`
+skips it, `defect_provenance` skips it, and `clean_records` excludes it "even if the critic
+escalated its severity".
+
+Escalation is not hypothetical. `validate_issue` checks category scope, locus existence and
+verbatim spans; it never checks severity, and RC-005 says clamps go up only — so a critic may
+legally report a `stylistic` issue at `major`, and `stylistic` is in `LENS_CATEGORIES` for every
+lens. Two measurements diverged from the thing they claim to measure:
+
+- **Sensitivity was inflated.** `grade` credits a defect as found when any in-lens material issue
+  lands in the locus window, and `obvious_hits` — the input to the fail-closed "found 0 of N
+  obvious" gate — uses that relaxed form. A `stylistic` note filed at `major` on the planted
+  paragraph scored as a detection. In a real run the same finding is discarded before the
+  controller sees anything, and the planted defect sails through. The harness would have reported
+  a critic as sighted on precisely the artifact it was blind to.
+- **Noise was inflated.** `material_issue_count` counted the same finding on a control, feeding
+  `control_material_rate` and its `unfit` gate, whose reason string reads "runs would stagnate
+  rather than converge". A stylistic finding cannot stagnate a run: it is absent from the tally
+  that `signal_signature` keys on and it never withholds a clean record. The gate would fail a
+  usable critic for findings production throws away.
+
+Both errors point the same way — toward believing the audition rather than the run.
+
+**Decision.** The exclusion is not restated in the audition. `taxonomy.counts_for_convergence`
+is now the single definition of "material issue": `stylistic` is out before severity is read,
+everything else counts at its clamped severity. `audition._is_material` delegates to it, which
+fixes `grade`'s `same_lens` and `material_issue_count` together, and `triage.clean_records` and
+`triage.defect_provenance` were rewritten to call it — behavior unchanged, but the two consumers
+now cannot disagree without one of them being edited on purpose.
+`test_grader_materiality_agrees_with_triage_for_every_category` asserts the parity directly, over
+every (lens, category, severity) a critic could legally report, rather than over the one case
+the previous test happened to cover (`stylistic` at `minor`, where the old code was accidentally
+right).
+
+**Not changed.** Triage and the controller were already correct, and the fixture corpus is
+untouched — `corpus_hash` deliberately does not move, because nothing about what is being
+measured changed, only how a critic's answer is scored.
+
+**Known gap: cached metrics predate this rule.** The audition cache is keyed on
+`corpus_hash`, `prompt_hash` and `repetitions`, none of which this change touches, so entries
+recorded before it survive and are still read by `ra doctor` and by the `audition.enforce`
+startup gate. Those numbers were graded by the old predicate and can be wrong in both directions
+— an inflated `obvious_hits`, an inflated `control_material_rate`. `ra audition --force` re-grades
+a slot. Extending the cache key to cover the grader's own identity is a caching-semantics question
+tracked separately and deliberately not solved here.
+
+
+## D-audition-failure-coverage — a verdict covers every fixture it owed, or it is `unfit`
+
+**The problem.** `audition.run_assignment` deliberately separates "cannot emit the schema" from
+"looked and saw nothing": a failed lens increments `schema_failures` and skips grading, so it is
+neither a miss nor a false positive. That separation is right — the two have different fixes, one
+a prompt or output-mode problem and the other a reason to replace the model — and
+`test_failed_lens_counts_as_schema_failure_not_as_silence` pins it. The accounting that followed
+from it leaked.
+
+Failed calls also vanished from every *denominator*. `planted_total`, `obvious_total` and
+`control_runs` grew only on successful calls, so a fixture a model reliably broke on was deleted
+from that model's own exam:
+
+- An evidence assignment is 5 fixtures x 3 repetitions = 15 calls. A model that fails all three
+  repetitions of one planted fixture — deterministically, because that artifact's content drives
+  it out of schema — sits at exactly 3/15 = 20%, which the strict `schema_failure_rate >
+  max_schema_failure_rate` gate admits.
+- That fixture then contributes nothing to `planted_total` or `obvious_total`. Catching the rest
+  and staying clean on the controls yields **`fit`**, confirmed by direct simulation.
+- The noise direction censors more quietly still. `_ratio` returns 0.0 for a zero denominator,
+  meaning "not measured", and `judge` gates the noise checks on `control_runs` — so a model that
+  breaks on controls specifically switched those gates *off* rather than failing them, and its
+  `control_material_rate` read clean.
+
+The result was a verdict whose headline rates were computed over a corpus subset the model had
+selected by failing, which is the exact inverse of the harness's fail-closed posture.
+
+**Decision — coverage is tracked per fixture and gates before any rate.** `Metrics` gains
+`fixtures_owed` (the size of `for_lens`, controls included) and `uncovered_fixtures` (the ids that
+never produced one gradable review across every repetition). `judge` returns `unfit` when
+`uncovered_fixtures` is non-empty, naming them. Coverage is checked *after* the schema gate and
+*before* everything else, because coverage is what the remaining rates are over.
+
+Per fixture, not per call, is the load-bearing part. "20% of calls failed" cannot distinguish a
+model that stumbles once on each of five fixtures — a flake, correctly tolerated by the schema
+threshold — from one that is deterministically broken on a single fixture and therefore never
+measured on it at all. Only the second censors a denominator, and only a per-fixture count sees it.
+
+**`unfit`, not `insufficient`.** Both were arguable and the choice follows the reasoning the schema
+gate already uses one block earlier: a model asked `repetitions` times that returned nothing
+gradable every time has produced a definite, reproducible failure, not an absence of evidence.
+`insufficient` means "we did not ask enough" — `calls == 0`, or a corpus with nothing to grade —
+and reporting a reproducible break as a gap in our own measurement would put the deficiency on the
+harness. It also matters at the gate: `audition.enforce` blocks only on `unfit`, and a model that
+cannot review one of the artifacts it will be handed in production is exactly what that gate is
+for.
+
+**The rule is uniform across planted fixtures and controls, and is not tunable.** The narrower
+form considered was "any planted fixture, or *all* controls", on the theory that controls pool
+into one rate and losing one of two only shrinks the sample. It was rejected: in both directions
+the fact measured is the same one — this model reliably cannot produce a gradable review of this
+artifact — and in production that means the report gets no review from that critic on that lens.
+A uniform rule is also the one an operator can state without a footnote. There is no threshold,
+for the same reason the zero-obvious rule has none (D-critic-audition): a rate no call contributed to
+is not a lenient measurement, it is the absence of one.
+
+**`schema_failure_rate` stays the separately reported cause, and stays `>`.** Failures are not
+folded into misses; the schema gate still fires first, so a wholly broken model is still reported
+as a mechanical problem rather than sent to an operator as "never graded 6 fixtures". The
+20%-exactly boundary was reconsidered and deliberately left alone. `>` is what a field named
+`max_…` should mean, and it is what `max_control_material_rate` already means, while
+`min_obvious_sensitivity` admits its named bound from the other side — changing one of the three
+would make the set read inconsistently. More to the point, the boundary was only load-bearing
+because of the censoring: with coverage gated, a model sitting at exactly 20% because of three
+scattered flakes is a model that was measured on everything, which is what the threshold is
+calibrating for.
+
+**`fixtures_owed` is a required field, so old cache entries are dropped.** A record that cannot
+say what it owed cannot say whether it measured all of it. Defaulting it to 0 would have made the
+coverage gate vacuous for every verdict written before this change, i.e. fail-open for the
+`max_age_days` window on precisely the entries the finding is about. Required means
+`Metrics.model_validate` rejects them and `load_cache` — which already treats any unreadable entry
+as absent — degrades them to *not audited*. Same blast radius as D-control-soundness: the
+`enforce` gate blocks only on a positive `unfit`, so this is safe to land with enforcement on, and
+the correct reading of a pre-coverage verdict is "re-measure".
+
+**Reporting.** `ra audition` gains a `cover` column (`covered/owed`, red when short) beside the
+rates it qualifies, and `--json` carries both fields through the existing `model_dump`. The
+`OrchestratorView` is untouched — audition metrics never enter the controller's context.
+
+**What this does not do.** It does not change the fixtures, the thresholds, or the grader.
+`refine_audition` has its own `Metrics` with the same shape of denominator and was left alone as
+out of scope; whether it censors the same way is an open item below.
+
+## D-audition-rubric-identity — a cached verdict names the grading rules that produced it
+
+`CacheEntry.matches` keyed a stored audition result to `(corpus_hash, prompt_hash, repetitions)`.
+That triple is the right *philosophy* — D-critic-audition's cache exists so a verdict is never
+carried across a change in what the measurement means, and D-control-soundness relies on exactly
+that when it says a corpus edit "degrades to re-measure" — but the triple was incomplete. Two
+verdict-affecting inputs sat outside it, and both are read by `ra doctor` and by the
+`audition.enforce` startup gate for up to `max_age_days` (30 by default).
+
+**`require_verbatim_spans`.** The CLI already passes `config.require_verbatim_spans` into
+`run_assignment`, and `triage.validate_issue` fails a whole lens closed on a quote that is not
+verbatim. Flipping the flag changes what a critic is able to score at all, so a score measured
+under one regime is not evidence about the other — in either direction. It is now a stored field
+on the entry and a term in `matches()`.
+
+**The grading rules.** `_is_material`, `_locus_matches`, `LOCUS_PARAGRAPH_TOLERANCE`,
+`SEVERITY_FLOOR`, `SEVERITY_RANK`, `LENS_CATEGORIES` and `run_assignment`'s counter accounting
+together decide what a call is worth. None was hashed, so a deployed change to any of them — a
+severity floor moved, a category re-scoped to another lens, the locus window widened — left every
+stored verdict trusted for a month though it had been produced by rules that no longer exist. A
+new `rubric_hash()` is now a fourth term in `matches()`.
+
+**How `rubric_hash` is built, and why it is half automatic and half by hand.** The issue offered
+a choice: a hand-bumped constant, or a hash derived from the taxonomy tables. Both were taken,
+mixed into one digest — the shape `refine_prompt_hash` already uses, where a hashed prompt surface
+is combined with a hand-bumped `PROMPT_VERSION`.
+
+The rules that are *data* are hashed from the tables directly (`LENS_CATEGORIES`, `SEVERITY_FLOOR`,
+`SEVERITY_RANK`, `LOCUS_PARAGRAPH_TOLERANCE`). Deriving that part of the identity from its source
+data removes the maintenance risk that a table edit in `taxonomy.py`, away from the grader, lands
+without the separate manual version bump. The `Metrics` field set is hashed for the same reason: a
+new counter defaults to 0 on every older entry, and a `judge` gate reading it would score a stale
+entry as a measured zero rather than as an absence.
+
+The rules that are *code* — `grade`, `_is_material`, `_locus_matches`, `run_assignment`'s
+accounting — carry `RUBRIC_VERSION`, a constant with a comment listing what requires a bump.
+**Rejected: hashing `inspect.getsource` over those functions.** It is automatic and cannot be
+forgotten, which is the whole argument for it. It was rejected because `audition.py` is
+deliberately comment-dense — the reasoning is the documentation — and an audition costs
+|models| x |fixtures| x repetitions calls against a paid, rate-limited proxy. Billing a full
+re-measurement of the roster for a typo fix in a docstring conflicts with the operational goal of
+invalidating only when measurement semantics change. It also breaks under a source-less install.
+The chosen trade is a manually maintained constant for code rules, with automatic hashing where
+the rubric is already represented as data.
+
+**Not covered, deliberately: `judge`'s gate order and `AuditionThresholds`.** Neither is stale-able.
+The cache stores `Metrics`, not a verdict; `judge(entry.metrics, cfg.thresholds)` runs at read time
+against live thresholds, so a gate reorder or a retuned threshold already takes effect on the next
+read without any invalidation. Hashing them would force a paid re-measurement to obtain a verdict
+the current code would compute for free from the data already stored.
+
+**Backward compatibility degrades to *not audited*, never to a pass.** `rubric_hash` and
+`require_verbatim_spans` are required fields with no defaults, so an entry written before they
+existed fails `CacheEntry.model_validate`, and `load_cache` already drops what fails to validate.
+A pre-rubric `.ra-audition.json` therefore reads as an empty cache: every slot shows *not audited*
+in `ra doctor`, and the `enforce` gate — which blocks only on a positive `unfit` — passes. That is
+the same direction D-control-soundness established for a corpus edit, and it is safe to land in a
+deployment running with enforcement on. A default value would have been the unsafe choice: it
+would have asserted a rubric the entry never recorded.
+
+`cached_judgements` and `enforce_fitness` take `require_verbatim_spans` as a required argument
+rather than defaulting it, because the flag lives on `Config` while those functions take
+`AuditionConfig`, and both callers hold a `Config`. A default would let a caller silently compare
+against the wrong regime — the defect this decision closes, reintroduced one layer up. The gate
+still takes no `LLMClient`, and `test_the_gate_takes_no_client_and_so_can_never_spend` still pins
+that.
+
+**Deferred: storing per-call graded results so a rubric bump can regrade for free.** The cache
+holds aggregated `Metrics`, so any invalidation — corpus, prompt, or now rubric — forces a full
+paid re-measurement even when the raw calls would answer the new rules perfectly well. Storing raw
+`LensResult`s per fixture per repetition would make a rubric bump a free regrade, and would make
+the `judge`-reads-a-new-counter case free too. It was deferred rather than rejected: it changes the
+cache from a small verdict record into a corpus of stored model output (roughly two orders of
+magnitude larger, and containing critic prose about fixture text), which raises retention and
+schema-migration questions this issue should not settle in passing. Recorded as an open item below.
+
+## D-obvious-per-lens — every lens carries an obvious-tier fixture and a locus-anchored one, and "never clean" fails closed
+
+**The problem.** Found by adversarial review of the audition harness after D-control-soundness, and
+confirmed independently by simulation. Both fail-closed sensitivity gates in `audition.judge` are
+keyed to planted defects on `tier: obvious` fixtures:
+
+- the hardcoded one — `if metrics.obvious_total > 0 and metrics.obvious_hits == 0: → UNFIT`, the
+  llama-4-scout signature, and
+- the `min_obvious_sensitivity` threshold, itself guarded by `if metrics.obvious_total`.
+
+The `completeness` lens had exactly two planted fixtures, `omitted-counterargument-01` and
+`unexamined-presupposition-01`, and both were `tier: moderate`. So `obvious_total` was **zero on
+every completeness assignment** and both gates were structurally dead. A critic that returned zero
+issues on every call it ever made — the precise failure D-critic-audition was built to catch — scored:
+obvious gates skipped, controls clean (it invents nothing because it says nothing), `lens_sensitivity`
+0% against a warn threshold, verdict **MARGINAL**. `enforce_fitness` blocks only on `unfit`, so even
+a deployment running `audition.enforce: true` would have started with a silent critic staffing one of
+its three lenses.
+
+A second hole ran through the same two fixtures from the other direction. Both set `anywhere: true`,
+which skips the locus window entirely, so the completeness lens measured only *did the critic name a
+category from my lens*, never *did it find the defect*. A degenerate critic that reflexively raises
+one material `omitted_counterargument` on every artifact therefore scored 100% `lens_sensitivity` on
+completeness — and exactly `1.00` on `control_material_rate`, which is not *greater than* the `1.0`
+default, so the noise gate passed it too. Perfect sensitivity, MARGINAL verdict, no block. The
+completeness rubric could fail neither a never-fire critic nor an always-fire one.
+
+Neither hole was visible to a test. `test_shipped_corpus_loads_and_covers_both_directions` asserted
+only that each lens has *a* planted fixture.
+
+**Decision, part one: an obvious-tier fixture per lens, and a locus-anchored defect per lens.**
+`omitted-counterargument-02` is added to the corpus: `lens: completeness`, `tier: obvious`,
+`anywhere: false`, anchored at `S1.P1`. Its report recommends raising a rural interstate speed limit
+and never mentions crash risk, injury or fatality anywhere — not a section, not a sentence, not a
+source. That is the whole of the defect, and it is what makes the tier honest: the fixture is not
+merely thin. It carries a real `## The strongest counterargument` section that engages the
+reference-point objection on the merits, it names its own weakest argument as weak, and it decomposes
+the measurement it rests on, so a critic cannot score by flagging "needs more detail". It is written
+in production report shape (D-report-template) from the start rather than in the pre-template shape
+the older fixtures still use.
+
+Two corpus tests pin both properties per lens — `test_every_lens_has_an_obvious_tier_fixture` and
+`test_every_lens_has_a_locus_anchored_planted_defect` — so neither can regress the next time fixtures
+are edited. They are corpus assertions, not grader assertions: they fail at the fixture, which is
+where the defect was.
+
+**Why this fixture is anchored when the other two are not.** `anywhere` exists because an omission
+often has several honest loci and grading against one of them measures agreement with the fixture
+author's filing choice. This omission has a dominant locus. `S1.P1` is the only paragraph that states
+the recommendation, and the only one that asserts what the strongest objection *is* — the claim the
+absent objection most directly bears on, which is exactly what `prompts._CATEGORY_ANCHOR` instructs an
+`omitted_counterargument` critic to quote (D-absence-anchor). Every other section is descriptive.
+
+**The residual risk, recorded rather than hidden.** A critic that files the omission against the
+`## The strongest counterargument` section instead scores a miss, and with `obvious_total` of 1 on
+this lens that alone reads `unfit` — the shape of failure D-control-soundness was: a lens made
+structurally unpassable by its own corpus. Two things bound it. The shipped posture is
+`audition.enforce: false`, so the consequence is a warning naming the count ("found 0 of 1 obvious
+planted defects"), which is inspectable. And the pre-registered remedy is to add a *second* obvious
+completeness fixture — an `anywhere: true` one, which the coverage tests permit once an anchored
+fixture exists — rather than to relax this one, because `obvious_total` of 2 turns a locus
+disagreement into 50% obvious sensitivity (marginal) while still grading silence 0% (unfit). That
+remedy is not taken pre-emptively: it costs a fixture's worth of paid calls on every audition to
+insure against a miss no measurement has yet observed.
+
+**Decision, part two: "never clean" fails closed, and the control-rate boundary does not move.**
+The always-fire strategy lands on exactly `1.00`, and the obvious repair is to change
+`control_material_rate > max_control_material_rate` to `>=`. That is **rejected**, twice over.
+
+It leaves the hole open to configuration. The doctrine established for the silence direction — and
+pinned by `test_silent_critic_is_unfit_under_every_threshold_setting` — is that the strategy which
+most completely defeats the harness must not be reachable by tuning. Under `>=` the always-fire critic
+is blocked only while `max_control_material_rate` happens to sit at `1.0`; an operator who loosens it
+to `1.5`, which looks like an ordinary calibration, re-opens it exactly. And it silently re-tightens a
+calibrated threshold for every deployment, changing the configured number's meaning from "more than
+one invented issue per sound report" to "one or more", in a region the D-control-soundness data does
+not speak to — the rates measured there were 1.67 to 4.17, none near the boundary. A knife-edge fix
+for one arithmetic coincidence is not a fix for the class.
+
+What is added instead is a second **hardcoded** gate, the mirror of the silence gate: `control_runs`
+non-zero and `control_clean_runs == 0` is `unfit`, whatever the thresholds say. It states the property
+that actually matters, which is not *how noisy* but *did this critic ever once let a sound report
+through in this audition*. The gate is a conservative fail-closed policy against the demonstrated
+always-fire strategy: zero clean results on the configured controls is sufficient to reject that
+audition, without claiming the observations predict how the critic would behave on another sound
+report. Ordering: the new gate sits *after* the `max_control_material_rate` check, so the existing and
+more informative "invents N material issues per sound report" reason still wins wherever it applies,
+and the new one speaks only where the rate gate is silent. `control_clean_rate` as a *threshold* was
+considered and rejected for the same reason `>=` was: a tunable knob at the one point where the
+harness must be untunable.
+
+This is deliberately not a judgement about noise in degrees. A critic clean on some sound reports and
+not others is `warn_control_material_rate`'s business and still grades `marginal`. The gate fires only
+on *never*, across a base of two control artifacts times the configured repetitions — six evaluations
+at the default, and only two when `repetitions: 1`. Those repeated observations are not treated as
+independent samples or generalized beyond the audition corpus. The thinness of that base is a real
+limitation and is already an open item below (a third control fixture).
+
+**Cache and blast radius.** Adding a fixture changes `corpus_hash`, so every cached verdict stops
+matching in `cached_judgements` and reads *not audited* — never `unfit`. `enforce_fitness` blocks only
+on a positive `unfit`, so this lands safely even with enforcement on: it degrades to "re-measure",
+which is correct, because a verdict from the old corpus is a claim about a measurement that no longer
+covered the completeness lens's obvious tier at all.
+
+**Invariants.** None touched. The audition harness sits outside the run graph — it never reaches the
+controller, `OrchestratorView`, author exclusion (it pins the model under test on purpose, and uses the
+`AUDITION_AUTHOR` sentinel), or the severity floors, which the grader reads but does not change. The
+grader stays a pure function with no LLM in it. The new fixture is untrusted data that enters a critic
+context through the same fenced `critic_user` path a real report does, and the fail-closed lens
+contract is unchanged.
+
+**What this does not establish.** The new fixture has not been auditioned against real models — that
+costs a paid proxy run — so the `obvious` tier claim rests on reading the artifact, as every tier claim
+in this corpus does. Nor has the never-clean gate ever fired on live data: every `unfit` verdict
+recorded so far came from the rate gate, and this one exists to catch a strategy that was demonstrated
+by simulation rather than observed in a roster.
+
+
+## D-reviewer-confidence-field — the finding arrays admit the field the prompts make reviewers compute
+
+**The problem.** The review pipeline was NO-GOing PRs that every reviewer who completed had
+approved. A reviewer attached `confidence` to a `non_blocking_notes[]` entry; that array's items
+set `additionalProperties: false` and did not admit the field; ajv rejected the *whole* artifact;
+the judge then failed closed on a selected role that produced no valid artifact. On 2026-08-01
+this hit six of the eight open resolver PRs (#123–#130) for roughly seven wasted review cycles,
+sometimes burning both cycles of a single PR. It is intermittent per role invocation — the model
+sometimes writes the number down and sometimes does not — so #124 and #125 passed the same
+pipeline the same day.
+
+The cause is a contradiction inside the reviewer contract, not a misbehaving model. Every reviewer
+prompt states the **0.7 confidence ladder**: a finding the reviewer is less than 0.7 confident in
+belongs in `non_blocking_notes[]` rather than `blocking_issues[]`. Deciding which array a finding
+goes in is therefore done in terms of a number the reviewer has in hand — and `confidence` is
+*required* on every `fix_suggestions[]` entry, so it is already in the output contract one array
+over. The schema then forbade the field on exactly the arrays the prompt had it reasoning about.
+A reviewer that recorded the number it was told to use lost every finding it had.
+
+**Decision — admit `confidence` on both finding arrays, bounded `[0, 1]`, nullable on notes.**
+Admitted rather than forbidden: the number is real signal a reader of the artifact wants, and
+refusing it costs not one finding but all of them. Nullable on `non_blocking_notes[]` matches
+`severity` and `source` there. The bound stays live, so `confidence: 1.5` is still a failure.
+
+**Decision — the two finding arrays must admit the same fields, enforced mechanically.**
+`blocking_issues[]` and `non_blocking_notes[]` describe the same findings at different confidence;
+the ladder is literally "same finding, other array". This is the fourth instance of one class —
+`id`, `decision_ref` (#29), `category` (#35), `confidence` (#75, then #131) — and each was fixed by
+admitting the one field, which closes an instance, not the class. `reviewer-v1.json`'s own comment
+says `severity` and `source` were admitted "pre-emptively to close the class"; that pre-emption
+used the wrong frame. The leak-prone set is not *fields a blocker has* but **every field named
+anywhere in a reviewer's output contract or prompt**, which is why it missed the one field required
+on `fix_suggestions[]` and cited in all five prompts.
+
+`.github/scripts/review/schema-parity.test.mjs` closes the class in the gate that already runs on
+every change under `.github/scripts/review/**`:
+
+- the two arrays' property sets must stay **equal** — admitting a field to one fails PR validation
+  until it is on both;
+- every descriptive field **required on `fix_suggestions[]`** must appear on both arrays — the rule
+  that would have caught `confidence` before it shipped;
+- neither array may switch to `additionalProperties: true`, which would make the parity assertion
+  vacuous while silently accepting hallucinated fields;
+- `confidence` keeps its `[0, 1]` bounds on both.
+
+A deliberately one-sided field is still allowed: it goes in the test's `ASYMMETRIC` map with its
+reason, which makes the exception a reviewed act rather than an oversight.
+
+**What this is not.** The judge's fail-closed aggregation is untouched and is not being weakened.
+A reviewer that fails must block the merge rather than drop out of the review set — that behaviour
+was correct, and it is what made a self-inflicted schema bug visible instead of silently shrinking
+the panel. What changes is only that a reviewer following its own prompt no longer produces an
+invalid artifact. The prompts' confidence ladder is likewise unchanged; the schema is the side that
+was wrong. Nor is this a general tolerance layer: unknown properties still fail closed, in the same
+narrow spirit as the `maxLength` normalizer, which shortens over-long strings and deliberately
+never drops an unknown field.
+
+**Known limit.** Reviewer artifacts are validated against **main's** copy of the schema, so this
+change does nothing for its own reviewers — the flake can still kill a role on the PR that fixes
+it. That is what happened to the first attempt at this fix (PR #81, closed unmerged 2026-07-30,
+NO-GO'd on cycle 1 by this exact bug class hitting its `invariant` reviewer). The limit is recorded
+in [ci-pipeline.md](./ci-pipeline.md) rather than worked around, because the alternative — validating
+against the PR's own schema — would let a PR relax the contract its own review is checked against.
+
+
+## D-audition-source-mode — the audition measures the source-less floor, and the verdict says only that
+
+`audition.run_assignment` calls `critique_once` with `sources=None`, on every fixture, for every
+lens. The production deployment runs `verify_sources` always-on
+([deployment-profile.md](./deployment-profile.md)), so its evidence critic reads a prompt this
+harness never builds: `misrepresented_source` sharpened from *"the cited source plainly does not
+support the claim"* into *"the fetched page does not contain the claim"* (`prompts.critic_user`),
+the pages themselves in a `fetched_sources_block` with its three entry shapes (D-existence-vs-body),
+and the standing instruction not to re-raise a definitive not-found that
+`triage.mechanical_citation_issues` has already minted (D-notfound-fabrication). The verdicts are
+named `fit` and `unfit`, which read as unconditional. They are not, and until now the gap was
+recorded nowhere.
+
+**Decision. The audition measures the capability floor a critic brings with no source access —
+deliberately — and that scope is now stated in the code, carried in the cache identity, and
+written here.** Four reasons, in the order they carry weight.
+
+**The floor is real, not hypothetical — and it sits strictly below production's failed-fetch
+case, not level with it.** `sources=None` matches exactly one production state: a report with no
+citations to check at all. It does not match a paywalled, blocked or offline citation, because
+fetching is best-effort by construction — sites block automated clients, paywall bodies, serve
+formats the extractor cannot read, or go offline, and this system refuses the tricks that would
+get around that (D-existence-vs-body) — but a failed fetch is still a *fetch attempt*, and
+`fetched_sources_block` still renders an entry for it, telling the critic to judge that citation
+*on its face*. A critic under `sources=None` never sees that instruction, or the fact that a
+citation was attempted at all. A critic that cannot find a defect with no source scaffolding
+whatsoever is therefore failing a strictly harder bar than any real evidence critic runs against
+— which is why an `unfit` here is trustworthy evidence of a problem, even though a `fit` cannot
+promise the model would also succeed once handed even a failed-fetch entry.
+
+**One definition of "the prompt", across all three lenses.** The logic and completeness lenses
+receive no sources under any configuration. A harness that fed a packet to evidence alone would be
+taking two different measurements and printing both as `fit`, and the position-aware roster
+warnings compare verdicts across lenses.
+
+**Determinism.** `corpus_hash` keys every cached verdict to the exact bytes of the corpus. A
+measurement whose inputs depended on what the network returned that day would be keyed to nothing,
+would differ between machines, and would rot as cited URLs die — the same reason the whole test
+suite is offline.
+
+**The direction the gate actually uses survives the narrowing.** `audition.enforce` blocks only on
+a positive `unfit`, and `unfit` here means the model found nothing obvious in text handed to it
+directly, with no source scaffolding at all. In principle that is over-strict — a model could be
+blind with nothing and sharp once handed even a failed-fetch entry — and that risk is accepted
+because it fails toward re-rostering, which is this project's posture: a model that cannot pass
+the harder bar is not thereby known to fail the easier one, but nothing here is claiming it does.
+
+**What a `fit` verdict certifies.** That the model raises material, correctly-anchored, in-scope
+findings against the artifact text alone, and does not invent them against a sound control, with
+no fetched-source scaffolding of any kind in its context. For the evidence lens specifically, that
+is a floor strictly below the on-its-face standard production actually runs when a citation is
+attempted and its body does not arrive — that case still gets a `fetched_sources_block` entry
+naming the failure, which this measurement never exercises.
+
+**What it does not certify, and no threshold change would.** Three things, all of them real:
+
+- **Use of fetched page text.** The sharpened `misrepresented_source` — the strongest check the
+  production evidence lens has — is never exercised. (#118 covers the unfetched form of that
+  category, which the corpus also lacks; the fetched form needs the packets below.)
+- **The discipline of the fetched-sources block.** Not re-raising the `NOT FOUND` case triage has
+  already recorded (a duplicate at the blocking floor), not reading `BLOCKED` as fabrication, not
+  reading a metadata-only entry as a body. Each is a failure mode D-notfound-fabrication and
+  D-existence-vs-body exist to prevent, and this harness can see none of them.
+- **The noise direction with a page in context.** Sensitivity plausibly only improves when a critic
+  is handed evidence. Over-flagging does not: a fetched page is more surface to over-read, and
+  `control_material_rate` is measured without one.
+
+**`fabricated-citation-01` stays `tier: obvious`, and is not measuring a superseded capability.**
+Only an HTTP-definitive not-found is settled mechanically (D-notfound-fabrication); a fabricated
+citation whose URL is blocked, paywalled, or resolves to an unrelated live page leaves the
+judgment exactly where this fixture puts it — with the critic, on the face of the text. What the
+fixture cannot measure is the duplicate case in the list above.
+
+**`prompt_hash()` now describes what it covers.** Its docstring claimed "every prompt surface a
+critic sees" while hashing `critic_user(lens, "q", "body", None)` and nothing else. The claim is
+corrected rather than the coverage widened: the hash covers the surface the harness measures, plus
+`AUDITION_SOURCE_MODE` as an explicit component of the identity.
+
+*Rejected: hashing the sources-present surface too.* It would invalidate every cached verdict
+whenever anyone edited a prompt fragment no measurement had ever used — discarding results that
+remain exactly as true as the day they were recorded — and would advertise a coverage the corpus
+does not have. The mode tag is what makes the narrower hash safe: a sources-present mode cannot
+inherit these verdicts, because it will not key to them.
+
+*Blast radius.* Introducing the tag changes the hash once, so every existing cached verdict stops
+matching and reads *not audited* until `ra audition` is re-run — never `unfit`. The gate blocks
+only on a positive `unfit`, so this is safe to land in a deployment running with enforcement on.
+
+**Rejected: mirroring deployment by fetching the fixtures' own citations.** The planted citations
+are fabricated by construction, so fetching them would measure how today's internet answers a
+made-up URL — a 404 from a dead domain one week, a parked page the next — and the control
+fixtures' real citations would rot on their own schedule. `ra audition` is a live command and may
+spend proxy calls, but the corpus it grades against has to stay a fixed, hashable artifact that is
+identical on every machine.
+
+**Not done, deliberately: offline source packets.** Closing the gap for real needs no network — a
+`sources.yaml` beside a fixture's `artifact.md`, deserialized into `FetchedSource` values covering
+the outcomes that matter (a body that supports the claim, a body that does not, a `BLOCKED`, a
+`NOT FOUND`, a metadata-only record), fed through the same `prompts.critic_user` call, and keyed in
+the cache under a different `AUDITION_SOURCE_MODE`. It is a corpus change that belongs next to the
+fixture work in #118 rather than bolted onto a scoping decision, so it is an open item below. The
+mode tag is the seam it plugs into.
+
+
 ## D-minor-floor-fixtures — an audition fixture plants only what the grader can credit
 
 Found by adversarial review of the audition harness after D-control-soundness, and confirmed by a
@@ -2697,20 +3296,33 @@ force a revision. A fixture whose planted defect no run would ever act on cannot
 grades a critic's fitness for runs.
 
 **Decision.** The fixture is re-planted as `overstated_claim` and renamed
-`tests/fixtures/audition/overstated-claim-01`. The evaluative wording ("squandered", "a boondoggle
-of an outreach initiative") is **removed** rather than left beside the new defect, and S2.P1 now
+`tests/fixtures/audition/overstated-claim-02`. `-02` rather than `-01`: D-category-coverage landed
+concurrently and independently claimed `overstated-claim-01` for its own fixture (a vitamin-D
+report restated from a hedged, subgroup-concentrated effect into a flat "prevents"). Two
+`overstated_claim` fixtures at `tier: moderate` is not redundant coverage — different domains and a
+different defect shape, a counterfactual-certainty claim here against a hedge-drop there — so both
+stand. The evaluative wording ("squandered", "a boondoggle of an outreach initiative") is
+**removed** rather than left beside the new defect, and the "Spending and execution" section now
 asserts a counterfactual certainty — the appropriation's size "was never the binding constraint",
 "no increase in funding could have delivered the 300 beds on schedule" — that the two findings it
 rests on do not establish. `docs/bias.md` §3 already routes exactly this case: framing that changes
 the strength of a claim is `overstated_claim`, not `loaded_language`. Removing the wording rather
 than keeping both is the point of the change: leaving it would have preserved a reading of the
-locus on which a doctrine-compliant critic still scores zero.
+locus on which a doctrine-compliant critic still scores zero. The artifact is also rewritten into
+`prompts.REPORT_SKELETON` shape (`## Conclusion` first, `## Key findings`, `## The strongest
+counterargument`, topical sections, `## Sources` last, no top-level `#` title) — the precedent
+D-obvious-per-lens and D-category-coverage set for new fixtures in this corpus — rather than left in
+the older `# Title` shape it previously used, so a critic is graded on the document shape production
+actually hands it.
 
 **The rule is mechanical, not a note.** `_check_planted_floor_is_material` refuses at load any
 planted category whose floor is below `MATERIAL_FLOOR` — today `loaded_language`, `stylistic`,
 `unclear_structure`. This is the same shape as `_check_control_manifest` under D-control-soundness:
 the corpus property that review kept failing to hold becomes something the loader holds. It says
-only that such a category is not measurable *by this grader*, whose single bar is materiality.
+only that such a category is not measurable *by this grader*, whose single bar is materiality. This
+supersedes D-category-coverage's characterization of `loaded-language-01` as "diagnostic, not a
+sensitivity measurement": that fixture no longer exists, and nothing planting a minor-floor category
+can exist in this corpus going forward — not diagnostic, unrepresentable.
 
 **`severity_agreement` was not a rate.** The same code carried a second defect, and the
 loaded-language case was the one that exposed it: `severity_agreements / strict_hits`, with
@@ -2725,14 +3337,21 @@ name is kept over `exact_floor_rate` because the corrected definition is agreeme
 not equality-with-it. Nothing reads the metric — it is neither displayed by `ra doctor` nor gated
 on — so this is a correctness fix ahead of a consumer, not a behaviour change.
 
-**Coverage cost, stated plainly.** The corpus no longer covers `loaded_language`, and now covers
-`overstated_claim`, which it did not before: 8 of the 11 non-stylistic categories either way.
-`loaded_language` is **deliberately uncovered** by the gating corpus and this is the record of why.
-Covering it needs a non-gating diagnostic channel — a correct-category, correct-locus, floor-severity
-report credited in a `diagnostic_hits` metric excluded from `planted_total` — which was rejected
-here for two reasons. It changes what `ra audition` reports and what `ra doctor` shows, so it is its
-own decision with its own consumer; and D-critic-audition's argument against an inert `enabled` flag
-applies to an inert metric too. It is an open item below.
+**`RUBRIC_VERSION` bumped to 2 (D-audition-rubric-identity).** `grade`'s `severity_agrees`
+computation is exactly the "strict / same-lens / severity-agreement matching rules" category that
+decision names as requiring a hand bump. A cached `Metrics.severity_agreements` recorded under
+version 1 could exceed `strict_hits` — the bug this decision fixes — so it must not be read as
+though it meant the same thing as a version-2 count. The bump invalidates every stored entry via
+`rubric_hash`, which is safe under `audition.enforce`: entries drop to *not audited*, never to a
+false `unfit`.
+
+**Coverage cost, stated plainly.** The corpus no longer covers `loaded_language`, and it is
+**deliberately uncovered** by the gating corpus — this is the record of why. Covering it needs a
+non-gating diagnostic channel — a correct-category, correct-locus, floor-severity report credited
+in a `diagnostic_hits` metric excluded from `planted_total` — which was rejected here for two
+reasons. It changes what `ra audition` reports and what `ra doctor` shows, so it is its own decision
+with its own consumer; and D-critic-audition's argument against an inert `enabled` flag applies to
+an inert metric too. It is an open item below.
 
 **Rejected: keep the fixture and document that it measures escalation.** Weakest of the three
 options considered. `lens_sensitivity` is not a diagnostic-only number — it is compared against
@@ -2752,6 +3371,11 @@ was: a verdict from the old corpus is a claim about a measurement that no longer
   auditioned at all, and the corpus is barred from planting them. A second channel that credits a
   correct-category, correct-locus report at its own floor, reports it, and gates nothing would close
   that gap; it needs a consumer in `ra doctor` before it is worth adding.
+- Per-call graded results in the audition cache (D-audition-rubric-identity). Storing raw
+  `LensResult`s alongside `Metrics` would turn every rubric bump into a free regrade instead of a
+  paid re-measurement, which is the thing that makes invalidating a verdict expensive enough to
+  argue about. It needs a retention answer (the cache becomes stored model output, not a verdict
+  record) and a migration story for the entry schema, so it is its own decision.
 - Per-role CI cost telemetry, and a revisit of the D-ci-model-pinning tiers against measured
   proxy spend. The tiers are currently a bet on task shape; nothing in this repository can yet
   say whether they cost more or less than what they replaced.
@@ -2763,9 +3387,24 @@ was: a verdict from the old corpus is a claim about a measurement that no longer
   that as "fixture suspect" instead of grading the models down would make this class self-limiting.
   It needs a locus-clustering rule and a majority threshold, and it changes what `ra audition`
   reports, so it is its own decision.
+- Whether the refine audition censors its denominators the way the critic audition did
+  (D-audition-failure-coverage). `refine_audition.Metrics` counts `schema_failures` separately and
+  builds its rates from successful calls only, which is the same shape; nobody has yet checked
+  whether a refine model can deterministically break on one fixture and still grade `fit`. The fix
+  would be the same three fields, but the argument for `unfit` there is weaker — refinement is
+  warn-only and degrades to silence by design (D-refine-audition) — so it is its own decision.
 - A third control fixture. Two controls x 3 repetitions is 6 runs per slot, which is a thin base
   for a rate compared against a threshold of 1.0 — the audition that surfaced D-control-soundness
   exited 0 on one pass and 1 on the next. Cost is roughly +10% on a full audition.
+- Deterministic offline **source packets** for the evidence fixtures, and a second audition mode
+  that runs under them (D-audition-source-mode). Today every measurement is taken with
+  `sources=None`, so the sharpened `misrepresented_source` and the whole `fetched_sources_block`
+  discipline — don't duplicate a mechanical `NOT FOUND`, don't read `BLOCKED` as fabrication,
+  don't read an abstract as a body — are uncertified for a critic production runs with
+  `verify_sources` on. The packets need no network; they are fixture data. Cost is a corpus
+  addition per evidence fixture, a mode component in the cache key and in what `ra doctor`
+  displays, and roughly a doubling of evidence-lens calls when both modes are run. It lands
+  naturally with the fixture work in #118.
 - Whether `misrepresented_source` can be meaningfully checked without fetching the source
   (v1 only checks on-its-face support); a later evidence layer (RA-011) would strengthen this.
 - Calibration of `K` (plateau window), the hard cap, and defect-score weights against real runs.
