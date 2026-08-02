@@ -43,6 +43,7 @@ class Category(str, Enum):
     OVERSTATED_CLAIM = "overstated_claim"
     LOADED_LANGUAGE = "loaded_language"
     # completeness
+    INCOMPLETE_ANSWER = "incomplete_answer"
     OMITTED_COUNTERARGUMENT = "omitted_counterargument"
     UNCLEAR_STRUCTURE = "unclear_structure"
     UNEXAMINED_PRESUPPOSITION = "unexamined_presupposition"
@@ -64,6 +65,7 @@ SEVERITY_FLOOR: dict[Category, Severity] = {
     # that finds pervasive, verdict-carrying framing may propose `major` and the
     # clamp keeps it — escalation is allowed, only downgrades are not (RC-005).
     Category.LOADED_LANGUAGE: Severity.MINOR,
+    Category.INCOMPLETE_ANSWER: Severity.MAJOR,
     Category.OMITTED_COUNTERARGUMENT: Severity.MAJOR,
     Category.UNCLEAR_STRUCTURE: Severity.MINOR,
     Category.UNEXAMINED_PRESUPPOSITION: Severity.MAJOR,
@@ -88,6 +90,7 @@ LENS_CATEGORIES: dict[Lens, tuple[Category, ...]] = {
         Category.STYLISTIC,
     ),
     Lens.COMPLETENESS: (
+        Category.INCOMPLETE_ANSWER,
         Category.OMITTED_COUNTERARGUMENT,
         Category.UNCLEAR_STRUCTURE,
         Category.UNEXAMINED_PRESUPPOSITION,
@@ -146,14 +149,18 @@ LENS_BRIEF: dict[Lens, str] = {
         "or aligned cluster that the report inherits a single viewpoint."
     ),
     Lens.COMPLETENESS: (
-        "Assess only coverage and organization: whether a material opposing view or "
-        "counterargument that a careful reader would expect is absent, whether "
+        "Assess only coverage and organization: whether every explicit, material part "
+        "of the question is answered rather than replaced with an adjacent question; "
+        "whether a material opposing view or counterargument that a careful reader "
+        "would expect is absent, or the purported opposing case is an easier objection "
+        "that does not challenge a load-bearing conclusion; whether "
         "the organization of the report impedes evaluating its argument, and "
         "whether the report adopts a contested presupposition of the question, or "
         "of its own framing, as settled fact without examining it. An omission "
         "must be fixable within the report itself: adding the missing perspective, "
         "weakening the affected claim, or stating the limitation explicitly are each "
         "acceptable resolutions. Never demand a specific external document, dataset, "
-        "or record as the only acceptable fix."
+        "or record as the only acceptable fix. Do not invent an unstated goal, a "
+        "question behind the question, or an optional angle and call it unanswered."
     ),
 }

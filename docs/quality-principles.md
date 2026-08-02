@@ -45,6 +45,13 @@ review findings the way `D<n>` ids are.
 | QP11 | **Evidence-base freshness is checked mechanically and is never blocking.** See the marker line above and [§3](#3-refreshing-the-evidence-base). | this file | — |
 | QP12 | **Principles-as-spec drift is blocking, in both directions.** Behavior governed by QP1–QP10 changing without this file and `decisions.md` moving too — or a principle here weakening with no new fetchable evidence in the diff — is the `quality` reviewer's row-12 analogue. See [§4](#4-retiring-or-weakening-a-principle). | this file + every surface above | — |
 
+**Application — answer obligations (D-answer-obligations).** `incomplete_answer` is structured
+completeness output with a mechanical `major` floor under QP1. Its writer and critic prompt
+obligations change what each isolated role must assess, not what crosses contexts, so QP5's traffic
+boundary is unchanged. The audition measures the added category through its existing structured
+metrics, deterministic verdict, and rubric-identity invalidation under QP8; no LLM grades prose into
+a control decision.
+
 ## 3. Refreshing the evidence base
 
 The literature moves; this register must not silently rot. There is deliberately **no

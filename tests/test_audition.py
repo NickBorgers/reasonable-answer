@@ -465,6 +465,18 @@ def test_corpus_class_is_not_readable_off_source_count():
         )
 
 
+def test_incomplete_answer_fixture_changes_the_question_not_the_report():
+    """D-answer-obligations: isolate answer coverage from every artifact-level cue."""
+    fixtures = {f.id: f for f in audition.load_fixtures(CORPUS).fixtures}
+    control = fixtures["control-base-dust-bowl-01"]
+    planted = fixtures["incomplete-answer-01"]
+
+    assert planted.artifact == control.artifact
+    assert planted.question != control.question
+    assert "unionization" in planted.question
+    assert Category.INCOMPLETE_ANSWER in {defect.category for defect in planted.defects}
+
+
 # ------------------------------------------------------------------- grading
 
 
