@@ -1143,6 +1143,7 @@ def entry(**kwargs) -> audition.CacheEntry:
         prompt_hash="prompt",
         rubric_hash="rubric",
         require_verbatim_spans=True,
+        structured_output_mode="json_schema",
         repetitions=3,
         recorded_at=time.time(),
     )
@@ -1157,6 +1158,7 @@ def matches_current(e: audition.CacheEntry, **overrides) -> bool:
         repetitions=3,
         rubric_hash="rubric",
         require_verbatim_spans=True,
+        structured_output_mode="json_schema",
     )
     args.update(overrides)
     return e.matches(
@@ -1165,9 +1167,10 @@ def matches_current(e: audition.CacheEntry, **overrides) -> bool:
 
 
 def test_cache_entry_is_invalidated_by_any_dimension_of_what_it_measured():
-    """Corpus, prompts, repetitions, grading rubric and span-validation regime are all
-    part of what a score means (D-audition-rubric-identity). A verdict carried across a
-    change in any of them is a claim about a measurement that no longer exists."""
+    """Corpus, prompts, repetitions, grading rubric, span-validation regime and
+    structured-output mode are all part of what a score means (D-audition-rubric-identity,
+    D-audition-probe-parity). A verdict carried across a change in any of them is a claim
+    about a measurement that no longer exists."""
     e = entry()
     assert matches_current(e)
     assert not matches_current(e, corpus_hash="other-corpus")
@@ -1175,6 +1178,24 @@ def test_cache_entry_is_invalidated_by_any_dimension_of_what_it_measured():
     assert not matches_current(e, repetitions=5)
     assert not matches_current(e, rubric_hash="other-rubric")
     assert not matches_current(e, require_verbatim_spans=False)
+    assert not matches_current(e, structured_output_mode="prompt")
+
+
+def test_only_the_structured_output_mode_may_be_left_uncompared():
+    """The mode is the one dimension a caller can decline to compare, and declining is
+    explicit (D-audition-probe-parity). A cache-read-only caller cannot learn the mode
+    without spending the probe it promises not to spend, so it reads across the
+    difference and `mode_drift` reports it — rather than dropping the entry and
+    disarming the `enforce` gate every time a non-deterministic prober lands elsewhere.
+
+    Nothing else may be waived: every other term is knowable for free from config, the
+    corpus or the code.
+    """
+    e = entry(structured_output_mode="json_schema")
+    assert matches_current(e, structured_output_mode=None)
+    assert not matches_current(e, structured_output_mode="prompt")
+    with pytest.raises(TypeError):
+        e.matches("corpus", "prompt", 3, rubric_hash="rubric", require_verbatim_spans=True)
 
 
 def test_cache_entry_expires():
@@ -1208,6 +1229,18 @@ def test_a_pre_rubric_cache_file_reads_as_not_audited(tmp_path):
         "recorded_at": time.time(),
     }
     path.write_text(json.dumps({audition.cache_key("p/m", Lens.LOGIC): old_shape}))
+    assert audition.load_cache(path) == {}
+
+
+def test_a_pre_probe_cache_file_reads_as_not_audited(tmp_path):
+    """An entry written before the audition probed cannot say which extraction path its
+    `schema_failures` were counted on, and a defaulted mode would assert one it never
+    recorded. So it fails validation and is dropped — the same safe direction
+    D-audition-rubric-identity established (D-audition-probe-parity)."""
+    path = tmp_path / "cache.json"
+    legacy = entry().model_dump(mode="json")
+    legacy.pop("structured_output_mode")
+    path.write_text(json.dumps({audition.cache_key("p/m", Lens.LOGIC): legacy}))
     assert audition.load_cache(path) == {}
 
 
@@ -1524,6 +1557,7 @@ def unfit_cache(
     lens: Lens,
     cfg: AuditionConfig,
     require_verbatim_spans: bool = True,
+    structured_output_mode: str = "json_schema",
 ) -> None:
     """Write a cache the gate will actually accept: real corpus, prompt and rubric
     hashes, the span-validation regime it was measured under, the configured repetition
@@ -1543,6 +1577,7 @@ def unfit_cache(
                 prompt_hash=audition.prompt_hash(),
                 rubric_hash=audition.rubric_hash(),
                 require_verbatim_spans=require_verbatim_spans,
+                structured_output_mode=structured_output_mode,
                 repetitions=cfg.repetitions,
                 recorded_at=time.time(),
             )
@@ -1612,12 +1647,53 @@ def test_flipping_require_verbatim_spans_drops_cached_verdicts_to_not_audited(tm
     assert audition.cached_judgements(cfg, roster(), IDENTITIES, False)
 
 
+def test_the_gate_still_blocks_on_a_verdict_measured_under_another_mode(tmp_path):
+    """D-audition-probe-parity's deliberate asymmetry, in the direction that matters.
+
+    The free read cannot know today's mode without spending a probe, so it declines to
+    compare. Had it instead dropped a mode-mismatched entry, `minimax-m3` — documented in
+    `config/roster.yaml` as probing non-deterministically — would disarm the enforcement
+    gate on most boots simply by probing somewhere else, and an `unfit` critic would
+    start a run. Reading across the difference keeps the block; `mode_drift` is what
+    makes the difference visible.
+    """
+    cfg = AuditionConfig(enforce=True, cache_path=tmp_path / "c.json")
+    unfit_cache(cfg.cache_path, "p/good", Lens.LOGIC, cfg, structured_output_mode="prompt")
+    assert audition.cached_judgements(cfg, roster(), IDENTITIES, True)
+    with pytest.raises(ConfigError):
+        audition.enforce_fitness(cfg, roster(), IDENTITIES, True)
+
+
+def test_mode_drift_names_the_slot_and_stays_silent_when_the_mode_agrees(tmp_path):
+    """The report that replaces the invalidation the free read cannot afford. It has to
+    name the slot and the two modes, or an operator cannot tell which verdict to
+    re-measure (D-audition-probe-parity)."""
+    cfg = AuditionConfig(cache_path=tmp_path / "c.json")
+    unfit_cache(cfg.cache_path, "p/good", Lens.LOGIC, cfg, structured_output_mode="prompt")
+
+    agreed = audition.mode_drift(cfg, roster(), IDENTITIES, {"c_good": "prompt"})
+    assert agreed == []
+
+    drifted = audition.mode_drift(cfg, roster(), IDENTITIES, {"c_good": "json_schema"})
+    assert len(drifted) == 1
+    assert "c_good" in drifted[0] and "logic" in drifted[0]
+    assert "prompt" in drifted[0] and "json_schema" in drifted[0]
+
+    # An alias nobody probed is not drift: an absent measurement of today's mode says
+    # nothing about the mode the verdict was taken under.
+    assert audition.mode_drift(cfg, roster(), IDENTITIES, {}) == []
+
+
 def test_the_gate_takes_no_client_and_so_can_never_spend(tmp_path):
     """`test_grader_needs_no_client` in spirit, for the startup path. The gate runs on
     every `ra run` and every web boot; if it ever grew a client it would quietly bill an
-    audition per run, and a keyless checkout would stop booting."""
+    audition per run, and a keyless checkout would stop booting.
+
+    `mode_drift` is held to the same rule: it reports on probe results but takes them as
+    data, so the doctor-path reporter cannot grow into a spender (D-audition-probe-parity).
+    """
     import inspect
 
-    for fn in (audition.enforce_fitness, audition.cached_judgements):
+    for fn in (audition.enforce_fitness, audition.cached_judgements, audition.mode_drift):
         params = set(inspect.signature(fn).parameters)
         assert not params & {"client", "llm"}, f"{fn.__name__} gained a call path"

@@ -1,4 +1,5 @@
-"""`ra doctor` — the pre-flight a roster edit is checked against, offline."""
+"""`ra doctor` and the audition commands — the pre-flight a roster edit is checked
+against, offline."""
 
 from __future__ import annotations
 
@@ -7,11 +8,20 @@ import yaml
 from fakes import FakeClient
 from typer.testing import CliRunner
 
-from reasonable_answer import cli
+from reasonable_answer import cli, refine_audition
 from reasonable_answer.build import UNKNOWN, BuildIdentity
 from reasonable_answer.schemas import CritiqueOutput
 
 runner = CliRunner()
+
+IDENTITIES = {
+    "writer-a": "vendor-a/model-a",
+    "writer-b": "vendor-b/model-b",
+    "logic-spec": "vendor-c/logic",
+    "evidence-spec": "vendor-d/evidence",
+    "completeness-spec": "vendor-e/completeness",
+    "referee": "vendor-f/referee",
+}
 
 
 @pytest.fixture
@@ -35,24 +45,31 @@ def doctor_config(tmp_path, monkeypatch):
             }
         )
     )
-    identities = {
-        "writer-a": "vendor-a/model-a",
-        "writer-b": "vendor-b/model-b",
-        "logic-spec": "vendor-c/logic",
-        "evidence-spec": "vendor-d/evidence",
-        "completeness-spec": "vendor-e/completeness",
-        "referee": "vendor-f/referee",
-    }
     monkeypatch.setattr(
         cli,
         "LLMClient",
         lambda _config: FakeClient(
-            identities=identities,
+            identities=IDENTITIES,
             critique_fn=lambda *_: CritiqueOutput(issues=[]),
             report_fn=lambda _: "",
         ),
     )
     return path
+
+
+@pytest.fixture
+def audition_client(doctor_config, monkeypatch):
+    """`doctor_config`'s roster, with the fake client handed back so a test can see what
+    the command probed and which mode it pinned. Two aliases answer a mode other than
+    the fake's default, so a test can tell a pinned mode from a coincidence."""
+    client = FakeClient(
+        identities=IDENTITIES,
+        critique_fn=lambda *_: CritiqueOutput(issues=[]),
+        report_fn=lambda _: "",
+        modes={"logic-spec": "json_object", "referee": "json_object"},
+    )
+    monkeypatch.setattr(cli, "LLMClient", lambda _config: client)
+    return client
 
 
 def test_doctor_labels_the_orchestrator_role(doctor_config):
@@ -234,6 +251,175 @@ def test_audition_refine_rejects_unknown_transforms(doctor_config):
     )
     assert result.exit_code == 2
     assert "unknown transforms" in result.stdout
+
+
+# ------------------------------------------- the audition's structured-output regime
+
+
+def _with_audition_cache(config_path, tmp_path, **extra):
+    data = yaml.safe_load(config_path.read_text())
+    data["audition"] = {"cache_path": str(tmp_path / "audition-cache.json"), **extra}
+    config_path.write_text(yaml.safe_dump(data))
+    return tmp_path / "audition-cache.json"
+
+
+def _stub_run_audition(monkeypatch, seen):
+    """Stand in for the measuring pass, recording the mode each slot was measured under.
+
+    The point of the audition is what the calls look like, and `mode_for` is what
+    decides that — so a stub that records it is measuring exactly the property
+    D-audition-probe-parity is about, without spending a corpus.
+    """
+
+    def fake(client, roster, identities, fixtures, cfg, require_verbatim_spans=True, only=None):
+        for slot in only:
+            seen[slot.alias] = client.mode_for(slot.alias)
+        return tuple(
+            cli.audition_mod.Metrics(
+                alias=s.alias, identity=s.identity, lens=s.lens, fixtures_owed=0
+            )
+            for s in only
+        )
+
+    monkeypatch.setattr(cli.audition_mod, "run_audition", fake)
+
+
+def test_audition_pins_the_production_structured_output_mode_before_measuring(
+    audition_client, doctor_config, tmp_path, monkeypatch
+):
+    """D-audition-probe-parity. Unprobed, every audition call resolves `mode_for` to the
+    default prompt mode, so the harness certifies a critic in an extraction regime no run
+    ever uses for it — a model reliable under its pinned mode is penalised for prompt-mode
+    failures it will never have in production, and the reverse can hide a real one.
+    """
+    cache_path = _with_audition_cache(doctor_config, tmp_path)
+    seen: dict[str, str] = {}
+    _stub_run_audition(monkeypatch, seen)
+
+    result = runner.invoke(cli.app, ["audition", "--config", str(doctor_config)])
+
+    assert result.exit_code == 0, result.stdout
+    # Every critic slot was probed, and measured under what the probe pinned.
+    assert set(audition_client.probes) >= set(seen)
+    assert seen["logic-spec"] == "json_object"
+    assert seen["writer-a"] == "json_schema"
+    assert "prompt" not in set(seen.values())
+
+    # And the verdict records the regime it was taken in, rather than leaving a reader
+    # to assume one.
+    cache = cli.audition_mod.load_cache(cache_path)
+    modes = {e.metrics.alias: e.structured_output_mode for e in cache.values()}
+    assert modes["logic-spec"] == "json_object"
+    assert modes["writer-a"] == "json_schema"
+
+
+def test_audition_fails_closed_when_an_alias_cannot_be_pinned(
+    audition_client, doctor_config, tmp_path
+):
+    _with_audition_cache(doctor_config, tmp_path)
+    audition_client.unprobeable.add("logic-spec")
+
+    result = runner.invoke(cli.app, ["audition", "--config", str(doctor_config)])
+
+    assert result.exit_code == 2
+    assert "fail closed" in result.stdout
+    assert "logic-spec" in result.stdout
+
+
+def test_audition_re_measures_a_verdict_taken_under_another_mode(
+    audition_client, doctor_config, tmp_path, monkeypatch
+):
+    """The measuring path is the one place a mode mismatch can be answered by spending
+    rather than by reporting, so it re-measures instead of reusing (D-audition-probe-parity).
+    """
+    cache_path = _with_audition_cache(doctor_config, tmp_path)
+    seen: dict[str, str] = {}
+    _stub_run_audition(monkeypatch, seen)
+    runner.invoke(cli.app, ["audition", "--config", str(doctor_config)])
+    assert seen  # measured once, cache now populated
+
+    # A second run reuses everything...
+    seen.clear()
+    result = runner.invoke(cli.app, ["audition", "--config", str(doctor_config)])
+    assert result.exit_code == 0, result.stdout
+    assert seen == {}
+
+    # ...until the alias probes somewhere else, which is a documented possibility for at
+    # least one rostered model (`config/roster.yaml`'s minimax-m3 note).
+    audition_client.modes["logic-spec"] = "json_schema"
+    audition_client.probes.clear()
+    result = runner.invoke(cli.app, ["audition", "--config", str(doctor_config)])
+
+    assert result.exit_code == 0, result.stdout
+    assert set(seen) == {"logic-spec"}
+    assert seen["logic-spec"] == "json_schema"
+    cache = cli.audition_mod.load_cache(cache_path)
+    modes = {e.metrics.alias: e.structured_output_mode for e in cache.values()}
+    assert modes["logic-spec"] == "json_schema"
+
+
+def test_doctor_reports_a_verdict_measured_under_a_different_mode(
+    audition_client, doctor_config, tmp_path, monkeypatch
+):
+    """The free read keeps the verdict (dropping it would disarm the `enforce` gate every
+    time a non-deterministic prober landed elsewhere), so doctor has to say the two
+    disagree or the divergence is invisible (D-audition-probe-parity)."""
+    _with_audition_cache(doctor_config, tmp_path)
+    _stub_run_audition(monkeypatch, {})
+    runner.invoke(cli.app, ["audition", "--config", str(doctor_config)])
+
+    audition_client.modes["logic-spec"] = "json_schema"
+    audition_client.probes.clear()
+    result = runner.invoke(cli.app, ["doctor", "--config", str(doctor_config)])
+
+    assert result.exit_code == 0
+    out = result.stdout.replace("\n", " ")
+    assert "auditioned under structured-output mode" in out
+    assert "json_object" in out and "json_schema" in out
+
+
+def test_audition_refine_also_measures_under_the_pinned_mode(
+    audition_client, doctor_config, tmp_path, monkeypatch
+):
+    """Same gap, same fix, on the refine corpus: `RefinementService.preflight` pins the
+    strongest supported mode before serving, so the audition has to measure under it."""
+    data = yaml.safe_load(doctor_config.read_text())
+    data["refine"] = {"enabled": True}
+    data["audition"] = {"refine": {"cache_path": str(tmp_path / "refine-cache.json")}}
+    doctor_config.write_text(yaml.safe_dump(data))
+
+    seen: dict[str, str] = {}
+
+    def fake_run(client, alias, identity, enabled, fixtures, cfg):
+        seen[alias] = client.mode_for(alias)
+        return refine_audition.RefineMetrics(
+            alias=alias, identity=identity, transforms=tuple(sorted(enabled))
+        )
+
+    monkeypatch.setattr(refine_audition, "run_refine_audition", fake_run)
+
+    result = runner.invoke(cli.app, ["audition-refine", "--config", str(doctor_config)])
+
+    assert result.exit_code == 0, result.stdout
+    assert seen == {"referee": "json_object"}
+    cache = refine_audition.load_refine_cache(tmp_path / "refine-cache.json")
+    assert {e.structured_output_mode for e in cache.values()} == {"json_object"}
+
+
+def test_audition_refine_fails_closed_when_the_alias_cannot_be_pinned(
+    audition_client, doctor_config, tmp_path
+):
+    data = yaml.safe_load(doctor_config.read_text())
+    data["refine"] = {"enabled": True}
+    data["audition"] = {"refine": {"cache_path": str(tmp_path / "refine-cache.json")}}
+    doctor_config.write_text(yaml.safe_dump(data))
+    audition_client.unprobeable.add("referee")
+
+    result = runner.invoke(cli.app, ["audition-refine", "--config", str(doctor_config)])
+
+    assert result.exit_code == 2
+    assert "fail closed" in result.stdout
+    assert "referee" in result.stdout
 
 
 # ------------------------------------------------------------------- logging

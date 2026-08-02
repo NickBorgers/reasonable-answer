@@ -347,13 +347,19 @@ def test_cache_entry_matches_and_invalidates():
         metrics=_metrics(),
         corpus_hash="c1",
         prompt_hash="p1",
+        structured_output_mode="json_schema",
         repetitions=5,
         recorded_at=1_000.0,
     )
-    assert entry.matches("c1", "p1", 5)
-    assert not entry.matches("c2", "p1", 5)
-    assert not entry.matches("c1", "p2", 5)
-    assert not entry.matches("c1", "p1", 3)
+    mode = {"structured_output_mode": "json_schema"}
+    assert entry.matches("c1", "p1", 5, **mode)
+    assert not entry.matches("c2", "p1", 5, **mode)
+    assert not entry.matches("c1", "p2", 5, **mode)
+    assert not entry.matches("c1", "p1", 3, **mode)
+    # The measuring path probes and so compares the mode; the cache-read-only path
+    # cannot probe without spending and passes None to say so (D-audition-probe-parity).
+    assert not entry.matches("c1", "p1", 5, structured_output_mode="prompt")
+    assert entry.matches("c1", "p1", 5, structured_output_mode=None)
     assert not entry.is_stale(1_000.0 + 86400, 30)
     assert entry.is_stale(1_000.0 + 31 * 86400, 30)
 
@@ -378,10 +384,12 @@ def test_candidate_set_entry_does_not_evict_production_entry(tmp_path: Path):
     path = tmp_path / "cache.json"
     entries = {
         refine_cache_key("m", DEFAULT_ENABLED): RefineCacheEntry(
-            metrics=_metrics(), corpus_hash="c", prompt_hash="p", repetitions=5, recorded_at=1.0
+            metrics=_metrics(), corpus_hash="c", prompt_hash="p", repetitions=5,
+            structured_output_mode="json_schema", recorded_at=1.0,
         ),
         refine_cache_key("m", candidate): RefineCacheEntry(
-            metrics=_metrics(), corpus_hash="c", prompt_hash="p2", repetitions=5, recorded_at=2.0
+            metrics=_metrics(), corpus_hash="c", prompt_hash="p2", repetitions=5,
+            structured_output_mode="json_schema", recorded_at=2.0,
         ),
     }
     save_refine_cache(path, entries)
@@ -403,6 +411,7 @@ def test_cached_judgement_reads_only_the_cache(tmp_path: Path):
             metrics=_metrics(),
             corpus_hash=corpus_hash,
             prompt_hash=refine_prompt_hash(DEFAULT_ENABLED),
+            structured_output_mode="json_schema",
             repetitions=cfg.repetitions,
             recorded_at=1_000.0,
         )
