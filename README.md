@@ -81,7 +81,7 @@ and which controller rule fired:
 round 2   writer deepseek-v4-flash
   logic         glm-5.2          2 issues
   evidence      glm-5.2          clean
-  completeness  mistral-large-3  clean
+  completeness  gemma4           clean
   1 major  ->  rule 14  generate  material issues remain
 ```
 
@@ -288,7 +288,7 @@ roster:
   critics:
     logic:        [glm-5.2, minimax-m3, mistral-large-3]
     evidence:     [glm-5.2, minimax-m3, gemma4]
-    completeness: [mistral-large-3, glm-5.2, gemma4]
+    completeness: [gemma4, glm-5.2]
 ```
 
 Every entry is **open-weight** and small enough to load on the target local box (see
