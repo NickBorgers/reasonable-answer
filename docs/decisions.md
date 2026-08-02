@@ -3721,11 +3721,23 @@ file, `pr-validation.yml`'s path-filtered `decisions` job, and `mkdocs.yml`'s si
 solve a problem a merge driver solves without touching any of it — and it would still need a variant of
 this same driver, or a numbering scheme, to keep the resulting many-file index itself append-safe.
 
-**Invariants.** None of the tabulated safety invariants is in reach — this is repository tooling, not
-pipeline core, and it constrains how a merge of one governance file is resolved, not what enters any
-model's context. The driver's own default is fail-closed: any condition it cannot confirm true
-(marker missing, an edit inside the head, a same-slug collision) makes it abstain to the exact behavior
-git would have used unconfigured, so it can only ever do better than today, never worse.
+**Invariants.** None of the six tabulated pipeline-core safety invariants (author exclusion, blind
+orchestrator, fail-closed lenses, severity floors, termination, untrusted text) is in reach — none
+constrains how a model's context is built, and this changes none of them. It does narrow
+D-inherit-whole-range's tree-identity gate: a `docs/decisions.md` merge this driver resolved now
+recreates identically and can inherit a prior verdict, where before this decision any conflict in
+that file forced a full review regardless of shape (see docs/ci-pipeline.md's "Cycle control" and
+"Syncing with the base branch", and QP7/QP8 in quality-principles.md, all updated alongside this
+entry). That narrowing is deliberate and bounded — the gate stays a pure, deterministic function of
+git content, never an LLM judgment, and only the append-only shape is affected. It holds only because
+every registration executes the driver from the trusted `main` checkout (`$GITHUB_WORKSPACE` in
+review-fixer.yml, `$GITHUB_WORKSPACE/main-checkout` in review-pipeline.yml), never the PR checkout
+under review: the inherit step is a verifier and must not run code the commit it is verifying
+supplied, and the sync steps hold `WORKFLOW_PAT` and must not execute a contributor's edit to this
+file before anything is reviewed. The driver's own default is fail-closed within that boundary: any
+condition it cannot confirm true (marker missing, an edit inside the head, any slug named on both
+sides) makes it abstain to the exact behavior git would have used unconfigured, so a conflict of any
+other shape is unaffected and reviewed exactly as before.
 
 ## D-conceptual-conflation — a narrow `conceptual_conflation` logic category, and empirical anchors as an explicit widening of `overstated_claim`
 
@@ -3956,6 +3968,7 @@ its checkpoint. `graph._lens_results` accepts the pre-existing one-result-per-le
 the same reason. No A/B harness: `depth: 1` reproduces the previous single-critic discovery pass
 from configuration, while the intentional failed-confirmation divergence above is pinned
 separately; comparing the arms on real questions remains an operator measurement.
+
 
 ## Open items for a future round
 

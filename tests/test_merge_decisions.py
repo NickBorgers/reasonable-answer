@@ -60,6 +60,32 @@ def test_same_slug_different_content_abstains() -> None:
     assert merge_decisions.try_fast_path(BASE, ours, theirs) is None
 
 
+def test_same_slug_identical_body_but_differing_suffix_abstains() -> None:
+    # Same slug, same body, on both sides -- but each suffix also carries something the
+    # other doesn't (D-echo only on ours), so the two suffixes are not equal overall.
+    # Concatenating them would duplicate the D-bravo section verbatim rather than merge two
+    # distinct decisions -- any cross-side slug intersection must abstain, not just a
+    # differing-body one.
+    shared = "## D-bravo — second\n\nshared body.\n\n"
+    ours = BASE.replace(TAIL, shared + "## D-echo — extra\n\nonly on ours.\n\n" + TAIL)
+    theirs = BASE.replace(TAIL, shared + TAIL)
+    assert merge_decisions.try_fast_path(BASE, ours, theirs) is None
+
+
+def test_duplicate_slug_within_one_sides_suffix_abstains() -> None:
+    ours = BASE.replace(
+        TAIL, "## D-bravo — second\n\nfirst body.\n\n## D-bravo — second again\n\nsecond body.\n\n" + TAIL
+    )
+    theirs = BASE.replace(TAIL, "## D-charlie — third\n\nbody charlie.\n\n" + TAIL)
+    assert merge_decisions.try_fast_path(BASE, ours, theirs) is None
+
+
+def test_section_with_empty_body_abstains() -> None:
+    ours = BASE.replace(TAIL, "## D-bravo — second\n\n" + TAIL)
+    theirs = BASE.replace(TAIL, "## D-charlie — third\n\nbody charlie.\n\n" + TAIL)
+    assert merge_decisions.try_fast_path(BASE, ours, theirs) is None
+
+
 def test_edit_to_open_items_section_abstains() -> None:
     ours = BASE.replace(TAIL, "## Open items for a future round\n\n- something open.\n- new item.\n")
     theirs = BASE.replace(TAIL, "## D-bravo — second\n\nbody bravo.\n\n" + TAIL)

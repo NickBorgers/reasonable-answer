@@ -22,12 +22,12 @@ import sys
 from pathlib import Path
 
 TAIL_MARKER = re.compile(r"^## Open items for a future round\s*$", re.MULTILINE)
-# Reuses scripts/validate-decision-numbers.sh's prose-heading regex verbatim, so a
-# "same slug, different body" collision is judged by the same rule that check enforces.
-SLUG_HEADING = re.compile(r"^## (D-[a-z0-9-]+) ", re.MULTILINE)
+# The decision-heading form the registry requires, carrying the same slug token
+# scripts/validate-decision-numbers.sh checks for duplicates.
+SLUG_HEADING = re.compile(r"^## (D-[a-z0-9-]+) — .+$", re.MULTILINE)
 # Any top-level heading, decision-shaped or not -- used to catch a non-decision heading
 # (or stray prose before the first decision heading) hiding inside an appended suffix.
-ANY_HEADING = re.compile(r"^## ", re.MULTILINE)
+LEVEL_TWO_HEADING = re.compile(r"^## .+$", re.MULTILINE)
 
 
 def split_at_marker(text: str) -> tuple[str, str] | None:
@@ -38,24 +38,27 @@ def split_at_marker(text: str) -> tuple[str, str] | None:
     return text[: m.start()], text[m.start():]
 
 
-def slug_sections(suffix: str) -> dict[str, str]:
-    """slug -> its full section body, from one `## D-<slug>` heading to the next (or EOF)."""
-    matches = list(SLUG_HEADING.finditer(suffix))
-    return {
-        m.group(1): suffix[m.start(): (matches[i + 1].start() if i + 1 < len(matches) else len(suffix))]
-        for i, m in enumerate(matches)
-    }
-
-
-def is_pure_decision_suffix(suffix: str) -> bool:
-    """True iff `suffix` is empty, or entirely a sequence of whole `## D-<slug>` sections --
-    nothing before the first heading, and no top-level heading that isn't slug-shaped (which
-    would otherwise be silently swallowed into the previous section's body)."""
+def slug_sections(suffix: str) -> dict[str, str] | None:
+    """slug -> its whole `## D-<slug> — ...` section, or None if `suffix` is not *entirely*
+    a sequence of such sections: nothing before the first heading, every top-level heading
+    slug-shaped (never swallowed into the previous section's body), every section carrying a
+    non-empty body and ending in a blank line, and no slug repeated within this one suffix."""
     if not suffix:
-        return True
-    slug_headings = list(SLUG_HEADING.finditer(suffix))
-    any_headings = list(ANY_HEADING.finditer(suffix))
-    return bool(slug_headings) and slug_headings[0].start() == 0 and len(slug_headings) == len(any_headings)
+        return {}
+    matches = list(SLUG_HEADING.finditer(suffix))
+    if not matches or matches[0].start() != 0 or not suffix.endswith("\n\n"):
+        return None
+    if [m.start() for m in matches] != [m.start() for m in LEVEL_TWO_HEADING.finditer(suffix)]:
+        return None
+    sections: dict[str, str] = {}
+    for i, m in enumerate(matches):
+        end = matches[i + 1].start() if i + 1 < len(matches) else len(suffix)
+        section = suffix[m.start():end]
+        slug = m.group(1)
+        if not section[m.end():].strip() or slug in sections:
+            return None
+        sections[slug] = section
+    return sections
 
 
 def try_fast_path(base: str, ours: str, theirs: str) -> str | None:
@@ -68,14 +71,17 @@ def try_fast_path(base: str, ours: str, theirs: str) -> str | None:
     if not head_a.startswith(head_o) or not head_b.startswith(head_o):
         return None  # not a pure trailing append (an existing section was edited)
     suffix_a, suffix_b = head_a[len(head_o):], head_b[len(head_o):]
-    if not is_pure_decision_suffix(suffix_a) or not is_pure_decision_suffix(suffix_b):
-        return None  # appended text isn't purely whole decision sections -- abstain
+    slugs_a, slugs_b = slug_sections(suffix_a), slug_sections(suffix_b)
+    if slugs_a is None or slugs_b is None:
+        return None  # appended content is not entirely complete, unambiguous decision sections
     if suffix_a == suffix_b:
         return head_o + suffix_a + tail_o  # both sides appended byte-identical content
-    slugs_a, slugs_b = slug_sections(suffix_a), slug_sections(suffix_b)
-    for slug, body in slugs_a.items():
-        if slug in slugs_b and slugs_b[slug] != body:
-            return None  # genuine same-slug collision -- abstain, do not silently pick one
+    if set(slugs_a) & set(slugs_b):
+        # Any slug named on both sides -- concatenating would either duplicate a section
+        # verbatim or define the same slug twice, and a same-body match here is no safer:
+        # slug_sections already proved each side's own suffix is internally duplicate-free,
+        # but a name shared *across* sides is a collision this driver does not resolve.
+        return None
     return head_o + suffix_a + suffix_b + tail_o
 
 

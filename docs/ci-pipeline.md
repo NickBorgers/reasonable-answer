@@ -225,8 +225,12 @@ it holds `contents: read`, so it could not push if it tried.
   tree exactly. Either test failing means the panel reads the push. This replaced a test on
   the *shape of the head commit alone*, which was silent about everything committed
   underneath it: content, then `git merge origin/main`, inherited the prior verdict with no
-  reviewer reading a line. The tree test is what a conflict resolution cannot pass, and it
-  is deliberately fail-closed — a merge that cannot be re-created cleanly is reviewed.
+  reviewer reading a line. The tree test is what a hand-resolved conflict cannot pass, and
+  it is deliberately fail-closed — a merge that cannot be re-created cleanly is reviewed.
+  One conflict shape is an exception: `docs/decisions.md`'s append-only collision resolves
+  deterministically through a trusted merge driver run from `main`, not a judgement call, so
+  a merge that shape resolved does re-create cleanly and can still inherit — see "Syncing
+  with the base branch" below and D-decisions-merge-driver.
 - **A fixer-authored commit has no per-author exemption from the merge-from-base rule.** A clean,
   tree-identical base resync is inherited; a conflict-resolved merge is reviewed under
   D-inherit-whole-range. A prior version of this rule (PR #65, responding to PR #49) refused
@@ -343,8 +347,22 @@ does not burn a cycle. A merge the agent had to **resolve** no longer does
 (D-inherit-whole-range): its tree is not the tree re-creating the merge produces, so the
 inherit test refuses it and the panel reads it. That is a deliberate narrowing of what this
 paragraph used to promise — a resolution is a judgement nobody has checked, and it is the
-one place arbitrary content can sit inside a correctly-shaped merge. It costs a cycle only
-on a PR that actually conflicted with its base. The conflicted-path list travels in a file
+one place arbitrary content can sit inside a correctly-shaped merge.
+
+**One conflict shape resolves deterministically enough to still inherit
+(D-decisions-merge-driver).** `docs/decisions.md`'s append-only collision — two PRs each
+adding a decision immediately before the same tail marker, nothing else touched — is common
+enough to carry its own merge driver (`scripts/merge_decisions.py`), registered from the
+trusted `main` checkout in both this sync step and the inherit step's own recreation, never
+from the PR under review. Because both sides run the identical trusted, deterministic
+function on the same inputs, a merge that shape resolves still recreates tree-identical and
+still inherits. A `docs/decisions.md` conflict of any other shape — an edited existing
+section, an edited Open-items list, a genuine same-slug collision — still falls through to a
+hand resolution nobody has checked, and is reviewed exactly as before; every other file's
+conflicts are unaffected.
+
+It costs a cycle only on a PR that actually conflicted with its base in a shape nothing
+resolves deterministically. The conflicted-path list travels in a file
 rather than an environment variable: paths are contributor-controlled, and the agent's
 environment is assembled from an `--env-file`, where a newline in a path would inject
 arbitrary variables.
