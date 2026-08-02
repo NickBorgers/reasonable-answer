@@ -1,0 +1,32 @@
+# A control declares no `lens` and no `tier` (D-control-soundness): it is graded by
+# every lens, and it gates no sensitivity threshold because it plants nothing.
+#
+# This is the sound base of `conceptual-conflation-01` (D-conceptual-conflation). The two
+# differ in exactly one paragraph, S4.P2: there it substitutes statutory coverage for
+# realized access and merges two differently-excluded populations into one; here it names
+# coverage and access as separate measures and says the two groups arrive by different
+# routes. Everything else — Conclusion, findings, counterargument, S5, S6, sources — is
+# byte-identical, so a critic that raises a material logic issue at S4 on both artifacts
+# has reacted to the subject matter rather than to the defect.
+#
+# This is also the control that measures the *narrowing* half of the category. The report
+# repeatedly moves between a formal rule, a delivery mechanism and an observed outcome —
+# which is what a report on this question has to do — and it aggregates where the
+# aggregation is defended (S3.P1 treats needs and the 50-employee line as jointly
+# operating, and says so). A critic that reads any of that as `conceptual_conflation` is
+# applying the category to terminology and to subgroup structure rather than to a
+# load-bearing substitution, and scores as noise, which is the point.
+#
+# Soundness contract, which no test can check and review therefore must: every empirical
+# claim carries an inline [n] citation resolving to a numbered `## Sources` entry; the
+# question is contested and the sourcing spans the state's own records, a worker-side
+# review and an employer-side survey, so `one_sided_sourcing` — which floors to `major` —
+# cannot be earned honestly; the strongest opposing case (that the filing gap reflects
+# different leave needs, not a barrier) has its own section, is granted the part of the
+# gap the state's own tenure-adjusted figure concedes to it, and is answered on the
+# concentration it does not explain; the contested presupposition in the question — that
+# "access" is one thing — is surfaced in S4.P2 rather than inherited; and no claim about
+# magnitude, prevalence or change is made without the figure or the record that states it,
+# so the empirical-anchor reading of `overstated_claim` cannot be earned either.
+kind: control
+question: "Did the state's 2019 paid family leave law expand access to leave for low-wage workers?"

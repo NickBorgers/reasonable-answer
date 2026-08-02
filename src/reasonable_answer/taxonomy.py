@@ -41,6 +41,7 @@ class Category(str, Enum):
     CONTRADICTED_CLAIM = "contradicted_claim"
     INVALID_INFERENCE = "invalid_inference"
     OVERSTATED_CLAIM = "overstated_claim"
+    CONCEPTUAL_CONFLATION = "conceptual_conflation"
     LOADED_LANGUAGE = "loaded_language"
     # completeness
     OMITTED_COUNTERARGUMENT = "omitted_counterargument"
@@ -59,6 +60,12 @@ SEVERITY_FLOOR: dict[Category, Severity] = {
     Category.CONTRADICTED_CLAIM: Severity.BLOCKING,
     Category.INVALID_INFERENCE: Severity.MAJOR,
     Category.OVERSTATED_CLAIM: Severity.MAJOR,
+    # `invalid_inference`'s sibling and floored with it (D-conceptual-conflation): the
+    # substitution is what carries the inference, so keeping the two concepts apart is
+    # what the conclusion would have to survive. Not blocking — unlike a contradiction,
+    # nothing in the report is thereby shown false, and the fix (draw the distinction,
+    # or restrict the claim to the concept the evidence covers) is always in-report.
+    Category.CONCEPTUAL_CONFLATION: Severity.MAJOR,
     # Deliberately minor (D-social-bias): the most judgment-laden bias category; a material
     # floor would let a noisy critic force revisions round after round. A critic
     # that finds pervasive, verdict-carrying framing may propose `major` and the
@@ -77,6 +84,7 @@ LENS_CATEGORIES: dict[Lens, tuple[Category, ...]] = {
         Category.CONTRADICTED_CLAIM,
         Category.INVALID_INFERENCE,
         Category.OVERSTATED_CLAIM,
+        Category.CONCEPTUAL_CONFLATION,
         Category.LOADED_LANGUAGE,
         Category.STYLISTIC,
     ),
@@ -134,8 +142,28 @@ LENS_BRIEF: dict[Lens, str] = {
         "Assess only the internal logic of the report: whether claims contradict "
         "each other or a source the report itself cites, whether conclusions follow "
         "from their stated premises, whether any claim is stated more strongly "
-        "than the support offered for it, and whether wording carries an evaluative "
-        "verdict the stated support does not establish."
+        "than the support offered for it, whether the argument turns on treating two "
+        "materially distinct things as interchangeable, and whether wording carries an "
+        "evaluative verdict the stated support does not establish.\n\n"
+        "Two of those need their triggers stated, because both have a wide "
+        "false-positive surface.\n"
+        "- Distinctness: a formal rule, the mechanism that implements it and the "
+        "outcome observed downstream are three different propositions; so are the "
+        "units actually measured and the wider population a claim is made about; so "
+        "are groups that reach the same outcome by different mechanisms. Raise "
+        "`conceptual_conflation` only when the report substitutes one for another AND "
+        "the substitution is what carries an inference or a conclusion. It is NOT a "
+        "different word for the same thing, NOT the absence of a subgroup breakdown, "
+        "and NOT a distinction that makes no difference here because one mechanism or "
+        "one body of evidence genuinely covers both — nor is an aggregation the report "
+        "draws explicitly and defends.\n"
+        "- Empirical anchoring: where a claim turns on magnitude, prevalence, timing "
+        "or change, a thematic assertion offered in place of a concrete figure or a "
+        "primary source that states it is support weaker than the claim — raise it as "
+        "`overstated_claim`. A claim about kind, mechanism or character needs no "
+        "number, and neither does one already qualified to the cases its support "
+        "covers. Never demand a specific dataset or document as the only fix: "
+        "qualifying the claim to what the support establishes is always acceptable."
     ),
     Lens.EVIDENCE: (
         "Assess only the sourcing of the report: whether material claims carry a "
