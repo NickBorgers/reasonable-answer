@@ -219,15 +219,47 @@ it — each one, again, a guard against a known LLM failure mode:
   written in the exact shape the writer prompt mandates — conclusion first, a counterargument
   section engaged on the merits, inline `[1]` citations resolving to a numbered `## Sources`
   section — because the harness uses the production critic prompt, and a corpus in any other shape
-  would audit critics on documents no production writer may emit (D-fixture-report-shape). Half the
-  planted fixtures ship alongside the sound base they were mutated from, so class cannot be read
-  off length, structure or topic: a model that passes by being conservative on long, balanced
-  reports and aggressive on short ones has detected nothing. An LLM grader is
+  would audit critics on documents no production writer may emit (D-fixture-report-shape). Several
+  planted fixtures ship alongside the sound base they were mutated from, and every planted fixture
+  is held to the same length and source-count band as the controls regardless, so class cannot be
+  read off length, structure or topic: a model that passes by being conservative on long, balanced
+  reports and aggressive on short ones has detected nothing. The corpus also has to
+  hold up its end per lens: every lens carries at least one *obvious*-tier fixture, because the two
+  fail-closed gates count only those, and at least one defect pinned to a real paragraph, because a
+  defect matchable anywhere measures only which category the critic named (D-obvious-per-lens). The
+  two failures that defeat the harness completely — never firing, and never once letting a sound
+  report through — are hardcoded as unfit rather than left to a threshold. A verdict also has to
+  cover the whole corpus: a call that fails the schema is graded as neither a hit nor a miss, so a
+  model that reliably breaks on one fixture would have that fixture quietly dropped from its own
+  denominators — a fixture nothing ever graded is now `unfit`, not a better score
+  (D-audition-failure-coverage). An LLM grader is
   expressly forbidden: the harness must not depend on
   the property it exists to measure. Model judges carry documented and reproducible biases —
   position, verbosity, and self-enhancement among them
   ([Zheng et al. 2023](https://arxiv.org/abs/2306.05685)) — so a grader built from one would
-  import exactly the failure modes the audition is supposed to detect.
+  import exactly the failure modes the audition is supposed to detect. What the grader counts as
+  a finding is the production predicate itself — `taxonomy.counts_for_convergence`, shared with
+  triage (D-audition-stylistic-parity) — so a finding a real run would discard, such as a
+  `stylistic` note a critic escalated to `major`, scores as neither a detection nor as invented
+  noise. A grader that restates the rule instead of sharing it drifts from it. Covering every
+  *lens* is not covering every *category*: because the grader scores a relaxed same-lens match, a
+  critic blind to one category still passes on the strength of the others, so every category that
+  floors at `major` or `blocking` now carries its own planted fixture and a test says so
+  (D-category-coverage). The minor-floor categories — `unclear_structure`, `loaded_language` and
+  `stylistic` — carry **no planted fixture at all**: a detection has to clear the material floor to
+  count, so a fixture for one of them would grade a critic that finds it and files it honestly at
+  `minor` as blind, measuring escalation rather than detection. `_check_planted_floor_is_material`
+  refuses such a fixture at load, mechanically, rather than leaving it to review
+  (D-minor-floor-fixtures).
+  What the audition measures is also a **floor**, and deliberately a strict one: critics are graded with no
+  fetched-source scaffolding whatsoever, while a deployment with source verification switched on
+  hands its evidence critic a `fetched_sources_block` for every citation it attempted to fetch —
+  including a paywalled, blocked or offline one, which still renders as a named failure entry
+  rather than silence (D-audition-source-mode). So `fit` says only that the model can do the job
+  on the artifact text alone, with nothing about any citation to lean on, not that it reads a
+  fetched page well, and not even that it handles the weaker on-its-face prompt production runs on
+  a citation whose fetch failed. Certifying either needs deterministic offline source packets
+  shipped with the fixtures, which is an open item.
 - **The dispute channel.** Critics can be wrong, and a false positive is otherwise
   indistinguishable from a real defect — floors escalate it, the blind referee counts it, and a
   compliant writer would "fix" the report into falsehood. An opt-in channel (D-writer-disputes) lets the writer

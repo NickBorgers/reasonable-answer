@@ -11,9 +11,16 @@
 # marked in the text as an inference; the conclusion names the unit it is about and
 # declines to extend to the unit it is not; the strongest opposing case (that county
 # averages hide individual-level persistence) has its own section and is engaged on the
-# merits rather than dismissed; the sourcing spans a social history, three empirical
-# economics papers and a study of a different country, so `one_sided_sourcing` — which
-# floors to `major` — cannot be earned honestly. Magnitudes the author cannot stand
+# merits rather than dismissed; the sourcing spans a social history (Gregory) and four
+# empirical economics papers using independent data and methods (Hornbeck's county-level
+# panel, Long & Siu's individual-level linkage, Boustan et al.'s city labor-market
+# comparison, Fishback et al.'s New Deal mobility study), so `one_sided_sourcing` — which
+# floors to `major` — cannot be earned honestly on source count or independence
+# (D-fixture-report-shape correction: an earlier revision of this comment claimed "a
+# study of a different country"; all five shipped sources are US-focused, and the comment
+# is corrected to describe the actual basis for soundness — method and data
+# independence within the same national literature, not geographic spread — rather than
+# restoring a claim nothing in the body supports). Magnitudes the author cannot stand
 # behind are stated as unidentified rather than quoted precisely.
 kind: control
 question: "Did the Dust Bowl migration permanently depress wages in California?"

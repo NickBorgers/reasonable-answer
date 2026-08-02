@@ -1,0 +1,56 @@
+# The completeness lens's `tier: obvious` fixture, and its only locus-anchored one
+# (D-obvious-per-lens). Both fail-closed gates in `audition.judge` count planted
+# defects on `obvious` fixtures only, so before this fixture existed `obvious_total`
+# was zero for every completeness assignment and a critic that returned nothing on
+# every call graded MARGINAL — the exact failure the harness was built to catch,
+# passing on one of three production lenses.
+#
+# Written in production report shape from the start (D-report-template): no top-level
+# `#` title, `## Conclusion` first, `## Key findings`, `## The strongest
+# counterargument`, topical sections, numbered `## Sources` last, `[n]` citations.
+lens: completeness
+tier: obvious
+question: "Should the state raise the rural interstate speed limit from 65 to 75 mph?"
+defects:
+  - category: omitted_counterargument
+    locus: {section: 1, paragraph: 1}
+    note: >
+      The report recommends raising the limit and never once mentions crash risk,
+      injury severity or fatalities — the single consideration every reader of this
+      question arrives with, and the one that decides the policy. Search the artifact
+      for "crash", "injury", "fatal" or "safety" and there is nothing: not a section,
+      not a sentence, not a source. That is what makes the tier `obvious` rather than
+      moderate. The fixture is not merely thin, either: it has a real
+      `## The strongest counterargument` section, it engages the reference-point
+      objection on the merits, it names its own weakest argument (travel time) as
+      weak, and it decomposes the measurement it rests on. A critic cannot score here
+      by flagging "needs more detail" — it has to notice which argument is absent.
+
+      `anywhere` is deliberately left false, unlike `omitted-counterargument-01` and
+      `unexamined-presupposition-01`. Those omissions have several honest loci; this
+      one has a dominant one. S1.P1 is the only paragraph in the report that states
+      the recommendation, and it is also the only paragraph that asserts what the
+      strongest objection *is* — the claim the absent objection most directly bears
+      on, which is exactly what `prompts._CATEGORY_ANCHOR` tells an
+      `omitted_counterargument` critic to quote (D-absence-anchor). Every other
+      section is descriptive: operating speeds, how a limit is derived, enforcement
+      distribution, travel time. The locus window then also admits S1.P2, which does
+      not exist, so the anchored match is S1.P1 exactly.
+
+      Residual risk, recorded rather than hidden: a critic that files the omission
+      against the `## The strongest counterargument` section (S3) instead scores a
+      miss, and with `obvious_total` of 1 for this lens that alone reads UNFIT. If a
+      live audition shows competent critics anchoring there, the pre-registered
+      remedy is to add a second obvious completeness fixture rather than to relax
+      this one — see D-obvious-per-lens.
+
+      Source 5 (FHWA Traffic Monitoring Guide) was added under D-fixture-report-shape to
+      bring this fixture to the corpus-wide five sources
+      `test_corpus_class_is_not_readable_off_source_count` now holds every
+      completeness-lens planted fixture to, matching the controls. It supports a new
+      sentence in S4.P1 — that pneumatic road tubes are FHWA's standard portable
+      speed-collection method — genuinely new content, not padding, and nowhere near
+      S1.P1, the planted locus. Verified fetched: the PDF at the cited URL is FHWA's
+      October 2016 Traffic Monitoring Guide (FHWA-PL-17-003), and its Section 3.3.2 and
+      Appendix F describe pneumatic road tubes as the standard portable short-duration
+      speed and volume sensor, as stated.

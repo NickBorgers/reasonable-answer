@@ -1,0 +1,62 @@
+lens: evidence
+tier: obvious
+question: "Does state-funded preschool improve children's long-run outcomes?"
+defects:
+  - category: misrepresented_source
+    locus: {section: 4, paragraph: 3}
+    note: >
+      S4.P3 attributes twelfth-grade outcomes — a closing and reversing achievement
+      deficit, on-time graduation, chronic absence in the final two years — to source
+      [2], which is listed accurately and in full as Durkin et al. (2022), "Effects of a
+      statewide pre-kindergarten program on children's achievement and behavior
+      **through sixth grade**". Ground truth: that paper's follow-up window ends at
+      sixth grade, it reports the deficit as open rather than closing, and a 2022
+      publication could not contain twelfth-grade outcomes for a cohort it observes in
+      sixth grade. Nothing about the citation is wrong — the authors, year, title,
+      journal and volume are all real and correct — so a critic checking whether the
+      entry exists, or whether it is plausible, passes it. The misrepresentation is
+      visible on the face of the Sources entry, which is what makes this checkable
+      without fetching anything.
+      No slot rotation: the source has to be real for the mismatch to be checkable, and
+      rotating a real citation would either falsify it or leave the tell intact anyway.
+      Tier is obvious because S4.P2 cites the same paper correctly for its sixth-grade
+      result one paragraph earlier, so the overreach sits directly against an accurate
+      use of the same source, and because the evidence lens brief names this case
+      verbatim ("a cited source is described as supporting something it plainly would
+      not support").
+      Deliberate: the claim is plausible rather than absurd — the Boston lottery study
+      [5] really does find attainment gains without test-score gains — so a critic
+      cannot reach the finding by smelling an implausible result. It has to check the
+      attribution.
+      Known and accepted: S1 says adult outcomes are known "almost entirely" from the
+      two demonstration programs, which a twelfth-grade reversal would sit awkwardly
+      against. That is the same contrast invalid-inference-01 relies on — a careful
+      report with one overreach in it — and it costs nothing here, because the logic
+      lens never sees this fixture (`FixtureSet.for_lens`) and the evidence lens cannot
+      raise `contradicted_claim`.
+      Fixed, not planted: an earlier draft also attributed third-grade outcomes to a
+      separately cited Puma et al. (2010) initial report, whose follow-up window is
+      verified (ERIC ED507845) to end at 1st grade — in S1.P1, the Key findings bullet,
+      and S4.P1. That would have been a second, unplanted instance of this fixture's own
+      category, graded a total miss for a critic that caught the planted S4.P3 tell but
+      not this one and a double credit for a critic that caught both. All three loci now
+      cite only the 2012 Third Grade Follow-Up report (source [1], ERIC ED539264,
+      fetch-verified) for both the study's initial random assignment and the
+      third-grade claim, which the 2012 report itself describes as background. Exactly
+      one planted defect remains, at S4.P3.
+
+      Trimmed from nine sources to five under D-fixture-report-shape's
+      merge-reconciliation pass, to bring this fixture to the corpus-wide five
+      `test_corpus_class_is_not_readable_off_source_count` now holds every evidence-lens
+      planted fixture to, matching the six controls. Four citations were removed without
+      touching S4.P3 or its neighbor S4.P2, and without introducing a new attribution
+      error: the 2010 Puma et al. initial-assignment report (folded into source [1]'s
+      description, above), the 2018 Lipsey/Farran/Durkin third-grade paper (the
+      third-grade Tennessee claim was dropped rather than reattributed, since the
+      report's own case does not depend on it — S4.P2 now describes Tennessee's design
+      and goes straight to the sixth-grade result), Deming (2009) (the counterargument
+      section's rebuttal no longer needs a second corroborating study once it argues
+      from Boston's own unrepresentativeness, which the report already establishes), and
+      Heckman et al.'s (2010) Perry rate-of-return figure (ancillary color, not load-bearing
+      for any finding). Renumbered 1-5 in citation order; no in-text marker or Sources
+      entry is stale.

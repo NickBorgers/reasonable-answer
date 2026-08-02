@@ -373,12 +373,14 @@ def audition(
 
     now = time.time()
     ph = audition_mod.prompt_hash()
+    rh = audition_mod.rubric_hash()
+    spans = config.require_verbatim_spans
     cache = {} if force else audition_mod.load_cache(cfg.cache_path)
 
     stale_or_missing = [
         s
         for s in slots
-        if not _cache_usable(cache, s, fixtures.corpus_hash, ph, cfg, now)
+        if not _cache_usable(cache, s, fixtures.corpus_hash, ph, rh, spans, cfg, now)
     ]
     if stale_or_missing:
         calls = len(stale_or_missing) * len(fixtures.fixtures) * cfg.repetitions
@@ -392,7 +394,7 @@ def audition(
             identities,
             fixtures,
             cfg,
-            require_verbatim_spans=config.require_verbatim_spans,
+            require_verbatim_spans=spans,
             only=tuple(stale_or_missing),
         )
         for metrics in measured:
@@ -401,6 +403,8 @@ def audition(
                     metrics=metrics,
                     corpus_hash=fixtures.corpus_hash,
                     prompt_hash=ph,
+                    rubric_hash=rh,
+                    require_verbatim_spans=spans,
                     repetitions=cfg.repetitions,
                     recorded_at=now,
                 )
@@ -411,7 +415,10 @@ def audition(
     rows: list[tuple[Assignment_t, audition_mod.Metrics | None, audition_mod.Judgement | None]] = []
     for slot in slots:
         entry = cache.get(audition_mod.cache_key(slot.identity, slot.lens))
-        if entry is None or not entry.matches(fixtures.corpus_hash, ph, cfg.repetitions):
+        if entry is None or not entry.matches(
+            fixtures.corpus_hash, ph, cfg.repetitions,
+            rubric_hash=rh, require_verbatim_spans=spans,
+        ):
             rows.append((slot, None, None))
             continue
         judgement = audition_mod.judge(entry.metrics, cfg.thresholds)
@@ -423,6 +430,8 @@ def audition(
             data={
                 "corpus_hash": fixtures.corpus_hash,
                 "prompt_hash": ph,
+                "rubric_hash": rh,
+                "require_verbatim_spans": spans,
                 "slots": [
                     {
                         "alias": s.alias,
@@ -626,16 +635,23 @@ def _refine_doctor_line(config: Config, client: LLMClient) -> str | None:
     return line
 
 
-def _cache_usable(cache, slot, corpus_hash, ph, cfg, now) -> bool:
+def _cache_usable(cache, slot, corpus_hash, ph, rh, spans, cfg, now) -> bool:
     entry = cache.get(audition_mod.cache_key(slot.identity, slot.lens))
-    if entry is None or not entry.matches(corpus_hash, ph, cfg.repetitions):
+    if entry is None or not entry.matches(
+        corpus_hash, ph, cfg.repetitions, rubric_hash=rh, require_verbatim_spans=spans
+    ):
         return False
     return not entry.is_stale(now, cfg.max_age_days)
 
 
 def _render_audition(rows) -> None:
     table = Table(title="critic audition")
-    for column in ("alias", "lens", "pos", "strict", "lens sens", "obvious", "ctrl/run", "verdict"):
+    # `cover` sits beside the rates because it says what they were measured over: a
+    # fixture no call ever graded is absent from every denominator to its right
+    # (D-audition-failure-coverage).
+    columns = ("alias", "lens", "pos", "cover", "strict", "lens sens", "obvious", "ctrl/run",
+               "verdict")
+    for column in columns:
         table.add_column(column)
     colour = {
         audition_mod.Verdict.FIT: "green",
@@ -647,15 +663,17 @@ def _render_audition(rows) -> None:
         if metrics is None or judgement is None:
             # Never blank: a blank cell reads as a pass.
             table.add_row(
-                slot.alias, slot.lens.value, str(slot.position + 1), "-", "-", "-", "-",
+                slot.alias, slot.lens.value, str(slot.position + 1), "-", "-", "-", "-", "-",
                 f"[dim]{audition_mod.Status.NOT_AUDITED.value}[/dim]",
             )
             continue
         style = colour[judgement.verdict]
+        cover = f"{metrics.fixtures_covered}/{metrics.fixtures_owed}"
         table.add_row(
             slot.alias,
             slot.lens.value,
             str(slot.position + 1),
+            cover if metrics.fixtures_covered == metrics.fixtures_owed else f"[red]{cover}[/red]",
             f"{metrics.strict_sensitivity:.2f}",
             f"{metrics.lens_sensitivity:.2f}",
             f"{metrics.obvious_sensitivity:.2f}",
@@ -681,13 +699,18 @@ def _audition_cells(config: Config, identities: dict[str, str]) -> dict[str, str
         corpus_hash = None
     cache = audition_mod.load_cache(config.audition.cache_path)
     ph = audition_mod.prompt_hash()
+    rh = audition_mod.rubric_hash()
     now = time.time()
 
     per_alias: dict[str, list[str]] = {}
     for slot in slots:
         entry = cache.get(audition_mod.cache_key(slot.identity, slot.lens))
         if entry is None or corpus_hash is None or not entry.matches(
-            corpus_hash, ph, config.audition.repetitions
+            corpus_hash,
+            ph,
+            config.audition.repetitions,
+            rubric_hash=rh,
+            require_verbatim_spans=config.require_verbatim_spans,
         ):
             cell = f"[dim]{audition_mod.Status.NOT_AUDITED.value}[/dim]"
         elif entry.is_stale(now, config.audition.max_age_days):
@@ -717,7 +740,9 @@ def _audition_warnings(config: Config, identities: dict[str, str]) -> list[str]:
     `ra doctor` must not spend an audition's worth of calls, so anything unmeasured is
     simply absent here and shows as `not audited` in the table.
     """
-    judgements = audition_mod.cached_judgements(config.audition, config.roster, identities)
+    judgements = audition_mod.cached_judgements(
+        config.audition, config.roster, identities, config.require_verbatim_spans
+    )
     warnings = audition_mod.roster_warnings(config.roster, identities, judgements)
     # Enforcement with nothing measured is the failure mode that got `audition.enabled`
     # deleted: a setting that reads as a safety control while gating nothing. It cannot
