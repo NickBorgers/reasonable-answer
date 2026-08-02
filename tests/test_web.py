@@ -471,7 +471,8 @@ def test_a_run_with_no_final_json_still_reports_its_build(config, tmp_path):
 
     store = RunStore(config.runs_dir, "run-inflight")
     store.question("Still going?")
-    store.event("queued", attempt=1, auto=False, build={"commit": "b" * 40, "dirty": False, "source": "git"})
+    store.event("queued", attempt=1, auto=False, build={"commit": "a" * 40, "dirty": False, "source": "git"})
+    store.event("startup", build={"commit": "b" * 40, "dirty": False, "source": "git"})
 
     summary = Registry(config.runs_dir).summary("run-inflight", active={"run-inflight": "running"})
     assert summary.build == {"commit": "b" * 40, "dirty": False, "source": "git"}
