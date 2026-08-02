@@ -33,13 +33,15 @@ but **triage clamps it up to a mechanical, category-specific floor** — the cri
 | logic | `contradicted_claim` | claim contradicts another claim or a cited source | **blocking** |
 | logic | `invalid_inference` | conclusion does not follow from premises | **major** |
 | logic | `overstated_claim` | claim stronger than its support | **major** |
-| completeness | `omitted_counterargument` | a material opposing view is missing | **major** |
+| completeness | `incomplete_answer` | an explicit, material part of the question is unanswered or replaced by an adjacent question | **major** |
+| completeness | `omitted_counterargument` | a material opposing view is missing, or a purported opposing case substitutes an easier objection that does not challenge a load-bearing conclusion | **major** |
 | completeness | `unclear_structure` | organization/clarity impedes evaluation | minor |
 | any | `stylistic` | cosmetic preference | minor (**ignored** for convergence) |
 
 **Severity floor for convergence = `major`.** `material = blocking + major`. Convergence requires
 `material == 0`; `minor`/`stylistic` never block. (Flooring `overstated_claim`/
-`omitted_counterargument` at `major` is deliberately conservative and config-tunable.)
+`incomplete_answer`/`omitted_counterargument` at `major` is deliberately conservative and
+config-tunable.)
 
 ### Evidence handling (RA-011, D-in-artifact-citations, D-retrieval-opt-in)
 

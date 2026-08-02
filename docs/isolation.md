@@ -277,14 +277,15 @@ Mitigations, by boundary:
 - **Loci are bounded structural references** (section/paragraph indices), not free text; quoted
   spans are length-limited untrusted data — closing the critic→generator free-text channel. Each
   category states **what its `claim_span` anchors to** (D-absence-anchor), because the anchor is not self-evident
-  where the defect is not a locatable phrase. The two absent-content completeness categories,
-  `omitted_counterargument` and `unexamined_presupposition`, describe something the report does *not*
-  say; `unclear_structure` describes a property of *arrangement* rather than of any one span. In
+  where the defect is not a locatable phrase. The three absent-content completeness categories,
+  `incomplete_answer`, `omitted_counterargument`, and `unexamined_presupposition`, describe something
+  the report does *not* say; `unclear_structure` describes a property of *arrangement* rather than
+  of any one span. In
   neither case is there a span of the offending text, so a critic asked only for "a verbatim quote"
   reaches for material that is not in the paragraph — which fails the check, through the repair
   budget, and fails the lens. Each anchors instead to present text — the claim the gap bites into,
-  or the opening words of the ill-arranged passage — and the two absent-content categories route the
-  missing content to `instruction` or `rationale`. This narrows what a critic may quote and never
+  or the opening words of the ill-arranged passage — and the three absent-content categories route
+  the missing content to `instruction` or `rationale`. This narrows what a critic may quote and never
   widens it: validation is unchanged.
 - **The orchestrator can't be injected** — it never sees free text, only integer counts.
 - **Confirmation is indistinguishable** from a normal critique (identical interface/prompt; the

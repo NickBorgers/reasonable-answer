@@ -88,8 +88,10 @@ a fresh context with exactly one job:
   claims, and loaded framing.
 - **evidence** — is the support real? Catches fabricated citations, misrepresented sources,
   uncited claims, and one-sided source selection.
-- **completeness** — what's missing? Catches omitted counterarguments, unexamined presuppositions
-  inherited from the question, and unclear structure.
+- **completeness** — what's missing? Catches an unanswered explicit part of the question,
+  omitted counterarguments (including an easier objection substituted for the strongest case),
+  unexamined presuppositions inherited from the question, and unclear structure. It does not invent
+  a hidden goal, a "question behind the question," or an optional angle and call that unanswered.
 
 Narrowing the question is what turns an LLM from a mediocre editor into a sharp one: "find
 fabricated citations in this report" plays directly to the spot-the-flaw strength. It also makes

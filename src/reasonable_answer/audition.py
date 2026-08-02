@@ -145,12 +145,13 @@ class PlantedDefect(BaseModel):
     locus: StructuralRef
     #: Skip the locus window and match this defect anywhere in the artifact.
     #:
-    #: Some defects have no honest location. An `omitted_counterargument` is defined by
-    #: absence: a critic may reasonably anchor it to the thesis that overreaches, to the
-    #: section where the rebuttal belonged, or to the conclusion that ignores it. Grading
-    #: those as misses would measure agreement with the fixture author's filing choice
-    #: rather than the critic's ability to notice the omission. `locus` stays required
-    #: as documentation of where the fixture author considers it to live.
+    #: Some defects have no honest location. An `omitted_counterargument` or
+    #: `incomplete_answer` is defined by absence: a critic may reasonably anchor it to
+    #: the thesis that overreaches, the section where material belonged, or the partial
+    #: conclusion. Grading those as misses would measure agreement with the fixture
+    #: author's filing choice rather than the critic's ability to notice the omission.
+    #: `locus` stays required as documentation of where the fixture author considers it
+    #: to live.
     anywhere: bool = False
     #: Human-facing only. Never used for matching — matching on prose would either
     #: need an LLM or degenerate into brittle substring checks.
