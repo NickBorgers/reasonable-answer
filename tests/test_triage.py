@@ -178,6 +178,42 @@ def test_signal_signature_ignores_minor_noise():
     assert signal_signature(a) == signal_signature(b)
 
 
+# --------------------------------------------- conceptual conflation (D-conceptual-conflation)
+
+
+def test_conceptual_conflation_clamps_up_to_major_and_is_logic_only():
+    clamped = clamp([issue(Category.CONCEPTUAL_CONFLATION, Severity.MINOR)])
+    assert clamped[0].severity is Severity.MAJOR
+    for lens in (Lens.EVIDENCE, Lens.COMPLETENESS):
+        with pytest.raises(LensValidationError):
+            validate_issue(lens, issue(Category.CONCEPTUAL_CONFLATION, Severity.MAJOR), STRUCTURE)
+
+
+def test_conceptual_conflation_related_span_must_be_artifact_text():
+    """D-conceptual-conflation puts the category in `IN_ARTIFACT_RELATED`, unlike the
+    three bias categories: both poles of a substitution are passages the report
+    contains, so `related_span` is the report's own statement of the concept being
+    substituted away — not a description of a pattern. A critic that paraphrases it
+    instead would forward words the report never used, carrying the apparent authority
+    of quoted text, which is exactly what the verbatim check exists to stop."""
+    base = issue(Category.CONCEPTUAL_CONFLATION, Severity.MAJOR)
+
+    quoted = base.model_copy(update={"related_span": "A second claim, cited [1]."})
+    validate_issue(Lens.LOGIC, quoted, STRUCTURE)  # elsewhere in the artifact: fine
+
+    described = base.model_copy(
+        update={"related_span": "the eligibility rule, as the report frames it earlier"}
+    )
+    with pytest.raises(LensValidationError):
+        validate_issue(Lens.LOGIC, described, STRUCTURE)
+
+
+def test_conceptual_conflation_may_omit_related_span_entirely():
+    """The field stays optional, so a single sentence that fuses the two concepts with
+    no second passage anywhere in the report is still reportable."""
+    validate_issue(Lens.LOGIC, issue(Category.CONCEPTUAL_CONFLATION, Severity.MINOR), STRUCTURE)
+
+
 # ------------------------------------------------------- social-bias categories (D-social-bias)
 
 

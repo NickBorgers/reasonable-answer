@@ -30,6 +30,8 @@ from .schemas import (
 )
 from .taxonomy import (
     LENS_CATEGORIES,
+    LENSES,
+    SEVERITY_RANK,
     Category,
     Lens,
     Severity,
@@ -77,8 +79,20 @@ def _quote_hint(field: str, scope: str, source_text: str) -> str:
 
 
 #: Categories whose `related_span` must itself be text from the artifact.
+#:
+#: `conceptual_conflation` joins the three original logic categories (D-conceptual-conflation)
+#: because both poles of a substitution are passages the report contains — the one that
+#: states the concept and the one that swaps the other in — exactly the premise/conclusion
+#: shape `invalid_inference` already has, and not the bias categories' *pattern* shape. The
+#: field stays optional, so a single sentence that fuses the two concepts with no second
+#: passage anywhere is still reportable with `related_span` omitted.
 IN_ARTIFACT_RELATED = frozenset(
-    {Category.CONTRADICTED_CLAIM, Category.INVALID_INFERENCE, Category.OVERSTATED_CLAIM}
+    {
+        Category.CONTRADICTED_CLAIM,
+        Category.INVALID_INFERENCE,
+        Category.OVERSTATED_CLAIM,
+        Category.CONCEPTUAL_CONFLATION,
+    }
 )
 
 
@@ -246,6 +260,68 @@ def clamp(issues: list[RawIssue]) -> list[RawIssue]:
     return out
 
 
+def _issue_key(issue: RawIssue) -> tuple:
+    """The identity of a finding, independent of who reported it.
+
+    Two critics reading the same lens (D-front-loaded-depth) routinely land on the same
+    defect, and with `search.verify_sources` on both evidence critics are handed the
+    same mechanical `fabricated_citation` for the same dead URL. Counting that twice
+    would inflate `totals`, inflate the stagnation signature, and make the view
+    disagree with the defect list it is supposed to summarize — so `tally` and
+    `to_defects` collapse on this one key and stay in step.
+    """
+    return (issue.locus.section, issue.locus.paragraph, issue.category, issue.claim_span)
+
+
+def distinct_issues(results: list[LensResult]) -> list[RawIssue]:
+    """Every clamped, convergence-relevant finding across the *completed* reviews of
+    one artifact, collapsed to one entry per `_issue_key`.
+
+    Where two critics report the same finding at different severities the **highest**
+    survives. That is the same direction the mechanical floor clamps in (RC-005): a
+    critic may escalate and never downgrade, and letting whichever review happened to
+    be stored first decide would make a second reviewer able to soften the first.
+
+    Failed reviews are skipped here, once, so `tally`, `to_defects` and everything
+    derived from them see the identical stream — partial counts are never used (rule 2).
+    """
+    collapsed: dict[tuple, RawIssue] = {}
+    for result in sorted(results, key=lambda r: r.lens.value):
+        if result.failed:
+            continue
+        for issue in clamp(result.issues):
+            if issue.category is Category.STYLISTIC:
+                # "ignored for convergence" has to mean ignored: counted here, a
+                # stylistic nitpick could authorize a polish rewrite (rule 9) and risk
+                # a substantive regression for a finding declared irrelevant.
+                continue
+            key = _issue_key(issue)
+            current = collapsed.get(key)
+            if current is None or SEVERITY_RANK[issue.severity] > SEVERITY_RANK[current.severity]:
+                collapsed[key] = issue
+    return list(collapsed.values())
+
+
+def reviewed_lenses(results: list[LensResult]) -> set[Lens]:
+    """Lenses with at least one *completed* review among `results`."""
+    return {r.lens for r in results if not r.failed}
+
+
+def unreviewed_lenses(results: list[LensResult]) -> list[Lens]:
+    """Lenses this artifact has no completed review for — the fail-closed unit
+    (controller rules 2/3, docs/convergence.md).
+
+    A lens is incomplete when *nothing* valid was returned for it, not when one of
+    several reviews failed. With review depth above 1 those differ: a failed second
+    critic leaves a whole, valid review standing, and discarding it to re-ask would
+    throw away findings the fail-closed rule exists to preserve. The depth shortfall
+    is not dropped — it is picked up by rule 8, which cannot let a *clean* artifact be
+    accepted below full clearance.
+    """
+    reviewed = reviewed_lenses(results)
+    return [lens for lens in LENSES if lens not in reviewed]
+
+
 def to_defects(
     results: list[LensResult], overruled: set[tuple[str, str]] | None = None
 ) -> list[Defect]:
@@ -256,33 +332,22 @@ def to_defects(
     writer disputed and lost (D-writer-disputes): those are marked `adjudicated=True` so the next
     writer is told the task was independently reviewed and stands."""
     defects: list[Defect] = []
-    seen: set[tuple] = set()
     overruled = overruled or set()
-    for result in sorted(results, key=lambda r: r.lens.value):
-        if result.failed:
-            continue
-        for issue in clamp(result.issues):
-            if issue.category is Category.STYLISTIC:
-                continue  # never blocks; not worth a rewrite instruction
-            key = (issue.locus.section, issue.locus.paragraph, issue.category, issue.claim_span)
-            if key in seen:
-                continue
-            seen.add(key)
-            defects.append(
-                Defect(
-                    locus=issue.locus,
-                    category=issue.category,
-                    severity=issue.severity,
-                    claim_span=issue.claim_span,
-                    rationale=issue.rationale,
-                    instruction=issue.instruction,
-                    related_span=issue.related_span,
-                    citation_id=issue.citation_id,
-                    expected_support=issue.expected_support,
-                    adjudicated=(issue.category.value, _normalize(issue.claim_span))
-                    in overruled,
-                )
+    for issue in distinct_issues(results):
+        defects.append(
+            Defect(
+                locus=issue.locus,
+                category=issue.category,
+                severity=issue.severity,
+                claim_span=issue.claim_span,
+                rationale=issue.rationale,
+                instruction=issue.instruction,
+                related_span=issue.related_span,
+                citation_id=issue.citation_id,
+                expected_support=issue.expected_support,
+                adjudicated=(issue.category.value, _normalize(issue.claim_span)) in overruled,
             )
+        )
     order = {Severity.BLOCKING: 0, Severity.MAJOR: 1, Severity.MINOR: 2}
     defects.sort(key=lambda d: (order[d.severity], d.locus.section, d.locus.paragraph))
     return defects
@@ -341,20 +406,18 @@ def defect_provenance(results: list[LensResult]) -> dict[str, list[str]]:
 
 
 def tally(results: list[LensResult]) -> tuple[dict[str, SeverityCounts], SeverityCounts]:
+    """Count **distinct** findings, not reports of them (`_issue_key`).
+
+    With one critic per lens the deduplication is a no-op — categories are partitioned
+    by lens, so two lenses cannot raise the same key. It starts to bite at review depth
+    2, where the same defect found by both critics is one defect.
+    """
     per_category: dict[str, SeverityCounts] = {}
     totals = SeverityCounts()
-    for result in results:
-        if result.failed:
-            continue  # partial counts are never used (rule 2)
-        for issue in clamp(result.issues):
-            if issue.category is Category.STYLISTIC:
-                # "ignored for convergence" has to mean ignored: counted here, a
-                # stylistic nitpick could authorize a polish rewrite (rule 9) and
-                # risk a substantive regression for a finding declared irrelevant.
-                continue
-            bucket = per_category.setdefault(issue.category.value, SeverityCounts())
-            setattr(bucket, issue.severity.value, getattr(bucket, issue.severity.value) + 1)
-            setattr(totals, issue.severity.value, getattr(totals, issue.severity.value) + 1)
+    for issue in distinct_issues(results):
+        bucket = per_category.setdefault(issue.category.value, SeverityCounts())
+        setattr(bucket, issue.severity.value, getattr(bucket, issue.severity.value) + 1)
+        setattr(totals, issue.severity.value, getattr(totals, issue.severity.value) + 1)
     return per_category, totals
 
 
