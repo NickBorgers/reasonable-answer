@@ -271,6 +271,13 @@ it — each one, again, a guard against a known LLM failure mode:
   fetched page well, and not even that it handles the weaker on-its-face prompt production runs on
   a citation whose fetch failed. Certifying either needs deterministic offline source packets
   shipped with the fixtures, which is an open item.
+  A floor is still only a floor *of the right thing*: the audition pins every model to the same
+  structured-output mode a run would pin it to, by probing the proxy before it measures anything
+  (D-audition-probe-parity). Unprobed it did not, and a `schema_failures` count is a count of one
+  particular extraction path — so a model reliable under `json_schema` was being graded on
+  prompt-mode failures it would never have in production. The mode is recorded on the verdict and
+  re-measured when it moves; the cache-read paths that must never spend a call read across a
+  difference they cannot afford to detect, and `ra doctor` reports it instead.
 - **The dispute channel.** Critics can be wrong, and a false positive is otherwise
   indistinguishable from a real defect — floors escalate it, the blind referee counts it, and a
   compliant writer would "fix" the report into falsehood. An opt-in channel (D-writer-disputes) lets the writer

@@ -14,7 +14,7 @@ from typing import Any
 
 from pydantic import ValidationError
 
-from reasonable_answer.config import Budgets
+from reasonable_answer.config import Budgets, ConfigError
 from reasonable_answer.llm import Completion, MalformedOutputError
 from reasonable_answer.schemas import (
     ArbiterVerdict,
@@ -84,6 +84,13 @@ class FakeClient:
     polish_recommended: bool = False
     calls: list[Call] = field(default_factory=list)
     modes: dict[str, str] = field(default_factory=dict)
+    #: aliases whose structured-output mode cannot be pinned. Mirrors the real
+    #: client's fail-closed probe path without requiring a live proxy.
+    unprobeable: set[str] = field(default_factory=set)
+    #: aliases `probe_structured_output` has been asked about, in order. Recorded so a
+    #: test can assert a command probed *before* it spent (D-audition-probe-parity);
+    #: memoised like the real client, so a repeat probe is one entry, not two.
+    probes: list[str] = field(default_factory=list)
     generations: int = 0
     #: alias -> can it emit tool calls; absent means yes
     tool_capable: dict[str, bool] = field(default_factory=dict)
@@ -112,10 +119,21 @@ class FakeClient:
         return self.identities[alias]
 
     def probe_structured_output(self, alias: str) -> str:
+        if alias in self.unprobeable:
+            raise ConfigError(f"fail closed: alias '{alias}' cannot produce structured output")
+        if alias not in self.probes:
+            self.probes.append(alias)
         return self.modes.get(alias, "json_schema")
 
     def mode_for(self, alias: str) -> str:
-        return self.probe_structured_output(alias)
+        """The real client answers the *default* mode until an alias has been probed,
+        and that gap is the whole of D-audition-probe-parity. A double that answered the
+        pinned mode regardless would make an unprobed call path invisible to every test,
+        which is exactly how the audition shipped measuring critics in a regime
+        production never ran them in."""
+        if alias not in self.probes:
+            return "prompt"
+        return self.modes.get(alias, "json_schema")
 
     def probe_tool_calling(self, alias: str) -> bool:
         return self.tool_capable.get(alias, True)
