@@ -188,6 +188,9 @@ and the docs reviewer blocks on the first.
 - **[deployment-profile.md](./deployment-profile.md)** — how the production instance is actually
   configured, as distinct from what the repository ships: the edge that makes header trust safe,
   the outbound credentials, and the source-verification tiers that run there but ship off.
+- **[run-provenance.md](./run-provenance.md)** — which build produced a run (D-run-build-stamp):
+  what is stamped where, and the recipe for bucketing runs before and after a given fix, which is
+  how any claim that a change improved convergence has to be checked.
 - **[decisions.md](./decisions.md)** — design decisions, the Codex review, and how each of the
   20 findings was resolved.
 - **[question-refinement.md](./question-refinement.md)** — the edge-side, ambient

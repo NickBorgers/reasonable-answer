@@ -82,6 +82,34 @@ def test_a_clean_report_reaches_accepted_with_two_reviewers_per_lens(identities,
     assert all(len(v) >= 2 for v in cleared.values()), cleared
 
 
+def test_every_run_names_the_build_that_produced_it(identities, config):
+    """D-run-build-stamp. Driven end to end rather than unit-tested because the value of
+    the stamp is that it is written without anyone remembering to write it: the failure
+    mode is a new terminal path that finalizes without one."""
+    client = make_client(identities)
+    final = run(config, question="Is it so?", seed=REPORT, client=client)
+    run_dir = client_run_dir(final)
+
+    summary = json.loads((run_dir / "final.json").read_text())
+    assert set(summary["build"]) == {"commit", "dirty", "source"}
+
+    events = [json.loads(line) for line in (run_dir / "events.jsonl").read_text().splitlines()]
+    startups = [e["build"] for e in events if e["kind"] == "startup"]
+    assert startups == [summary["build"]], "one attempt, so one build, and it is the one that finalized"
+
+
+def test_the_build_stamp_never_reaches_the_blind_orchestrator(identities, config):
+    """The controller decides on an OrchestratorView that carries no identifiers. A key
+    added to the store must not become a key the orchestrator can see — asserted here
+    rather than argued, because the store and the view are edited by different people."""
+    client = make_client(identities)
+    final = run(config, question="Is it so?", seed=REPORT, client=client)
+
+    views = (client_run_dir(final) / "signals" / "views.jsonl").read_text()
+    assert "build" not in views
+    assert "commit" not in views
+
+
 def client_run_dir(final):
     from pathlib import Path
 

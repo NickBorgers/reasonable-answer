@@ -55,8 +55,9 @@ but **triage clamps it up to a mechanical, category-specific floor** — the cri
 2. the substitution is what carries a **load-bearing** inference or conclusion — keep the two
    apart and the conclusion no longer follows as stated.
 
-Three distinctions collapse often enough to be named. A **formal rule** (what a statute, policy or
-specification provides), the **mediated mechanism** that implements it (who administers it, at what
+The taxonomy names three distinctions that can satisfy this trigger. A **formal rule** (what a
+statute, policy or specification provides), the **mediated mechanism** that implements it (who
+administers it, at what
 rate, subject to what other rule), and the **observed outcome** downstream are three propositions,
 each needing its own support. The **units actually measured** and the **wider population** a claim
 is made about are two different sets. And **groups that reach the same outcome by different

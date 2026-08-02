@@ -63,6 +63,7 @@ FINAL = {
     ],
     "warnings": ["the seed carried no headings"],
     "note": "",
+    "build": {"commit": "c749b5e" + "0" * 33, "dirty": False, "source": "image"},
 }
 
 
@@ -234,6 +235,35 @@ def test_an_export_of_a_run_with_no_final_json_still_declares_itself():
 
     assert "aborted" in document
     assert "never fully critiqued" in document
+
+
+def test_the_record_names_the_build_that_produced_the_report():
+    """D-run-build-stamp: an exported report says which commit produced it, so a reader
+    holding two exports can tell whether they came from the same code."""
+    document = export.export_markdown("Q?", REPORT, FINAL, "run-shared", exported_on="2026-07-25")
+    html = export.export_html("Q?", REPORT, FINAL, "run-shared", exported_on="2026-07-25")
+
+    for surface in (document, html):
+        assert "Built from" in surface
+        assert "c749b5e00000" in surface
+
+
+def test_a_run_that_predates_stamping_shows_no_build_row():
+    """Not "unknown" — the record has nothing to say, and saying "unknown" implies it
+    tried to find out and failed. Older exports must render exactly as they always did."""
+    final = {k: v for k, v in FINAL.items() if k != "build"}
+    document = export.export_markdown("Q?", REPORT, final, "run-shared")
+    html = export.export_html("Q?", REPORT, final, "run-shared")
+
+    for surface in (document, html):
+        assert "Built from" not in surface
+
+
+def test_a_dirty_build_is_flagged_rather_than_shown_as_a_bare_commit():
+    """A modified tree's commit is a starting point, not an identity: the code that ran
+    was that commit plus edits nobody recorded, and the reader has to know."""
+    final = {**FINAL, "build": {"commit": "c749b5e" + "0" * 33, "dirty": True, "source": "git"}}
+    assert "(modified)" in export.export_markdown("Q?", REPORT, final, "run-shared")
 
 
 def test_the_review_record_is_the_same_list_the_page_shows(client, finished_run):

@@ -9,7 +9,15 @@
 
 services:
   ra:
-    build: .
+    build:
+      context: .
+      args:
+        # Stamps runs with the commit that built the image (docs/run-provenance.md).
+        # Export it to make a locally-built image attributable:
+        #   RA_BUILD_SHA=$(git rev-parse HEAD) docker compose up -d --build
+        # Left unset it stays empty, and the app falls back to reading the checkout or
+        # to recording source=unknown — never to inventing a commit.
+        RA_BUILD_SHA: "${RA_BUILD_SHA:-}"
     image: reasonable-answer:latest
     restart: unless-stopped
     # A run is 10-25 minutes, so no grace period can "wait for it to finish". This
