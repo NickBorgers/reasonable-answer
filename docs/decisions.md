@@ -746,8 +746,10 @@ aborts it.
 and `reviewed_sha` is the key that dedup, the cycle counter, and every artifact name hang from. It
 would break the `input_sha == reviewed_sha` gate, since the rebased tree no longer descends from
 the SHA the reviewers read. And it needs a force-push from the one job holding a write-capable
-PAT, where a non-forced `git push HEAD:<ref>` is a much smaller thing to get wrong. A merge commit
-also lands on the existing merge-from-base inherit path, so a resync costs no review cycle.
+PAT, where a non-forced `git push HEAD:<ref>` is a much smaller thing to get wrong. A clean merge
+whose tree matches a mechanical recreation lands on the merge-from-base inherit path, so that
+resync costs no review cycle. A conflict resolution by the fixer or a human does not inherit: under
+D-inherit-whole-range, the panel reads any merge whose tree cannot be recreated exactly.
 
 **The gate that makes it safe to leave a conflict unresolved.** Both fixer prompts tell the agent
 to prefer the base branch's structural change and re-apply the PR's intent on top, and — the part

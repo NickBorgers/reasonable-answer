@@ -227,15 +227,16 @@ it holds `contents: read`, so it could not push if it tried.
   underneath it: content, then `git merge origin/main`, inherited the prior verdict with no
   reviewer reading a line. The tree test is what a conflict resolution cannot pass, and it
   is deliberately fail-closed — a merge that cannot be re-created cleanly is reviewed.
-- **A fixer-authored commit is inherited exactly like any other merge-from-base**, with no
-  per-author exemption. A prior version of this rule (PR #65, responding to PR #49) refused
+- **A fixer-authored commit has no per-author exemption from the merge-from-base rule.** A clean,
+  tree-identical base resync is inherited; a conflict-resolved merge is reviewed under
+  D-inherit-whole-range. A prior version of this rule (PR #65, responding to PR #49) refused
   to inherit onto a commit authored as `ci@reasonable-answer.local`, on the theory that "the
   fixed SHA earns its own cycle" was a property worth enforcing here. That was an agent's
   invention, not the owner's intent: the owner has since confirmed fixer output is meant to
   reach main without a further review cycle, matching the design this repository borrows
-  from, and the per-author check has been removed. See D-fixer-merges-not-rebases's residual: a fixer-authored
-  merge whose conflict resolutions are wrong-but-clean can still reach main unread, in the
-  same way any other wrong-but-clean fixer output can (below).
+  from, and the per-author check has been removed. See D-fixer-merges-not-rebases's residual:
+  wrong-but-clean fixer output can still reach main unread on the fixer's normal path (below),
+  where no successor inherit decision runs.
 - **A run that reviewed nothing does not consume a cycle.** `review/cycle` is written by
   `record-cycle`, after the panel has read the code, and only when at least one reviewer's
   guard cleared. Every guard refusing — PR Validation red on the reviewed SHA, the branch

@@ -244,6 +244,20 @@ def test_merge_of_an_unrelated_branch_under_the_head_is_reviewed(bench: Bench, s
     assert "which is not on main" in result["_log"]
 
 
+def test_head_merge_of_an_unrelated_branch_is_reviewed(bench: Bench, script: str) -> None:
+    """A head that directly merges a side branch fails the top-level second-parent guard."""
+    reviewed = bench.commit_on_pr("feature.txt")
+    _git(bench.work, "checkout", "-q", "-b", "side", bench.base_root)
+    bench.commit_on_pr("side.txt")
+    _git(bench.work, "checkout", "-q", "pr")
+    _git(bench.work, "merge", "-q", "--no-ff", "-m", "merge side", "side")
+    head = _git(bench.work, "rev-parse", "HEAD")
+
+    result = bench.run(script, head, reviewed)
+    assert result["inherit"] == "false"
+    assert "^2 is not on main" in result["_log"]
+
+
 def test_a_merge_carrying_extra_content_is_reviewed(bench: Bench, script: str) -> None:
     """Shape alone cannot see this, which is why the tree is checked too.
 
