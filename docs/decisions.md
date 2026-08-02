@@ -3464,7 +3464,7 @@ affordable.
 **Tested by running the step, not by reading it.** `tests/test_ci_inherit_classifier.py` extracts
 the `run:` block from `review-pipeline.yml` and drives it under `bash` over throwaway git
 repositories, with a stub `gh` answering the one status query it makes — offline, no token. Seven
-of its thirteen cases fail against the old classifier, including both directions of the bypass
+of its fourteen cases fail against the old classifier, including both directions of the bypass
 and the hand-resolved conflict. A predicate this cheap to get wrong and this expensive to get
 wrong is not one to leave to a reviewer noticing a diff in YAML.
 
