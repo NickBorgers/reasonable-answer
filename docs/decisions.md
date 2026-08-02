@@ -4006,9 +4006,10 @@ logic verdict is `marginal`, not `unfit`, and the spot check attributed part of 
 noise *cohort-wide* — every critic on that lens — to defects in the control fixtures themselves,
 which are being repaired separately; grading a model on a corpus known to be wrong is exactly the
 mistake D-control-soundness names. The logic-lens roster call therefore waits for the post-fix
-re-audition. Nothing here touches the audition thresholds, the fixtures, the grader, or any code:
-this decision is a roster edit and the evidence for it, which is the whole point of having a
-measured eligibility term. No audition cache is committed (`.ra-audition.json` is a property of the
+re-audition. Nothing here touches the audition thresholds, the fixtures, the grader, or any file
+under `src/`: this decision is a roster edit, three tests pinning the composition it chose, and the
+evidence for both — which is the whole point of having a measured eligibility term. No audition
+cache is committed (`.ra-audition.json` is a property of the
 deployment, not the repo), so the verdicts above are cited, not shipped — re-running `ra audition`
 is what reproduces them.
 
