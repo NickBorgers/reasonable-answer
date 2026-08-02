@@ -246,6 +246,44 @@ def test_control_declaring_a_lens_is_rejected(tmp_path):
         audition.load_fixtures(tmp_path / "corpus")
 
 
+def test_planting_a_minor_floor_category_is_rejected(tmp_path):
+    """D-minor-floor-fixtures. Every detection credit requires post-clamp materiality, so
+    a category floored below `MATERIAL_FLOOR` can only be found by a critic that
+    escalates past its own floor. `loaded_language` is minor on purpose (D-social-bias):
+    a critic that reports it at exactly that severity is doing what the taxonomy asks
+    and would score `strict = False`, `same_lens = False` — blind, on a metric that
+    feeds MARGINAL. The fixture would be grading escalation, not detection."""
+    d = tmp_path / "corpus" / "bad"
+    d.mkdir(parents=True)
+    (d / "artifact.md").write_text("# Q\n\nBody paragraph.\n")
+    (d / "manifest.yaml").write_text(
+        yaml.safe_dump(
+            {
+                "lens": "logic",
+                "question": "q",
+                "defects": [
+                    {"category": "loaded_language", "locus": {"section": 1, "paragraph": 1}}
+                ],
+            }
+        )
+    )
+    with pytest.raises(audition.FixtureError, match="below the material floor"):
+        audition.load_fixtures(tmp_path / "corpus")
+
+
+def test_every_shipped_planted_category_is_detectable():
+    """The corpus side of the same property: a planted defect no correct critic could
+    be credited for is a fixture that measures nothing it claims to."""
+    from reasonable_answer.taxonomy import SEVERITY_FLOOR, is_material
+
+    for fixture in audition.load_fixtures(CORPUS).fixtures:
+        for defect in fixture.defects:
+            assert is_material(SEVERITY_FLOOR[defect.category]), (
+                f"{fixture.id}: '{defect.category.value}' floors below material and can "
+                f"never be credited by `grade`"
+            )
+
+
 def test_planted_fixture_without_a_lens_is_rejected(tmp_path):
     """The other direction: nothing would ever grade it."""
     d = tmp_path / "corpus" / "bad"
@@ -455,6 +493,99 @@ def test_escalated_stylistic_issue_does_not_count_as_a_detection(severity):
     )
     assert found[0].strict is False
     assert found[0].same_lens is False
+
+
+def _logic_fixture(category: Category = Category.INVALID_INFERENCE) -> audition.Fixture:
+    return audition.Fixture(
+        id="f",
+        lens=Lens.LOGIC,
+        question="q",
+        artifact="x",
+        defects=(
+            audition.PlantedDefect(category=category, locus=StructuralRef(section=2, paragraph=1)),
+        ),
+    )
+
+
+@pytest.mark.parametrize(
+    ("reported", "agrees"),
+    [
+        (Severity.BLOCKING, True),   # legal escalation: RC-005 permits exactly this
+        (Severity.MAJOR, True),      # at the floor
+        (Severity.MINOR, False),     # the clamp had to lift it
+    ],
+)
+def test_severity_agreement_counts_escalation_as_agreement(reported, agrees):
+    """`invalid_inference` floors at major. A critic proposing `blocking` is exercising
+    the one direction the clamp allows, and scoring that as disagreement made the metric
+    punish the behaviour the taxonomy invites. Only a proposal triage has to lift
+    disagrees. D-minor-floor-fixtures."""
+    found = audition.grade(
+        _logic_fixture(),
+        result(Lens.LOGIC, issue(Category.INVALID_INFERENCE, 2, 1, reported)),
+    )
+    assert found[0].strict is True, "under-rating a major-floor category is still a detection"
+    assert found[0].severity_agrees is agrees
+
+
+@pytest.mark.parametrize(
+    ("planted", "reported", "severity"),
+    [
+        # The D-minor-floor-fixtures case: a doctrine-compliant minor report used to
+        # increment the numerator while contributing nothing to the denominator.
+        (Category.OVERSTATED_CLAIM, Category.LOADED_LANGUAGE, Severity.MINOR),
+        (Category.OVERSTATED_CLAIM, Category.OVERSTATED_CLAIM, Severity.MINOR),
+        (Category.OVERSTATED_CLAIM, Category.OVERSTATED_CLAIM, Severity.BLOCKING),
+        (Category.OVERSTATED_CLAIM, Category.CONTRADICTED_CLAIM, Severity.BLOCKING),
+        (Category.OVERSTATED_CLAIM, Category.STYLISTIC, Severity.MINOR),
+        (Category.CONTRADICTED_CLAIM, Category.CONTRADICTED_CLAIM, Severity.MINOR),
+    ],
+)
+def test_severity_agreement_never_counts_what_strict_did_not(planted, reported, severity):
+    """The numerator must sit inside the denominator, or `severity_agreement` is not a
+    rate at all — it exceeded 1.0 whenever a critic reported a minor-floor category
+    at its floor."""
+    found = audition.grade(
+        _logic_fixture(planted), result(Lens.LOGIC, issue(reported, 2, 1, severity))
+    )
+    assert not (found[0].severity_agrees and not found[0].strict)
+
+
+def test_severity_agreement_is_a_rate_over_a_whole_audition():
+    """The aggregate form of the property, through `run_assignment` rather than `grade`:
+    a mixed critic — one escalation, one under-rating, one minor report of a minor-floor
+    category — must still land in [0, 1]."""
+    fixtures = audition.load_fixtures(CORPUS)
+    slot = audition.Assignment(alias="a", identity="p/m", lens=Lens.LOGIC, position=0)
+
+    # Spans are verbatim quotes from the two artifacts, because `require_verbatim_spans`
+    # defaults on exactly as in a run.
+    overreach = "will reduce fatalities in any city that builds them"
+    framing = "settle the question decisively"
+
+    def respond(alias, user):
+        if overreach in user:
+            # Escalation on a major-floor category: found, and rated above the floor.
+            return [
+                issue(
+                    Category.INVALID_INFERENCE, 3, 2, Severity.BLOCKING, claim_span=overreach
+                )
+            ]
+        if framing in user:
+            # The doctrine-compliant minor reading, at the fixture's actual ground-truth
+            # locus (`overstated-claim-02`, S4.P1 — the fixture moved to REPORT_SKELETON
+            # shape and its `-02` name under D-minor-floor-fixtures). It is not a
+            # detection, and before D-minor-floor-fixtures it incremented the numerator
+            # anyway.
+            return [
+                issue(Category.LOADED_LANGUAGE, 4, 1, Severity.MINOR, claim_span=framing)
+            ]
+        return []
+
+    m = audition.run_assignment(ScriptedClient(respond), slot, fixtures, repetitions=1)
+    assert m.strict_hits == 1, "the escalated invalid_inference must count as found"
+    assert m.severity_agreements <= m.strict_hits
+    assert 0.0 <= m.severity_agreement <= 1.0
 
 
 def test_material_count_applies_the_severity_floor():

@@ -72,7 +72,15 @@ from .config import AuditionConfig, AuditionThresholds, ConfigError, Roster
 from .critique import critique_once
 from .llm import LLMClient
 from .schemas import LensResult, RawIssue, StructuralRef
-from .taxonomy import LENS_CATEGORIES, SEVERITY_FLOOR, SEVERITY_RANK, Category, Lens, counts_for_convergence
+from .taxonomy import (
+    LENS_CATEGORIES,
+    MATERIAL_FLOOR,
+    SEVERITY_FLOOR,
+    SEVERITY_RANK,
+    Category,
+    Lens,
+    counts_for_convergence,
+)
 
 #: Fixture corpus shipped with the source tree.
 DEFAULT_FIXTURE_DIR = Path(__file__).resolve().parent.parent.parent / "tests" / "fixtures" / "audition"
@@ -99,7 +107,14 @@ LOCUS_PARAGRAPH_TOLERANCE = 1
 #: The one `judge` change that would need one — a gate reading a `Metrics` counter older
 #: entries never collected, which defaults to 0 and reads as a measured zero — is caught
 #: automatically, because `rubric_hash` covers the `Metrics` field set.
-RUBRIC_VERSION = 1
+#:
+#: Bumped to 2 by D-minor-floor-fixtures: `grade`'s `severity_agrees` is now derived
+#: from `exact` (the same issues that produce `strict`) rather than computed
+#: independently, and the comparison is `>=` the floor rather than `==` it. A cached
+#: `Metrics.severity_agreements` recorded under version 1 could exceed `strict_hits` —
+#: exactly the bug this decision fixes — so it must not be read as though it meant the
+#: same thing as a version-2 count.
+RUBRIC_VERSION = 2
 
 #: `{{slot}}` in a fixture artifact, substituted from the manifest's slot table.
 _SLOT = re.compile(r"\{\{([a-z0-9_]+)\}\}")
@@ -261,6 +276,7 @@ def load_fixtures(directory: Path | None = None) -> FixtureSet:
             raise FixtureError(f"fixture '{fixture_dir.name}': {exc}") from exc
 
         _check_lens_ownership(fixture)
+        _check_planted_floor_is_material(fixture)
         fixtures.append(fixture)
 
     if not fixtures:
@@ -317,6 +333,34 @@ def _check_lens_ownership(fixture: Fixture) -> None:
             )
 
 
+def _check_planted_floor_is_material(fixture: Fixture) -> None:
+    """A planted category must floor at or above `MATERIAL_FLOOR`. D-minor-floor-fixtures.
+
+    Every detection credit in `grade` requires post-clamp materiality, because that is
+    what triage would count and what a run would ever be revised for. A category whose
+    floor is *below* that line — `loaded_language` at `minor` under D-social-bias,
+    `stylistic`, `unclear_structure` — can therefore only be detected by a critic that
+    escalates past its own floor. Planting one grades the doctrinal reading of the
+    category as blindness: report the planted category at the severity the taxonomy
+    assigns it and you score `strict = False`, `same_lens = False`. The rubric would be
+    measuring willingness to escalate, in a metric that feeds `MARGINAL`.
+
+    This is the mechanical half of the decision, in the same sense as
+    `_check_control_manifest`. It does not say a minor-floor category is unmeasurable —
+    it says it is not measurable *by this grader*, whose one bar is materiality.
+    """
+    for defect in fixture.defects:
+        floor = SEVERITY_FLOOR[defect.category]
+        if SEVERITY_RANK[floor] < SEVERITY_RANK[MATERIAL_FLOOR]:
+            raise FixtureError(
+                f"fixture '{fixture.id}': category '{defect.category.value}' floors at "
+                f"'{floor.value}', below the material floor '{MATERIAL_FLOOR.value}' — a "
+                f"critic reporting it at its own floor would score as blind, so the "
+                f"fixture would grade escalation rather than detection "
+                f"(D-minor-floor-fixtures)"
+            )
+
+
 # ------------------------------------------------------------------- grading
 
 
@@ -327,6 +371,11 @@ class Detection:
     defect: PlantedDefect
     strict: bool
     same_lens: bool
+    #: The critic found it *and* rated it at or above the category floor unaided — the
+    #: clamp had nothing to lift. Implies `strict` by construction (D-minor-floor-fixtures):
+    #: it is derived from the same issues, so it can never count something `strict` did
+    #: not. Escalation is agreement, not disagreement — a critic proposing `blocking` on a
+    #: major-floor category is exercising the one direction RC-005 permits.
     severity_agrees: bool
 
 
@@ -366,6 +415,10 @@ def grade(fixture: Fixture, result: LensResult) -> tuple[Detection, ...]:
     whatever was planted there.
 
     Both numbers are reported; neither is the whole story alone.
+
+    Every credit here is post-clamp material, so a planted category has to floor at or
+    above `MATERIAL_FLOOR` for any of it to be reachable — `_check_planted_floor_is_material`
+    holds the corpus to that at load (D-minor-floor-fixtures).
     """
     detections: list[Detection] = []
     for defect in fixture.defects:
@@ -374,14 +427,16 @@ def grade(fixture: Fixture, result: LensResult) -> tuple[Detection, ...]:
             for i in result.issues
             if defect.anywhere or _locus_matches(defect.locus, i.locus)
         ]
-        strict = any(i.category == defect.category and _is_material(i) for i in candidates)
+        exact = [i for i in candidates if i.category == defect.category and _is_material(i)]
+        strict = bool(exact)
         same_lens = any(
             i.category in LENS_CATEGORIES[fixture.lens] and _is_material(i) for i in candidates
         )
-        severity_agrees = any(
-            i.category == defect.category and i.severity == SEVERITY_FLOOR[defect.category]
-            for i in candidates
-        )
+        # Derived from `exact`, so the severity numerator is a subset of the `strict`
+        # denominator it is divided by. Testing `>=` rather than `==` the floor keeps a
+        # legal escalation on the agreeing side.
+        floor = SEVERITY_FLOOR[defect.category]
+        severity_agrees = any(SEVERITY_RANK[i.severity] >= SEVERITY_RANK[floor] for i in exact)
         detections.append(
             Detection(
                 defect=defect,
@@ -466,6 +521,14 @@ class Metrics(BaseModel):
 
     @property
     def severity_agreement(self) -> float:
+        """Share of strict detections the critic rated at or above the floor unaided.
+
+        A rate, so it needs the numerator inside the denominator; `grade` derives both
+        from the same issues, which is what makes that hold. It did not before
+        D-minor-floor-fixtures — `severity_agrees` was independent of material detection,
+        so a non-material report of a minor-floor category incremented the numerator while
+        contributing nothing to `strict_hits`, and the ratio could exceed 1.0.
+        """
         return _ratio(self.severity_agreements, self.strict_hits)
 
     @property

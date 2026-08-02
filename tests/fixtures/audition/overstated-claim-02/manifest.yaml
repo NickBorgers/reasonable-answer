@@ -1,0 +1,44 @@
+lens: logic
+tier: moderate
+question: "Did the city's homeless services budget increase achieve its goals?"
+defects:
+  - category: overstated_claim
+    locus: {section: 4, paragraph: 1}
+    note: >
+      S4.P1 states that the figures "settle the question decisively", that the size of the
+      appropriation "was never the binding constraint on capacity", and that "no increase
+      in funding could have delivered the 300 beds on schedule" — a counterfactual
+      certainty that the two findings it rests on (first-year spending within allowed
+      uses, execution nine months behind schedule) do not establish. The numbers are
+      themselves accurate and cited, and the paragraph immediately after notes the
+      retrofits added cost as well as time, which cuts against the claim rather than
+      supporting it: the defect is the strength of the assertion, not the underlying
+      facts. Tier is moderate rather than obvious because the rest of the report is
+      measured — the Conclusion and the Outcomes section attribute the shortfall to
+      capital-project delay with none of this certainty — so a fast reader may take
+      S4.P1 as a summary of it. A critic may also reasonably propose `invalid_inference`
+      or `contradicted_claim` here; the fixture grades on the same-lens window, so any
+      material logic finding at the locus scores.
+
+      Directory is `-02` because `overstated-claim-01` already names a different
+      fixture (D-category-coverage, #126): a small-average-effect vitamin D report
+      restated as a flat "prevents". Two `overstated_claim` fixtures at moderate tier
+      is not redundant coverage — different domains, different defect shape (a
+      counterfactual-certainty claim here against a hedge-drop there) — and both were
+      confirmed independently to earn `moderate` rather than `obvious` on their own
+      terms before this rename.
+
+      This fixture previously planted `loaded_language` on an earlier S2.P1 (under the
+      pre-`REPORT_SKELETON` shape this artifact used before D-obvious-per-lens and
+      D-category-coverage set the corpus-wide precedent of authoring fixtures in
+      production report shape) that called the spending "squandered" and the outreach
+      initiative "a boondoggle". No doctrine-compliant critic could pass it:
+      `loaded_language` floors at `minor` (D-social-bias) and every detection credit
+      requires post-clamp materiality, so reporting the planted category at its own
+      floor scored as blindness. The evaluative wording is removed rather than left
+      beside the overstatement, so the locus measures one thing. See
+      D-minor-floor-fixtures, which also adds `_check_planted_floor_is_material` — a
+      load-time guard that now refuses any fixture planting a minor-floor category
+      outright, which supersedes D-category-coverage's characterization of
+      `loaded-language-01` as merely "diagnostic, not a sensitivity measurement": it is
+      not diagnostic either, because the corpus can no longer contain it at all.

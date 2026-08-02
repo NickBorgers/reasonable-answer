@@ -237,10 +237,12 @@ it — each one, again, a guard against a known LLM failure mode:
   *lens* is not covering every *category*: because the grader scores a relaxed same-lens match, a
   critic blind to one category still passes on the strength of the others, so every category that
   floors at `major` or `blocking` now carries its own planted fixture and a test says so
-  (D-category-coverage). The two minor-floor categories — `unclear_structure` and
-  `loaded_language` — are **diagnostic only**. A detection has to clear the material floor to
-  count, so a critic that finds one and files it honestly at `minor` scores nothing; a fixture for
-  those ranks models against each other and must never be read as a sensitivity measurement.
+  (D-category-coverage). The minor-floor categories — `unclear_structure`, `loaded_language` and
+  `stylistic` — carry **no planted fixture at all**: a detection has to clear the material floor to
+  count, so a fixture for one of them would grade a critic that finds it and files it honestly at
+  `minor` as blind, measuring escalation rather than detection. `_check_planted_floor_is_material`
+  refuses such a fixture at load, mechanically, rather than leaving it to review
+  (D-minor-floor-fixtures).
   What the audition measures is also a **floor**, and deliberately a strict one: critics are graded with no
   fetched-source scaffolding whatsoever, while a deployment with source verification switched on
   hands its evidence critic a `fetched_sources_block` for every citation it attempted to fetch —
