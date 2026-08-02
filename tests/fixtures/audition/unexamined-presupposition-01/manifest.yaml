@@ -1,3 +1,7 @@
+# Production shape per D-fixture-report-shape. Derived from a sound base whose conclusion
+# opened by naming "failed" as contested and reporting the mixed record before answering
+# the causal question; the base is not shipped, to keep the audition's per-model call
+# count bounded.
 lens: completeness
 tier: moderate
 question: "Why did the downtown revitalization project fail?"
@@ -7,10 +11,14 @@ defects:
     anywhere: true
     note: >
       The question presupposes the project failed; the report adopts that framing in its
-      opening sentence and organizes everything as an autopsy — yet its own cited
-      figures (S2) show foot traffic up 22 percent and vacancy down, i.e. the record is
-      mixed and "failure" is contested, which the report never states or examines. The
-      individual claims are accurate and cited, so evidence and logic critics find
-      little; the omission is the failure to surface the premise. `anywhere` is set
-      because an omission of examination has no honest single locus; a critic may anchor
-      it to the framing in S1.P1 or to the conclusion that restates it.
+      first sentence and organizes everything as an autopsy — yet its own cited figures
+      (S4.P2) show foot traffic up 22 percent and vacancy down from 28 to 19 percent,
+      i.e. the record is mixed and "failure" is contested, which the report never states
+      or examines. S7 comes closest and still does not: it lists the limits of the
+      *causal* account while leaving the premise itself untouched. The individual claims
+      are accurate and cited, and S3 engages a genuine opposing view — about which cause
+      dominated, never about whether there was a failure to explain — so evidence and
+      logic critics find little and `omitted_counterargument` is not available as a
+      shortcut. `anywhere` is set because an omission of examination has no honest single
+      locus; a critic may anchor it to the framing in S1.P1 or to the assessment that
+      restates it.

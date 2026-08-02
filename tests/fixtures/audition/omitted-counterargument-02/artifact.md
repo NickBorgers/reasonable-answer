@@ -17,7 +17,7 @@ The surveyed record bounds the effect rather than eliminating it. Across the pos
 
 ## What the posted limit describes today
 
-The department's 2024 speed study instrumented all eleven segments with pneumatic tube counters for fourteen consecutive days each, recording free-flow passenger-vehicle speeds only; readings taken in queued or weather-affected conditions were discarded before the percentiles were computed [1]. The 85th percentile came out at 74 mph and the median at 71 mph, nine and six miles per hour above the posted limit respectively.
+The department's 2024 speed study instrumented all eleven segments with pneumatic tube counters for fourteen consecutive days each, recording free-flow passenger-vehicle speeds only; readings taken in queued or weather-affected conditions were discarded before the percentiles were computed [1]. Pneumatic road tubes are the standard portable method for short-duration vehicle speed data collection in FHWA traffic-monitoring practice, and the department's protocol follows it [5]. The 85th percentile came out at 74 mph and the median at 71 mph, nine and six miles per hour above the posted limit respectively.
 
 The gap is stable rather than episodic. It varies by less than 2 mph between daytime and overnight windows and by less than 3 mph across the four measurement months, and no single segment accounts for it: the narrowest per-segment gap in the study is 7 mph [1]. A posted limit that essentially all free-flow traffic exceeds is describing something other than how the road is driven.
 
@@ -43,3 +43,4 @@ The travel-time case is weak and the recommendation does not rest on it. If oper
 2. Federal Highway Administration (2012). *Methods and Practices for Setting Speed Limits: An Informational Report*. FHWA-SA-12-004.
 3. Transportation Research Board (2003). *NCHRP Report 504: Design Speed, Operating Speed, and Posted Speed Practices*. National Cooperative Highway Research Program.
 4. State Highway Patrol (2024). *Traffic Enforcement Activity Report, Fiscal Year 2024*.
+5. Federal Highway Administration (2016). *Traffic Monitoring Guide*. FHWA-PL-17-003. https://www.fhwa.dot.gov/policyinformation/tmguide/tmg_fhwa_pl_17_003.pdf

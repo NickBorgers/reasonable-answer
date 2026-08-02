@@ -1,12 +1,29 @@
 # A control declares no `lens` and no `tier` (D-control-soundness): it is graded by
 # every lens, and it gates no sensitivity threshold because it plants nothing.
 #
-# Soundness contract, which no test can check and review therefore must: every
-# empirical claim below carries an in-text citation to a Sources entry; the question's
-# ambiguous term is named and decomposed rather than assumed; the case against the
-# report's own answer has its own section. This question is contested, so the sourcing
-# is deliberately drawn across a bank, an intergovernmental body and academic work on
-# both sides of the cost-contingency dispute — `one_sided_sourcing` floors to `major`,
-# and a two-source control would earn that finding honestly.
+# One of the two unpaired controls (D-fixture-report-shape): it has no planted sibling,
+# so it also checks that the corpus is not merely a set of near-duplicate pairs.
+#
+# Soundness contract, which no test can check and review therefore must: every empirical
+# claim carries an inline [n] citation resolving to a numbered `## Sources` entry; the
+# question's ambiguous term is named and decomposed rather than assumed; the strongest
+# opposing case — that recent Western nuclear costs are contingent rather than intrinsic
+# — has its own section and is left explicitly unresolved rather than dismissed. This
+# question is contested, so the sourcing spans a financial-advisory levelized-cost
+# estimate (Lazard), a joint intergovernmental-agency estimate (IEA & NEA), and academic
+# work in market-value economics (Hirth) and whole-system modeling (Sepulveda et al.),
+# plus the historical-cost study (Lovering et al.) the contingency case in S3 rests on.
+# That academic source is one-sided by itself — it backs only the "contingent, not
+# intrinsic" reading — which is exactly why the report states the objection and declines
+# to resolve it ("Nothing cited here resolves that transfer") rather than manufacturing a
+# rebuttal source it does not have (D-fixture-report-shape correction: an earlier
+# revision of this comment, and of the parallel paragraph in D-control-soundness, claimed
+# sourcing on "both sides" of this dispute; that stopped being true when the
+# negative-learning-by-doing source was dropped, and both are now corrected to describe
+# what ships). `one_sided_sourcing` still floors to `major` and a two-source control would
+# earn that finding honestly; five distinct sources across five distinct publishers put it
+# out of honest reach on its own mechanical terms. The `## Conclusion` section summarises
+# material cited below it, per the conclusion-first report template — a critic that raises
+# `uncited_claim` against it is over-flagging, which is what this fixture measures.
 kind: control
 question: "Is nuclear power cost-competitive with solar and wind?"

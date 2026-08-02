@@ -1,3 +1,7 @@
+# Matched pair (D-fixture-report-shape): derived from
+# `control-base-congestion-pricing-01` by swapping the counterargument section's subject
+# and dropping the two sources that only that section used. The mutant is not shorter or
+# thinner than its sound sibling by design.
 lens: completeness
 tier: moderate
 question: "Should cities adopt congestion pricing?"
@@ -7,10 +11,14 @@ defects:
     anywhere: true
     note: >
       The report recommends adoption without ever raising distributional incidence — a
-      flat cordon charge is regressive with respect to income, and that is the single
-      most common objection in the literature and the one that has killed schemes
-      politically. Note the fixture is not merely thin: S4 discusses boundary effects and
+      flat cordon charge takes a larger share of income from poorer drivers, and that is
+      the single most common objection in the literature and the one that has killed
+      schemes politically. Note the fixture is not merely thin, and it is not missing a
+      counterargument *section*: S3 engages the cordon-relocation objection at length and
+      answers it, which is precisely the "weakened version of the opposing case" the
+      report template forbids. S5 discusses boundary effects, collection cost and
       political durability, so a critic cannot score by flagging "needs more detail"
       generally. `anywhere` is set because an omission has no honest locus; a critic may
-      reasonably anchor it to the recommendation in S1.P1, to the revenue section that
-      ignores who pays, or to the implementation section where it belonged.
+      reasonably anchor it to the recommendation in S1.P1, to the counterargument section
+      that substitutes a weaker objection, or to the revenue paragraph that never says
+      who pays.

@@ -1,0 +1,18 @@
+# A control declares no `lens` and no `tier` (D-control-soundness): it is graded by
+# every lens, and it gates no sensitivity threshold because it plants nothing.
+#
+# This is the sound base of `omitted-counterargument-01` (D-fixture-report-shape). Here
+# the counterargument section engages the distributional-incidence objection — the one
+# that has actually killed schemes — on the merits; there it engages a weaker objection
+# the report has already answered elsewhere, and the incidence question never appears.
+#
+# Soundness contract, which no test can check and review therefore must: every empirical
+# claim carries an inline [n] citation resolving to a numbered `## Sources` entry; the
+# recommendation is conditioned rather than blanket, so the conclusion claims no more
+# than the implementations support; the strongest opposing case is stated in the form
+# its proponents would accept and answered by showing incidence is an empirical question
+# rather than by minimising the burden; five sources spanning two transport authorities,
+# an overview paper and two peer-reviewed equity analyses put `one_sided_sourcing` out
+# of honest reach.
+kind: control
+question: "Should cities adopt congestion pricing?"

@@ -42,3 +42,13 @@ defects:
       outright, which supersedes D-category-coverage's characterization of
       `loaded-language-01` as merely "diagnostic, not a sensitivity measurement": it is
       not diagnostic either, because the corpus can no longer contain it at all.
+
+      Sources 3-5 were added under D-fixture-report-shape's merge-reconciliation pass to
+      bring this fixture from two sources to the corpus-wide five
+      `test_corpus_class_is_not_readable_off_source_count` now holds every logic-lens
+      planted fixture to, matching the six controls. Like the rest of this hypothetical
+      city's documents, they are invented agency records rather than fetchable real-world
+      sources — consistent with every other citation in this fixture and with
+      D-fixture-report-shape's original "Deliberately not done" note that the municipal
+      fixtures cite invented documents for a hypothetical city. None of the three touches
+      S4.P1, the planted locus.

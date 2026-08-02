@@ -7,7 +7,7 @@ defects:
     note: >
       S4.P3 attributes twelfth-grade outcomes — a closing and reversing achievement
       deficit, on-time graduation, chronic absence in the final two years — to source
-      [3], which is listed accurately and in full as Durkin et al. (2022), "Effects of a
+      [2], which is listed accurately and in full as Durkin et al. (2022), "Effects of a
       statewide pre-kindergarten program on children's achievement and behavior
       **through sixth grade**". Ground truth: that paper's follow-up window ends at
       sixth grade, it reports the deficit as open rather than closing, and a 2022
@@ -25,7 +25,7 @@ defects:
       verbatim ("a cited source is described as supporting something it plainly would
       not support").
       Deliberate: the claim is plausible rather than absurd — the Boston lottery study
-      [6] really does find attainment gains without test-score gains — so a critic
+      [5] really does find attainment gains without test-score gains — so a critic
       cannot reach the finding by smelling an implausible result. It has to check the
       attribution.
       Known and accepted: S1 says adult outcomes are known "almost entirely" from the
@@ -34,13 +34,29 @@ defects:
       report with one overreach in it — and it costs nothing here, because the logic
       lens never sees this fixture (`FixtureSet.for_lens`) and the evidence lens cannot
       raise `contradicted_claim`.
-      Fixed, not planted: an earlier draft also attributed third-grade outcomes to
-      source [1] — Puma et al. (2010), whose follow-up window is verified (ERIC
-      ED507845) to end at 1st grade — in S1.P1, the Key findings bullet, and S4.P1.
-      That would have been a second, unplanted instance of this fixture's own category,
-      graded a total miss for a critic that caught the planted S4.P3 tell but not this
-      one and a double credit for a critic that caught both. All three loci now cite the
-      2012 Third Grade Follow-Up report (source [9], ERIC ED539264, fetch-verified) for
-      the third-grade claim specifically, leaving source [1] cited only for what it
-      actually establishes: the study's initial random assignment. Exactly one planted
-      defect remains, at S4.P3.
+      Fixed, not planted: an earlier draft also attributed third-grade outcomes to a
+      separately cited Puma et al. (2010) initial report, whose follow-up window is
+      verified (ERIC ED507845) to end at 1st grade — in S1.P1, the Key findings bullet,
+      and S4.P1. That would have been a second, unplanted instance of this fixture's own
+      category, graded a total miss for a critic that caught the planted S4.P3 tell but
+      not this one and a double credit for a critic that caught both. All three loci now
+      cite only the 2012 Third Grade Follow-Up report (source [1], ERIC ED539264,
+      fetch-verified) for both the study's initial random assignment and the
+      third-grade claim, which the 2012 report itself describes as background. Exactly
+      one planted defect remains, at S4.P3.
+
+      Trimmed from nine sources to five under D-fixture-report-shape's
+      merge-reconciliation pass, to bring this fixture to the corpus-wide five
+      `test_corpus_class_is_not_readable_off_source_count` now holds every evidence-lens
+      planted fixture to, matching the six controls. Four citations were removed without
+      touching S4.P3 or its neighbor S4.P2, and without introducing a new attribution
+      error: the 2010 Puma et al. initial-assignment report (folded into source [1]'s
+      description, above), the 2018 Lipsey/Farran/Durkin third-grade paper (the
+      third-grade Tennessee claim was dropped rather than reattributed, since the
+      report's own case does not depend on it — S4.P2 now describes Tennessee's design
+      and goes straight to the sixth-grade result), Deming (2009) (the counterargument
+      section's rebuttal no longer needs a second corroborating study once it argues
+      from Boston's own unrepresentativeness, which the report already establishes), and
+      Heckman et al.'s (2010) Perry rate-of-return figure (ancillary color, not load-bearing
+      for any finding). Renumbered 1-5 in citation order; no in-text marker or Sources
+      entry is stale.

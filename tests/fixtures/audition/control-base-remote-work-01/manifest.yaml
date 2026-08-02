@@ -1,0 +1,20 @@
+# A control declares no `lens` and no `tier` (D-control-soundness): it is graded by
+# every lens, and it gates no sensitivity threshold because it plants nothing.
+#
+# This is the sound base of `fabricated-citation-01` (D-fixture-report-shape). The two
+# differ only in source [2] and the sentences that describe it, so an evidence critic
+# that scores the pair correctly is verifying citations rather than reacting to the
+# shape of the document.
+#
+# Soundness contract, which no test can check and review therefore must: every empirical
+# claim carries an inline [n] citation resolving to a numbered `## Sources` entry; every
+# source is a real, checkable publication and is described only as far as the author can
+# stand behind; the question's ambiguous term ("productivity") is decomposed into
+# individual output and firm-level information flow rather than assumed; the strongest
+# opposing case — that the favourable studies measure the wrong quantity — has its own
+# section, is stated in the form its proponents would accept, and is answered by naming
+# what would have to be shown rather than by dismissal; five sources spanning a field
+# experiment, personnel data, an administrative study, a network study and a survey put
+# `one_sided_sourcing` out of honest reach.
+kind: control
+question: "Does remote work reduce team productivity?"

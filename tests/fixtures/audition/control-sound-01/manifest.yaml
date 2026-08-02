@@ -1,11 +1,22 @@
 # A control declares no `lens` and no `tier` (D-control-soundness): it is graded by
 # every lens, and it gates no sensitivity threshold because it plants nothing.
 #
-# Soundness contract, which no test can check and review therefore must: every
-# empirical claim below carries an in-text citation to a Sources entry; the question's
-# ambiguous term is named and decomposed rather than assumed; the case against the
-# report's own answer has its own section. The lead paragraph is a summary of material
-# cited below it, per the conclusion-first report template — a critic that raises
-# `uncited_claim` against it is over-flagging, which is what this fixture measures.
+# One of the two unpaired controls (D-fixture-report-shape): it has no planted sibling,
+# so it also checks that the corpus is not merely a set of near-duplicate pairs.
+#
+# Soundness contract, which no test can check and review therefore must: every empirical
+# claim carries an inline [n] citation resolving to a numbered `## Sources` entry; the
+# question's ambiguous term is named and decomposed rather than assumed; the strongest
+# opposing case — that the negative reading mistakes a gap in the literature for a
+# finding — has its own section, is granted where it is right, and is answered by naming
+# the study design that would settle it; five sources across social history (Fee, Tomes),
+# epidemiology (Markel et al.) and economics (Cutler & Miller, Almond) put
+# `one_sided_sourcing` out of honest reach on discipline alone (D-fixture-report-shape
+# correction: an earlier revision of this comment claimed "six sources ... in two
+# countries"; the shipped artifact has always had five, all US-focused, and the comment
+# is corrected to describe what ships rather than restoring a claim nothing in the body
+# supports). The `## Conclusion` section summarises material cited below it, per the
+# conclusion-first report template — a critic that raises `uncited_claim` against it is
+# over-flagging, which is what this fixture measures.
 kind: control
 question: "Did the 1918 influenza pandemic accelerate the adoption of public health infrastructure?"
