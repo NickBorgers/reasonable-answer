@@ -51,9 +51,8 @@ roster:
       - minimax-m3
       - gemma4
     completeness:
-      - mistral-large-3
-      - glm-5.2
       - gemma4
+      - glm-5.2
 
 runs_dir: runs
 retention_days: 14
