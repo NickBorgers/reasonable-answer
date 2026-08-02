@@ -626,6 +626,52 @@ class RevisionConfig(BaseModel):
     scope_check: Literal["warn", "off"] = "warn"
 
 
+class ReviewConfig(BaseModel):
+    """How many independent critics read each draft, per lens (D-front-loaded-depth).
+
+    `depth: 2` is the production default and the thing this section exists to say:
+    every generated artifact is read by **two** eligible non-author models on every
+    lens, before any revision. It used to be one, with the second critic deferred to
+    controller rule 8 — which only fires once a pass has already reported the draft
+    clean. In `run-c4c0e64b4128` five successive artifacts looked clean on that first
+    pass and the second logic critic then found 2, 4, 6, 3 and 5 issues apiece: the
+    depth was always going to be paid for, just five rounds later than it was useful.
+
+    `depth: 1` restores the old single-critic pass exactly, so the two arms are
+    comparable from configuration rather than from a checkout (the same discipline
+    `revision.mode` follows).
+
+    The depth is a **ceiling, not a quota**: a pass runs `min(depth, fresh eligible
+    non-author models)` critics, so a roster-limited lens still runs one critic and
+    still terminates `converged_unconfirmed` rather than aborting. Author exclusion and
+    resolved-identity distinctness are enforced per slot by `roles.critic_slate`, so no
+    slate can contain the author or the same model twice.
+    """
+
+    model_config = ConfigDict(extra="forbid")
+
+    #: Bounded like every other budget: an unbounded depth is a way to spend a roster's
+    #: whole critic pool on one draft by editing one number.
+    depth: int = Field(default=2, ge=1, le=4)
+    #: Per-lens overrides, keyed by lens name. Absent lenses use `depth`.
+    per_lens: dict[str, int] = Field(default_factory=dict)
+
+    @model_validator(mode="after")
+    def _check(self) -> ReviewConfig:
+        unknown = sorted(set(self.per_lens) - {lens.value for lens in LENSES})
+        if unknown:
+            raise ConfigError(f"review.per_lens names unknown lenses: {unknown}")
+        for lens, value in sorted(self.per_lens.items()):
+            if not 1 <= value <= 4:
+                raise ConfigError(
+                    f"review.per_lens['{lens}'] must be between 1 and 4 (got {value})"
+                )
+        return self
+
+    def depth_for(self, lens: Lens) -> int:
+        return self.per_lens.get(lens.value, self.depth)
+
+
 class AuthConfig(BaseModel):
     """Who the web layer believes is asking.
 
@@ -770,6 +816,7 @@ class Config(BaseModel):
     auth: AuthConfig = Field(default_factory=AuthConfig)
     roster: Roster
     budgets: Budgets = Field(default_factory=Budgets)
+    review: ReviewConfig = Field(default_factory=ReviewConfig)
     revision: RevisionConfig = Field(default_factory=RevisionConfig)
     search: SearchConfig = Field(default_factory=SearchConfig)
     sources: SourcesConfig = Field(default_factory=SourcesConfig)

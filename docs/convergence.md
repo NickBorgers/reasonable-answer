@@ -11,6 +11,11 @@ report, and it is bounded so it **always terminates**.
 > per-lens critic pools headed by the model best matched to each lens, sized to give **≥2
 > eligible non-author models per lens** for strong acceptance.
 >
+> Those two models both read **every** draft (D-front-loaded-depth, `review.depth: 2`): review depth
+> is what a pass spends, not what the end of a run collects. See
+> [Review depth](#review-depth-both-reviewers-read-every-draft-d-front-loaded-depth) below for
+> what that does and does not change about the table.
+>
 > *Eligible* throughout this document means **structurally** eligible — non-author, distinct
 > identity, distinct family — which is all the controller reads. D-critic-audition adds a separate
 > **demonstrated-capability** term (`ra audition` grades each critic `fit` / `marginal` / `unfit`);
@@ -216,6 +221,63 @@ The confirming critique runs through the **identical critique interface/prompt**
 is a controller-side label applied **after** output, invisible to the model, fresh context, no
 cache reuse (RB-010).
 
+## Review depth: both reviewers read every draft (D-front-loaded-depth)
+
+`review.depth` (default **2**, overridable per lens via `review.per_lens`) is how many eligible
+non-author critics read a lens on **every** generated artifact, before any revision. Each is a
+separate call through the same interface as any other critique — same prompt, fresh context, blind
+to the other critic and to what it found.
+
+```
+review:
+  depth: 2                 # critics per lens per pass; 1 is the old single-critic pass
+  per_lens: {evidence: 3}  # optional per-lens override
+```
+
+Depth was previously 1 in all but name: the second reviewer was collected by **rule 8**, which
+fires only after a pass has already reported `material == 0`. So the second opinion could not
+participate in discovery, and when it disagreed the run had already paid for a clean pass to find
+out. D-front-loaded-depth records the measurement.
+
+Three properties bound it:
+
+* **A ceiling, not a quota.** A pass runs `min(depth, fresh eligible non-author models)` critics.
+  A `roster_limited` lens still runs one critic and still terminates `converged_unconfirmed`
+  through rule 10 — depth can never turn a weak guarantee into an abort.
+* **Eligibility is enforced per slot.** The slate is drawn by `roles.critic_slate` from
+  `eligible_critics`, which has already dropped the author and deduplicated by resolved
+  provider/model, and `assert_author_exclusion` re-checks at the moment of the call. No slate
+  contains the author, and no slate contains one model twice behind two aliases (RA-017).
+* **One finding is counted once.** Two critics on a lens routinely report the same defect;
+  `triage.distinct_issues` collapses them on `(section, paragraph, category, claim_span)` — the
+  key the defect list already used — keeping the highest severity, so a second reviewer may
+  escalate a finding and can never soften it (RC-005). `tally`, the defect list and the
+  stagnation signature therefore all see one finding once.
+
+**The decision table is unchanged** — no rule added, removed, renumbered or reordered, and no new
+`ControllerInput` or `OrchestratorView` field. Rule 8 keeps its job (it is still the only way an
+under-cleared clean artifact reaches `strong_met`, still bounded by `confirmation_attempts`) and
+loses its shift: at depth 2 a clean pass normally arrives already strongly-cleared, so rule 8
+becomes the top-up for **incomplete depth** rather than the normal discovery path. Termination
+survives untouched, because every measure that bounds the loop counts passes, generations and
+budgets — never calls.
+
+### What `lenses_failed` counts (rules 2 and 3)
+
+`lenses_failed` is the number of lenses with **no completed review of the current artifact**
+(`triage.unreviewed_lenses`). At depth 1 that is exactly "the lens's result failed", which is the
+reading rules 2 and 3 were written against. At depth 2 the two differ in one case — one critic
+completed and the other failed — and the distinction is deliberate:
+
+* Fail-closed still applies to a **review**, whole: one bad field fails the call it appeared in,
+  after the repair budget, and nothing from it is salvaged or silently dropped.
+* Counting the *lens* as failed there would discard a complete, valid review in order to re-ask,
+  which is the opposite of what fail-closed protects. It would also convert a soft terminal into a
+  hard one: rule 2's exhaustion is rule 3 (`aborted`), while the depth shortfall's own path ends at
+  rule 10/11 (`converged_unconfirmed` / `exhausted_unresolved`).
+* The shortfall is not forgiven. It lands on `cleared_count`, so the artifact cannot be accepted:
+  if it is clean, rule 8 restores the depth; if it is not, rule 14 replaces the artifact anyway.
+
 ## The stop decision — one exhaustive ordered table (RB-009, RC-003, RC-004)
 
 The controller evaluates these **in order; first match wins**. This is the *whole* controller
@@ -236,7 +298,10 @@ rule generates once `round ≥ hard_cap`** and the hard cap is genuinely hard (R
 | # | Condition | Action / terminal |
 |---|-----------|-------------------|
 | 1 | `fatal` (writer pool empty, a lens has no eligible non-author, repeated malformed) | **aborted** |
-| 2 | `lenses_failed > 0` **and** `critique_attempts_remaining > 0` | **re-critique** failed lens(es) (→ Critiquing); `critique_attempts_remaining -= 1`; partial counts never used |
+| 2 | `lenses_failed > 0` **and** `critique_attempts_remaining > 0` | **re-critique** the unreviewed lens(es) (→ Critiquing); `critique_attempts_remaining -= 1`; partial counts never used |
+
+`lenses_failed` counts lenses with **no completed review** of the current artifact, not
+lenses one of whose reviews failed — see [Review depth](#what-lenses_failed-counts-rules-2-and-3).
 
 A lens only reaches rule 2 once the critic has already been given
 `budgets.critic_repair_retries` chances to correct itself *within its own call*, shown
@@ -251,7 +316,7 @@ the model that just failed.
 | 5 | `round ≥ hard_cap` **and** `blocking > 0` | **needs_human_review** |
 | 6 | `round ≥ hard_cap` **and** `major > 0` | **exhausted_unresolved** |
 | 7 | `material == 0` **and** `strong_met` | **accepted** |
-| 8 | `material == 0` **and** `top_up_possible` (some lens `toppable` **and** `confirmation_attempts_remaining > 0`) | **re-critique** a toppable lens by a fresh eligible non-author model (→ Critiquing, **no** generation); `confirmation_attempts_remaining -= 1` |
+| 8 | `material == 0` **and** `top_up_possible` (some lens `toppable` **and** `confirmation_attempts_remaining > 0`) | **re-critique** a toppable lens by a fresh eligible non-author model (→ Critiquing, **no** generation); `confirmation_attempts_remaining -= 1`. At `review.depth ≥ 2` this is the top-up for *incomplete depth*, not the normal discovery path (D-front-loaded-depth) |
 | 9 | `material == 0` **and** `round < hard_cap` **and** `minor > 0` **and** `polish_recommended` **and** `polish_used < polish_cap` | **continue** (polish → generate; `polish_used += 1`) |
 | 10 | `material == 0` **and** `weak_met` (every under-cleared lens is `roster_limited`) | **converged_unconfirmed** |
 | 11 | `material == 0` (not strong, not toppable, not weak — confirmation budget spent) | **exhausted_unresolved** (clean-but-unconfirmed) |

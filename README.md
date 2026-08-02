@@ -19,8 +19,9 @@ about running it.
 ## How it works, in one paragraph
 
 Models take turns **writing** and **critiquing** a report, and a report is never critiqued — on any
-dimension — by the model that wrote it. Three per-lens critics (logic / evidence / completeness)
-each run in a fresh, authorship-blind context and emit issues against a closed schema. A mechanical
+dimension — by the model that wrote it. Three lenses (logic / evidence / completeness) read every
+draft, each by two independent critics, and each of those runs in a fresh, authorship-blind context
+and emits issues against a closed schema. A mechanical
 triage step clamps severities to category floors, turns the issues into depersonalized fix-tasks for
 the next writer, and projects a content-free count summary for a **blind referee**. The referee — a
 deterministic controller, assisted by an LLM whose only authority is a cosmetic-polish judgment —

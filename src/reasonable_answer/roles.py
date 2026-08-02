@@ -71,6 +71,45 @@ def eligible_critics(
     return out
 
 
+def critic_slate(
+    roster: Roster,
+    identities: dict[str, str],
+    lens: Lens,
+    author_identity: str,
+    used_identities: set[str],
+    depth: int = 1,
+    rotation: int = 0,
+) -> list[str]:
+    """Up to `depth` distinct eligible non-author critics to read this lens *this pass*
+    (D-front-loaded-depth).
+
+    Prefer models that have not yet reviewed this lens on this artifact — that is what
+    turns a weak clearance into a strong one, and running two of them at once is what
+    stops the second reviewer's findings arriving five rounds late.
+
+    `depth` is a ceiling, never a quota. The slate is drawn only from *fresh* eligible
+    models, so a lens the roster can staff only once returns one alias and the run
+    reaches `converged_unconfirmed` through rule 10 instead of asking one model to
+    double-review its way to a strong acceptance. `eligible_critics` has already
+    dropped the author and deduplicated by resolved identity, so no slate can contain
+    the author or the same model twice however large `depth` is.
+
+    Once everyone has reviewed (a re-critique after a lens failure) it falls back to
+    rotating a single model through the pool by `rotation` rather than always returning
+    the first eligible one. That fallback used to be `eligible[0]` unconditionally,
+    which meant a lens that kept failing asked the *same* model every remaining
+    attempt: one production run spent 11 of its 12 `critique_attempts` on a single
+    critic and aborted.
+    """
+    eligible = eligible_critics(roster, identities, lens, author_identity)
+    if not eligible:
+        raise RosterExhausted(f"lens '{lens.value}' has no eligible non-author critic")
+    fresh = [alias for alias in eligible if identities[alias] not in used_identities]
+    if not fresh:
+        return [eligible[rotation % len(eligible)]]
+    return fresh[: max(1, depth)]
+
+
 def pick_critic(
     roster: Roster,
     identities: dict[str, str],
@@ -79,23 +118,10 @@ def pick_critic(
     used_identities: set[str],
     rotation: int = 0,
 ) -> str:
-    """Prefer a model that has not yet reviewed this lens on this artifact — that is
-    what turns a weak clearance into a strong one. Once everyone has reviewed (a
-    re-critique after a lens failure) it rotates through the pool by `rotation`
-    rather than always returning the first eligible model.
-
-    The fallback used to be `eligible[0]` unconditionally, which meant a lens that kept
-    failing asked the *same* model every remaining attempt: one production run spent 11
-    of its 12 `critique_attempts` on a single critic and aborted. Rotating spends the
-    budget on different models, which is the only thing a bare retry can vary.
-    """
-    eligible = eligible_critics(roster, identities, lens, author_identity)
-    if not eligible:
-        raise RosterExhausted(f"lens '{lens.value}' has no eligible non-author critic")
-    for alias in eligible:
-        if identities[alias] not in used_identities:
-            return alias
-    return eligible[rotation % len(eligible)]
+    """The single-critic case of `critic_slate` — one model for one lens, one pass."""
+    return critic_slate(
+        roster, identities, lens, author_identity, used_identities, 1, rotation
+    )[0]
 
 
 def lens_statuses(

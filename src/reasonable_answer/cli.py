@@ -449,7 +449,9 @@ def audition(
     else:
         _render_audition(rows)
 
-    for warning in audition_mod.roster_warnings(config.roster, identities, judgements):
+    for warning in audition_mod.roster_warnings(
+        config.roster, identities, judgements, config.review
+    ):
         console.print(f"[yellow]warning:[/yellow] {warning}")
 
     unfit = [s.alias for s, _, j in rows if j and j.verdict is audition_mod.Verdict.UNFIT]
@@ -743,7 +745,9 @@ def _audition_warnings(config: Config, identities: dict[str, str]) -> list[str]:
     judgements = audition_mod.cached_judgements(
         config.audition, config.roster, identities, config.require_verbatim_spans
     )
-    warnings = audition_mod.roster_warnings(config.roster, identities, judgements)
+    warnings = audition_mod.roster_warnings(
+        config.roster, identities, judgements, config.review
+    )
     # Enforcement with nothing measured is the failure mode that got `audition.enabled`
     # deleted: a setting that reads as a safety control while gating nothing. It cannot
     # be an error (a fresh checkout has no cache and must still run) so it is said out
