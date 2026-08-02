@@ -168,6 +168,14 @@ jobs:
         run: |
           set -euo pipefail
 
+          # Registers the same driver review-fixer.yml uses when it created this merge, so
+          # recreating it here via `git merge-tree` reproduces the same tree it produced,
+          # not a plain 3-way merge's tree. Mismatch here only costs a spent review cycle
+          # (fail-closed to "review normally", below), never a correctness bug — but without
+          # this the driver's whole benefit (successful inheritance on trivial resyncs) is
+          # lost even when the merge itself was fine.
+          git config merge.decisions-append.driver 'python3 scripts/merge_decisions.py %O %A %B'
+
           # Every refusal is the same plain "review this normally". Written once so a newly
           # added test cannot forget to emit the outputs the rest of the graph reads.
           review_normally() {

@@ -3641,6 +3641,42 @@ invariant, no controller or isolation surface touched: `OrchestratorView` forbid
 built field by field, so a key in the store cannot reach it, and a test asserts the stamp never
 appears in `signals/views.jsonl`.
 
+## D-decisions-merge-driver — a merge driver resolves the common append-only collision, not a file split
+
+**The problem.** Every new decision is appended immediately before `## Open items for a future round`
+(D-decision-slugs), and nearly every PR here is agent-authored and adds one. Two independent,
+non-conflicting PRs that both append routinely collide at that identical insertion point — a genuine
+git merge conflict with no semantic disagreement behind it. Git history carries the evidence directly:
+at least six commits titled "merge: resolve conflicts with origin/main + address reviewer findings
+(cycle 1, cold)" exist solely to hand-resolve this exact tail-marker collision (for example
+f6ec615, which resolved it by retaining one branch's decision and appending the other branch's
+decision before the open-items marker — two unrelated decisions, one collision).
+
+**The decision.** A repo-local git merge driver (`scripts/merge_decisions.py`, registered by
+`.gitattributes` and `git config merge.decisions-append.driver`) special-cases the "both sides purely
+appended sections before the tail marker" shape and merges it automatically. Anything else — an edit to
+an existing section, an edit to the Open-items section itself, a genuine same-slug collision with
+differing content, or any parse ambiguity — falls through to exactly what an unconfigured merge would
+have done (`git merge-file`'s own diff3 merge, conflict markers and all). The driver is registered at
+every place this repository actually runs a merge of this kind: `review-fixer.yml`'s two sync-merge call
+sites, `review-pipeline.yml`'s merge-tree recreation step (D-inherit-whole-range), and
+`.devcontainer/setup.sh` for a human resolving the same conflict locally.
+
+Splitting the file into one-decision-per-file was considered and rejected: the single append-only log is
+load-bearing in `scripts/validate-decision-numbers.sh` and `tests/test_decision_numbers.py`'s
+whole-file duplicate scan, `tests/test_reviewer_prompt_ranges.py`'s membership check, several CI
+reviewer prompts under `.github/scripts/review/prompts/` that cite the slug scheme against this one
+file, `pr-validation.yml`'s path-filtered `decisions` job, and `mkdocs.yml`'s single top-level nav entry
+(with its own comment explaining the file is deliberately not split). A split would touch all of that to
+solve a problem a merge driver solves without touching any of it — and it would still need a variant of
+this same driver, or a numbering scheme, to keep the resulting many-file index itself append-safe.
+
+**Invariants.** None of the tabulated safety invariants is in reach — this is repository tooling, not
+pipeline core, and it constrains how a merge of one governance file is resolved, not what enters any
+model's context. The driver's own default is fail-closed: any condition it cannot confirm true
+(marker missing, an edit inside the head, a same-slug collision) makes it abstain to the exact behavior
+git would have used unconfigured, so it can only ever do better than today, never worse.
+
 ## Open items for a future round
 
 - A non-gating diagnostic channel for minor-floor categories in `ra audition`

@@ -9,6 +9,10 @@ fi
 
 uv sync --frozen 2>/dev/null || uv sync
 
+# Local/devcontainer parity with the CI pipeline's merge steps: a human resolving a
+# docs/decisions.md conflict here gets the same append-only fast path (D-decisions-merge-driver).
+git config merge.decisions-append.driver 'python3 scripts/merge_decisions.py %O %A %B'
+
 echo
 echo "reasonable-answer is ready."
 echo "  make test    # full offline suite — no proxy, no API keys"

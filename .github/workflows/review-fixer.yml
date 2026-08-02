@@ -182,6 +182,11 @@ jobs:
           git config user.email "${AGENT_COMMIT_EMAIL}"
           git config user.name  "${AGENT_COMMIT_NAME}"
 
+          # Registers the append-only fast path for docs/decisions.md (D-decisions-merge-driver).
+          # .gitattributes assigns the driver name; this defines what it runs — local to this
+          # checkout, same as the identity above, since cloning does not carry git config over.
+          git config merge.decisions-append.driver 'python3 scripts/merge_decisions.py %O %A %B'
+
           # Deliberately not a shallow fetch. A branch further behind than the depth would
           # get a truncated history and a merge base that is not the real one.
           git fetch --quiet origin "${BASE_REF}"
@@ -681,6 +686,12 @@ jobs:
           # somehow does not, fail rather than run an agent against a state nobody
           # described to it.
           if [ "${MERGE_STATE}" != "none" ]; then
+            # Same registration as the primary sync step, defensively repeated: this step
+            # replays that merge from a hard reset and must not depend on the earlier
+            # step's .git/config surviving unchanged.
+            git -C "${PR_DIR}" config merge.decisions-append.driver \
+              'python3 scripts/merge_decisions.py %O %A %B'
+
             REPLAYED=conflicts
             if git -C "${PR_DIR}" merge --no-commit --no-ff "origin/${BASE_REF}"; then
               git -C "${PR_DIR}" commit -m "Merge origin/${BASE_REF} into ${HEAD_REF}" \
