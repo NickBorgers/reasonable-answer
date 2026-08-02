@@ -80,6 +80,41 @@ def test_edit_to_existing_section_declines_fast_path() -> None:
     assert merge_decisions.try_fast_path(BASE, ours, theirs) is None
 
 
+def test_duplicated_marker_abstains() -> None:
+    # split_at_marker must reject an ambiguous document rather than silently split at the
+    # first occurrence -- a malformed decisions.md should never be reasoned about.
+    doubled = BASE + TAIL
+    ours = BASE.replace(TAIL, "## D-bravo — second\n\nbody bravo.\n\n" + TAIL)
+    assert merge_decisions.try_fast_path(doubled, ours, doubled) is None
+
+
+def test_arbitrary_prose_appended_before_marker_abstains() -> None:
+    # The suffix must be *entirely* whole decision sections. Prose that isn't shaped like a
+    # decision heading must not be silently concatenated in.
+    ours = BASE.replace(TAIL, "just a stray note, not a decision.\n\n" + TAIL)
+    theirs = BASE.replace(TAIL, "## D-bravo — second\n\nbody bravo.\n\n" + TAIL)
+    assert merge_decisions.try_fast_path(BASE, ours, theirs) is None
+
+
+def test_non_decision_heading_inside_suffix_abstains() -> None:
+    # A `## ` heading that isn't `## D-<slug>`-shaped would otherwise be swallowed into the
+    # preceding section's body by slug_sections()'s next-match-or-EOF boundary.
+    ours = BASE.replace(
+        TAIL,
+        "## D-bravo — second\n\nbody bravo.\n\n## Not a decision\n\nsneaked in.\n\n" + TAIL,
+    )
+    theirs = BASE.replace(TAIL, "## D-charlie — third\n\nbody charlie.\n\n" + TAIL)
+    assert merge_decisions.try_fast_path(BASE, ours, theirs) is None
+
+
+def test_text_before_first_heading_in_suffix_abstains() -> None:
+    ours = BASE.replace(
+        TAIL, "preamble text\n\n## D-bravo — second\n\nbody bravo.\n\n" + TAIL
+    )
+    theirs = BASE.replace(TAIL, "## D-charlie — third\n\nbody charlie.\n\n" + TAIL)
+    assert merge_decisions.try_fast_path(BASE, ours, theirs) is None
+
+
 # ---------------------------------------------------------------------------
 # Tier 2: real git, end-to-end, through the driver's CLI contract.
 # ---------------------------------------------------------------------------

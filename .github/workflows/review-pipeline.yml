@@ -174,7 +174,14 @@ jobs:
           # (fail-closed to "review normally", below), never a correctness bug — but without
           # this the driver's whole benefit (successful inheritance on trivial resyncs) is
           # lost even when the merge itself was fine.
-          git config merge.decisions-append.driver 'python3 scripts/merge_decisions.py %O %A %B'
+          #
+          # Points at the trusted `main-checkout` ($GITHUB_WORKSPACE/main-checkout), not the
+          # `pr-head` working directory this step runs in: this job carries WORKFLOW_PAT as
+          # GH_TOKEN, and pr-head is a contributor-controlled checkout. Resolving the script
+          # there would let a PR that edits scripts/merge_decisions.py run its own code in
+          # this credentialed context before any reviewer has read a line of it.
+          git config merge.decisions-append.driver \
+            "python3 ${GITHUB_WORKSPACE}/main-checkout/scripts/merge_decisions.py %O %A %B"
 
           # Every refusal is the same plain "review this normally". Written once so a newly
           # added test cannot forget to emit the outputs the rest of the graph reads.

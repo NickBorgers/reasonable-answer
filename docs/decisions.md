@@ -3694,12 +3694,13 @@ appears in `signals/views.jsonl`.
 
 **The problem.** Every new decision is appended immediately before `## Open items for a future round`
 (D-decision-slugs), and nearly every PR here is agent-authored and adds one. Two independent,
-non-conflicting PRs that both append routinely collide at that identical insertion point — a genuine
-git merge conflict with no semantic disagreement behind it. Git history carries the evidence directly:
-at least six commits titled "merge: resolve conflicts with origin/main + address reviewer findings
-(cycle 1, cold)" exist solely to hand-resolve this exact tail-marker collision (for example
-f6ec615, which resolved it by retaining one branch's decision and appending the other branch's
-decision before the open-items marker — two unrelated decisions, one collision).
+non-conflicting PRs that both append collide at that identical insertion point: a 3-way merge diffs
+each side against the same base line and has no way to order two insertions anchored on it, so the
+result is a genuine git conflict with no semantic disagreement behind it — the same shape every time,
+regardless of which two decisions collided. The repository already carries dedicated machinery for
+exactly this: `review-fixer.yml`'s "Sync with the base branch" step and `fixer.md`'s "Merge conflicts"
+section exist because an agent hits this class of conflict routinely enough to need a documented,
+gated resolution path rather than treating it as exceptional.
 
 **The decision.** A repo-local git merge driver (`scripts/merge_decisions.py`, registered by
 `.gitattributes` and `git config merge.decisions-append.driver`) special-cases the "both sides purely

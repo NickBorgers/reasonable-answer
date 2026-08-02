@@ -185,7 +185,14 @@ jobs:
           # Registers the append-only fast path for docs/decisions.md (D-decisions-merge-driver).
           # .gitattributes assigns the driver name; this defines what it runs — local to this
           # checkout, same as the identity above, since cloning does not carry git config over.
-          git config merge.decisions-append.driver 'python3 scripts/merge_decisions.py %O %A %B'
+          #
+          # Points at the trusted `main` checkout ($GITHUB_WORKSPACE, not $PR_WORKSPACE): the
+          # driver command is executed by git during the merge below, in a job carrying
+          # WORKFLOW_PAT, and $PR_WORKSPACE is a contributor-controlled checkout. Resolving the
+          # script there would let a PR that edits scripts/merge_decisions.py run its own code
+          # in this credentialed context before any reviewer has read a line of it.
+          git config merge.decisions-append.driver \
+            "python3 ${GITHUB_WORKSPACE}/scripts/merge_decisions.py %O %A %B"
 
           # Deliberately not a shallow fetch. A branch further behind than the depth would
           # get a truncated history and a merge base that is not the real one.
@@ -688,9 +695,12 @@ jobs:
           if [ "${MERGE_STATE}" != "none" ]; then
             # Same registration as the primary sync step, defensively repeated: this step
             # replays that merge from a hard reset and must not depend on the earlier
-            # step's .git/config surviving unchanged.
+            # step's .git/config surviving unchanged. Points at $GITHUB_WORKSPACE (the
+            # trusted `main` checkout), not $PR_DIR: `-C` only changes where the config is
+            # written, not the working directory the driver command later runs from, so a
+            # relative path here would still resolve against the untrusted PR checkout.
             git -C "${PR_DIR}" config merge.decisions-append.driver \
-              'python3 scripts/merge_decisions.py %O %A %B'
+              "python3 ${GITHUB_WORKSPACE}/scripts/merge_decisions.py %O %A %B"
 
             REPLAYED=conflicts
             if git -C "${PR_DIR}" merge --no-commit --no-ff "origin/${BASE_REF}"; then

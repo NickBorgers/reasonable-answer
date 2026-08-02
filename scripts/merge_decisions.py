@@ -25,11 +25,17 @@ TAIL_MARKER = re.compile(r"^## Open items for a future round\s*$", re.MULTILINE)
 # Reuses scripts/validate-decision-numbers.sh's prose-heading regex verbatim, so a
 # "same slug, different body" collision is judged by the same rule that check enforces.
 SLUG_HEADING = re.compile(r"^## (D-[a-z0-9-]+) ", re.MULTILINE)
+# Any top-level heading, decision-shaped or not -- used to catch a non-decision heading
+# (or stray prose before the first decision heading) hiding inside an appended suffix.
+ANY_HEADING = re.compile(r"^## ", re.MULTILINE)
 
 
 def split_at_marker(text: str) -> tuple[str, str] | None:
-    m = TAIL_MARKER.search(text)
-    return None if m is None else (text[: m.start()], text[m.start():])
+    matches = list(TAIL_MARKER.finditer(text))
+    if len(matches) != 1:
+        return None  # missing, or duplicated -- either way not a shape this driver reasons about
+    m = matches[0]
+    return text[: m.start()], text[m.start():]
 
 
 def slug_sections(suffix: str) -> dict[str, str]:
@@ -39,6 +45,17 @@ def slug_sections(suffix: str) -> dict[str, str]:
         m.group(1): suffix[m.start(): (matches[i + 1].start() if i + 1 < len(matches) else len(suffix))]
         for i, m in enumerate(matches)
     }
+
+
+def is_pure_decision_suffix(suffix: str) -> bool:
+    """True iff `suffix` is empty, or entirely a sequence of whole `## D-<slug>` sections --
+    nothing before the first heading, and no top-level heading that isn't slug-shaped (which
+    would otherwise be silently swallowed into the previous section's body)."""
+    if not suffix:
+        return True
+    slug_headings = list(SLUG_HEADING.finditer(suffix))
+    any_headings = list(ANY_HEADING.finditer(suffix))
+    return bool(slug_headings) and slug_headings[0].start() == 0 and len(slug_headings) == len(any_headings)
 
 
 def try_fast_path(base: str, ours: str, theirs: str) -> str | None:
@@ -51,6 +68,8 @@ def try_fast_path(base: str, ours: str, theirs: str) -> str | None:
     if not head_a.startswith(head_o) or not head_b.startswith(head_o):
         return None  # not a pure trailing append (an existing section was edited)
     suffix_a, suffix_b = head_a[len(head_o):], head_b[len(head_o):]
+    if not is_pure_decision_suffix(suffix_a) or not is_pure_decision_suffix(suffix_b):
+        return None  # appended text isn't purely whole decision sections -- abstain
     if suffix_a == suffix_b:
         return head_o + suffix_a + tail_o  # both sides appended byte-identical content
     slugs_a, slugs_b = slug_sections(suffix_a), slug_sections(suffix_b)
