@@ -3693,8 +3693,10 @@ appears in `signals/views.jsonl`.
 ## D-decisions-merge-driver — a merge driver resolves the common append-only collision, not a file split
 
 **The problem.** Every new decision is appended immediately before `## Open items for a future round`
-(D-decision-slugs), and nearly every PR here is agent-authored and adds one. Two independent,
-non-conflicting PRs that both append collide at that identical insertion point: a 3-way merge diffs
+(D-decision-slugs). Almost every PR here is agent-authored (docs/ci-pipeline.md's "Syncing with the
+base branch": "Almost every PR here is agent-authored, so when the base moves there is no human in
+the loop to resync"), and most add a decision. Two independent, non-conflicting PRs that both append
+collide at that identical insertion point: a 3-way merge diffs
 each side against the same base line and has no way to order two insertions anchored on it, so the
 result is a genuine git conflict with no semantic disagreement behind it — the same shape every time,
 regardless of which two decisions collided. The repository already carries dedicated machinery for
@@ -3711,6 +3713,11 @@ have done (`git merge-file`'s own diff3 merge, conflict markers and all). The dr
 every place this repository actually runs a merge of this kind: `review-fixer.yml`'s two sync-merge call
 sites, `review-pipeline.yml`'s merge-tree recreation step (D-inherit-whole-range), and
 `.devcontainer/setup.sh` for a human resolving the same conflict locally.
+
+The recognized shape is exact: appended text must be one or more complete `## D-<slug> — …` sections,
+nothing else, with at least one blank line separating the last one from the tail marker. Any prose
+that isn't itself a decision section, a stray non-decision heading, or a section running straight
+into the marker with no blank line at all makes the driver decline, not merge something malformed.
 
 Splitting the file into one-decision-per-file was considered and rejected: the single append-only log is
 load-bearing in `scripts/validate-decision-numbers.sh` and `tests/test_decision_numbers.py`'s

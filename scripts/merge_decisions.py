@@ -53,9 +53,15 @@ def slug_sections(suffix: str) -> dict[str, str] | None:
     sections: dict[str, str] = {}
     for i, m in enumerate(matches):
         end = matches[i + 1].start() if i + 1 < len(matches) else len(suffix)
+        # Every offset here is absolute within `suffix`. `section` is a *slice* of it, so
+        # indexing back into `section` with an absolute `suffix` offset (as an earlier
+        # version of this function did) is off by `m.start()` for every section but the
+        # first -- silently empty for a second-or-later section, which then reads as an
+        # empty body and aborts the whole suffix. Keep everything suffix-relative instead.
         section = suffix[m.start():end]
+        body = suffix[m.end():end]
         slug = m.group(1)
-        if not section[m.end():].strip() or slug in sections:
+        if not body.strip() or slug in sections:
             return None
         sections[slug] = section
     return sections
@@ -87,7 +93,15 @@ def try_fast_path(base: str, ours: str, theirs: str) -> str | None:
 
 def main(argv: list[str]) -> int:
     o_path, a_path, b_path = argv[1], argv[2], argv[3]
-    merged = try_fast_path(Path(o_path).read_text(), Path(a_path).read_text(), Path(b_path).read_text())
+    try:
+        merged = try_fast_path(
+            Path(o_path).read_text(), Path(a_path).read_text(), Path(b_path).read_text()
+        )
+    except Exception:
+        # An unexpected input (non-UTF-8 bytes, an encoding this driver did not anticipate)
+        # must reach the fallback like any other case it declines to reason about, not
+        # exit on a traceback -- "falls through to git merge-file" above means every case.
+        merged = None
     if merged is not None:
         Path(a_path).write_text(merged)
         return 0

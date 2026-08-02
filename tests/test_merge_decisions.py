@@ -45,6 +45,23 @@ def test_pure_double_append_merges_both_in_order() -> None:
     assert "body charlie" in merged
 
 
+def test_two_sections_on_one_side_still_merges() -> None:
+    # Regression test: slug_sections() once read a section's body by indexing back into
+    # `section` (a slice of `suffix` starting at the heading's own offset) using an offset
+    # absolute within `suffix`. Correct only for the first section in a suffix -- for any
+    # later one it read past the slice's end, saw an empty body, and aborted the whole
+    # suffix. That made the fast path silently abstain whenever either side appended more
+    # than one decision, which is the common shape (a branch appending one decision while
+    # two more landed on main since the merge base).
+    ours = BASE.replace(
+        TAIL, "## D-bravo — second\n\nbody bravo.\n\n## D-charlie — third\n\nbody charlie.\n\n" + TAIL
+    )
+    theirs = BASE.replace(TAIL, "## D-delta — fourth\n\nbody delta.\n\n" + TAIL)
+    merged = merge_decisions.try_fast_path(BASE, ours, theirs)
+    assert merged is not None
+    assert "D-bravo" in merged and "D-charlie" in merged and "D-delta" in merged
+
+
 def test_identical_suffix_append_is_not_duplicated() -> None:
     same_suffix = "## D-bravo — second\n\nbody bravo.\n\n" + TAIL
     ours = BASE.replace(TAIL, same_suffix)
