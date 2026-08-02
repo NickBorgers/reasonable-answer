@@ -3,6 +3,7 @@ from __future__ import annotations
 import pytest
 
 from reasonable_answer import shutdown
+from reasonable_answer.build import _compute
 from reasonable_answer.config import Budgets, Config, ProxyConfig, Roster
 from reasonable_answer.schemas import (
     ControllerInput,
@@ -20,6 +21,15 @@ def _clean_shutdown_flag():
     shutdown.reset()
     yield
     shutdown.reset()
+
+
+@pytest.fixture(autouse=True)
+def _clean_build_cache():
+    """`build_identity()` resolves once per process, which is right in production and
+    wrong across tests: one test's RA_BUILD_SHA would answer for every later one."""
+    _compute.cache_clear()
+    yield
+    _compute.cache_clear()
 
 
 @pytest.fixture

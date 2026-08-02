@@ -13,8 +13,13 @@ depends on. This page only states which switches are thrown.
 
 ## Shape
 
-One host, one Docker Compose service (`compose.yaml`), built from the checkout rather than pulled
-by digest — the running code is the working tree. The container is `read_only: true` with
+One host, one Docker Compose service, running the image `docker-release.yml` builds and publishes
+to GHCR on every merge to `main` — not built from the host's checkout. That is what makes run
+provenance exact rather than best-effort: CI knows the commit, bakes it in as `RA_BUILD_SHA`, and
+every run the image produces records it (D-run-build-stamp, [run-provenance.md](./run-provenance.md)).
+The `build:` key in the repository's own `compose.yaml` is the local-development path; it passes
+the same argument through so a hand-built image stays attributable too.
+The container is `read_only: true` with
 `cap_drop: ALL`, `no-new-privileges`, a `tmpfs` at `/tmp`, and exactly one writable volume at
 `/data/runs` holding the audit trail and the SQLite checkpoints resumability depends on. The port
 is published on `127.0.0.1:8080` only; reachability comes from the edge in front of it.
@@ -145,8 +150,8 @@ load-bearing rather than incidental:
 There is no metrics or log-shipping stack in this repository — the application logs to stdout via
 the standard library and the container's log driver takes it from there. The real audit surface is
 on disk: per run, `events.jsonl`, `audit.json`, and `owner.txt` under the runs volume, with a
-startup event recording identities, modes, budgets, and which resolve tiers were enabled. A
-background sweeper enforces `retention_days`.
+startup event recording identities, modes, budgets, which resolve tiers were enabled, and the
+build the attempt ran on. A background sweeper enforces `retention_days`.
 
 `compose.yaml` sets **`RA_LOG_LEVEL: INFO`** (D-provider-retry). The shipped code default is WARNING, and the
 container's CMD is fixed so `--verbose` cannot be passed; at WARNING a deployment records no run

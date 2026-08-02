@@ -15,6 +15,7 @@ from rich.table import Table
 from . import audition as audition_mod
 from . import ingest, search, shutdown
 from .audition import Assignment as Assignment_t
+from .build import build_identity
 from .config import Config, ConfigError, validate_roster_health
 from .export import export_html, export_markdown
 from .graph import GracefulStop
@@ -177,6 +178,18 @@ def doctor(
         console.print(f"[yellow]warning:[/yellow] {warning}")
     if not warnings:
         console.print("[green]roster healthy: every lens has >=2 eligible non-author models[/green]")
+
+    # Surfaced here because `unknown` is otherwise invisible: it costs nothing at the time
+    # and only shows up much later, as a month of runs that cannot be attributed to a
+    # commit (D-run-build-stamp).
+    build = build_identity()
+    if build.source == "unknown":
+        console.print(
+            "[yellow]warning:[/yellow] build unknown — runs will not record which commit "
+            "produced them. Set RA_BUILD_SHA at image build time (docs/run-provenance.md)."
+        )
+    else:
+        console.print(f"[dim]build: {build.describe()} (from {build.source})[/dim]")
 
     refine_line = _refine_doctor_line(config, client)
     if refine_line:

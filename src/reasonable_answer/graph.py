@@ -28,6 +28,7 @@ from . import critique as critique_mod
 from . import dispute as dispute_mod
 from . import fetch, prompts, reading, resolve, roles, search, support, triage
 from . import report as report_mod
+from .build import build_identity
 from .config import Config, ConfigError, validate_roster_health
 from .controller import acceptance_state, decide, detect_cycle
 from .llm import LLMClient, MalformedOutputError, ModelCallError
@@ -224,6 +225,9 @@ def build_runtime(
         read_pdfs=read_pdfs,
         resolve_tiers=sorted(_enabled_tiers(config)),
         audition_enforced=config.audition.enforce,
+        # Per attempt, not per run: a resumed run can cross a deploy, and the set of
+        # startup events is the only place that shows it (docs/run-provenance.md).
+        build=build_identity().as_dict(),
     )
     for warning in warnings:
         log.warning("roster: %s", warning)
@@ -1534,6 +1538,11 @@ def _finalize(state: State, rt: Runtime) -> dict:
         "outstanding_defects": outstanding,
         "warnings": state.get("warnings", []),
         "note": Decision.model_validate(state["decision"]).note if state.get("decision") else "",
+        # The build that *finalized* this run. A resume may legitimately cross a deploy —
+        # `_run_fingerprint` deliberately does not pin the build — so this names one build,
+        # not all of them. The `startup` events in events.jsonl are the full list
+        # (docs/run-provenance.md).
+        "build": build_identity().as_dict(),
         "label": (
             "consensus-reviewed with verified sourcing"
             if rt.verify_sources

@@ -8,6 +8,7 @@ from fakes import FakeClient
 from typer.testing import CliRunner
 
 from reasonable_answer import cli
+from reasonable_answer.build import UNKNOWN, BuildIdentity
 from reasonable_answer.schemas import CritiqueOutput
 
 runner = CliRunner()
@@ -71,6 +72,28 @@ def test_doctor_reports_every_alias_including_the_orchestrator(doctor_config):
 def test_doctor_reports_a_healthy_roster(doctor_config):
     result = runner.invoke(cli.app, ["doctor", "--config", str(doctor_config)])
     assert "roster healthy" in result.stdout
+
+
+def test_doctor_warns_when_the_build_is_unknown(doctor_config, monkeypatch):
+    monkeypatch.setattr(cli, "build_identity", lambda: UNKNOWN)
+
+    result = runner.invoke(cli.app, ["doctor", "--config", str(doctor_config)])
+
+    assert result.exit_code == 0
+    assert "build unknown" in result.stdout
+
+
+def test_doctor_reports_the_known_build_source(doctor_config, monkeypatch):
+    monkeypatch.setattr(
+        cli,
+        "build_identity",
+        lambda: BuildIdentity(commit="a" * 40, dirty=False, source="image"),
+    )
+
+    result = runner.invoke(cli.app, ["doctor", "--config", str(doctor_config)])
+
+    assert result.exit_code == 0
+    assert "build: aaaaaaaaaaaa (from image)" in result.stdout
 
 
 def test_doctor_says_so_when_enforcement_is_on_with_nothing_measured(doctor_config):
