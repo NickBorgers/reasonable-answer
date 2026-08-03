@@ -231,6 +231,16 @@ a violation is the `unclear_structure` lens's business, not a new mechanical gat
 seeded round-1 artifact keeps its own shape until the first revision steers it toward the
 frame.
 
+That same section is the **denominator** of a run's source-verification coverage
+(D-observed-source-coverage). `fetch.source_entries` splits it into bibliography entries and
+`fetch.coverage` tallies them against the outcomes the evidence lens's fetches produced. The tally
+is written into checkpointed state under the artifact's hash in `_critique_one`, read back in
+`_finalize` for the draft actually shipped — which on a non-accepted terminal need not be the last
+one written — and rendered by `export.py` on all three surfaces. Each of a lens's critics tallies
+independently, so `_record_coverage` arbitrates: one record per artifact, the observation that
+reached furthest, and an audit event only for a tally that took the record. It is observation only:
+no controller rule reads it, no `OrchestratorView` field carries it, and it mints no defect.
+
 ## Writer retrieval: search, then read, then trace (D-retrieval-opt-in, D-writer-source-reads)
 
 Retrieval reaches the writer in two steps, each its own opt-in switch and each off by default.

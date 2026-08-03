@@ -65,6 +65,11 @@ NOT_FOUND_STATUSES = frozenset({404, 410})
 _SOURCES_HEADING = re.compile(r"^#{1,6}\s*sources\s*$", re.IGNORECASE | re.MULTILINE)
 _URL = re.compile(r"https?://[^\s<>\"'\)\]]+")
 
+#: The line shapes a bibliography entry actually starts with in model-written markdown:
+#: a bullet, a bracketed number, or an ordered-list number. Used only to *count* entries
+#: (`source_entries`) — nothing routes on it.
+_ENTRY_START = re.compile(r"^\s{0,3}(?:[-*+]\s+|\[\d+\]\s*|\(?\d+[.)]\s+)")
+
 
 @dataclass(frozen=True)
 class RawResponse:
@@ -313,8 +318,8 @@ def classify_status(status: int | None) -> SourceOutcome:
     return SourceOutcome.ERROR
 
 
-def extract_source_urls(report: str, limit: int = 20) -> list[str]:
-    """Every URL in the report's '## Sources' section, in order, deduplicated.
+def sources_section(report: str) -> str:
+    """The body of the report's '## Sources' section, or `''` when it has none.
 
     Scoped to that section deliberately: a URL mentioned in passing in the body is not
     a citation the report is standing behind, and fetching it would spend budget on
@@ -322,22 +327,278 @@ def extract_source_urls(report: str, limit: int = 20) -> list[str]:
     """
     match = _SOURCES_HEADING.search(report or "")
     if not match:
-        return []
+        return ""
     tail = report[match.end() :]
     # Stop at the next heading — '## Sources' is conventionally last, but nothing
     # guarantees it.
     next_heading = re.search(r"^#{1,6}\s+\S", tail, re.MULTILINE)
     if next_heading:
         tail = tail[: next_heading.start()]
+    return tail
 
+
+def _clean_url(raw: str) -> str:
+    """Trailing sentence punctuation is not part of the URL. One definition, so the URL
+    an entry is counted under and the URL that was fetched are always the same key."""
+    return raw.rstrip(".,;:")
+
+
+def extract_source_urls(report: str, limit: int = 20) -> list[str]:
+    """Every URL in the report's '## Sources' section, in order, deduplicated."""
     seen: list[str] = []
-    for raw in _URL.findall(tail):
-        url = raw.rstrip(".,;:")
+    for raw in _URL.findall(sources_section(report)):
+        url = _clean_url(raw)
         if url not in seen:
             seen.append(url)
         if len(seen) >= limit:
             break
     return seen
+
+
+def source_entries(report: str) -> list[str]:
+    """The bibliography *entries* in the '## Sources' section, one string each.
+
+    `extract_source_urls` answers "what can be fetched"; this answers "what did the
+    report claim to be standing on", and the gap between the two is the whole point of
+    the coverage record (D-observed-source-coverage). A run that listed fifteen
+    references and could address three of them verified a fifth of its bibliography, and
+    no count derived from URLs alone can say so.
+
+    Entry splitting is a heuristic over model-written markdown, and is deliberately
+    conservative in the direction that *understates* coverage. A section any of whose
+    lines carry a list marker (`- `, `* `, `[1]`, `1.`, `1)`) is split on those markers,
+    with unmarked lines folded into the entry above as continuations and text before the
+    first marker treated as section prose rather than an entry. A section with no marker
+    anywhere falls back to one entry per non-blank line, which is the other shape writers
+    produce. Neither shape can be recognised with certainty, which is why what this feeds
+    is reported as an observed count and never as a completeness claim.
+    """
+    lines = sources_section(report).splitlines()
+    if any(_ENTRY_START.match(line) for line in lines):
+        entries: list[str] = []
+        for line in lines:
+            stripped = line.strip()
+            if not stripped:
+                continue
+            if _ENTRY_START.match(line):
+                entries.append(stripped)
+            elif entries:
+                entries[-1] = f"{entries[-1]} {stripped}"
+        return entries
+    return [line.strip() for line in lines if line.strip()]
+
+
+def entry_url(entry: str) -> str | None:
+    """The URL this entry can be addressed by, or None when it carries none.
+
+    The *first* URL, because an entry that names a mirror alongside its citation is
+    addressed at the thing it cites. A bare identifier (`doi:10.…`, `arXiv:2405.20362`)
+    with no resolver URL deliberately does not count: nothing in this pipeline fetches
+    one, so counting it as addressable would overstate what was checkable.
+    """
+    match = _URL.search(entry)
+    return _clean_url(match.group(0)) if match else None
+
+
+#: Outcomes that mean "could not read", never "is not there" (D-notfound-fabrication).
+#: `PAYWALLED` sits here even though it also corroborates existence: existence and
+#: readability are different questions, and this table answers the second one.
+_UNREAD = frozenset(
+    {
+        SourceOutcome.PAYWALLED,
+        SourceOutcome.BLOCKED,
+        SourceOutcome.UNREADABLE,
+        SourceOutcome.EMPTY,
+        SourceOutcome.ERROR,
+    }
+)
+
+#: Which `SourceCoverage` field each outcome increments. Table-driven so that adding a
+#: `SourceOutcome` without deciding where it counts is visible here rather than silently
+#: absorbed; an unmapped outcome falls through to `blocked_or_unreadable`, which
+#: understates coverage rather than overstating it — the only safe direction.
+_OUTCOME_BUCKET: dict[SourceOutcome, str] = {
+    SourceOutcome.FULL_TEXT: "body_backed_entries",
+    SourceOutcome.METADATA_ONLY: "metadata_only",
+    SourceOutcome.NOT_FOUND: "not_found",
+    SourceOutcome.BUDGET_EXHAUSTED: "budget_exhausted",
+    **{outcome: "blocked_or_unreadable" for outcome in _UNREAD},
+}
+
+
+@dataclass(frozen=True)
+class SourceCoverage:
+    """What source verification actually reached on one artifact's bibliography.
+
+    Dispositions are counted in *entries*, not in fetches: two entries citing one URL are
+    two entries the report stands on, and the fetcher's per-run cache means they cost one
+    call between them. `bodies_read` is the exception made explicit in its name: it counts
+    distinct cited URLs whose body was read, while `body_backed_entries` says how many
+    bibliography entries that work supports. Every field is a bounded non-negative integer
+    derived from the artifact's own text and the outcomes recorded against it — no URL, no
+    page text, no model identity — so the whole record is safe to put in `final.json` and
+    the audit trail (RA-016).
+
+    `cited` is partitioned twice, and each partition sums to it exactly:
+
+    * by addressability — `addressable + not_addressable`
+    * by disposition — `body_backed_entries + metadata_only + blocked_or_unreadable
+      + not_found + budget_exhausted + not_attempted + not_addressable`
+
+    `existence_confirmed` and `not_independently_checked` cut across both and are
+    derived rather than stored, so they can never disagree with the counts.
+    """
+
+    cited: int = 0
+    addressable: int = 0
+    not_addressable: int = 0
+    #: Addressable, and a fetch outcome was recorded against it.
+    attempted: int = 0
+    #: Addressable but never offered to the fetcher — past `search.max_sources` for this
+    #: artifact, or cited in a draft whose evidence lens never got that far. Distinct
+    #: from `not_addressable`: this one *could* have been checked.
+    not_attempted: int = 0
+    #: Entries whose cited source body was read. This belongs to the entry disposition
+    #: partition; several entries may be backed by the same body.
+    body_backed_entries: int = 0
+    #: Distinct cited URLs for which a source body was read. This is the count rendered
+    #: as bodies, and is deliberately not part of the entry disposition partition.
+    bodies_read: int = 0
+    metadata_only: int = 0
+    #: Refused, paywalled, empty, an unreadable format, or a transport error. Each is
+    #: "could not read" and none of them is evidence the source does not exist.
+    blocked_or_unreadable: int = 0
+    #: HTTP 404/410 — the one outcome that establishes absence (D-notfound-fabrication).
+    not_found: int = 0
+    budget_exhausted: int = 0
+    #: False when the artifact this describes was critiqued with `search.verify_sources`
+    #: off, so every entry is unchecked by configuration rather than by outcome.
+    verification_enabled: bool = True
+
+    @property
+    def existence_confirmed(self) -> int:
+        """Entries whose source is established to exist — body read, or registry
+        corroborated. The only count that supports a verification claim at all.
+
+        `PAYWALLED` also corroborates existence, and is deliberately *not* added here:
+        it is counted under `blocked_or_unreadable` so the disposition partition stays
+        a partition, and splitting it out is what a future emitter of that outcome
+        (`SourceOutcome.PAYWALLED` is not emitted today) would have to do. Until then
+        this undercounts rather than overcounts, which is the safe direction.
+        """
+        return self.body_backed_entries + self.metadata_only
+
+    @property
+    def not_independently_checked(self) -> int:
+        """Every entry this run can say nothing about: unaddressable, unattempted,
+        refused, unreadable, out of budget. Never evidence that an entry is wrong.
+
+        A definitive not-found is excluded: it is an independent determination that
+        the cited page is absent, not an entry the run can say nothing about.
+        """
+        return (
+            self.not_addressable
+            + self.not_attempted
+            + self.blocked_or_unreadable
+            + self.budget_exhausted
+        )
+
+    def as_dict(self) -> dict[str, Any]:
+        """The `final.json` shape. Derived counts are written out too, so a reader that
+        never imports this module cannot compute them differently."""
+        return {
+            "cited": self.cited,
+            "addressable": self.addressable,
+            "not_addressable": self.not_addressable,
+            "attempted": self.attempted,
+            "not_attempted": self.not_attempted,
+            "body_backed_entries": self.body_backed_entries,
+            "bodies_read": self.bodies_read,
+            "metadata_only": self.metadata_only,
+            "blocked_or_unreadable": self.blocked_or_unreadable,
+            "not_found": self.not_found,
+            "budget_exhausted": self.budget_exhausted,
+            "existence_confirmed": self.existence_confirmed,
+            "not_independently_checked": self.not_independently_checked,
+            "verification_enabled": self.verification_enabled,
+        }
+
+
+def coverage(
+    report: str,
+    fetched: Mapping[str, FetchedSource] | None = None,
+    *,
+    verification_enabled: bool = True,
+) -> SourceCoverage:
+    """Tally `report`'s bibliography against the fetch outcomes recorded for it.
+
+    `fetched` maps a cited URL to its result. An entry whose URL is absent from that map
+    was never attempted, and is reported as such — never as a failure, and never as a
+    pass.
+    """
+    fetched = fetched or {}
+    tallies = dict(
+        cited=0,
+        addressable=0,
+        not_addressable=0,
+        attempted=0,
+        not_attempted=0,
+        body_backed_entries=0,
+        metadata_only=0,
+        blocked_or_unreadable=0,
+        not_found=0,
+        budget_exhausted=0,
+    )
+    bodies_read: set[str] = set()
+    for entry in source_entries(report):
+        tallies["cited"] += 1
+        url = entry_url(entry)
+        if url is None:
+            tallies["not_addressable"] += 1
+            continue
+        tallies["addressable"] += 1
+        source = fetched.get(url)
+        if source is None:
+            tallies["not_attempted"] += 1
+            continue
+        tallies["attempted"] += 1
+        tallies[_OUTCOME_BUCKET.get(source.outcome, "blocked_or_unreadable")] += 1
+        if source.outcome is SourceOutcome.FULL_TEXT:
+            bodies_read.add(url)
+    return SourceCoverage(
+        **tallies,
+        bodies_read=len(bodies_read),
+        verification_enabled=verification_enabled,
+    )
+
+
+def coverage_sentence(observed: Mapping[str, Any]) -> str:
+    """The one-line, observed statement of what was checked — no adjective, no posture.
+
+    Reads from the `as_dict` shape rather than the dataclass because the shipped
+    artifact's coverage comes back off checkpointed state as plain JSON, and because a
+    record written by an older version must still render rather than crash. Every field
+    is coerced, and a field that is missing reads as zero — understating coverage, which
+    is the only direction this line is allowed to be wrong in.
+    """
+
+    def count(key: str) -> int:
+        value = observed.get(key)
+        return value if isinstance(value, int) and not isinstance(value, bool) else 0
+
+    if count("cited") == 0:
+        return "source review: the shipped draft cites no sources"
+    bodies = count("bodies_read")
+    backed = count("body_backed_entries")
+    bodies_label = "source body" if bodies == 1 else "source bodies"
+    entries_label = "cited entry" if backed == 1 else "cited entries"
+    return (
+        f"source review: {count('cited')} cited; "
+        f"{count('addressable')} addressable; "
+        f"{count('existence_confirmed')} existence confirmed; "
+        f"{bodies} {bodies_label} read (backing {backed} {entries_label}); "
+        f"{count('not_independently_checked')} not independently checked"
+    )
 
 
 class _TextExtractor(HTMLParser):

@@ -360,19 +360,20 @@ and would fill it from memory, and no downstream check can tell a remembered cit
 retrieved one. Each run carries a query budget (default 60) because the free tier is 2,000
 queries/month; when it runs out the writer is told so explicitly rather than being handed silence.
 
-**Source verification (optional, off by default).** Set `search.verify_sources: true` and the pages
-the report cites are fetched and handed to the **evidence lens only**, as untrusted data. That turns
-`fabricated_citation` and `misrepresented_source` from judgements about plausibility into checks
-against the page. A cited URL that returns a definitive not-found — HTTP 404 or 410 Gone — is
-treated as a `fabricated_citation`, because that status establishes the URL does not resolve rather
-than that it could not be read. Every other failed fetch is explicitly *not* treated as evidence of
-fabrication — a 403, a timeout, a paywall, an unreadable content type, or an empty body means the
-fetch failed, not that the source is fake, because sites block automated clients, paywall, and go
-offline. Reading a cited **PDF** rather than reporting it as an unreadable content type is a separate
-opt-in tier (`sources.enabled` and `sources.pdf.enabled`, both off by default and needing the
-`ingest` extra); `search.verify_sources` alone does not read PDF bodies. This fetches URLs a model
-chose, which is SSRF exposure by construction; it is expected to be constrained at the network layer,
-not here.
+**Source verification (optional, off by default).** Set `search.verify_sources: true` and
+addressable cited URLs, deduplicated and capped by `search.max_sources`, are fetched and handed to
+the **evidence lens only**, as untrusted data. Unaddressable entries and addressable entries beyond
+the cap remain unchecked. For attempted pages, this turns `fabricated_citation` and
+`misrepresented_source` from judgements about plausibility into checks against the page. A cited URL
+that returns a definitive not-found — HTTP 404 or 410 Gone — is treated as a
+`fabricated_citation`, because that status establishes the URL does not resolve rather than that it
+could not be read. Every other failed fetch is explicitly *not* treated as evidence of fabrication
+— a 403, a timeout, a paywall, an unreadable content type, or an empty body means the fetch failed,
+not that the source is fake, because sites block automated clients, paywall, and go offline. Reading
+a cited **PDF** rather than reporting it as an unreadable content type is a separate opt-in tier
+(`sources.enabled` and `sources.pdf.enabled`, both off by default and needing the `ingest` extra);
+`search.verify_sources` alone does not read PDF bodies. This fetches URLs a model chose, which is
+SSRF exposure by construction; it is expected to be constrained at the network layer, not here.
 
 **Registry tiers (optional, off by default).** A direct fetch can fail for reasons that say nothing
 about whether the source is real: a paywalled journal or a newspaper refusing an automated client
@@ -386,14 +387,23 @@ invented one. (arXiv ids and PMCIDs are covered when arXiv and Europe PMC are ad
 mirror rather than the version of record. Neither tier sharpens `misrepresented_source`: an
 abstract is not the source's text. See D-existence-vs-body.
 
-**Known limitations.** Output is labelled *consensus-reviewed with in-artifact sourcing* by default,
-*…with retrieved sourcing* when `search.enabled: true`, and *…with verified sourcing* when
-`verify_sources` is also on. **None of the three is fact-checked.** Verification establishes that a
-cited source exists and, when a body can be read, that the page says something compatible with the
+**Known limitations.** Output is labelled *consensus-reviewed with in-artifact sourcing* by default
+and *…with retrieved sourcing* when `search.enabled: true`. When `verify_sources` is also on the
+label is not a posture at all but the run's **measured** coverage of the draft it shipped —
+*consensus-reviewed — source review: 15 cited; 3 addressable; 3 existence confirmed; 3 source
+bodies read (backing 3 cited entries); 12 not independently checked* — because a feature being
+switched on says nothing about how much of a bibliography it reached
+(D-observed-source-coverage). When the shipped draft has a recorded evidence lens measurement, its
+exports and run page carry the full breakdown; otherwise they report no coverage rather than
+rendering zeros. **None of it is fact-checked.** Verification establishes that
+a cited source exists and, when a body can be read, that the page says something compatible with the
 claim — not that the page is correct, and not that the roster chose good sources. A
-registry-confirmed source whose body cannot be read proves existence only, and an open-access
-mirror is disclosed as a different document from the cited page. With verification off, whether a
-source supports the claim attached to it is unverified entirely. (See D-in-artifact-citations/D-retrieval-opt-in/D-source-verification/D-existence-vs-body in
+registry-confirmed source whose body cannot be read proves existence only, and an open-access mirror
+is disclosed as a different document from the cited page. An entry counted as not independently
+checked is unverified, not suspect; a blocked or paywalled one was unreadable, not absent. A
+definitive not-found was independently checked and establishes that the cited page is absent. With
+verification off, whether a source supports the claim attached to it is unverified entirely. (See
+D-in-artifact-citations/D-retrieval-opt-in/D-source-verification/D-existence-vs-body/D-observed-source-coverage in
 [decisions.md](docs/decisions.md) and the evidence section of [convergence.md](docs/convergence.md).)
 
 **Writer disputes (optional, off by default).** Set `disputes.enabled: true` and a writer that

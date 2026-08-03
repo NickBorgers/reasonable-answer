@@ -147,8 +147,9 @@ hallucination rates of 17–33%, against vendor claims of being hallucination-fr
 **Source verification (D-source-verification), also opt-in and off by default — including in the shipped roster,
 which enables retrieval only (D-run-date-grounding): verification fetches model-chosen URLs, and the egress
 boundary that makes that safe is a deployment concern outside this repo
-(docs/ssrf-egress-isolation.md).** With `search.verify_sources: true`
-the pages the report cites are fetched and handed to the **evidence lens only**, as untrusted data.
+(docs/ssrf-egress-isolation.md).** With `search.verify_sources: true`, addressable cited pages are
+deduplicated and fetched up to `search.max_sources`, then handed to the **evidence lens only** as
+untrusted data; unaddressable and over-cap entries remain unchecked.
 Two categories change character:
 
 | category | verification off | verification on |
@@ -226,12 +227,46 @@ blocking fabrications the writer could never resolve. The date is captured once 
 stays byte-identical even across midnight (RB-010). It is deliberately absent from the audition
 prompt-hash surface: it is run context, not lens semantics.
 
-Even with both options on, the output is *consensus-reviewed with verified sourcing* — **not
-fact-checked**. Verification establishes that a cited source exists and, when a body can be read,
-that the page says something compatible with the claim; a registry-confirmed source whose body
-cannot be read proves existence only, and an open-access mirror is a different document from the
-cited page. It does not establish that the page is *right*, nor that the roster picked good
-sources in the first place.
+**The label states measured coverage, not that verification was enabled (D-observed-source-coverage).**
+With verification on, `final.json`'s label is the observation — *consensus-reviewed — source review:
+15 cited; 3 addressable; 3 existence confirmed; 3 source bodies read (backing 3 cited entries);
+12 not independently checked* — because a switch that is on says nothing about how much of a
+bibliography it reached.
+`fetch.coverage` tallies the shipped draft's own `## Sources` section in **entries**: `cited`,
+`addressable` / `not_addressable`, `attempted` / `not_attempted`, and a disposition per attempt
+(`body_backed_entries`, `metadata_only`, `blocked_or_unreadable`, `not_found`,
+`budget_exhausted`). `bodies_read` separately counts distinct cited URLs whose body was read, so two
+bibliography entries sharing one URL render as two body-backed entries and one body, never two
+bodies. `existence_confirmed` is derived from body-backed entries and registry hits, and
+`not_independently_checked` is derived only from unaddressable, unattempted, blocked or unreadable,
+and budget-exhausted entries. A definitive not-found is independently checked and found absent, so
+it belongs in neither derived count. The tally is taken where the evidence lens fetches and keyed to
+the artifact's hash, so a
+non-accepted terminal that ships an earlier draft reports *that* draft's coverage; a draft with no
+record reads as *not recorded*, which is neither zero coverage nor a pass. At review depth above 1
+the lens tallies the same bibliography once per critic; an artifact still gets exactly **one**
+record, selected by a stable total ordering of independent checks, distinct bodies, body-backed
+entries, metadata confirmations, and definitive absences. Equal-reach observations therefore do
+not fall back to arrival order. Record replacement and its audit event share one lock, so the last
+coverage event and `final.json` cannot diverge under concurrency. The markdown export, the HTML
+export and the run page render the same breakdown. Coverage is a report, never a gate: it enters no
+controller rule, no
+`OrchestratorView`, and mints no defect.
+
+Two readings the counts must never be given, carried as a caveat under every rendering of them. An
+entry that was **not independently checked is unverified, not suspect**. A **blocked or paywalled
+entry was unreadable, not absent** — reading it as absence is exactly the inference
+D-notfound-fabrication forbids. A definitive not-found is the contrasting case: it was independently
+checked and establishes that a cited page does not exist. Coverage is measured with verification
+*off* too, where every entry is unchecked by configuration rather than by outcome and the rendering
+says so; the two labels for those postures are unchanged, because neither ever claimed verification.
+
+Even with both options on, the output is **not fact-checked**. Verification establishes that a cited
+source exists and, when a body can be read, that the page says something compatible with the claim;
+a registry-confirmed source whose body cannot be read proves existence only, and an open-access
+mirror is a different document from the cited page. It does not establish that the page is *right*,
+nor that the roster picked good sources in the first place — and now it does not claim to have
+reached more of the bibliography than it did.
 
 ## Two signal schemas — content-free vs. operational (RB-004, RB-008)
 
