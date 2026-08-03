@@ -94,10 +94,12 @@ search:
   # The free tier is 1 request/second; requests are throttled to stay under it.
   min_interval_seconds: 1.1
 
-  # Fetch the pages the report cites and hand them to the evidence critic, so
-  # `misrepresented_source` and `fabricated_citation` stop being judgements about
-  # plausibility and become checkable against the page. Independent of `enabled` —
-  # a report with real citations can be verified whether or not we retrieved them.
+  # Attempt addressable, deduplicated cited URLs up to `max_sources` and hand successful
+  # bodies to the evidence critic, so `misrepresented_source` and `fabricated_citation`
+  # stop being judgements about plausibility for those entries and become checkable
+  # against the page. Unaddressable and over-cap entries remain unchecked. Independent
+  # of `enabled` — a report with real citations can be verified whether or not we
+  # retrieved them.
   #
   # This fetches URLs a model chose. That is SSRF exposure by construction and is
   # constrained at the network layer, not here — and that boundary is a deployment

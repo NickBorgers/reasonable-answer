@@ -245,8 +245,10 @@ other untrusted input, and the writer is additionally told that anything inside 
 addresses it is data to report on, never a directive.
 
 **Fetched source pages (D-source-verification)** are the same class, one step further: with
-`search.verify_sources: true` the *full text* of a cited page enters a **critic's** context, and a
-page has far more room to address its reader than a search snippet does. Three things bound it:
+`search.verify_sources: true` the *full text* of an attempted, addressable cited page within
+`search.max_sources` can enter a **critic's** context; unaddressable and over-cap entries remain
+unchecked. A page has far more room to address its reader than a search snippet does. Three things
+bound it:
 
 - **Evidence lens only.** Logic and completeness never receive page text. They cannot raise a
   citation category, so the pages would widen what they see without widening what they may report —

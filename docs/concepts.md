@@ -202,9 +202,11 @@ it — each one, again, a guard against a known LLM failure mode:
   carry a new text to acceptance.
 - **Search and source verification.** Writers can be given a real web-search tool, so cited URLs
   are ones a search actually returned rather than remembered (LLM memory is where fabricated
-  citations come from). With the full feature set enabled, the system also fetches the cited
-  pages and hands them to the evidence lens, turning "does this source say that?" from a
-  plausibility guess into a check against the page — the same per-claim-against-fetched-text move
+  citations come from). With the full feature set enabled, the system also attempts the
+  addressable, deduplicated citation URLs up to `search.max_sources` and hands successful bodies
+  to the evidence lens. Entries without a fetchable URL and entries beyond that cap remain
+  unchecked. For attempted pages this turns "does this source say that?" from a plausibility
+  guess into a check against the page — the same per-claim-against-fetched-text move
   that [FActScore](https://arxiv.org/abs/2305.14251) (Min et al. 2023) uses to score long-form
   factuality. (The shipped config leaves that last switch off only because fetching model-chosen
   URLs needs a network egress boundary the deployment must provide — see
