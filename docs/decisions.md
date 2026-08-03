@@ -4356,19 +4356,16 @@ other shape is unaffected and reviewed exactly as before.
 
 ## D-resume-stall-guard — a wedged author session is killed on silence, and never resumed twice
 
-**The problem.** D-resume-timeout made a hung `author-resume` *survivable*: the cold fixer now really
-does fire, and PR #134 proved the path works end to end. It did not make the hang *cheap*, and the
-cost is the pipeline's dominant latency. Two runs on 2026-08-03 (PRs #141 and #144) show the shape:
-reviewers finished in 11–14 minutes, then the fixer spent the full 25-minute resume budget producing
-nothing and only then started the cold agent's own 30-minute budget. A fix cycle that does 11 minutes
-of review can therefore take an hour, and 25 of those minutes are spent waiting for a session already
-known to be wedged — both PRs resumed sessions (`claude/30726196351`, `claude/30726196209`) that had
-been failing since the previous day. Nothing in the pipeline remembered that.
+**The problem.** D-resume-timeout made a hung `author-resume` *survivable*: the cold fixer fires after
+the resume attempt reaches its outer deadline. That still permits the resume attempt to consume its
+full 25-minute budget before the cold agent's own 30-minute budget starts, and the pipeline has no
+cross-run memory that a particular session previously produced no fix.
 
-**What the evidence actually says.** Every observed hang — the three July runs in D-resume-timeout and
-both of these — produced *zero* stream-json events. The failure is not a slow resume; it is a session
-that never speaks at all. `ci-session-store.sh validate` cannot see this: it proves a non-empty
-transcript exists on disk, which a wedging session also has.
+**Operational premise.** This decision treats a resumed agent that emits no stream-json output for a
+bounded interval as stalled, not as evidence that every silent agent is irrecoverable. The premise is
+deliberately narrower than an empirical claim about all hangs: it defines when the pipeline stops
+waiting and falls back. `ci-session-store.sh validate` cannot make that decision because it proves
+only that a non-empty transcript exists on disk, not that a new turn is making progress.
 
 **The decision.** Two independent mechanisms, because they answer different questions — "is this
 attempt going anywhere?" and "should this attempt happen at all?".
@@ -4380,13 +4377,13 @@ attempt going anywhere?" and "should this attempt happen at all?".
    working fix mid-edit. Idleness separates the two cleanly, and `--output-format=stream-json`
    (already required for D-resume-timeout's diagnosis) is what makes it observable.
 
-   Two thresholds, because the two silences differ. Before the first byte the CLI has not begun a
-   turn: that is the observed wedge, seconds are already abnormal, and the deadline is **3 minutes**.
-   After output has started, silence means a tool call is running — a test suite, a dependency sync —
-   which is legitimately long, so the deadline is **10 minutes**. The outer `timeout` stays unchanged
-   as the backstop for a process that spins noisily rather than idling. The guard is gated on
-   `AGENT_RESUME=1`: reviewers, the cold fixer, the resolver and the author have no fallback to hand
-   off to, so an idle-kill there would turn a slow tool call into a failed job.
+   Two thresholds distinguish startup from an active turn. Before the first byte the CLI has not
+   exposed progress, so the deadline is **3 minutes**. After output has started, the longer
+   **10-minute** deadline leaves room for a tool call such as a test suite or dependency sync. These
+   values are policy choices, not measurements of a universal failure threshold. The outer `timeout`
+   stays unchanged as the backstop for a process that spins noisily rather than idling. The guard is
+   gated on `AGENT_RESUME=1`: reviewers, the cold fixer, the resolver and the author have no fallback
+   to hand off to, so an idle-kill there would turn a slow tool call into a failed job.
 
    The cause is recorded in a flag file *before* the kill, and read before the exit code. An outside
    kill surfaces as 143/137, and 137 is the same code the outer deadline's `--kill-after` escalation
@@ -4409,9 +4406,8 @@ attempt going anywhere?" and "should this attempt happen at all?".
    attempt, now bounded by the guard above. Failing closed would silently and permanently delete the
    resume path on an unrelated API blip, and `author-resume` is the better fixer when it works.
 
-**What this does not fix.** Reviewer-stage staggering, which is capacity: five homelab runners against
-a fan-out of two PRs × five reviewers plus any resolver run, costing 4–8 minutes of queue wait on the
-second PR. That is a runner-count question, not a pipeline-logic one.
+**What this does not fix.** Reviewer-stage staggering is a runner-capacity question, not a
+pipeline-logic question, and remains outside this decision.
 
 **Invariants.** None of the six pipeline-core invariants is in reach. Author exclusion and the blind
 orchestrator are properties of the report pipeline, not of CI; this changes neither what may enter a

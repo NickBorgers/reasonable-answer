@@ -473,17 +473,15 @@ implicit `success()` is not ANDed onto it — which would skip the fallback on t
 exists to catch — while still stopping a cancelled run from entering a step that resets the
 tree and replays the base merge. In cold mode there is no fallback, so a timeout stays fatal.
 
-Containment made a hung resume survivable; two further mechanisms make it cheap
-(D-resume-stall-guard), because the wasted 25 minutes were the pipeline's largest single
-latency — and they were spent *before* the cold fixer that does the work even started.
+Containment made a hung resume survivable; two further mechanisms bound the silent-attempt cost and
+avoid repeating it for the same session (D-resume-stall-guard), before the cold fixer starts.
 
-**The stall guard.** Every hang observed to date emitted zero stream-json events: the failure
-is silence, not slowness. So `run-in-container.sh` watches the output log beside a resumed
-agent and kills it when the log stops growing — measuring idleness rather than shortening the
-total budget, because a resume that is genuinely working needs as much time as a cold fixer.
-Two thresholds: **3 minutes** before the first byte, where the CLI has not begun a turn at all
-and seconds are already abnormal, and **10 minutes** once output has started, where silence
-means a long tool call. The outer `timeout` is unchanged and still backstops a process that
+**The stall guard.** The pipeline treats a resumed agent that emits no stream-json output for a
+bounded interval as stalled. `run-in-container.sh` therefore watches the output log beside a resumed
+agent and kills it when the log stops growing — measuring idleness rather than shortening the total
+budget of an active attempt. Two policy thresholds distinguish startup from an active turn:
+**3 minutes** before the first byte and **10 minutes** once output has started, leaving the longer
+interval for a tool call. The outer `timeout` is unchanged and still backstops a process that
 spins noisily instead of idling. The guard writes `fixer-stalled.flag` naming the reason
 *before* killing — an outside kill arrives as 143/137, and 137 is also what the outer
 deadline's `--kill-after` escalation produces, so the exit code cannot tell them apart — and
@@ -493,9 +491,9 @@ would turn a slow test suite into a failed job. `AGENT_FIRST_OUTPUT_TIMEOUT`,
 `AGENT_STALL_TIMEOUT` and `AGENT_STALL_POLL` are override seams so the offline test can use
 deadlines of seconds.
 
-**The quarantine.** A wedged session does not heal, and the same `Author-Session:` trailer is
-read on every cycle and every re-review — so the same dead session was resumed again and
-again. When a resume produces no fix, the fixer now uploads a marker artifact named
+**The quarantine.** The pipeline does not assume that a session which produced no fix should be
+retried automatically. Because the same `Author-Session:` trailer is read on every cycle and every
+re-review, a failed resume now uploads a marker artifact named
 `session-hung-<agent>-<run-id>`; before the next resume it queries that name and, on a live
 hit, goes straight to cold. Artifacts rather than the per-SHA commit statuses below, because
 this fact is keyed by session: a session outlives every SHA it is asked about, and each cycle
