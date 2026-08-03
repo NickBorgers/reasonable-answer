@@ -59,7 +59,11 @@ roster:
     # 13 material issues it filed on 5 of 6 controls were real defects). mistral-large-3
     # is therefore not in this pool; it stays a writer and a logic critic, where its
     # verdict is `marginal` and the roster call waits on the re-audition that follows the
-    # control-fixture repairs.
+    # control-fixture repairs. That re-audition is now gated on two rounds of repair, not
+    # one: D-control-defect-sweep corrected five defects, and D-control-source-research
+    # then rewrote two controls whose bibliographies did not resolve at all. Both changed
+    # `corpus_hash`, so every verdict quoted in this file was measured against a corpus
+    # that no longer exists and is retained only as the reason for the pending re-run.
     #
     # Two families survive the drop (Google + Zhipu), so `validate_roster_health` still
     # sees a lens that can reach a strong `accepted`; what is lost is mistral's Western

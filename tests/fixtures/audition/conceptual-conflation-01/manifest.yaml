@@ -1,6 +1,6 @@
 lens: logic
 tier: moderate
-question: "Did the state's 2019 paid family leave law expand access to leave for low-wage workers?"
+question: "Did Washington's paid family and medical leave program expand access to leave for low-wage workers?"
 defects:
   - category: conceptual_conflation
     locus: {section: 4, paragraph: 2}
@@ -9,34 +9,37 @@ defects:
 
       First: statutory coverage stands in for realized access — "Coverage of that reach is
       also what expanded access, because a covered worker has the benefit available to
-      them". The report itself keeps those apart everywhere else: S5.P1 and S5.P2 are
-      about the two mechanisms that decide whether a covered worker can afford a leave and
-      has a job at the end of it, and neither is in the 2019 law's coverage rule. The
-      substitution is load-bearing rather than loose wording — it is what licenses reading
-      the filing gap "as a matter of awareness rather than of program design", which is a
-      different conclusion from the one the Conclusion and S3.P1 reach.
+      them". The report itself keeps those apart everywhere else: S5.P1 is about the hours
+      test that decides whether a covered worker is eligible at all, S5.P2 about the
+      separate rule that decides whether the job is there afterwards, and neither is the
+      coverage rule. The substitution is load-bearing rather than loose wording — it is what
+      licenses reading the participation gap "as a matter of awareness rather than of
+      program design", which is a different conclusion from the one the Conclusion, S3 and
+      S5.P1 reach when they put most of the gap at the eligibility test.
 
       Second: two populations whose exclusion runs through different mechanisms are called
       "one under-informed residual population" that "one outreach effort ... would reach".
       S6.P1 sets the mechanisms out separately — small-employer hourly workers are inside
-      the program and hold a benefit with no reinstatement right, self-employed workers are
-      outside it by default and must elect in and pay both premium shares — and the auditor
-      is reported there as treating them as separate series. Grouping them is what carries
-      the single-fix claim.
+      the program and until 2026 held a benefit with no reinstatement right, self-employed
+      workers are outside it by default and must elect in for three years and pay the whole
+      employee premium — and closes by naming them as separate mechanisms. Grouping them is
+      what carries the single-fix claim.
 
-      Tier is moderate, not obvious. The paragraph is factually accurate sentence by
-      sentence, every claim it makes is cited, and the wording is measured; the defect is
-      only visible to a reader holding S5 and S6 alongside it. It is also deliberately
-      placed *before* the paragraphs that draw the distinctions, which is the order a real
-      report slides in.
+      Tier is moderate, not obvious. The paragraph is measured sentence by sentence, its
+      one empirical claim is cited, and the awareness reading has real purchase in the
+      record — [2] found workers understood job protection in general but not its terms and
+      often attributed it to the wrong statute, and [1] reports lower awareness among
+      low-income workers. The defect is only visible to a reader holding S5 and S6 alongside
+      it. It is also deliberately placed *before* the paragraphs that draw the distinctions,
+      which is the order a real report slides in.
 
       Grading note, in the shape overstated-claim-02 already uses: a critic may reasonably
-      file this locus as `invalid_inference` (the awareness conclusion does not follow) or
-      as `overstated_claim` (the single-fix claim outruns [4]). The fixture grades the
-      same-lens window, so any material logic finding at S4.P1-P3 scores; `strict` is
-      reserved for the category that names what actually went wrong.
+      file this locus as `invalid_inference` (the awareness conclusion does not follow) or as
+      `overstated_claim` (the single-fix claim outruns [4]). The fixture grades the same-lens
+      window, so any material logic finding at S4.P1-P2 scores; `strict` is reserved for the
+      category that names what actually went wrong.
 
       Paired with `control-base-paid-leave-01`, which is this artifact with S4.P2 replaced
-      by a paragraph that draws the same three distinctions correctly and nothing else
-      changed. The pair is what separates "detects the conflation" from "distrusts reports
-      about paid leave" — a critic that flags both has measured the topic, not the defect.
+      by a paragraph that draws the same distinctions correctly and nothing else changed. The
+      pair is what separates "detects the conflation" from "distrusts reports about paid
+      leave" — a critic that flags both has measured the topic, not the defect.

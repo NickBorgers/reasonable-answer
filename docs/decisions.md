@@ -4258,6 +4258,108 @@ condition it cannot confirm true (marker missing, an edit inside the head, any s
 sides) makes it abstain to the exact behavior git would have used unconfigured, so a conflict of any
 other shape is unaffected and reviewed exactly as before.
 
+## D-control-source-research — a control's bibliography must resolve, and the resolver must have read the bodies
+
+**The observation.** Two of the four paired controls added by D-fixture-report-shape and
+D-conceptual-conflation carried bibliographies that do not resolve. `control-base-open-source-01`
+cited an "Institute for Software Sustainability" — the identifiable real organization is the
+Software Sustainability Institute — together with an "Open Source Stewardship Foundation", an
+"Enterprise Open Source Program Office Council", an "Independent Maintainers Collective" and a
+"Journal of Software Commons", none of which exact-title or organization search locates. `control-
+base-paid-leave-01` cited an unnamed state's auditor, employment security department, chamber of
+commerce research foundation and "Chapter 419, Laws of 2019", all of them written to be
+jurisdiction-free and therefore unresolvable by construction. D-control-defect-sweep repaired five
+real defects in five other fixtures and did not look at these two.
+
+**Why this is a corpus-integrity defect and not a citation-format one.** A control is declared sound
+under every lens and is graded by every lens (D-control-soundness). An evidence critic that reads a
+`## Sources` list, cannot resolve an entry, and files `fabricated_citation` — the category
+D-notfound-fabrication settles mechanically on a definitive not-found — has done exactly what the
+lens asks.
+Under `control_material_rate` that correct finding is scored against the model as invention. The
+same failure mode as D-control-defect-sweep, one layer down: the metric was measuring the corpus
+again, and this time in the category the corpus is least able to defend, because "the source does
+not exist" is the one control defect a competent critic is *guaranteed* to find.
+
+**Decision.** Both artifacts are rewritten from the sources outward, on real, resolvable, fully-read
+sources, and the paired plants are regenerated from the new bases so each still differs from its
+control in exactly one paragraph.
+
+- `control-base-open-source-01` now rests on Overney et al. (ICSE 2020,
+  doi:10.1145/3377811.3380410), Shimada et al. (ICSE 2022, doi:10.1145/3510003.3510116), the 2024
+  Tidelift maintainer report, Osborne (arXiv:2404.06484v5) and Zhang et al. (ICSE 2024,
+  doi:10.1145/3597503.3639197). Every figure in the artifact is read off a source body: the
+  53/29-against-48/39 time split and the 13-against-10 security split are Tidelift's paid-versus-
+  unpaid table (n=135 and n=228 of 437 respondents); 345 projects is the commit model's sample in
+  Overney's interrupted time series, whose intervention coefficient is indistinguishable from zero;
+  "nothing had changed" leading at 74 answers against 65 for motivation is Shimada's Table 5; the
+  consortium tiers, the rule barring the technical committee from overriding a maintainer consensus,
+  the refused documentation request and the terminated membership are Osborne's results section.
+- `control-base-paid-leave-01` names its jurisdiction, which is what makes it auditable at all. It
+  now rests on the Washington Employment Security Department's December 2025 legislative report, the
+  UW Evans School's December 2024 legislative report on job protection (ESSB 5187 s. 225(22)), the
+  cited sections of RCW Title 50A, an Economic Opportunity Institute worker-side account and a
+  Washington Policy Center critique that reaches the opposite conclusion. The invented facts are
+  gone and the real ones point somewhere more interesting: wage replacement is *most* generous at
+  the bottom (90 percent of a wage at or below half the state average weekly wage, RCW 50A.15.020),
+  so the "replacement wage, not a full wage" mechanism the business-side critique offers is weakest
+  exactly where the participation gap is widest; and the department attributes about 80 percent of
+  that gap to work-history eligibility rather than to anything happening at the point of claiming.
+  The question changes with the artifact — it named a fictional state's 2019 law and now names
+  Washington's program.
+
+**Two claims were dropped rather than cited, which is the part of this that matters.** The advocacy
+source states that "in 2024 alone, the program paid out $5.9 billion in benefits and processed
+883,000 successful applications"; the department's own FY2025 report gives approximately $2 billion
+and 269,508 paid claims, so the advocacy figure can only be cumulative since 2020 and is not used.
+The same source puts job protection at "about 50% of the workforce" where the study it cites reports
+53 percent of the *employment-eligible* population — a different denominator — so the artifact
+states the study's figure with the study's denominator. Neither correction is visible in the diff,
+which is why it is recorded here: a bibliography that resolves is not the same property as a claim
+that matches the passage behind it, and only the second one survives review.
+
+**No threshold, grader, taxonomy or prompt is touched.** Source counts stay at five per fixture, so
+`test_corpus_class_is_not_readable_off_source_count` compares what it compared before. Both
+artifacts grew — 1,150 and 1,148 words against 978 and 1,036 — because a resolvable locator costs
+words and because a real evidence base is more qualified than an invented one; the corpus band is
+now 787-1,150 words, a 1.46x spread against `MAX_LENGTH_SPREAD` of 1.5, and each class's median
+still sits inside the other class's range (916 and 935 words). `MINIMAL_PAIRS` asserts the one-
+paragraph minimality of both pairs, and it passes: the plants were regenerated by string
+substitution from the new controls, so byte-identity outside the planted paragraph is mechanical
+rather than asserted.
+
+**Consequence for the cache.** Editing any fixture changes `corpus_hash`, and
+`AuditionEntry.matches` therefore invalidates every cached verdict (D-audition-rubric-identity).
+That is the intended behaviour and the reason the hash covers artifact bytes. The verdicts quoted in
+`config/roster.yaml` were taken against a corpus in which two controls could not survive an evidence
+lens honestly, so they are not verdicts about the models on that lens.
+
+**The re-audition is owed and is not in this change, and nothing here pretends otherwise.** No
+measurement is reported: `ra audition` costs `|critics| x |fixtures| x repetitions` calls against the
+rostered identities, and the environment that resolved this issue has no credential for them, so
+running it would have produced either nothing or a number measured against something other than the
+roster. Two things make that safe rather than merely unfinished. The cache is a local runtime
+artifact (`audition.cache_path: .ra-audition.json`, git-ignored), so no stale verdict is checked in
+to be reused by accident; and `AuditionEntry.matches` compares `corpus_hash`, so any cache that does
+exist on an operator's disk is now a miss on every entry — a reader who runs `ra doctor` against this
+tree sees `not audited`, which is the true state, rather than a figure from the defective corpus. The
+roster comment that already deferred a pool decision to "the re-audition that follows the
+control-fixture repairs" now says there were two rounds of repair, so the pending re-run is not
+mistaken for one that already happened. When it is run, its noise figures are reported separately
+from the 2026-08-02 round's rather than compared to them: the two were measured on different corpora,
+and `control_material_rate` is a joint measurement of the model and the corpus
+(D-control-defect-sweep).
+
+**Deliberately not done.** No new test. The mechanically checkable properties — citations resolving
+in both directions, source counts, one-paragraph minimality, report shape, length band — already
+have tests, and they pass; "this locator resolves to a real document" cannot be checked offline
+without breaking the clone-and-run promise, and "this sentence matches the passage behind the
+locator" cannot be checked mechanically at all. Both belong where D-control-soundness put them: the
+manifest soundness contracts, which now record source-by-source what was read and which claims each
+body supports, and review. The other two paired controls from D-fixture-report-shape (`control-base-
+congestion-pricing-01`, `control-base-remote-work-01`) and the two unpaired ones cite real,
+resolvable literature and are not touched.
+
 ## Open items for a future round
 
 - A third completeness critic, chosen by measurement (D-completeness-pool-noise). The pool is down

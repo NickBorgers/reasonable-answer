@@ -2,36 +2,59 @@
 # every lens, and it gates no sensitivity threshold because it plants nothing.
 #
 # This is the sound base of `overstated-claim-03` (D-conceptual-conflation), and it is the
-# corpus's **qualitative-evidence control**. The two artifacts differ in exactly one
-# paragraph, S4.P1: there it claims a proportion, a base rate and an interval off two small
-# collections of maintainer accounts; here it says the record does not settle prevalence or
-# pace, names why (both collections were drawn from maintainers who already held
-# sponsorship, neither reports a denominator), and restricts the report to a claim about
-# kind. Everything else is byte-identical.
+# corpus's **thin-evidence control**. The two artifacts differ in exactly one paragraph,
+# S4.P1: there it claims a proportion, a base rate and an interval off a self-selected
+# maintainer survey and a single-project case study; here it says the record does not
+# settle prevalence or pace, names why source by source, and restricts the report to a
+# claim about kind. Everything else is byte-identical.
 #
 # What this control measures is the narrowing condition on the empirical-anchor reading of
-# `overstated_claim`. The report is built almost entirely on qualitative evidence and makes
-# almost entirely qualitative claims — what maintainers describe, in what order, and what
-# the fiscal host's terms move where. Those claims turn on kind, not on magnitude,
-# prevalence, timing or change, so no anchor is owed and none is missing. A critic that
-# demands a figure for "the work becomes scheduled rather than opportunistic", or that
-# reads the explicit refusal in S4.P1 as the absence of support rather than as the
-# qualification the rule asks for, is inventing a material issue and scores as noise. That
-# is the direction the decision's control-noise gate is watching: without it, the widened
-# category reads as "quantify everything" and every honest qualitative report stagnates.
+# `overstated_claim`. Most of what the report asserts turns on kind and mechanism — what
+# paid and unpaid maintainers report spending their month on, what a consortium's rules
+# permit a funder to decide, what two studies looking for an effect on output did not
+# find. Those claims turn on kind, not on magnitude, prevalence, timing or change, so no
+# anchor is owed and none is missing; where a claim does turn on magnitude the figure is
+# in the sentence. A critic that demands a number for "money arrives attached to a
+# structure", or that reads the explicit refusal in S4.P1 as the absence of support rather
+# than as the qualification the rule asks for, is inventing a material issue and scores as
+# noise. That is the direction the decision's control-noise gate is watching: without it,
+# the widened category reads as "quantify everything" and every honest report that reaches
+# the edge of its evidence stagnates.
+#
+# The sources are real and were read in full before use (D-control-source-research). Every
+# figure in the artifact was checked against the source body, not against a search snippet:
+# the 53/29-against-48/39 time split and the 13-against-10 security split are the
+# paid-versus-unpaid table in [3] (n=135 and n=228 of 437 respondents), and the hours
+# comparison is the same report's 82-against-78 percent; 83, 64 and 52 percent are the
+# improvements paid maintainers attribute to being paid there (n=142), and the findings list
+# reports all three rather than the two that suit the argument — 64 percent named *more*
+# feature work, which is why the report claims a shift in shares and not a swap of tasks;
+# the 345 projects are the commit model's sample in [1]'s interrupted time series, whose
+# intervention coefficient is indistinguishable from zero and whose authors summarize the
+# analysis as "some evidence, but not strong support"; the "nothing had changed" ordering is
+# [2]'s Table 5 (74 answers against 65 for motivation, of 177 sponsored developers); the
+# consortium's tiered memberships, the rule that the technical committee cannot override a
+# maintainer consensus, the refused documentation request and the terminated membership are
+# all in [4]'s results section; and the long-term contributor association is [5]'s logistic
+# model.
 #
 # Soundness contract, which no test can check and review therefore must: every empirical
-# claim carries an inline [n] citation resolving to a numbered `## Sources` entry; the
-# question is contested and the sourcing spans a maintainer-side collection, an academic
-# interview study, a corporate program survey and a methodological critique that argues
-# against this report's own reading, so `one_sided_sourcing` — which floors to `major` —
-# cannot be earned honestly; the strongest opposing case (that the governance change alone
-# explains everything) has its own section, is granted the finding it fits and the fact
-# that this record cannot refute it, and is answered only on the one point where the
-# accounts bear against it, with that evidence labelled weak; the contested presupposition
-# in the question — that maintenance has changed — is not inherited, because S4.P1 states
-# what the record can and cannot establish about it; and each of the three numeric claims
-# in the report (nineteen of twenty-two, nine of twelve, 78 percent) is attached to the
-# source that reports it.
+# claim carries an inline [n] citation resolving to a numbered `## Sources` entry, and no
+# source is described more strongly than its text permits — [1]'s null is reported as the
+# authors report it, and [2]'s and [5]'s single-population limits are stated in S4.P1
+# rather than left for a reader to notice. The question is contested and the sourcing spans
+# two mining-and-survey studies, an industry maintainer survey, a funder-side case study and
+# a paid-versus-volunteer comparison, two of which argue against this report's own reading,
+# so `one_sided_sourcing` — which floors to `major` — cannot be earned honestly. The
+# strongest opposing case (that sponsorship selected different people rather than changing
+# the work) has its own section, is granted the survey's own "hard to say what is cause and
+# what is effect" caveat and the before-and-after null that fits it, and is answered only on
+# the one point where the evidence holds the person fixed, with that evidence labelled weak.
+# The contested presupposition in the question — that maintenance has changed — is not
+# inherited, because
+# S4.P1 states what the record can and cannot establish about it. And the report is
+# internally consistent across sections (D-control-defect-sweep): S1 and S5.P2 make the same
+# claim about output, and S3 concedes the selection reading that S1 flags rather than
+# contradicting it.
 kind: control
 question: "How has maintenance of widely used open-source software changed since corporate sponsorship programs became common?"

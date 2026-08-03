@@ -4,29 +4,53 @@
 # This is the sound base of `conceptual-conflation-01` (D-conceptual-conflation). The two
 # differ in exactly one paragraph, S4.P2: there it substitutes statutory coverage for
 # realized access and merges two differently-excluded populations into one; here it names
-# coverage and access as separate measures and says the two groups arrive by different
-# routes. Everything else — Conclusion, findings, counterargument, S5, S6, sources — is
-# byte-identical, so a critic that raises a material logic issue at S4 on both artifacts
-# has reacted to the subject matter rather than to the defect.
+# coverage, eligibility and reinstatement as three separate measures and says the two
+# groups arrive by different routes. Everything else — Conclusion, findings,
+# counterargument, S5, S6, sources — is byte-identical, so a critic that raises a material
+# logic issue at S4 on both artifacts has reacted to the subject matter rather than to the
+# defect.
 #
 # This is also the control that measures the *narrowing* half of the category. The report
-# repeatedly moves between a formal rule, a delivery mechanism and an observed outcome —
-# which is what a report on this question has to do — and it aggregates where the
-# aggregation is defended (S3.P1 treats needs and the 50-employee line as jointly
-# operating, and says so). A critic that reads any of that as `conceptual_conflation` is
-# applying the category to terminology and to subgroup structure rather than to a
-# load-bearing substitution, and scores as noise, which is the point.
+# repeatedly moves between a statutory rule, the mechanism delivering it and an observed
+# outcome — which is what a report on this question has to do — and it aggregates where the
+# aggregation is defended (S3 treats the needs-based reading and the design reading as
+# jointly operating, and says so). A critic that reads any of that as
+# `conceptual_conflation` is applying the category to terminology and to subgroup structure
+# rather than to a load-bearing substitution, and scores as noise, which is the point.
+#
+# The sources are real and were read in full before use (D-control-source-research). The
+# jurisdiction is named rather than anonymized precisely so that every figure is auditable:
+# the 20/10/8 percent wage shares, the department's attribution of about 80 percent of that
+# gap to work-history eligibility, the 38 percent denial reason, the 3-against-8 percent
+# employer-size gap, the elective-coverage counts and the 18 percent filing rate are all in
+# [1]; the 74 percent employment-eligible estimate, the 53 percent job-protection rate, the
+# 15.5-against-70.4 percent quintile gradient, the 25-against-76 percent industry range, the
+# 1.8-against-1.1 percent quarterly take-up, the 5.8-against-3.3 point post-leave employment
+# association, the agricultural focus group, the missing poster text and the authors' own
+# "not causal" warning are all in [2]; the 820 hours, the qualifying period, the 90/50
+# replacement schedule, the 50/25/15/8-employee phase-in with its 180-day test, and the
+# three-year elective-coverage commitment at the full employee premium are read off the
+# cited RCW sections in [3]; the outreach account is [4]; the regressive reading and its
+# wage-replacement mechanism are [5]. Two claims in [4] were *not* used because its own
+# text does not support them at the scale it states them; see the decision.
 #
 # Soundness contract, which no test can check and review therefore must: every empirical
-# claim carries an inline [n] citation resolving to a numbered `## Sources` entry; the
-# question is contested and the sourcing spans the state's own records, a worker-side
-# review and an employer-side survey, so `one_sided_sourcing` — which floors to `major` —
-# cannot be earned honestly; the strongest opposing case (that the filing gap reflects
-# different leave needs, not a barrier) has its own section, is granted the part of the
-# gap the state's own tenure-adjusted figure concedes to it, and is answered on the
-# concentration it does not explain; the contested presupposition in the question — that
-# "access" is one thing — is surfaced in S4.P2 rather than inherited; and no claim about
-# magnitude, prevalence or change is made without the figure or the record that states it,
-# so the empirical-anchor reading of `overstated_claim` cannot be earned either.
+# claim carries an inline [n] citation resolving to a numbered `## Sources` entry, and no
+# source is represented more specifically than its text permits — [2]'s associations are
+# reported as associations and its causality warning is stated in S3. The question is
+# contested and the sourcing spans the administering department's own record, a legislature-
+# commissioned university study, the statute, a worker-side advocacy account and a
+# business-side critique that reaches the opposite conclusion, so `one_sided_sourcing` —
+# which floors to `major` — cannot be earned honestly. The strongest opposing case (that the
+# participation gap reflects different needs and weaker attachment to work, not a barrier)
+# has its own section, is granted the state's own figure conceding most of the gap to
+# eligibility and the study's own finding that protection matters least at the bottom, and
+# is answered on the post-leave association it does not explain. The contested
+# presupposition in the question — that "access" is one thing — is surfaced in S4.P2 rather
+# than inherited. No claim about magnitude, prevalence or change is made without the figure
+# or the record that states it, so the empirical-anchor reading of `overstated_claim` cannot
+# be earned either. And the report is internally consistent across sections
+# (D-control-defect-sweep): S1, S3 and S5.P1 all put most of the gap at the hours test, and
+# S6 restates the two mechanisms S4.P2 and S5 set out rather than merging them.
 kind: control
-question: "Did the state's 2019 paid family leave law expand access to leave for low-wage workers?"
+question: "Did Washington's paid family and medical leave program expand access to leave for low-wage workers?"
