@@ -15,6 +15,7 @@ import json
 import logging
 import threading
 import uuid
+from collections.abc import Callable
 from concurrent.futures import ThreadPoolExecutor
 from contextlib import closing
 from dataclasses import dataclass, field
@@ -92,6 +93,10 @@ class State(TypedDict, total=False):
     critique_rounds: dict[str, int]
     clean_records: list[dict]
     defects: list[dict]
+    #: Observed source-verification coverage, keyed by artifact hash — what the evidence
+    #: lens could actually reach in *that* draft's bibliography (D-observed-source-coverage).
+    #: Keyed rather than latest-wins because `_finalize` may ship an earlier round.
+    source_coverage: dict[str, dict]
 
     # Dispute channel (D-writer-disputes). The registry lives here — checkpointed state — so it
     # survives resume, and a content purge cannot break a live run.
@@ -859,6 +864,76 @@ def _resolution_tiers(sources: list) -> dict[str, int]:
     return counts
 
 
+#: Serialises the read-modify-write in `_record_coverage`. A module-level lock rather
+#: than one per sink because the sink is a plain dict owned by `_critique`, and the
+#: contention is one comparison per evidence critic per pass.
+_COVERAGE_LOCK = threading.Lock()
+
+
+def _coverage_rank(observed: dict) -> tuple[int | str, ...]:
+    """How far verification actually got, as a total key two tallies can be ranked on.
+
+    Entries *independently checked* comes first — `cited` minus the ones nothing
+    reached, which counts a definitive not-found as checked, because it is
+    (D-notfound-fabrication). Distinct bodies read, body-backed entries, registry
+    confirmations and definitive not-founds then order equal-reach observations by how
+    much direct evidence they contain (D-existence-vs-body). The canonical record is a
+    final tie-breaker so future fields cannot quietly reintroduce arrival-order behavior.
+    """
+
+    def count(key: str) -> int:
+        value = observed.get(key)
+        return value if isinstance(value, int) and not isinstance(value, bool) else 0
+
+    checked = max(0, count("cited") - count("not_independently_checked"))
+    numeric = (
+        checked,
+        count("bodies_read"),
+        count("body_backed_entries"),
+        count("metadata_only"),
+        count("not_found"),
+        count("attempted"),
+        -count("blocked_or_unreadable"),
+        -count("budget_exhausted"),
+        -count("not_attempted"),
+        -count("not_addressable"),
+    )
+    canonical = json.dumps(observed, sort_keys=True, separators=(",", ":"))
+    return (*numeric, canonical)
+
+
+def _record_coverage(
+    sink: dict[str, dict],
+    artifact_hash: str,
+    observed: dict,
+    *,
+    on_recorded: Callable[[dict], None] | None = None,
+) -> bool:
+    """Put `observed` on the record for this artifact if it reached furthest; say whether
+    it did.
+
+    At review depth above 1 an artifact's bibliography is tallied once per evidence
+    critic, concurrently, against a fetch cache that is monotone but last-write-wins
+    (`fetch.SourceFetcher.fetch`). Two critics that both miss the cache on the same URL
+    can therefore observe different outcomes, and there is no aggregate to read back
+    afterwards — so the run keeps the observation that reached furthest rather than
+    whichever thread happened to finish first. The total rank makes the record independent
+    of scheduling even when two observations reached equally far but ended differently.
+
+    `on_recorded` runs while the same lock is held. That is what keeps the audit trail
+    honest: updates and their events cannot interleave, so the last `source_coverage` event
+    for an artifact is always the one `final.json` will carry.
+    """
+    with _COVERAGE_LOCK:
+        current = sink.get(artifact_hash)
+        if current is not None and _coverage_rank(current) >= _coverage_rank(observed):
+            return False
+        sink[artifact_hash] = observed
+        if on_recorded is not None:
+            on_recorded(observed)
+        return True
+
+
 def _critique_one(
     rt: Runtime,
     lens: Lens,
@@ -869,6 +944,7 @@ def _critique_one(
     author_identity: str,
     attempt: int,
     run_date: str | None = None,
+    coverage_sink: dict[str, dict] | None = None,
 ) -> LensResult:
     """One lens, one critic, one fresh context. Failure is recorded as a *failed lens*,
     never as 'no issues found' — a failed review can never manufacture a clean record.
@@ -876,6 +952,14 @@ def _critique_one(
     The critic is chosen by the caller (`_critic_slots`), because at review depth above
     1 the slate for a lens has to be drawn as a whole: picking one model at a time from
     the same `used` set would return the same alias every time.
+
+    `coverage_sink` is the one thing this reports back other than its `LensResult`: the
+    evidence lens is where a bibliography is read against real fetch outcomes, and that
+    tally has to reach `_finalize` for the artifact it was taken on, not for whichever
+    draft the loop stopped at (D-observed-source-coverage). It is an out-parameter rather
+    than a second return value so the direct callers in the test suite keep their shape.
+    At review depth above 1 the lens has several critics, so the sink has several writers
+    per key and `_record_coverage` — not this function — decides which tally is kept.
     """
     identity = rt.identities[alias]
     try:
@@ -904,32 +988,55 @@ def _critique_one(
     # except in the narrow window where both critics miss the cache simultaneously on
     # the first pass, which costs a duplicate GET and is why the cache is monotone.
     sources = None
-    if lens is Lens.EVIDENCE and rt.verify_sources:
-        urls = fetch.extract_source_urls(report_text, limit=rt.config.search.max_sources)
-        sources = rt.fetcher.fetch_all(urls) if urls else None
-        if sources:
-            failed = [s for s in sources if not s.ok]
-            # Counts alone said "10 of 12 failed" for a whole production run without
-            # saying why, and a failure is cached for the run's lifetime, so the evidence
-            # lens works from whatever survived. `_failure_reasons` keeps only the reason
-            # *class* — a status code or an exception type — never a URL or page text
-            # (RA-016).
-            reasons = _failure_reasons(failed)
-            rt.store.event(
-                "fetch_sources",
-                artifact_hash=artifact_hash,
-                fetched=len(sources),
-                failed=len(failed),
-                failure_reasons=reasons,
-                tiers=_resolution_tiers(sources),
-            )
-            if failed:
-                log.warning(
-                    "source fetch: %d of %d failed (%s)",
-                    len(failed),
-                    len(sources),
-                    ", ".join(f"{reason}x{count}" for reason, count in sorted(reasons.items())),
+    if lens is Lens.EVIDENCE:
+        by_url: dict[str, fetch.FetchedSource] = {}
+        if rt.verify_sources:
+            urls = fetch.extract_source_urls(report_text, limit=rt.config.search.max_sources)
+            sources = rt.fetcher.fetch_all(urls) if urls else None
+            if sources:
+                # `FetchedSource.url` is the URL that was *asked for*, preserved by the
+                # resolver ladder even when the body came from a mirror (which lands in
+                # `body_source_url`), so this keys coverage to what the report cited.
+                by_url = {source.url: source for source in sources}
+                failed = [s for s in sources if not s.ok]
+                # Counts alone said "10 of 12 failed" for a whole production run without
+                # saying why, and a failure is cached for the run's lifetime, so the evidence
+                # lens works from whatever survived. `_failure_reasons` keeps only the reason
+                # *class* — a status code or an exception type — never a URL or page text
+                # (RA-016).
+                reasons = _failure_reasons(failed)
+                rt.store.event(
+                    "fetch_sources",
+                    artifact_hash=artifact_hash,
+                    fetched=len(sources),
+                    failed=len(failed),
+                    failure_reasons=reasons,
+                    tiers=_resolution_tiers(sources),
                 )
+                if failed:
+                    log.warning(
+                        "source fetch: %d of %d failed (%s)",
+                        len(failed),
+                        len(sources),
+                        ", ".join(f"{reason}x{count}" for reason, count in sorted(reasons.items())),
+                    )
+        # Taken on every artifact whose evidence lens runs, verification on or off: the
+        # bibliography is what the report stands on either way, and "none of it was
+        # independently checked" is a fact about a retrieval-only run that its
+        # configuration label cannot state (D-observed-source-coverage).
+        if coverage_sink is not None:
+            observed = fetch.coverage(
+                report_text, by_url, verification_enabled=rt.verify_sources
+            )
+            coverage_record = observed.as_dict()
+            _record_coverage(
+                coverage_sink,
+                artifact_hash,
+                coverage_record,
+                on_recorded=lambda record: rt.store.event(
+                    "source_coverage", artifact_hash=artifact_hash, **record
+                ),
+            )
 
     result = critique_mod.critique_once(
         rt.client,
@@ -1060,6 +1167,11 @@ def _critique(state: State, rt: Runtime) -> dict:
 
     run_date = state.get("run_date")
     slots = _critic_slots(state, rt, pending)
+    # Keyed by artifact hash and merged rather than replaced, exactly as `used_critics`
+    # is: the shipped draft on a non-accepted terminal need not be the last one written,
+    # so an earlier round's coverage has to survive the rounds after it
+    # (D-observed-source-coverage).
+    coverage_by_artifact: dict[str, dict] = dict(state.get("source_coverage", {}))
 
     def work(slot: _CritiqueSlot) -> LensResult:
         if slot.unstaffed_reason is not None:
@@ -1083,6 +1195,7 @@ def _critique(state: State, rt: Runtime) -> dict:
             author_identity,
             slot.attempt,
             run_date=run_date,
+            coverage_sink=coverage_by_artifact,
         )
 
     # Bounded by `max_concurrency` exactly as before — review depth multiplies the
@@ -1112,6 +1225,7 @@ def _critique(state: State, rt: Runtime) -> dict:
         "lens_results": results,
         "used_critics": {k: sorted(v) for k, v in used.items()},
         "critique_rounds": rounds,
+        "source_coverage": coverage_by_artifact,
     }
 
 
@@ -1399,6 +1513,37 @@ def _route_control(state: State) -> str:
 # -------------------------------------------------------------------- finalize
 
 
+def _sourcing_label(rt: Runtime, observed: dict | None) -> str:
+    """What this run may claim about its citations — measured, not configured.
+
+    `search.verify_sources: true` used to produce *consensus-reviewed with verified
+    sourcing* on every run that had it switched on, whatever the fetches actually
+    returned. The label now states the observed coverage of the *shipped* draft, so an
+    enabled feature can no longer imply a completeness the run did not reach
+    (D-observed-source-coverage).
+
+    The two non-verification arms are unchanged: neither claims verification, so neither
+    was overstating anything. Their coverage is still recorded and still rendered — the
+    export says how many entries went unchecked — it just does not need a new label to
+    stop being false.
+    """
+    if not rt.verify_sources:
+        return (
+            "consensus-reviewed with retrieved sourcing"
+            if rt.search_enabled
+            else "consensus-reviewed with in-artifact sourcing (no external retrieval)"
+        )
+    if not observed:
+        # Verification was on and no evidence lens ever completed on this draft. Saying
+        # so is the honest answer; falling back to the old label would make the absence
+        # of a measurement read as a passing one.
+        return (
+            "consensus-reviewed; source verification was enabled but no coverage was "
+            "recorded for the shipped draft"
+        )
+    return f"consensus-reviewed — {fetch.coverage_sentence(observed)}"
+
+
 def _finalize(state: State, rt: Runtime) -> dict:
     status = state.get("terminal_status") or "aborted"
     board = state.get("scoreboard", [])
@@ -1433,6 +1578,13 @@ def _finalize(state: State, rt: Runtime) -> dict:
     # one keying discipline for both annotation surfaces (issue #93).
     outstanding = [{**d, "artifact_hash": artifact_hash} for d in defects]
 
+    # Keyed on the *shipped* artifact, for the same reason the defect list is: a
+    # non-accepted terminal can ship an earlier round, and that round's bibliography is
+    # the one the reader is holding (D-observed-source-coverage). No entry means no
+    # evidence lens ever ran on this draft, which is reported as "not recorded" rather
+    # than as zero coverage or as none needed.
+    observed = (state.get("source_coverage") or {}).get(artifact_hash or "")
+
     view = state.get("view", {})
     summary = {
         "run_id": state["run_id"],
@@ -1443,6 +1595,7 @@ def _finalize(state: State, rt: Runtime) -> dict:
         "final_view": view,
         "clean_records": state.get("clean_records", []),
         "outstanding_defects": outstanding,
+        "source_coverage": observed,
         "warnings": state.get("warnings", []),
         "note": Decision.model_validate(state["decision"]).note if state.get("decision") else "",
         # The build that *finalized* this run. A resume may legitimately cross a deploy —
@@ -1450,13 +1603,7 @@ def _finalize(state: State, rt: Runtime) -> dict:
         # not all of them. The `startup` events in events.jsonl are the full list
         # (docs/run-provenance.md).
         "build": build_identity().as_dict(),
-        "label": (
-            "consensus-reviewed with verified sourcing"
-            if rt.verify_sources
-            else "consensus-reviewed with retrieved sourcing"
-            if rt.search_enabled
-            else "consensus-reviewed with in-artifact sourcing (no external retrieval)"
-        ),
+        "label": _sourcing_label(rt, observed),
     }
     rt.store.final(text, summary)
     rt.store.event("finalize", **{k: v for k, v in summary.items() if k != "final_view"})

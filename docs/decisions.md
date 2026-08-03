@@ -203,7 +203,7 @@ and confirmation-indistinguishability tests.
 | D-proxy-base-url | **`proxy.base_url` is overridable by an environment variable, named by `proxy.base_url_env` (default `RA_PROXY_BASE_URL`).** Precedence: env value > roster file value > built-in default. The roster's `base_url` becomes the *fallback*, not necessarily the effective value; the override is applied once in a `ProxyConfig` after-validator so every reader (`LLMClient`, `_fetch_model_info`) sees the resolved URL with no call-site change. Unset or empty env leaves the file value untouched. | Mirrors the existing `api_key_env` hook so the config surface stays consistent. Before this, `base_url` was readable only from the file, so a containerized deployment on a Docker bridge network — which cannot resolve the baked Tailscale MagicDNS URL and reaches the LiteLLM proxy by container DNS name (`http://litellm-proxy:4000/v1`) — had to mount a whole override `roster.yaml` just to change one line, shadowing every upstream roster change (model retunes, new critics, search defaults) and forcing a manual re-sync each time. Injecting one env var lets the baked roster stay authoritative for models, critics, search, and budgets. Kept backward-compatible: a roster with a plain `base_url:` and no env set behaves exactly as before. Applied in a validator rather than as an `api_key`-style lazy property because `base_url` is a plain field read across the codebase as an attribute, and a property cannot share its name; resolving at load also means nothing ever reads a URL the env was meant to override. No invariant is touched — this is a deployment-config affordance, not a change to isolation, author-exclusion, the orchestrator's blindness, or the controller. |
 | D-run-date-grounding | **Critics and writers are grounded in the run's date, and the shipped roster opts into retrieval (D-retrieval-opt-in); source verification (D-source-verification) stays off everywhere by default.** A `run_date` (UTC) is captured once at intake, stored in graph state, and injected into every writer and critic prompt as trusted context outside the data fence. The code defaults for `search.enabled` and `search.verify_sources` stay `false`; `config/roster.yaml` flips on `search.enabled` only. The completeness brief and the critic `instruction` contract now require that every demanded fix be resolvable within the report itself (add the perspective, weaken the claim, or state the limitation) — a critic may not make a specific external document the only acceptable resolution. | Run `run-75eb136b9bfb` stagnated to `needs_human_review` with good output: the evidence lens, judging "on its face" plausibility from its training-data recency, flagged legitimate current-year citations (one dated the previous day) as future-dated `fabricated_citation` — a blocking defect with a severity floor the writer can never argue down and, without retrieval, never fix. Simultaneously the completeness lens demanded a specific budget-vote record the writer had no way to retrieve, while `writer_revision` (correctly) forbids inventing sources — an unsatisfiable demand. One date per run (not per call) keeps RB-010's byte-identical confirmation critiques across midnight; old checkpoints without `run_date` resume dateless, i.e. with the prior behavior. The date is excluded from the audition prompt-hash surface because it is run context, not lens semantics. Enabling search makes citation demands satisfiable, and retrieval-grounded citations carry real, current dates — closing the false-`fabricated_citation` loop even without verification. Verification would go further (URL resolves, page matches), but it fetches model-chosen URLs, and the egress boundary that makes that safe is a network-layer deployment concern deliberately not implemented in this repo (docs/ssrf-egress-isolation.md documents the pattern); the shipped roster therefore leaves `verify_sources: false`, to be enabled per-deployment behind such a boundary. Search itself is not that exposure: it talks only to the fixed public Brave endpoint. |
 
-| D-source-verification | **Source verification for the evidence lens, opt-in and off by default.** With `search.verify_sources: true` the pages a report cites are fetched and handed to the **evidence lens only**, as untrusted data. `fabricated_citation` and `misrepresented_source` become checkable against the page instead of judgements about plausibility. A failed fetch is explicitly *not* evidence of fabrication — **except** a definitive not-found (HTTP 404/410), which D-notfound-fabrication later carves out as a mechanical `fabricated_citation` because that status proves the URL does not resolve rather than that it could not be read. Each fetch now carries a closed `SourceOutcome` (fetch.py) rather than one flat "could not fetch" string, so the evidence prompt names the failure class and only a not-found sharpens `fabricated_citation`; PR #96 added this vocabulary and, on top of it, an opt-in tier that **reads** a cited PDF instead of refusing it as an unreadable content type — gated by both `sources.enabled` and `sources.pdf.enabled` (`config.SourcesConfig`/`PdfSourceConfig`), fatal at startup if `pypdf` is missing, and off by default like verification itself. Not an SSRF boundary — egress is constrained at the network layer, not here. | D-retrieval-opt-in constrained where citations come from; it did not establish that a cited page supports the claim attached to it, because no critic could open one. Evidence-lens-only is an isolation requirement, not an optimization: logic and completeness cannot raise a citation category, so page text would widen what they see without widening what they may report. Off by default because fetching model-chosen URLs is exposure a deployment must opt into. |
+| D-source-verification | **Source verification for the evidence lens, opt-in and off by default.** With `search.verify_sources: true`, addressable cited pages are deduplicated and fetched up to `search.max_sources`, then handed to the **evidence lens only** as untrusted data; unaddressable and over-cap entries remain unchecked. `fabricated_citation` and `misrepresented_source` become checkable against the page instead of judgements about plausibility. A failed fetch is explicitly *not* evidence of fabrication — **except** a definitive not-found (HTTP 404/410), which D-notfound-fabrication later carves out as a mechanical `fabricated_citation` because that status proves the URL does not resolve rather than that it could not be read. Each fetch now carries a closed `SourceOutcome` (fetch.py) rather than one flat "could not fetch" string, so the evidence prompt names the failure class and only a not-found sharpens `fabricated_citation`; PR #96 added this vocabulary and, on top of it, an opt-in tier that **reads** a cited PDF instead of refusing it as an unreadable content type — gated by both `sources.enabled` and `sources.pdf.enabled` (`config.SourcesConfig`/`PdfSourceConfig`), fatal at startup if `pypdf` is missing, and off by default like verification itself. Not an SSRF boundary — egress is constrained at the network layer, not here. | D-retrieval-opt-in constrained where citations come from; it did not establish that a cited page supports the claim attached to it, because no critic could open one. Evidence-lens-only is an isolation requirement, not an optimization: logic and completeness cannot raise a citation category, so page text would widen what they see without widening what they may report. Off by default because fetching model-chosen URLs is exposure a deployment must opt into. |
 
 ## Codex adversarial review — round 3 (verdict: CHANGES_REQUESTED; 5 resolved / 4 partial / 1 unresolved + 6 new)
 
@@ -3921,6 +3921,102 @@ its checkpoint. `graph._lens_results` accepts the pre-existing one-result-per-le
 the same reason. No A/B harness: `depth: 1` reproduces the previous single-critic discovery pass
 from configuration, while the intentional failed-confirmation divergence above is pinned
 separately; comparing the arms on real questions remains an operator measurement.
+
+## D-observed-source-coverage — the run reports what verification reached, not that verification was switched on
+
+**The problem.** `graph._finalize` derived its sourcing label from a runtime boolean. With
+`search.verify_sources: true` every run shipped as *consensus-reviewed with verified sourcing*,
+whatever the fetches actually returned. The failure is structural: the label described enabled
+configuration while `fetch_sources` counted only URLs already selected for fetching, so neither
+recorded the bibliography's denominator or whether each entry was checked. The repository's
+offline mixed-outcome fixture in `tests/test_source_coverage.py` pins the resulting distinction:
+addressable, unaddressable, body-read, metadata-only, blocked, and not-found entries can coexist in
+one artifact, while a boolean label cannot report any of those observed differences. That is the
+failure mode the labelling discipline of D-in-artifact-citations, D-retrieval-opt-in and
+D-source-verification exists to prevent.
+
+**Decision.** Coverage is measured, keyed to an artifact, persisted, and rendered; the categorical
+label is replaced by the measurement.
+
+*Measured.* `fetch.coverage` reads the shipped draft's own `## Sources` section and tallies it in
+**entries**, not in fetches: `cited`, `addressable` / `not_addressable`, `attempted` /
+`not_attempted`, and a disposition for each attempt — `body_backed_entries`, `metadata_only`,
+`blocked_or_unreadable`, `not_found`, `budget_exhausted`. `bodies_read` is deliberately outside that
+entry partition: it counts distinct cited URLs whose body was read. `existence_confirmed` is derived
+from body-backed entries and registry hits. `not_independently_checked` is derived only from
+`not_addressable`, `not_attempted`, `blocked_or_unreadable`, and `budget_exhausted`; a definitive
+`not_found` is an independent determination of absence, not an unchecked entry. Both derived values
+are written from those counts so the summary line and the breakdown cannot disagree. Two entries
+citing one URL are two things the report stands on, but the per-run fetch cache collapses them into
+one call, so the record says two body-backed entries and one body read rather than calling one body
+two.
+
+*Keyed to an artifact.* The tally is taken in `_critique_one` where the evidence lens fetches, and
+written into checkpointed state under the artifact's hash — never latest-wins. On a non-accepted
+terminal `_finalize` ships the best-scoring draft, which need not be the last one written (issue
+#93), so coverage keys the same way the outstanding-defect list does. A draft with no entry reads as
+*not recorded*, which is neither zero coverage nor a pass.
+
+*One record per artifact, however many critics read it.* D-front-loaded-depth gives each lens
+`review.depth` critics per pass, so at the shipped default the evidence lens tallies the same
+bibliography twice, concurrently, against a fetch cache that is monotone but last-write-wins
+(`fetch.SourceFetcher.fetch`). Two critics that both miss the cache on the same URL can therefore
+observe genuinely different outcomes, and no aggregate of the two exists to read back afterwards.
+`graph._record_coverage` keeps the observation that **reached furthest** rather than whichever
+thread happened to finish first. Its total ordering compares entries independently checked,
+distinct bodies read, body-backed entries, registry confirmations, definitive absences and the
+remaining disposition counts, with a canonical-record tie-breaker for future fields. Equal-reach
+but different observations therefore cannot fall back to arrival order. Taking the maximum is not
+the same as claiming both critics saw it: it is the honest reading of "what did verification reach
+for this draft", which is a question about the run, not about a critic. A record update and its
+`source_coverage` event execute under the same lock, so two callbacks cannot interleave and the
+**last** event for an artifact is always the one `final.json` carries. This is deliberately not true
+of `fetch_sources`, which still fires once per evidence critic and therefore double-counts a
+depth-2 pass; it was never a coverage measurement, which is the gap this decision exists to close.
+
+*Persisted and rendered.* `final.json` gains `source_coverage`; `export.Provenance` carries it; the
+markdown export, the HTML export and the run page render the same breakdown from one definition, as
+they already do for the defect list. Every row is a bounded non-negative integer derived from the
+artifact's own text — no URL, no page text, no model identity — so the record is safe for the audit
+trail on RA-016's terms, and `OrchestratorView` is untouched: the controller still sees none of it.
+
+*The label.* With verification on, the label is now the observation —
+`consensus-reviewed — source review: 15 cited; 3 addressable; 3 existence confirmed; 3 source bodies
+read (backing 3 cited entries); 12 not independently checked`. Verification on with nothing recorded
+says exactly that rather than falling back to the old wording, because an absent measurement must
+not read as a passing one. The two non-verification labels are unchanged: neither ever claimed
+verification, so neither was overstating anything — but their coverage is still measured and still
+rendered, so a retrieval-only run now states in its export how much of its bibliography went
+unchecked, which its label never could.
+
+**What the numbers must not be read as saying.** Two misreadings are invited by the counts and
+foreclosed in the rendering, which carries the caveat under every breakdown. An entry that was not
+independently checked is *unverified*, not suspect. A `blocked` or `paywalled` entry was
+*unreadable*, not absent — reading it as absence is precisely the inference D-notfound-fabrication
+forbids. A definitive not-found is independently checked and establishes that a cited page does not
+exist. The existence-vs-body doctrine of D-existence-vs-body survives intact in the columns:
+`metadata_only` confirms existence and is counted separately from `body_backed_entries` and
+`bodies_read`, because a registry record is not the source's text. Entry counts and distinct-body
+counts are labelled separately everywhere they render.
+
+**Where the measurement is deliberately conservative.** Entry splitting is a heuristic over
+model-written markdown — list markers where the section has them, one entry per line where it does
+not — and "addressable" means *carries an http(s) URL*, so a bare `doi:10.…` with no resolver URL
+counts as not independently addressable. Text before the first list marker is treated as section
+prose, so a URL there may be fetched without entering the bibliography denominator. All three
+choices err toward reporting **less** coverage than was achieved, which is the only direction a
+claim about verification is allowed to be wrong in. The counts are therefore reported as observed,
+never as a completeness claim.
+
+**Deliberately not done.** No controller change: coverage does not gate acceptance, does not enter
+`OrchestratorView`, and mints no defect. No deduplication of `fetch_sources`, which fires once per
+evidence critic and so reports a depth-2 pass twice — pre-existing, visible only in the audit trail,
+and a change to an event this decision does not own. A bibliography that is entirely unaddressable is a fact the
+export now states, not a blocking finding — turning it into one is a severity-floor decision with
+its own failure modes and needs its own entry. No new fetching at finalize: the tally comes from
+outcomes the evidence lens already produced, so `_finalize` still performs no I/O and a resumed run
+reports the coverage its checkpoint carries. No change to `search.max_sources`, whose truncation is
+now visible as `not_attempted` rather than fixed.
 
 ## D-audition-probe-parity — the audition measures a critic in the extraction regime a run would pin it to
 

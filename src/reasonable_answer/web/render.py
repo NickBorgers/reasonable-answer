@@ -278,14 +278,16 @@ def render_index(
         else ""
     )
     # "Fetched and checked against what the report says they say" is the D-source-verification verified-sourcing
-    # posture (`search.verify_sources: true`): the cited pages are fetched and handed to the
-    # evidence lens. The shipped roster enables retrieval only and keeps verification off (D-run-date-grounding),
+    # posture (`search.verify_sources: true`): addressable cited pages up to the configured
+    # limit are fetched and handed to the evidence lens. The shipped roster enables retrieval
+    # only and keeps verification off (D-run-date-grounding),
     # and retrieval alone does not establish that a page supports the claim attached to it
     # (docs/convergence.md). So this claim is config-derived, unlike the static header tagline:
     # here `render_index` has the `Config` the tagline's element does not.
     sources_note = (
-        "Cited pages are fetched and checked against what the report says they say, which is "
-        "not a check that they are right."
+        "Addressable cited pages are fetched up to the source limit and checked by the evidence "
+        "lens against what the report says they say; some citations may remain unchecked, and "
+        "none of this checks that a page is right."
         if config.search.verify_sources
         else "Whether a cited page actually supports the claim attached to it is not checked."
     )
@@ -1608,6 +1610,9 @@ main {
 .rec-row { display: grid; grid-template-columns: 9rem 1fr; gap: .6rem; font-size: .9rem; }
 .rec-row dt { color: var(--dim); }
 .rec-row dd { margin: 0; }
+/* The source-review rows name what a count means ("Blocked, paywalled or unreadable"),
+   which does not fit the 9rem label column the other record rows use. */
+.coverage-grid .rec-row { grid-template-columns: minmax(9rem, 24rem) 1fr; }
 .reviewers { list-style: none; margin: 0 0 1.2rem; padding: 0; font-size: .9rem; }
 .reviewers li { padding: .12rem 0; }
 .reviewers .lens-name { display: inline-block; min-width: 8rem; color: var(--dim); }
