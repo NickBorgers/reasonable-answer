@@ -257,12 +257,23 @@ def test_an_unknown_provider_name_refuses_to_start(config, tmp_path, monkeypatch
 
 
 def test_the_call_ceiling_is_derived_from_the_run_s_own_shape(config):
-    """`max_sources * hard_cap` is the most distinct URLs a run could cite. Derived so
-    that raising `hard_cap` cannot silently start starving the tier at the old number."""
+    """Citations and writer-read candidates are the two structural consumers. Derived so
+    raising either budget cannot silently start starving the tier at the old number."""
     from reasonable_answer.graph import _extraction_call_ceiling
 
     assert _extraction_call_ceiling(config) == (
         config.search.max_sources * config.budgets.hard_cap
+    )
+
+    with_reading = config.model_copy(
+        update={
+            "search": config.search.model_copy(
+                update={"enabled": True, "read_sources": True}
+            )
+        }
+    )
+    assert _extraction_call_ceiling(with_reading) == (
+        config.search.max_sources * config.budgets.hard_cap + config.search.read_budget
     )
 
     pinned = config.model_copy(

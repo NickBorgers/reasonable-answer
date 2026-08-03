@@ -27,6 +27,10 @@ MAX_DISPUTE_GROUNDS = 400
 MAX_EVIDENCE_QUOTE = 400
 MAX_EVIDENCE_URL = 500
 MAX_DISPUTES = 10
+MAX_LOCATOR = 120
+MAX_SUPPORT_SPAN = 400
+MAX_SUPPORTED_CLAIM = 400
+MAX_SUPPORT_ENTRIES = 40
 
 
 class StructuralRef(BaseModel):
@@ -157,6 +161,46 @@ class AdjudicationRecord(BaseModel):
     verdict: AdjudicationVerdict
     method: AdjudicationMethod
     round: int
+
+
+class SupportEntry(BaseModel):
+    """One link in the traceability chain a writer that read its sources can emit
+    (D-writer-source-reads): citation id -> URL -> locator -> verbatim support span ->
+    supported claim.
+
+    Writer-authored and therefore untrusted, and bounded field by field like every
+    other model-authored text in this file. It is **audit-side only**: nothing here
+    reaches another model's context, becomes a defect, or is visible to the
+    orchestrator or the controller — see `support.check`, which is the only consumer.
+    """
+
+    model_config = ConfigDict(extra="forbid")
+
+    #: The marker as it appears in the report body — "1" for a claim cited [1].
+    citation_id: str = Field(min_length=1, max_length=MAX_CITATION_ID)
+    #: The source's URL, or the identifier (a DOI) where that is what was resolved.
+    url: str = Field(min_length=1, max_length=MAX_EVIDENCE_URL)
+    #: Where in the source the support sits: page, chapter, section, table. Optional
+    #: because a short web page genuinely has no locator, and inventing one would be
+    #: worse than omitting it — but a book cited with no locator is exactly the
+    #: bibliography-level provenance this field exists to expose.
+    locator: str | None = Field(default=None, max_length=MAX_LOCATOR)
+    #: Quoted from the source, verbatim. Mechanically checked against the body when
+    #: one was read.
+    support_span: str = Field(min_length=1, max_length=MAX_SUPPORT_SPAN)
+    #: Quoted from the report, verbatim. Checked against the report the same way.
+    claim: str = Field(min_length=1, max_length=MAX_SUPPORTED_CLAIM)
+
+
+class SupportManifest(BaseModel):
+    """The whole of one writer's traceability pass. An empty list is a valid answer —
+    a draft whose reads all failed has nothing to trace."""
+
+    model_config = ConfigDict(extra="forbid")
+
+    entries: list[SupportEntry] = Field(
+        default_factory=list, max_length=MAX_SUPPORT_ENTRIES
+    )
 
 
 class CleanRecord(BaseModel):
