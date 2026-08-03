@@ -45,6 +45,13 @@ review findings the way `D<n>` ids are.
 | QP11 | **Evidence-base freshness is checked mechanically and is never blocking.** See the marker line above and [§3](#3-refreshing-the-evidence-base). | this file | — |
 | QP12 | **Principles-as-spec drift is blocking, in both directions.** Behavior governed by QP1–QP10 changing without this file and `decisions.md` moving too — or a principle here weakening with no new fetchable evidence in the diff — is the `quality` reviewer's row-12 analogue. See [§4](#4-retiring-or-weakening-a-principle). | this file + every surface above | — |
 
+**Application — resumed-agent stall bounds (D-resume-stall-guard).** The resumed fixer remains under
+the unchanged outer agent timeout, while a 3-minute first-output deadline and a 10-minute
+between-output deadline add earlier bounds for silent attempts. Both idle deadlines route to the
+cold fixer rather than opening another resume loop, and the session quarantine prevents repeated
+attempts for the same recorded session. Together these preserve QP7's capped-loop requirement at
+the author-resume entry point without shortening the total budget of an active attempt.
+
 **Application — answer obligations (D-answer-obligations).** `incomplete_answer` is structured
 completeness output with a mechanical `major` floor under QP1. Its writer and critic prompt
 obligations change what each isolated role must assess, not what crosses contexts, so QP5's traffic

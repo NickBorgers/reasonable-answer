@@ -78,6 +78,116 @@ mark_incomplete() {
   printf '%s\n' "$1" > "$INCOMPLETE_SENTINEL_PATH"
 }
 
+# ── Stall guard: resume only ─────────────────────────────────────────────────
+#
+# The wedge this contains is not slowness, it is silence. Every observed hung resume
+# produced *zero* stream-json events and then died at the 25-minute deadline, so the whole
+# budget was spent proving something that was already knowable in the first minute — and
+# the cold fallback only started 25 minutes late (D-resume-stall-guard).
+#
+# The fix is not a shorter total budget: a resume that is genuinely working needs the same
+# time a cold fixer gets, and cutting the deadline to "long enough to notice a hang" would
+# kill working resumes mid-fix. What is diagnostic is *idleness*, so that is what is
+# measured — the output log's growth, which stream-json makes incremental.
+#
+# Two thresholds, because the two silences mean different things. Before the first byte the
+# CLI has not started a turn at all; that is the observed failure and seconds are already
+# abnormal, so the deadline is tight. After output has started, silence means a tool call
+# is running — a test suite, a dependency sync — and legitimately long, so the deadline is
+# generous. Both are far below the outer `timeout`, which stays as the backstop for a
+# process that is spinning noisily rather than sitting idle.
+STALL_FLAG_PATH="${OUTPUT_LOG_PATH%-output.log}-stalled.flag"
+rm -f "$STALL_FLAG_PATH"
+
+FIRST_OUTPUT_TIMEOUT="${AGENT_FIRST_OUTPUT_TIMEOUT:-180}"
+STALL_TIMEOUT="${AGENT_STALL_TIMEOUT:-600}"
+STALL_POLL="${AGENT_STALL_POLL:-5}"
+
+# Watches the log beside the running agent and kills it when it goes quiet for too long.
+# Writes the flag *before* killing, so the reason survives the exit code: a stall-kill
+# arrives as 143/137, which is otherwise indistinguishable from the outer deadline.
+watch_for_stall() {
+  local pid="$1"
+  local idle=0 last=0 size limit
+
+  while kill -0 "$pid" 2>/dev/null; do
+    sleep "$STALL_POLL"
+    size=$(wc -c < "$OUTPUT_LOG_PATH" 2>/dev/null || echo 0)
+    if [ "${size:-0}" -gt "$last" ]; then
+      last="$size"
+      idle=0
+      continue
+    fi
+
+    idle=$((idle + STALL_POLL))
+    limit="$STALL_TIMEOUT"
+    [ "$last" -eq 0 ] && limit="$FIRST_OUTPUT_TIMEOUT"
+    [ "$idle" -ge "$limit" ] || continue
+
+    if [ "$last" -eq 0 ]; then
+      printf 'no output at all within %ss — wedged before its first token\n' "$limit" \
+        > "$STALL_FLAG_PATH"
+    else
+      printf 'no output for %ss — stalled mid-run\n' "$limit" > "$STALL_FLAG_PATH"
+    fi
+    # TERM the `timeout` wrapper, which relays it to the CLI; escalate if it is ignored,
+    # for the same reason `timeout` itself carries --kill-after.
+    kill -TERM "$pid" 2>/dev/null || true
+    sleep 5
+    kill -KILL "$pid" 2>/dev/null || true
+    return 0
+  done
+}
+
+# Runs the agent command in "$@" and leaves `timeout`'s own exit status in `rc`.
+#
+# The non-resume path is deliberately byte-for-byte the old pipeline — reviewers, the cold
+# fixer, the resolver and the author all keep their existing behaviour, and none of them has
+# a fallback for a guard to hand off to. Only a resume gets the watchdog, and it needs the
+# CLI as a *tracked* child rather than the head of a pipeline, so the log is written through
+# a process substitution instead of `| tee`. `rc` is then `timeout`'s status directly, which
+# is the same value PIPESTATUS[0] carried before.
+run_agent() {
+  if [ "$RESUME" != "1" ]; then
+    set +e
+    "$@" < /dev/null 2>&1 | tee "$OUTPUT_LOG_PATH"
+    rc=${PIPESTATUS[0]}
+    set -e
+    return 0
+  fi
+
+  # The watchdog reads this file's size from its first tick; create it so an absent file
+  # is never confused with "no output yet".
+  : > "$OUTPUT_LOG_PATH"
+
+  local agent_pid watch_pid
+  set +e
+  "$@" < /dev/null > >(tee "$OUTPUT_LOG_PATH") 2>&1 &
+  agent_pid=$!
+  watch_for_stall "$agent_pid" &
+  watch_pid=$!
+  wait "$agent_pid"
+  rc=$?
+  set -e
+
+  kill "$watch_pid" 2>/dev/null || true
+  wait "$watch_pid" 2>/dev/null || true
+
+  # `wait` covers the agent, not the `tee` behind the process substitution, and bash does
+  # not reap process substitutions. Whatever tee has buffered but not yet written is the
+  # *tail* of the transcript — the last thing the CLI said before it stalled or died, which
+  # is exactly the part a hang is diagnosed from. Wait for the file to stop growing, briefly
+  # and boundedly: on a kill there is nothing in flight and this returns immediately.
+  local settle=0 prev=-1 now
+  while [ "$settle" -lt 20 ]; do
+    now=$(wc -c < "$OUTPUT_LOG_PATH" 2>/dev/null || echo 0)
+    [ "$now" = "$prev" ] && break
+    prev="$now"
+    settle=$((settle + 1))
+    sleep 0.1
+  done
+}
+
 # The model is named here, not just the agent: `agent` selects only a *family*, and which
 # checkpoint ran inside it is the thing a verdict has to be attributable to (D-ci-model-pinning).
 echo "run-in-container: ${REVIEW_ROLE:-agent} via ${CI_AGENT} on ${AGENT_MODEL}, timeout ${TIMEOUT}, resume=${RESUME}"
@@ -105,20 +215,16 @@ case "$CI_AGENT" in
     # flushes nothing, which is why a hung fixer left a 148-byte, transcript-less
     # artifact and could not be diagnosed. Streaming means even a killed run leaves a
     # partial log that shows where it stalled. `--verbose` is required alongside it.
-    # `set +e` so pipefail cannot abort before PIPESTATUS is read; rc is `timeout`'s
-    # status, not tee's, which is what makes 124/137 (deadline) distinct from a crash.
-    set +e
-    timeout --kill-after="$KILL_AFTER" "$TIMEOUT" claude -p \
+    # `run_agent` leaves `timeout`'s own status in rc — not tee's — which is what makes
+    # 124/137 (deadline) distinct from a crash, and adds the stall guard on a resume.
+    run_agent timeout --kill-after="$KILL_AFTER" "$TIMEOUT" claude -p \
       --dangerously-skip-permissions \
       --permission-mode=bypassPermissions \
       "${resume_args[@]}" \
       "${model_args[@]}" \
       --verbose \
       --output-format=stream-json \
-      "$PROMPT_BODY" \
-      < /dev/null 2>&1 | tee "$OUTPUT_LOG_PATH"
-    rc=${PIPESTATUS[0]}
-    set -e
+      "$PROMPT_BODY"
     ;;
   codex)
     # Codex does NOT honour OPENAI_BASE_URL. Left unconfigured it dials
@@ -141,25 +247,17 @@ EOF
 
     # `codex exec resume --last` picks the most recent rollout under the mounted
     # sessions directory — unambiguous for the same reason as claude's --continue.
-    # Same PIPESTATUS discipline as the claude branch: rc is `timeout`'s own status.
+    # Same rc discipline as the claude branch: rc is `timeout`'s own status.
     if [ "$RESUME" = "1" ]; then
-      set +e
-      timeout --kill-after="$KILL_AFTER" "$TIMEOUT" codex exec resume --last \
+      run_agent timeout --kill-after="$KILL_AFTER" "$TIMEOUT" codex exec resume --last \
         --dangerously-bypass-approvals-and-sandbox \
         "${model_args[@]}" \
-        "$PROMPT_BODY" \
-        < /dev/null 2>&1 | tee "$OUTPUT_LOG_PATH"
-      rc=${PIPESTATUS[0]}
-      set -e
+        "$PROMPT_BODY"
     else
-      set +e
-      timeout --kill-after="$KILL_AFTER" "$TIMEOUT" codex exec \
+      run_agent timeout --kill-after="$KILL_AFTER" "$TIMEOUT" codex exec \
         --dangerously-bypass-approvals-and-sandbox \
         "${model_args[@]}" \
-        "$PROMPT_BODY" \
-        < /dev/null 2>&1 | tee "$OUTPUT_LOG_PATH"
-      rc=${PIPESTATUS[0]}
-      set -e
+        "$PROMPT_BODY"
     fi
     ;;
   *)
@@ -169,6 +267,20 @@ EOF
 esac
 
 # ── Interpret the exit code ──────────────────────────────────────────────────
+# The stall guard is read first, and by its flag rather than by an exit code. Killing the
+# agent from outside `timeout` produces 143 (or 137 after the escalation), which says
+# nothing about *why* it died — 137 in particular is the same code the outer deadline's
+# --kill-after escalation produces. The flag is written before the kill, so it is the only
+# statement of cause that survives. It is only ever written on the resume path, so this
+# block cannot change any other role's behaviour.
+if [ -s "$STALL_FLAG_PATH" ]; then
+  STALL_REASON="$(tr -d '\n' < "$STALL_FLAG_PATH")"
+  echo "::warning::run-in-container: ${REVIEW_ROLE:-agent} resume stalled — ${STALL_REASON}"
+  mark_incomplete "stalled: ${STALL_REASON}"
+  echo "run-in-container: killed a stalled resume after far less than ${TIMEOUT}; exiting 0 so the cold fallback runs"
+  exit 0
+fi
+
 # A timeout is the failure this containment exists for: `timeout` exits 124 when it
 # sends SIGTERM at the deadline, and 137 when --kill-after escalates to SIGKILL because
 # the agent ignored SIGTERM. In resume mode a wedged session must hand control to the

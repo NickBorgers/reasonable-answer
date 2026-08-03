@@ -14,15 +14,19 @@ depends on:
   empty run are contained the same way (no sentinel; the missing result is the signal).
 - In **any non-resume mode** (cold fixer, reviewers, resolver, author) there is no
   fallback, so a timeout or a missing result stays fatal, exactly as before.
+- In resume mode a **silent** agent is killed on an idle deadline far short of the outer
+  one, so the fallback starts in the first minutes rather than the last (D-resume-stall-guard) — and an
+  agent that is quiet because it is working is not killed at all.
 
 The whole thing is offline: a fake `claude` on PATH stands in for the CLI, and
-`AGENT_TIMEOUT` lets the deadline be a couple of seconds instead of minutes. Nothing
-here touches the network or anything outside tmp_path.
+`AGENT_TIMEOUT` / `AGENT_FIRST_OUTPUT_TIMEOUT` let deadlines be seconds instead of
+minutes. Nothing here touches the network or anything outside tmp_path.
 """
 
 from __future__ import annotations
 
 import subprocess
+import time
 from pathlib import Path
 
 SCRIPT = (
@@ -38,6 +42,7 @@ SCRIPT = (
 RESULT_REL = ".review-output/fixer-result.json"
 OUTPUT_LOG_REL = ".review-output/fixer-output.log"
 SENTINEL_REL = ".review-output/fixer-incomplete.sentinel"
+STALL_FLAG_REL = ".review-output/fixer-stalled.flag"
 
 
 def _write_fake_claude(bin_dir: Path, body: str) -> None:
@@ -55,11 +60,17 @@ def _run(
     resume: bool,
     timeout: str = "2s",
     model: str | None = "claude-sonnet-5",
+    first_output: str | None = None,
+    stall: str | None = None,
 ) -> subprocess.CompletedProcess[str]:
     """Invoke run-in-container.sh against a fake `claude`, in an isolated tmp cwd.
 
     `model` mirrors the composite's now-mandatory `AGENT_MODEL`; pass None to exercise the
     caller that forgot to pin one (D-ci-model-pinning).
+
+    `first_output` / `stall` are the stall guard's two idle deadlines, in seconds. They are
+    left unset for every test that is not about the guard, so those keep exercising the
+    plain deadline path.
     """
     bin_dir = tmp_path / "bin"
     _write_fake_claude(bin_dir, claude_body)
@@ -78,9 +89,15 @@ def _run(
         "AGENT_TIMEOUT": timeout,
         "AGENT_KILL_AFTER": "1s",
         "AGENT_RESUME": "1" if resume else "0",
+        # A 1s tick keeps a deadline of a few seconds meaningful; production polls at 5s.
+        "AGENT_STALL_POLL": "1",
     }
     if model is not None:
         env["AGENT_MODEL"] = model
+    if first_output is not None:
+        env["AGENT_FIRST_OUTPUT_TIMEOUT"] = first_output
+    if stall is not None:
+        env["AGENT_STALL_TIMEOUT"] = stall
     return subprocess.run(
         ["bash", str(SCRIPT)],
         cwd=tmp_path,
@@ -145,6 +162,100 @@ def test_resume_clean_but_empty_is_contained(tmp_path: Path) -> None:
     assert r.returncode == 0, r.stderr
     assert (tmp_path / SENTINEL_REL).exists()
     assert not (tmp_path / RESULT_REL).exists()
+
+
+# ── the stall guard: a silent resume dies in seconds, not at the deadline ─────
+#
+# Containment made a hung resume survivable; it did not make it cheap. Every observed hang
+# emitted zero stream-json events and then sat until the 25-minute deadline, so the cold
+# fixer that does the actual work started 25 minutes late and the PR's fix cycle cost close
+# to an hour (D-resume-stall-guard). The guard measures idleness rather than shortening the
+# total budget, because a resume that is genuinely working needs the same time a cold fixer
+# gets. These pin both deadlines, and — more importantly — pin that a working agent is not
+# killed by either.
+
+# Never speaks, never returns: the observed wedge, and what the first-output deadline is for.
+SILENT_HANG = "exec sleep 60\n"
+# Speaks once, then wedges. The first-output deadline must not apply to this; the (longer)
+# mid-run deadline must.
+SPEAKS_THEN_HANGS = 'echo \'{"type":"system"}\'\nexec sleep 60\n'
+# Quiet for a while — a long tool call, e.g. a test suite — then finishes properly.
+QUIET_THEN_SUCCEEDS = (
+    "sleep 4\n"
+    'echo \'{"type":"result"}\'\n'
+    'mkdir -p "$(dirname "$RESULT_PATH")"; printf \'{"ok":true}\' > "$RESULT_PATH"\n'
+)
+
+
+def test_a_silent_resume_is_killed_long_before_the_deadline(tmp_path: Path) -> None:
+    started = time.monotonic()
+    r = _run(tmp_path, claude_body=SILENT_HANG, resume=True, timeout="60s", first_output="3")
+    elapsed = time.monotonic() - started
+
+    assert r.returncode == 0, r.stderr
+    assert (tmp_path / STALL_FLAG_REL).exists(), "the kill's cause must be recorded, not inferred"
+    assert "first token" in (tmp_path / STALL_FLAG_REL).read_text()
+    # The whole point: the cold fallback starts now rather than at the outer deadline.
+    assert elapsed < 30, f"the guard did not fire; the run took {elapsed:.1f}s of its 60s budget"
+    # And it still routes through the same containment the fallback reads.
+    assert (tmp_path / SENTINEL_REL).exists()
+    assert "stalled" in (tmp_path / SENTINEL_REL).read_text()
+
+
+def test_the_first_output_deadline_stops_applying_once_the_agent_speaks(tmp_path: Path) -> None:
+    """One byte of output moves the agent onto the generous deadline.
+
+    Without this, a single threshold would have to be either too tight for a long tool call
+    or too loose to catch the wedge, and the wedge is the case with evidence behind it.
+    """
+    started = time.monotonic()
+    r = _run(
+        tmp_path,
+        claude_body=SPEAKS_THEN_HANGS,
+        resume=True,
+        timeout="60s",
+        first_output="2",
+        stall="8",
+    )
+    elapsed = time.monotonic() - started
+
+    assert r.returncode == 0, r.stderr
+    assert "mid-run" in (tmp_path / STALL_FLAG_REL).read_text()
+    assert elapsed > 4, "the first-output deadline killed an agent that had already spoken"
+    # The transcript before the stall is what a hang is diagnosed from, so it must survive
+    # the kill rather than being lost in tee's buffer.
+    assert '{"type":"system"}' in (tmp_path / OUTPUT_LOG_REL).read_text()
+
+
+def test_a_quiet_but_working_resume_is_left_alone(tmp_path: Path) -> None:
+    r = _run(tmp_path, claude_body=QUIET_THEN_SUCCEEDS, resume=True, timeout="60s", first_output="15")
+    assert r.returncode == 0, r.stderr
+    assert (tmp_path / RESULT_REL).exists()
+    assert not (tmp_path / STALL_FLAG_REL).exists()
+    assert not (tmp_path / SENTINEL_REL).exists()
+
+
+def test_the_stall_guard_does_not_apply_outside_resume_mode(tmp_path: Path) -> None:
+    """Reviewers, the cold fixer, the resolver and the author keep their old behaviour.
+
+    None of them has a fallback to hand off to, so an idle-kill there would turn a slow
+    tool call into a failed job. The deadline they already had stays their only bound.
+    """
+    r = _run(tmp_path, claude_body=QUIET_THEN_SUCCEEDS, resume=False, timeout="60s", first_output="1")
+    assert r.returncode == 0, r.stderr
+    assert (tmp_path / RESULT_REL).exists()
+    assert not (tmp_path / STALL_FLAG_REL).exists()
+
+
+def test_a_stale_stall_flag_is_cleared_before_running(tmp_path: Path) -> None:
+    """Same hazard as the stale sentinel: .review-output is a mounted dir that outlives a
+    single attempt, and a leftover flag would report a fresh success as a stall."""
+    (tmp_path / ".review-output").mkdir(parents=True)
+    (tmp_path / STALL_FLAG_REL).write_text("stale\n")
+    r = _run(tmp_path, claude_body=SUCCEEDS, resume=True, timeout="30s")
+    assert r.returncode == 0, r.stderr
+    assert not (tmp_path / STALL_FLAG_REL).exists()
+    assert not (tmp_path / SENTINEL_REL).exists()
 
 
 # ── non-resume mode: no fallback exists, so failures stay fatal ───────────────
