@@ -246,13 +246,22 @@ def _clean(value: str | None, limit: int) -> str:
     return " ".join(text.split())[:limit]
 
 
-def make_tool_handler(client: BraveSearch) -> Callable[[str, str], str]:
+def make_tool_handler(
+    client: BraveSearch,
+    on_results: Callable[[list[SearchResult]], None] | None = None,
+) -> Callable[[str, str], str]:
     """Bind a search client into the (name, raw_arguments) -> result-text callback
     that :meth:`LLMClient.complete` drives.
 
     Every failure path returns *text describing the failure* rather than raising: a
     search that 429s or runs out of budget must not abort a half-written report, but
     the model has to be told, or it will read the silence as "nothing exists".
+
+    `on_results` is notified of every result set actually returned, before it is
+    rendered. It exists so the `read_source` allowlist (D-writer-source-reads) can be
+    exactly "the URLs this writer was offered" without this module knowing what a reader
+    is: a callback keeps `search -> reading` from becoming an import, and leaves the
+    search-only build byte-identical (the default is None, and nothing observes).
     """
 
     def handle(name: str, raw_arguments: str) -> str:
@@ -274,6 +283,8 @@ def make_tool_handler(client: BraveSearch) -> Callable[[str, str], str]:
             # logs. Length is enough to debug a malformed query.
             log.warning("search failed (query %d chars): %s", len(query), exc)
             return prompts.search_error_block(str(exc))
+        if on_results is not None:
+            on_results(results)
         log.info(
             "search returned %d results (query %d chars, %d/%d budget used)",
             len(results), len(query), client.budget.used, client.budget.limit,

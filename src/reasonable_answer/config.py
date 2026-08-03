@@ -194,6 +194,66 @@ class SearchConfig(BaseModel):
     #: characters of extracted text shown to the critic per page
     fetch_max_chars: int = Field(default=6_000, ge=500, le=100_000)
 
+    #: Give writers a `read_source` tool (D-writer-source-reads), so a claim can be
+    #: attached to a page the writer actually read rather than to a snippet. Bounded to
+    #: URLs a `web_search` in the same writer call returned — hence the hard dependency
+    #: on `enabled` below — and it egresses through the same fetch boundary
+    #: `verify_sources` uses, so the same network-layer caveat applies
+    #: (docs/ssrf-egress-isolation.md). Off by default like every retrieval affordance.
+    read_sources: bool = False
+    #: Whole-run cap on `read_source` calls. Sized well above `max_sources` because a
+    #: writer reads candidates, not only the sources it ends up citing, and every round
+    #: draws on the same pool.
+    read_budget: int = Field(default=24, ge=1, le=2_000)
+    #: Characters of page text shown to the writer per read. Raising this above
+    #: `fetch_max_chars` enlarges the shared fetch cache and nothing else: verification
+    #: is handed a `fetch.CappedFetcher` clipped back to `fetch_max_chars`, so what the
+    #: evidence lens sees — and what `dispute.adjudicate_mechanical` searches — stays a
+    #: function of `verify_sources` alone (D-writer-source-reads).
+    read_max_chars: int = Field(default=6_000, ge=500, le=100_000)
+    #: Whole-run cap on page text handed to writers. The per-read cap cannot see the
+    #: total, and a long context is a correctness problem here, not a cost one
+    #: (principle #6, docs/isolation.md).
+    read_char_budget: int = Field(default=200_000, ge=1_000, le=5_000_000)
+
+    #: Ask the writer, in a separate structured pass, where each cited claim's support
+    #: actually sits: citation id -> URL -> locator -> verbatim span -> claim. Checked
+    #: mechanically against the bodies that were read, and written to the run's audit
+    #: trail. Requires `read_sources`: with no body in hand there is nothing to check a
+    #: span against, and an unverifiable manifest is worse than none.
+    support_manifest: bool = False
+    #: Characters of already-read page text re-shown in the manifest pass. The pass is a
+    #: fresh call, so a writer asked to quote verbatim needs the pages in front of it —
+    #: but it needs them bounded, and it reaches no network to get them. The first
+    #: readable body is always shown whole, so the effective ceiling is this value plus
+    #: at most `read_max_chars` (D-writer-source-reads).
+    support_max_chars: int = Field(default=60_000, ge=1_000, le=1_000_000)
+
+    @model_validator(mode="after")
+    def _reading_requires_search(self) -> SearchConfig:
+        """Fail closed on the two combinations that cannot do what they claim.
+
+        `read_sources` without `enabled` offers a tool whose allowlist is always empty:
+        every call is refused, the writer spends its tool rounds discovering that, and
+        the run silently costs more to produce exactly what it produced before.
+        `support_manifest` without `read_sources` collects spans no body can check,
+        which is a manifest that looks like verification and is not — the failure mode
+        this whole feature exists to remove.
+        """
+        if self.read_sources and not self.enabled:
+            raise ValueError(
+                "fail closed: search.read_sources requires search.enabled — a writer "
+                "may only read URLs a web_search returned, so with search off the tool "
+                "can never resolve anything"
+            )
+        if self.support_manifest and not self.read_sources:
+            raise ValueError(
+                "fail closed: search.support_manifest requires search.read_sources — "
+                "support spans are checked against the bodies the writer read, and "
+                "with nothing read every entry would be recorded unchecked"
+            )
+        return self
+
 
 class PdfSourceConfig(BaseModel):
     """Reading a cited PDF, as opposed to reporting it as an unreadable content type.
@@ -243,8 +303,9 @@ class IdentifierTierConfig(BaseModel):
     #: what makes a denial worth acting on.
     providers: list[str] = Field(default_factory=lambda: ["crossref", "openalex"])
     timeout_seconds: float = Field(default=10.0, gt=0, le=60)
-    #: Whole-run call cap, enforced by `search.QueryBudget`. A twelve-source report
-    #: re-verified every round would otherwise scale with the round count.
+    #: Whole-run call cap, enforced by `search.QueryBudget`. Shared by verification and
+    #: writer reads because both use the run's resolver; the fetch cache prevents either
+    #: consumer from charging the same URL twice (D-writer-resolver-budget).
     max_calls_per_run: int = Field(default=60, ge=1, le=2000)
 
 
@@ -273,6 +334,9 @@ class OpenAccessTierConfig(BaseModel):
     #: local dev convenience; gitignored via *.token. Env var wins when both exist.
     core_token_file: str | None = "core.token"
     timeout_seconds: float = Field(default=10.0, gt=0, le=60)
+    #: Whole-run call cap shared by verification and writer reads, as for the identifier
+    #: tier. Candidate pages a writer reads can therefore consume this allowance before
+    #: the final report's citations are verified (D-writer-resolver-budget).
     max_calls_per_run: int = Field(default=40, ge=1, le=2000)
 
 
@@ -303,10 +367,11 @@ class ExtractionTierConfig(BaseModel):
     #: Rendering a page in a real browser is slower than fetching one.
     timeout_seconds: float = Field(default=45.0, gt=0, le=180)
     #: None means the structural ceiling: `search.max_sources * budgets.hard_cap`, the
-    #: most distinct URLs a run could ever cite. Derived rather than guessed so that
-    #: raising `hard_cap` does not silently start starving the tier. This is a guard
-    #: against a fetch loop, not a spending limit — the per-run cache already means a
-    #: URL is resolved once however many rounds and critics re-verify it.
+    #: most distinct URLs a run could ever cite, plus `search.read_budget` when writer
+    #: reading is on because candidate reads share the resolver. Derived rather than
+    #: guessed so raising either budget does not silently starve the tier. This is a guard
+    #: against a fetch loop, not a spending limit — the per-run cache already means a URL
+    #: is resolved once however many rounds and critics re-verify it.
     max_calls_per_run: int | None = Field(default=None, ge=1, le=5_000)
 
 
