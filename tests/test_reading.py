@@ -7,6 +7,8 @@ the writer distinguishably, and page text arrives fenced as untrusted data.
 
 from __future__ import annotations
 
+from types import SimpleNamespace
+
 import pytest
 
 from reasonable_answer import prompts, reading, search
@@ -56,6 +58,38 @@ def _session(*urls) -> reading.ReadSession:
     session = reading.ReadSession()
     session.record_results([search.SearchResult(title="T", url=u, description="D") for u in urls])
     return session
+
+
+def test_tools_remain_offered_until_both_retrieval_budgets_are_spent():
+    """Search and reading are independent affordances within one tool loop."""
+    from reasonable_answer.graph import _retrieval_kwargs
+
+    def offered(*, search_spent: bool, reads_spent: bool) -> bool:
+        query_budget = search.QueryBudget(1)
+        if search_spent:
+            assert query_budget.take()
+
+        class _Searcher:
+            budget = query_budget
+
+            def search(self, query, count=None):
+                return []
+
+        reader, _ = _reader({}, max_calls=1)
+        if reads_spent:
+            assert reader.budget.take_call()
+        runtime = SimpleNamespace(
+            search_enabled=True,
+            searcher=_Searcher(),
+            reader=reader,
+            config=SimpleNamespace(search=SimpleNamespace(max_tool_rounds=3)),
+        )
+        kwargs = _retrieval_kwargs(runtime, reading.ReadSession())
+        return kwargs["should_offer_tools"]()
+
+    assert offered(search_spent=True, reads_spent=False)
+    assert offered(search_spent=False, reads_spent=True)
+    assert not offered(search_spent=True, reads_spent=True)
 
 
 # ------------------------------------------------------- the allowlist is the search

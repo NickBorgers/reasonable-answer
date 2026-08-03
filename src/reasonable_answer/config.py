@@ -224,7 +224,9 @@ class SearchConfig(BaseModel):
     support_manifest: bool = False
     #: Characters of already-read page text re-shown in the manifest pass. The pass is a
     #: fresh call, so a writer asked to quote verbatim needs the pages in front of it —
-    #: but it needs them bounded, and it reaches no network to get them.
+    #: but it needs them bounded, and it reaches no network to get them. The first
+    #: readable body is always shown whole, so the effective ceiling is this value plus
+    #: at most `read_max_chars` (D-writer-source-reads).
     support_max_chars: int = Field(default=60_000, ge=1_000, le=1_000_000)
 
     @model_validator(mode="after")
@@ -301,8 +303,9 @@ class IdentifierTierConfig(BaseModel):
     #: what makes a denial worth acting on.
     providers: list[str] = Field(default_factory=lambda: ["crossref", "openalex"])
     timeout_seconds: float = Field(default=10.0, gt=0, le=60)
-    #: Whole-run call cap, enforced by `search.QueryBudget`. A twelve-source report
-    #: re-verified every round would otherwise scale with the round count.
+    #: Whole-run call cap, enforced by `search.QueryBudget`. Shared by verification and
+    #: writer reads because both use the run's resolver; the fetch cache prevents either
+    #: consumer from charging the same URL twice (D-writer-resolver-budget).
     max_calls_per_run: int = Field(default=60, ge=1, le=2000)
 
 
@@ -331,6 +334,9 @@ class OpenAccessTierConfig(BaseModel):
     #: local dev convenience; gitignored via *.token. Env var wins when both exist.
     core_token_file: str | None = "core.token"
     timeout_seconds: float = Field(default=10.0, gt=0, le=60)
+    #: Whole-run call cap shared by verification and writer reads, as for the identifier
+    #: tier. Candidate pages a writer reads can therefore consume this allowance before
+    #: the final report's citations are verified (D-writer-resolver-budget).
     max_calls_per_run: int = Field(default=40, ge=1, le=2000)
 
 
@@ -361,10 +367,11 @@ class ExtractionTierConfig(BaseModel):
     #: Rendering a page in a real browser is slower than fetching one.
     timeout_seconds: float = Field(default=45.0, gt=0, le=180)
     #: None means the structural ceiling: `search.max_sources * budgets.hard_cap`, the
-    #: most distinct URLs a run could ever cite. Derived rather than guessed so that
-    #: raising `hard_cap` does not silently start starving the tier. This is a guard
-    #: against a fetch loop, not a spending limit — the per-run cache already means a
-    #: URL is resolved once however many rounds and critics re-verify it.
+    #: most distinct URLs a run could ever cite, plus `search.read_budget` when writer
+    #: reading is on because candidate reads share the resolver. Derived rather than
+    #: guessed so raising either budget does not silently starve the tier. This is a guard
+    #: against a fetch loop, not a spending limit — the per-run cache already means a URL
+    #: is resolved once however many rounds and critics re-verify it.
     max_calls_per_run: int | None = Field(default=None, ge=1, le=5_000)
 
 

@@ -314,8 +314,10 @@ def _extraction_call_ceiling(config: Config) -> int:
     """The configured cap, or the structural one when none is set (D-paid-tier-page).
 
     `max_sources * hard_cap` is the most distinct URLs a run could ever cite — every
-    citation replaced in every round. Derived rather than written down so that raising
-    `budgets.hard_cap` cannot silently start starving the tier at the old number.
+    citation replaced in every round. Writer reads may additionally resolve up to
+    `read_budget` candidate URLs (D-writer-resolver-budget). Derived rather than written
+    down so raising either structural budget cannot silently starve the tier at the old
+    number.
 
     This bounds a *bug*, not a bill. `SourceFetcher` caches per URL for the whole run, so
     three critics re-verifying one '## Sources' list across eight rounds cost one call per
@@ -324,7 +326,8 @@ def _extraction_call_ceiling(config: Config) -> int:
     configured = config.sources.extraction.max_calls_per_run
     if configured is not None:
         return configured
-    return max(1, config.search.max_sources * config.budgets.hard_cap)
+    writer_reads = config.search.read_budget if config.search.read_sources else 0
+    return max(1, config.search.max_sources * config.budgets.hard_cap + writer_reads)
 
 
 def _cache_max_chars(config: Config) -> int:

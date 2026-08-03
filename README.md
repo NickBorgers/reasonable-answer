@@ -393,7 +393,9 @@ applies, which is why the shipped roster leaves it off.
 call asking that writer where each cited claim's support actually sits — citation id, URL, locator,
 verbatim span, claim. Every span is then checked *mechanically*, by string containment against the
 report and the page bodies that were read; `search.support_max_chars` (default 60,000) bounds how
-much already-read page text that pass is shown, and it reaches no network. The result is written to
+much already-read page text that pass is normally shown. The first readable body is always included
+whole, so the effective ceiling is `support_max_chars + read_max_chars`; the pass reaches no network.
+The result is written to
 `runs/<id>/support/rNN.json` with a verdict per entry, and closed-vocabulary verdict counts go to
 `events.jsonl`. It is **audit-side only**: no verdict becomes a defect, reaches a critic, or touches
 the stop decision — the writer authors the manifest, so a manifest that fed acceptance would be a

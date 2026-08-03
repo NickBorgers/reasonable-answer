@@ -4463,7 +4463,9 @@ only where one exists.
 
 **What did not change.** `search.verify_sources` still decides, alone, whether the evidence lens
 receives fetched pages, how much of a page it receives, and whether disputes can be adjudicated
-mechanically. `Runtime.fetcher` is still set only for verification, and it is a
+mechanically. Resolver call availability is the exception recorded by D-writer-resolver-budget:
+writer reads and verification share each enabled tier's whole-run call pool. `Runtime.fetcher` is
+still set only for verification, and it is a
 `fetch.CappedFetcher` view clipped to `fetch_max_chars` rather than the shared cache itself —
 "alone" has to cover the *volume* as well as the channel, because mechanical adjudication turns on
 string containment and a longer body upholds more disputes. The reader holds its own reference to
@@ -4520,6 +4522,11 @@ findings.
   thereby have acquired a path into the stop decision. The resolver ladder is built with the cache
   cap for the same reason, so a body reached through an open-access mirror is bounded like one
   fetched directly.
+* *Sharing one fetcher also shares resolver call budgets.* Writer reads are allowed to benefit from
+  the same identifier, open-access and extraction tiers as verification, so candidate reads can
+  spend calls before the evidence lens verifies the final citations. D-writer-resolver-budget
+  records that whole-run coupling and gives the derived extraction ceiling room for both consumers;
+  an operator-pinned cap remains an intentional tighter limit.
 * *A writer-authored manifest feeding acceptance would be a writer grading itself.* Closed by
   construction — no `Defect`, no `OrchestratorView` field, no controller input — and asserted:
   `tests/test_reading.py` checks the manifest enters no other model's context.
@@ -4545,6 +4552,32 @@ normalized-empty span is `span_not_found`. This mirrors the existing `triage._ve
 critic evidence, preserves every manifest entry, and changes no critic, orchestrator or controller
 input. `tests/test_support.py` fixes the markup-only and whitespace-only cases at the mechanical
 boundary.
+
+
+## D-writer-resolver-budget — writer reads and verification share resolver call pools
+
+**Finding.** D-writer-source-reads deliberately gave the reader and evidence lens one
+`SourceFetcher`: a page is downloaded once, both consumers see the same bytes, and a failed page is
+not retried into a different answer later in the run. The fetcher also owns one resolver ladder.
+Consequently, a writer read whose direct fetch yields no body spends the same identifier,
+open-access, and extraction call pools that later verification draws on. The original decision
+specified the shared character-cap consequence but left this call-budget consequence unstated, and
+the extraction tier's derived ceiling reserved calls only for cited URLs.
+
+**Decision.** Keep the shared resolver as part of the shared-fetcher contract. Writer reads are
+supposed to benefit from the configured resolver tiers; a separate resolver would duplicate
+provider calls and could let the writer and critic observe different outcomes for the same URL.
+The tier budgets are therefore whole-run pools across writer reads and verification. The derived
+extraction ceiling reserves `search.max_sources * budgets.hard_cap` calls for the maximum citation
+shape and, when `search.read_sources` is on, another `search.read_budget` calls for candidate pages.
+An explicit `sources.extraction.max_calls_per_run`, and the fixed identifier and open-access caps,
+remain operator-selected limits and may be lower than that structural demand.
+
+This does not let reading switch on the evidence channel: `search.verify_sources` still alone
+controls whether `Runtime.fetcher` exists and clips what the evidence path sees. It does mean that
+reading can change a later resolution outcome to `budget_exhausted`, which is recorded rather than
+misstated as a property of the source. Tests exercise the shared-pool transition and the enlarged
+derived extraction ceiling.
 
 
 ## Open items for a future round

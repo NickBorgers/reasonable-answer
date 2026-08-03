@@ -18,8 +18,9 @@ from pathlib import Path
 import pytest
 from fakes import http_sequence, http_stub, json_stub
 
-from reasonable_answer import prompts
+from reasonable_answer import prompts, reading
 from reasonable_answer.fetch import (
+    CappedFetcher,
     FetchedSource,
     Provider,
     ResolutionTier,
@@ -30,7 +31,7 @@ from reasonable_answer.fetch import (
 from reasonable_answer.resolve import SourceResolver, UnknownProvider, build
 from reasonable_answer.resolve import identifiers as ids
 from reasonable_answer.resolve.identifiers import IdKind
-from reasonable_answer.search import QueryBudget
+from reasonable_answer.search import QueryBudget, SearchResult
 from reasonable_answer.taxonomy import Lens
 
 FIXTURES = Path(__file__).parent / "fixtures" / "resolve"
@@ -660,6 +661,34 @@ def test_budget_exhaustion_says_so_instead_of_blaming_the_site():
 
     assert second.outcome is SourceOutcome.BUDGET_EXHAUSTED
     assert second.outcome is not SourceOutcome.BLOCKED
+
+
+def test_writer_reads_and_verification_draw_on_the_same_resolver_budget(monkeypatch):
+    """The shared fetcher also shares tier calls (D-writer-resolver-budget)."""
+    provider = FakeProvider(Provider.CROSSREF, record=RECORD)
+    source_fetcher = SourceFetcher(
+        resolver=resolver(metadata=[provider], metadata_budget=1)
+    )
+    monkeypatch.setattr(
+        source_fetcher,
+        "_fetch_uncached",
+        lambda url: FetchedSource(url=url, status=403, error="HTTP 403"),
+    )
+    reader = reading.SourceReader(
+        source_fetcher,
+        budget=reading.ReadBudget(max_calls=1, max_chars=6_000),
+        max_chars=6_000,
+    )
+    read_url = "https://doi.org/10.1038/writer-candidate"
+    session = reading.ReadSession()
+    session.record_results([SearchResult(title="candidate", url=read_url, description="d")])
+
+    assert reader.read(read_url, session).outcome is SourceOutcome.PAYWALLED
+
+    verification = CappedFetcher(source_fetcher, max_chars=6_000)
+    verified = verification.fetch("https://doi.org/10.1038/final-citation")
+    assert provider.metadata_calls == 1
+    assert verified.outcome is SourceOutcome.BUDGET_EXHAUSTED
 
 
 def test_budget_exhaustion_never_suppresses_a_mechanical_not_found():
