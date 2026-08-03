@@ -136,6 +136,24 @@ def test_a_mixed_bibliography_tallies_every_outcome_separately():
     assert observed.budget_exhausted == 0
 
 
+def test_a_budget_exhausted_entry_has_its_own_disposition():
+    report = "# T\n\n## Sources\n\n[1] https://example.org/deferred\n"
+    observed = fetch.coverage(
+        report,
+        {
+            "https://example.org/deferred": FetchedSource(
+                url="https://example.org/deferred",
+                error="resolution budget exhausted",
+                outcome=SourceOutcome.BUDGET_EXHAUSTED,
+            )
+        },
+    )
+
+    assert observed.attempted == 1
+    assert observed.budget_exhausted == 1
+    assert observed.blocked_or_unreadable == 0
+
+
 def test_existence_confirmed_counts_a_registry_hit_but_not_a_refusal():
     """D-existence-vs-body survives in the columns: a registry record proves the source
     exists without being its text, and a 403 proves nothing either way."""

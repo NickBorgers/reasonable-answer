@@ -140,8 +140,9 @@ hallucination rates of 17–33%, against vendor claims of being hallucination-fr
 **Source verification (D-source-verification), also opt-in and off by default — including in the shipped roster,
 which enables retrieval only (D-run-date-grounding): verification fetches model-chosen URLs, and the egress
 boundary that makes that safe is a deployment concern outside this repo
-(docs/ssrf-egress-isolation.md).** With `search.verify_sources: true`
-the pages the report cites are fetched and handed to the **evidence lens only**, as untrusted data.
+(docs/ssrf-egress-isolation.md).** With `search.verify_sources: true`, addressable cited pages are
+deduplicated and fetched up to `search.max_sources`, then handed to the **evidence lens only** as
+untrusted data; unaddressable and over-cap entries remain unchecked.
 Two categories change character:
 
 | category | verification off | verification on |
