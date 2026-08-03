@@ -94,6 +94,7 @@
  * @property {VerdictCategory} category   discriminator for finalize.yml messaging
  * @property {string[]} reasons           human-readable explanation lines
  * @property {string[]} unaddressed_blocker_ids
+ * @property {string[]} addressed_blocker_ids  namespaced ids the fixer cleared this cycle
  */
 
 /** Build a namespaced blocker id: "<role>/<id>". */
@@ -118,6 +119,7 @@ export function aggregate(reviewers, fixResult) {
       category: "pipeline_error",
       reasons: ["No reviewer artifacts present."],
       unaddressed_blocker_ids: [],
+      addressed_blocker_ids: [],
     };
   }
 
@@ -131,6 +133,7 @@ export function aggregate(reviewers, fixResult) {
         `Reviewer artifacts span multiple reviewed_sha values (${[...shas].join(", ")}); refusing to aggregate mixed epochs.`,
       ],
       unaddressed_blocker_ids: [],
+      addressed_blocker_ids: [],
     };
   }
   const reviewedSha = [...shas][0];
@@ -145,6 +148,7 @@ export function aggregate(reviewers, fixResult) {
         `Reviewer artifacts span multiple cycle values (${[...cycles].join(", ")}); refusing to aggregate mixed epochs.`,
       ],
       unaddressed_blocker_ids: [],
+      addressed_blocker_ids: [],
     };
   }
 
@@ -155,6 +159,7 @@ export function aggregate(reviewers, fixResult) {
       category: "pipeline_error",
       reasons: ["Missing fix-result artifact."],
       unaddressed_blocker_ids: [],
+      addressed_blocker_ids: [],
     };
   }
   if (fixResult.input_sha !== reviewedSha) {
@@ -165,6 +170,7 @@ export function aggregate(reviewers, fixResult) {
         `Fix-result input_sha (${fixResult.input_sha}) does not match reviewers' reviewed_sha (${reviewedSha}); refusing to aggregate mixed epochs.`,
       ],
       unaddressed_blocker_ids: [],
+      addressed_blocker_ids: [],
     };
   }
 
@@ -244,6 +250,7 @@ export function aggregate(reviewers, fixResult) {
       category: "reviewer_blockers",
       reasons,
       unaddressed_blocker_ids: unaddressed.map((u) => u.key),
+      addressed_blocker_ids: [...addressed],
     };
   }
 
@@ -257,6 +264,7 @@ export function aggregate(reviewers, fixResult) {
       category: "pipeline_error",
       reasons: ["All reviewers abstained; no applicable reviewer cleared this change."],
       unaddressed_blocker_ids: [],
+      addressed_blocker_ids: [],
     };
   }
 
@@ -264,5 +272,16 @@ export function aggregate(reviewers, fixResult) {
     `All ${nonAbstaining.length} non-abstaining reviewer(s) cleared; ` +
       `${addressed.size} blocker(s) addressed by fixer.`
   );
-  return { verdict: "GO", category: "go", reasons, unaddressed_blocker_ids: [] };
+  // `addressed_blocker_ids` travels with the verdict so the finalize comment can say which
+  // of the blockers it lists were already cleared. Without it the comment renders every
+  // blocker a reviewer raised under one "Blocking issues" heading, which on a GO reads as a
+  // contradiction — an approved PR with outstanding blockers — and buries the fixer's work
+  // in a parenthetical count (D-addressed-blockers-visible).
+  return {
+    verdict: "GO",
+    category: "go",
+    reasons,
+    unaddressed_blocker_ids: [],
+    addressed_blocker_ids: [...addressed],
+  };
 }
