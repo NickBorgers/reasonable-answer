@@ -22,6 +22,7 @@ from pathlib import Path
 import pytest
 
 from reasonable_answer.config import Config
+from reasonable_answer.taxonomy import Lens
 
 DEFAULT_ROSTER = Path("config/roster.default.yaml")
 DEPLOYMENT_ROSTER = Path("config/roster.yaml")
@@ -90,6 +91,52 @@ def test_the_deployment_roster_keeps_the_resolver_tiers_off(
     # `core` is keyed, so a default list containing it would turn "enable open access"
     # into "and also supply a CORE key or fail to boot".
     assert "core" not in deployment_config.sources.open_access.providers
+
+
+@pytest.mark.parametrize("path", [DEFAULT_ROSTER, DEPLOYMENT_ROSTER])
+def test_the_completeness_pool_excludes_the_unfit_critic(path: Path) -> None:
+    """D-completeness-pool-noise. `mistral-large-3` graded `unfit` on completeness —
+    2.61 material issues invented per sound control, spot-check confirmed — so it is not
+    in that pool on either shipped roster.
+
+    It is deliberately still a writer and a logic critic: its logic verdict is `marginal`
+    and that call waits on the post-fixture-repair re-audition. Asserting that here is
+    what keeps this from being read as "drop the model", which is a different change.
+    """
+    roster = Config.load(path).roster
+    completeness = roster.critics_for(Lens.COMPLETENESS)
+    assert "mistral-large-3" not in completeness
+    assert "mistral-large-3" in roster.critics_for(Lens.LOGIC)
+    assert "mistral-large-3" in roster.writers
+
+
+@pytest.mark.parametrize("path", [DEFAULT_ROSTER, DEPLOYMENT_ROSTER])
+def test_the_completeness_pool_leads_with_the_audited_fit_critic(path: Path) -> None:
+    """D-completeness-pool-noise, part 2: order is load-bearing, not cosmetic.
+
+    Whichever slot a pass reaches first is the one whose *silence* the run acts on, so
+    the measured-`fit` model (`gemma4`, 0.89 sensitivity / 0.17 invented per control)
+    holds position 1 and the `marginal` one (`glm-5.2`, 0.72) sits behind it.
+
+    Two families still staff the lens, which is what keeps a strong `accepted` reachable
+    — but family independence is a property of *resolved* identities (RA-017), so the
+    check that actually enforces it is `validate_roster_health` at startup, not this
+    test. What is pinned here is the composition and the ordering the decision chose.
+    """
+    completeness = Config.load(path).roster.critics_for(Lens.COMPLETENESS)
+    assert completeness == ["gemma4", "glm-5.2"]
+
+
+@pytest.mark.parametrize("path", [DEFAULT_ROSTER, DEPLOYMENT_ROSTER])
+def test_no_writer_sits_in_the_completeness_pool(path: Path) -> None:
+    """Author exclusion never shrinks this lens below the two models above.
+
+    The pool is at `review.depth`, with no spare, so a writer inside it would silently
+    drop the lens to a single critic on every round that writer authored — which is what
+    the dropped model did on R1 and every odd round.
+    """
+    roster = Config.load(path).roster
+    assert not set(roster.critics_for(Lens.COMPLETENESS)) & set(roster.writers)
 
 
 def test_the_two_rosters_name_the_same_models(

@@ -52,6 +52,13 @@ boundary is unchanged. The audition measures the added category through its exis
 metrics, deterministic verdict, and rubric-identity invalidation under QP8; no LLM grades prose into
 a control decision.
 
+**Application — measured completeness eligibility (D-completeness-pool-noise).** Removing an
+auditioned-unfit critic from one lens leaves completeness with Google and Zhipu witnesses. That is
+still cross-family under QP2 and can supply the two clean families required for strong acceptance,
+but it is the minimum compliant pool and has no spare critic after a failed depth-2 review. The
+fit-first order applies QP8's deterministic audition verdict to roster position; it does not treat
+an LLM's prose assessment as a control decision.
+
 ## 3. Refreshing the evidence base
 
 The literature moves; this register must not silently rot. There is deliberately **no

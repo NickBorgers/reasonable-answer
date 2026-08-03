@@ -52,10 +52,23 @@ roster:
       - glm-5.2            # critic-only: lowest hallucination of the open frontier
       - minimax-m3
       - gemma4
+    # Ordered fit-first (D-completeness-pool-noise). The 2026-08-02 audition measured this
+    # lens end to end: gemma4 `fit` (0.89 sensitivity, 0.17 invented material issues per
+    # sound control), glm-5.2 `marginal` (0.72), mistral-large-3 `unfit` (2.61 — the
+    # highest noise rate measured on any pair, and a 30-call spot check found none of the
+    # 13 material issues it filed on 5 of 6 controls were real defects). mistral-large-3
+    # is therefore not in this pool; it stays a writer and a logic critic, where its
+    # verdict is `marginal` and the roster call waits on the re-audition that follows the
+    # control-fixture repairs.
+    #
+    # Two families survive the drop (Google + Zhipu), so `validate_roster_health` still
+    # sees a lens that can reach a strong `accepted`; what is lost is mistral's Western
+    # corpus, which is the decorrelation cost of removing a critic that could not return
+    # an honest clean. The `fit` model leads because the pass reaches position 1 first,
+    # and it is that critic's silence the run acts on.
     completeness:
-      - mistral-large-3    # Western corpus — decorrelated priors from the CN-lab models
-      - glm-5.2
       - gemma4
+      - glm-5.2
 
 # Web search for writers. The code default is off; THIS deployment opts in so
 # completeness demands like "cite the specific budget vote" are satisfiable instead
@@ -226,12 +239,15 @@ disputes:
 # Run it deliberately with `ra audition`; `ra doctor` only reads the cache it leaves.
 #
 # NOTE on this roster specifically: `gemma4` is the same model as the gemma-4-31b-it
-# that flagged nothing in that run, now at position 3 on both evidence and completeness.
-# At `review.depth: 2` positions 1 and 2 read every draft and position 3 is still
-# unreachable on the first pass, so gemma4 is reached on the rule 8 confirmation top-up —
-# where a false clean raises cleared_count to 2, satisfies strong_met, and terminates the
-# run `accepted`. Audition it before trusting that lineup, and re-audition the whole
-# lineup before raising `review.depth` to 3, which would pull it into every pass.
+# that flagged nothing in that run. On completeness that worry is now answered by
+# measurement rather than by position — the 2026-08-02 audition graded it `fit` there —
+# which is why D-completeness-pool-noise moved it to position 1 of a two-model pool.
+# On evidence it is still at position 3 and still unmeasured: at `review.depth: 2`
+# positions 1 and 2 read every draft and position 3 is unreachable on the first pass, so
+# gemma4 is reached there on the rule 8 confirmation top-up — where a false clean raises
+# cleared_count to 2, satisfies strong_met, and terminates the run `accepted`. Audition
+# that slot before trusting it, and re-audition the whole lineup before raising
+# `review.depth` to 3, which would pull every position 3 into every pass.
 # Measuring is opt-in by being its own command (`ra audition`) — there is no `enabled`
 # flag here. Everything below only shapes what that command measures and what the two
 # cache readers, `ra doctor` and the `enforce` gate, make of the result.
