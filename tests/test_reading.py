@@ -924,17 +924,29 @@ def test_the_manifest_channel_is_off_unless_configured(tmp_path, identities, con
     assert not any(c.schema == "SupportManifest" for c in client.calls)
 
 
-def test_a_failed_manifest_pass_never_costs_the_run(tmp_path, identities):
+@pytest.mark.parametrize("failure", ["MalformedOutputError", "ModelCallError"])
+def test_a_failed_manifest_pass_never_costs_the_run(tmp_path, identities, failure):
     """Degrades to no manifest, in the manner of the dispute channel — and records only
-    the exception type, never a message built from the rejected report text."""
+    the exception type, never a message built from the rejected report text.
+
+    Both members of the caught tuple, separately. They arrive by different roads — a
+    provider that refused the call, and a reply that would not validate — and only the
+    second is built from the rejected input, so a handler that let one through would be
+    a different failure from one that let the other through. `tests/test_dispute.py`
+    covers the identical tuple the same way for `_elicit_disputes`.
+    """
     from reasonable_answer.graph import _generate
-    from reasonable_answer.llm import MalformedOutputError
+    from reasonable_answer.llm import MalformedOutputError, ModelCallError
 
     config = _manifest_config(tmp_path)
     reader, _ = _reader({READ_URL: _body(READ_URL, PAGE_TEXT)})
+    exc_type = {
+        "MalformedOutputError": MalformedOutputError,
+        "ModelCallError": ModelCallError,
+    }[failure]
 
     def _boom(alias, user):
-        raise MalformedOutputError("schema violation: 'The measured effect was 4.2 percent'")
+        raise exc_type("schema violation: 'The measured effect was 4.2 percent'")
 
     client = _manifest_client(identities, [])
     client.support_fn = _boom
@@ -947,7 +959,7 @@ def test_a_failed_manifest_pass_never_costs_the_run(tmp_path, identities):
     assert result["report"] == DRAFT.strip()
     assert list((rt.store.dir / "support").iterdir()) == []
     failed = _events(rt, "support_manifest_failed")
-    assert failed and failed[-1]["reason"] == "MalformedOutputError"
+    assert failed and failed[-1]["reason"] == failure
     assert "4.2 percent" not in (rt.store.dir / "events.jsonl").read_text()
 
 

@@ -197,9 +197,14 @@ is marked as coming from a mirror rather than the cited URL, and can never settl
 that URL, because a preprint is not the version of record.
 
 **Claim-level traceability is recorded, and is not a stop input (D-writer-source-reads).** With
-`search.support_manifest` on (which requires `search.read_sources`), each draft is followed by a
-separate structured pass in which its writer records `citation_id -> url -> locator ->
-support_span -> claim` for every claim resting on a page it read. `support.check` rules on each
+`search.support_manifest` on (which requires `search.read_sources`), a draft **whose writer read at
+least one page body** is followed by a separate structured pass in which that writer records
+`citation_id -> url -> locator -> support_span -> claim` for every claim resting on a page it read.
+A draft whose reads all failed — blocked, paywalled, not found, unreadable, or out of budget —
+produces no manifest at all rather than an empty one: with no body in hand the pass would collect
+spans nothing could check, which is the arrangement the `support_manifest` config guard refuses at
+load time. So "no manifest for this round" means *nothing was readable*, never *nothing was
+supported*. `support.check` rules on each
 entry mechanically — the claim must be in the report, and the span must be in the cited page's
 **own** body. Both must still contain text after quote normalization; markup-only or whitespace-only
 values cannot establish support merely because the empty string is a substring of every document.

@@ -844,11 +844,13 @@ def _record_support(
         # refuses at load time, arriving by another road.
         return
 
-    # A hard cap, not an approximate one: the length is added *before* the decision, so
-    # the pass cannot overshoot `support_max_chars` by a whole final page. The first
-    # body is always shown even if it alone exceeds the budget — a manifest pass with no
-    # source text in front of it would collect spans quoted from memory, which is the
-    # failure this whole check exists to catch.
+    # The length is weighed *before* the body is added, so no page after the first can
+    # carry the pass past `support_max_chars`. The one documented exception is the first
+    # readable body, which is shown whole however long it is — up to `read_max_chars`, so
+    # the ceiling on this pass is `support_max_chars + read_max_chars` rather than
+    # `support_max_chars`. Deliberate: a manifest pass with no source text in front of it
+    # would collect spans quoted from memory, which is the failure this check exists to
+    # catch, and showing nothing is worse than showing one page over budget.
     budget = rt.config.search.support_max_chars
     shown, used = [], 0
     for source in readable:

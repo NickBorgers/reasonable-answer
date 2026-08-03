@@ -375,6 +375,31 @@ a cited **PDF** rather than reporting it as an unreadable content type is a sepa
 `search.verify_sources` alone does not read PDF bodies. This fetches URLs a model chose, which is
 SSRF exposure by construction; it is expected to be constrained at the network layer, not here.
 
+**Writer source reads (optional, off by default).** `search.verify_sources` lets the system read a
+page to *check* a claim; it does not let it read one to *make* one. Set `search.read_sources: true`
+(which requires `search.enabled`) and writers also get a `read_source` tool, so a claim can be
+attached to text the writer actually read rather than to a one-line search snippet. A writer may
+open only a URL a `web_search` result **in that same writer call** returned — there is no
+arbitrary-URL reader, and a refused URL never reaches the network or costs budget. Three bounds
+apply per run: `search.read_budget` pages (default 24), `search.read_char_budget` characters of page
+text in total (default 200,000), and `search.read_max_chars` per page (default 6,000). Raising
+`read_max_chars` above `fetch_max_chars` widens what the *writer* sees and nothing else — the
+evidence lens and mechanical dispute adjudication stay clipped to `fetch_max_chars`. Reading
+egresses through the same fetch boundary `verify_sources` uses, so the same network-layer caveat
+applies, which is why the shipped roster leaves it off.
+
+**Support manifest (optional, off by default).** Set `search.support_manifest: true` (which requires
+`search.read_sources`) and each draft whose writer read a page is followed by one extra structured
+call asking that writer where each cited claim's support actually sits — citation id, URL, locator,
+verbatim span, claim. Every span is then checked *mechanically*, by string containment against the
+report and the page bodies that were read; `search.support_max_chars` (default 60,000) bounds how
+much already-read page text that pass is shown, and it reaches no network. The result is written to
+`runs/<id>/support/rNN.json` with a verdict per entry, and closed-vocabulary verdict counts go to
+`events.jsonl`. It is **audit-side only**: no verdict becomes a defect, reaches a critic, or touches
+the stop decision — the writer authors the manifest, so a manifest that fed acceptance would be a
+writer grading its own review. `supported` means the chain is traceable, not that the claim is true,
+and the output label is unchanged. See D-writer-source-reads.
+
 **Registry tiers (optional, off by default).** A direct fetch can fail for reasons that say nothing
 about whether the source is real: a paywalled journal or a newspaper refusing an automated client
 returns `blocked`, not proof of fabrication. Set `sources.enabled: true` together with

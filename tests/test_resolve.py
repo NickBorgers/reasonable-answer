@@ -969,8 +969,8 @@ def test_open_access_without_pdf_reading_says_what_it_will_cost(config):
 
 
 def test_tiers_without_anything_to_fetch_say_so(config):
-    """The tiers do nothing unless `search.verify_sources` is on, because nothing fetches
-    in the first place. Silence there is a config that looks enabled and is inert."""
+    """The tiers do nothing unless something fetches. Silence there is a config that
+    looks enabled and is inert."""
     from reasonable_answer.config import IdentifierTierConfig
     from reasonable_answer.graph import _build_resolver
 
@@ -978,7 +978,25 @@ def test_tiers_without_anything_to_fetch_say_so(config):
     warnings: list[str] = []
     _build_resolver(cfg, warnings)
 
-    assert any("verify_sources" in w for w in warnings)
+    assert any("nothing fetches" in w for w in warnings)
+
+
+def test_reading_alone_is_enough_to_make_the_tiers_run(config):
+    """`search.read_sources` builds a fetcher too (D-writer-source-reads), so the ladder
+    runs for a writer's reads with verification still off. Warning here would tell an
+    operator their tiers are inert when they are not — the predicate has to be "does
+    anything fetch", not "is verification on"."""
+    from reasonable_answer.config import IdentifierTierConfig, SearchConfig
+    from reasonable_answer.graph import _build_resolver
+
+    cfg = with_sources(config, identifiers=IdentifierTierConfig(enabled=True))
+    cfg = cfg.model_copy(
+        update={"search": SearchConfig(enabled=True, read_sources=True, verify_sources=False)}
+    )
+    warnings: list[str] = []
+    _build_resolver(cfg, warnings)
+
+    assert not any("nothing fetches" in w for w in warnings)
 
 
 # ------------------------------------------------------------ the two hard guards
