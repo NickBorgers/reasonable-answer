@@ -17,6 +17,7 @@ step makes, no network and no token.
 from __future__ import annotations
 
 import os
+import stat
 import subprocess
 from pathlib import Path
 
@@ -120,15 +121,17 @@ class Bench:
         return sha
 
     def install_trusted_driver_script(self) -> None:
-        """Populate `$GITHUB_WORKSPACE/main-checkout/scripts/merge_decisions.py` with the
-        real script, mirroring review-pipeline.yml's trusted `main-checkout` layout — the
-        registration under test points there, not at the untrusted `pr-head` working copy."""
-        dest = self.work.parent / "main-checkout" / "scripts" / "merge_decisions.py"
-        dest.parent.mkdir(parents=True, exist_ok=True)
-        dest.write_text(
-            (REPO_ROOT / "scripts" / "merge_decisions.py").read_text(encoding="utf-8"),
-            encoding="utf-8",
-        )
+        """Populate `$GITHUB_WORKSPACE/main-checkout/scripts/` with the real driver and the
+        registration helper that smoke-tests it, mirroring review-pipeline.yml's trusted
+        `main-checkout` layout — the registration under test runs from there, not from the
+        untrusted `pr-head` working copy. Omitting this stands in for a `main` older than
+        D-decisions-merge-driver, where the step registers nothing at all."""
+        scripts = self.work.parent / "main-checkout" / "scripts"
+        scripts.mkdir(parents=True, exist_ok=True)
+        for name in ("merge_decisions.py", "register_decisions_driver.sh"):
+            dest = scripts / name
+            dest.write_bytes((REPO_ROOT / "scripts" / name).read_bytes())
+            dest.chmod(dest.stat().st_mode | stat.S_IEXEC)
 
     def merge_main(self) -> str:
         _git(self.work, "fetch", "-q", "origin", "main")
@@ -437,6 +440,11 @@ def test_decisions_driver_resync_still_inherits(bench: Bench, script: str) -> No
     reviewed = bench.commit_on_pr(_DECISIONS_FILE, _decisions_with("D-pr-side"))
     bench.advance_main(_DECISIONS_FILE, _decisions_with("D-main-side"))
     head = bench.merge_main()
+    # The registration above stood in for review-fixer.yml resolving the merge, which happens
+    # in a different checkout entirely. `pr-head` is a fresh `actions/checkout` and carries no
+    # merge config of its own, so dropping it here is what makes the step's own registration
+    # -- the thing under test -- the only one that can affect the recreation below.
+    _git(bench.work, "config", "--unset", "merge.decisions-append.driver")
 
     result = bench.run(script, head, reviewed)
     assert result["inherit"] == "true", result["_log"]
@@ -461,6 +469,11 @@ def test_decisions_driver_resync_fails_closed_without_the_trusted_script(
     reviewed = bench.commit_on_pr(_DECISIONS_FILE, _decisions_with("D-pr-side"))
     bench.advance_main(_DECISIONS_FILE, _decisions_with("D-main-side"))
     head = bench.merge_main()
+    # The registration above stood in for review-fixer.yml resolving the merge, which happens
+    # in a different checkout entirely. `pr-head` is a fresh `actions/checkout` and carries no
+    # merge config of its own, so dropping it here is what makes the step's own registration
+    # -- the thing under test -- the only one that can affect the recreation below.
+    _git(bench.work, "config", "--unset", "merge.decisions-append.driver")
 
     result = bench.run(script, head, reviewed)
     assert result["inherit"] == "false"

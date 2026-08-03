@@ -4213,6 +4213,24 @@ nothing else, with at least one blank line separating the last one from the tail
 that isn't itself a decision section, a stray non-decision heading, or a section running straight
 into the marker with no blank line at all makes the driver decline, not merge something malformed.
 
+**Registration is conditional, because a broken driver is worse than none.** "Falls through to what
+an unconfigured merge would have done" is a property of the driver's *decisions*, not of its
+*existence*: a driver whose command cannot start does not fall through to anything. Git marks the
+path conflicted, leaves "ours" in the worktree with no conflict markers, and records the path as
+merely `UU` in the index — and `review-fixer.yml`'s commit step runs `git add -A` before its marker
+gate, which resolves that entry and leaves `git ls-files -u` and `git diff --check --cached` both
+empty. The gate passes and the pipeline pushes a merge that dropped every base-side change to a
+normative spec file, with no marker anywhere for a human or an agent to notice. The whole marker
+gate assumes an unresolved conflict leaves markers behind, and a non-executing driver is the one
+thing that breaks that assumption. So every site registers through
+`scripts/register_decisions_driver.sh`, which first runs the exact command git will run against a
+synthetic append (must merge it) and a synthetic same-section conflict (must decline it *and* leave
+markers), and registers only if both hold — clearing any earlier registration if they do not. A
+missing or broken driver therefore degrades to real plain-git behaviour rather than failing the job:
+a stuck PR buys no safety here, and the conflict is then resolved exactly as it was before this
+decision existed. The fixer's sync step carries the matching backstop, refusing to continue if a
+path routed to the driver comes back conflicted with no markers in it.
+
 Splitting the file into one-decision-per-file was considered and rejected: the single append-only log is
 load-bearing in `scripts/validate-decision-numbers.sh` and `tests/test_decision_numbers.py`'s
 whole-file duplicate scan, `tests/test_reviewer_prompt_ranges.py`'s membership check, several CI

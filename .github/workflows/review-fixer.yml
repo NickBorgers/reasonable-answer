@@ -186,13 +186,25 @@ jobs:
           # .gitattributes assigns the driver name; this defines what it runs — local to this
           # checkout, same as the identity above, since cloning does not carry git config over.
           #
-          # Points at the trusted `main` checkout ($GITHUB_WORKSPACE, not $PR_WORKSPACE): the
+          # Runs from the trusted `main` checkout ($GITHUB_WORKSPACE, not $PR_WORKSPACE): the
           # driver command is executed by git during the merge below, in a job carrying
           # WORKFLOW_PAT, and $PR_WORKSPACE is a contributor-controlled checkout. Resolving the
           # script there would let a PR that edits scripts/merge_decisions.py run its own code
           # in this credentialed context before any reviewer has read a line of it.
-          git config merge.decisions-append.driver \
-            "python3 ${GITHUB_WORKSPACE}/scripts/merge_decisions.py %O %A %B"
+          #
+          # The helper smoke-tests the driver before registering it, and registers nothing if
+          # that fails: a driver that cannot start leaves a conflicted path with no markers,
+          # which the commit step's marker gate cannot see. See the script's own header.
+          #
+          # Absent from the trusted checkout — an older `main`, including every run before
+          # this decision merged — nothing is registered and the merge is the plain-git one
+          # this step has always done. Failing here instead would only strand the PR.
+          REGISTER_DRIVER="${GITHUB_WORKSPACE}/scripts/register_decisions_driver.sh"
+          if [ -x "${REGISTER_DRIVER}" ]; then
+            "${REGISTER_DRIVER}" "${GITHUB_WORKSPACE}"
+          else
+            echo "::warning::${REGISTER_DRIVER} is not present in the trusted checkout; docs/decisions.md merges as it did before D-decisions-merge-driver"
+          fi
 
           # Deliberately not a shallow fetch. A branch further behind than the depth would
           # get a truncated history and a merge base that is not the real one.
@@ -217,6 +229,31 @@ jobs:
             # assembled from an --env-file: a newline in a path would inject arbitrary
             # variables into the container, and a comma would corrupt a delimited list.
             git diff --name-only --diff-filter=U > "$CONFLICT_LIST"
+
+            # A path routed to a custom merge driver must come back with real conflict
+            # markers if it conflicted at all. A driver that ran but wrote nothing leaves
+            # "ours" in the worktree, `UU` in the index, and nothing for the agent to see;
+            # the commit step's `git add -A` would then stage that as resolved, its marker
+            # gate would find nothing to complain about, and the pipeline would push a merge
+            # that silently dropped every base-side change to a normative spec file. The
+            # registration helper proves the driver works before registering it at all, so
+            # reaching this is a should-never-happen — which is exactly when failing beats
+            # handing an agent a tree whose conflict is invisible to it. A path that is
+            # conflicted because one side deleted it has no markers legitimately and no file
+            # to read them from, so it is not caught here.
+            while IFS= read -r conflicted; do
+              [ -n "$conflicted" ] || continue
+              [ -f "$conflicted" ] || continue
+              case "$(git check-attr merge -- "$conflicted")" in
+                *": merge: decisions-append") ;;
+                *) continue ;;
+              esac
+              if ! grep -q '^<<<<<<< ' "$conflicted"; then
+                echo "::error::${conflicted} is conflicted but carries no conflict markers: the merge driver neither resolved it nor fell back to git. Refusing to continue — a later 'git add -A' would stage this as resolved and silently drop the base-side changes."
+                git merge --abort
+                exit 1
+              fi
+            done < "$CONFLICT_LIST"
 
             # Resolving these means an agent editing files, and on the sync-only path no
             # reviewer guard has cleared this SHA — PR Validation may be absent or red and
@@ -695,12 +732,14 @@ jobs:
           if [ "${MERGE_STATE}" != "none" ]; then
             # Same registration as the primary sync step, defensively repeated: this step
             # replays that merge from a hard reset and must not depend on the earlier
-            # step's .git/config surviving unchanged. Points at $GITHUB_WORKSPACE (the
-            # trusted `main` checkout), not $PR_DIR: `-C` only changes where the config is
-            # written, not the working directory the driver command later runs from, so a
-            # relative path here would still resolve against the untrusted PR checkout.
-            git -C "${PR_DIR}" config merge.decisions-append.driver \
-              "python3 ${GITHUB_WORKSPACE}/scripts/merge_decisions.py %O %A %B"
+            # step's .git/config surviving unchanged. Runs from $GITHUB_WORKSPACE (the
+            # trusted `main` checkout), not $PR_DIR: the driver command git later runs
+            # resolves against the merging repo's worktree top, so a driver taken from
+            # $PR_DIR would be the untrusted PR checkout's copy.
+            REGISTER_DRIVER="${GITHUB_WORKSPACE}/scripts/register_decisions_driver.sh"
+            if [ -x "${REGISTER_DRIVER}" ]; then
+              "${REGISTER_DRIVER}" "${GITHUB_WORKSPACE}" "${PR_DIR}"
+            fi
 
             REPLAYED=conflicts
             if git -C "${PR_DIR}" merge --no-commit --no-ff "origin/${BASE_REF}"; then

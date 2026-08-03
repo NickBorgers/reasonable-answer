@@ -361,6 +361,16 @@ section, an edited Open-items list, a genuine same-slug collision — still fall
 hand resolution nobody has checked, and is reviewed exactly as before; every other file's
 conflicts are unaffected.
 
+The driver is registered by `scripts/register_decisions_driver.sh`, which smoke-tests it
+first and registers nothing if that fails. This is not belt-and-braces: a merge driver whose
+command cannot start does **not** degrade to the plain-git behaviour. Git marks the path
+conflicted but leaves "ours" in the worktree with no conflict markers at all, and the commit
+step's `git add -A` then stages that as resolved — the marker gate below sees nothing to
+object to and the pipeline pushes a merge that silently dropped every base-side change to a
+normative spec file. An unregistered driver is the real no-driver baseline; a broken
+registered one is a hole in the marker gate. The sync step additionally refuses outright if
+a path routed to the driver comes back conflicted with no markers in it.
+
 It costs a cycle only on a PR that actually conflicted with its base in a shape nothing
 resolves deterministically. The conflicted-path list travels in a file
 rather than an environment variable: paths are contributor-controlled, and the agent's
