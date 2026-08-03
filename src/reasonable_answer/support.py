@@ -121,7 +121,8 @@ def _normalize_url(url: str) -> str:
 def _verdict(
     entry: SupportEntry, normalized_report: str, bodies: Mapping[str, FetchedSource]
 ) -> SupportVerdict:
-    if _normalize(entry.claim) not in normalized_report:
+    claim = _normalize(entry.claim)
+    if not claim or claim not in normalized_report:
         return "claim_not_in_report"
 
     source = bodies.get(_normalize_url(entry.url))
@@ -131,7 +132,8 @@ def _verdict(
         return "body_not_read"
     if source.body_source_url is not None:
         return "different_document"
-    if _normalize(entry.support_span) not in _normalize(source.text):
+    span = _normalize(entry.support_span)
+    if not span or span not in _normalize(source.text):
         return "span_not_found"
     return VERIFIED
 

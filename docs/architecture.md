@@ -260,7 +260,9 @@ the wire are bounded already by `fetch_max_bytes`.
 `search.support_manifest` then adds a separate structured pass asking the same writer for
 `citation_id -> url -> locator -> support_span -> claim`, one entry per claim resting on a page it
 read. `support.check` rules on each entry by string containment against the report and the bodies
-that were read, using triage's quote normalization; it never guesses where no body exists, and
+that were read, using triage's quote normalization. A normalized claim or span must still contain
+quotable text: markup-only or whitespace-only strings cannot satisfy containment. The check never
+guesses where no body exists, and
 distinguishes `body_not_read` (an abstract, a paywall) and `different_document` (an open-access
 copy) from `span_not_found`. The result is **audit-side**: `support/rNN.json` holds the entries and
 their verdicts, `events.jsonl` holds counts only, and nothing reaches a critic, the defect list,

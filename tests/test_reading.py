@@ -745,6 +745,35 @@ def _manifest_client(identities, entries):
     )
 
 
+def _multi_source_manifest_client(identities, entries, *urls):
+    from fakes import FakeClient
+
+    from reasonable_answer.schemas import CritiqueOutput, SupportManifest
+
+    return FakeClient(
+        identities=identities,
+        critique_fn=lambda a, u: CritiqueOutput(issues=[]),
+        report_fn=lambda n: DRAFT,
+        tool_script=[
+            ("web_search", '{"query": "probe"}'),
+            *[("read_source", f'{{"url": "{url}"}}') for url in urls],
+        ],
+        support_fn=lambda a, u: SupportManifest(entries=entries),
+    )
+
+
+class _MultiSearcher:
+    def __init__(self, *urls):
+        self.budget = search.QueryBudget(10)
+        self._urls = urls
+
+    def search(self, query, count=None):
+        return [
+            search.SearchResult(title="A page", url=url, description="D")
+            for url in self._urls
+        ]
+
+
 def _entry(**kw):
     from reasonable_answer.schemas import SupportEntry
 
@@ -791,6 +820,65 @@ def test_the_manifest_is_written_to_the_run_and_tallied_in_the_event_log(
     # Counts only in the event log: the spans and the URL live in `support/`, which a
     # content purge removes and events.jsonl survives (RA-016).
     assert "4.2 percent" not in (rt.store.dir / "events.jsonl").read_text()
+
+
+def test_the_manifest_body_budget_stops_before_a_second_page(tmp_path, identities):
+    from reasonable_answer.graph import _generate
+
+    first_url = "https://example.org/first"
+    second_url = "https://example.org/second"
+    first_text = "first-page-marker " + "a" * 682
+    second_text = "second-page-marker " + "b" * 382
+    config = _config(
+        tmp_path,
+        enabled=True,
+        read_sources=True,
+        support_manifest=True,
+        support_max_chars=1_000,
+    )
+    reader, _ = _reader(
+        {first_url: _body(first_url, first_text), second_url: _body(second_url, second_text)}
+    )
+    client = _multi_source_manifest_client(identities, [], first_url, second_url)
+    rt, _ = _graph_runtime(
+        tmp_path,
+        identities,
+        config,
+        searcher=_MultiSearcher(first_url, second_url),
+        reader=reader,
+        client=client,
+    )
+
+    _generate({"question": "q?", "round": 0}, rt)
+
+    prompt = next(call.user for call in client.calls if call.schema == "SupportManifest")
+    assert "first-page-marker" in prompt
+    assert "second-page-marker" not in prompt
+    assert _events(rt, "support_manifest")[-1]["bodies_shown"] == 1
+
+
+def test_the_manifest_shows_one_oversized_first_page_in_full(tmp_path, identities):
+    from reasonable_answer.graph import _generate
+
+    page_text = "oversized-page-marker " + "x" * 1_180
+    config = _config(
+        tmp_path,
+        enabled=True,
+        read_sources=True,
+        support_manifest=True,
+        support_max_chars=1_000,
+    )
+    reader, _ = _reader({READ_URL: _body(READ_URL, page_text)})
+    client = _manifest_client(identities, [])
+    rt, _ = _graph_runtime(
+        tmp_path, identities, config, searcher=_Searcher(), reader=reader, client=client
+    )
+
+    _generate({"question": "q?", "round": 0}, rt)
+
+    prompt = next(call.user for call in client.calls if call.schema == "SupportManifest")
+    assert page_text in prompt
+    assert _events(rt, "support_manifest")[-1]["bodies_shown"] == 1
 
 
 def test_a_span_the_page_does_not_contain_is_recorded_as_unfound(tmp_path, identities):
@@ -876,4 +964,3 @@ def test_the_manifest_never_enters_another_model_context(tmp_path, identities):
             continue
         assert "support_span" not in call.user
         assert "p. 4" not in call.user
-

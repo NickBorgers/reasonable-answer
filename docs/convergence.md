@@ -200,10 +200,12 @@ that URL, because a preprint is not the version of record.
 separate structured pass in which its writer records `citation_id -> url -> locator ->
 support_span -> claim` for every claim resting on a page it read. `support.check` rules on each
 entry mechanically — the claim must be in the report, and the span must be in the cited page's
-**own** body — and distinguishes "checked and false" (`span_not_found`) from the three ways an
-entry is simply not checkable: no body was read (`body_not_read`, which covers an abstract and a
-paywall), the body came from an open-access copy (`different_document`), or the writer never opened
-the source (`not_retrieved`).
+**own** body. Both must still contain text after quote normalization; markup-only or whitespace-only
+values cannot establish support merely because the empty string is a substring of every document.
+The check distinguishes "checked and false" (`span_not_found`) from the three ways an entry is
+simply not checkable: no body was read (`body_not_read`, which covers an abstract and a paywall),
+the body came from an open-access copy (`different_document`), or the writer never opened the
+source (`not_retrieved`).
 
 **None of this reaches the controller.** No verdict becomes a `Defect`, no count appears on
 `OrchestratorView`, and no rule in the table below reads any of it: the manifest goes to

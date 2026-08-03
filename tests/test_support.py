@@ -14,6 +14,7 @@ import pytest
 from reasonable_answer import support
 from reasonable_answer.fetch import FetchedSource, SourceMetadata, SourceOutcome
 from reasonable_answer.schemas import SupportEntry, SupportManifest
+from reasonable_answer.store import RunStore, purge
 
 REPORT = (
     "## Conclusion\n\nThe measured effect was 4.2 percent, which is small. [1]\n\n"
@@ -62,6 +63,15 @@ def test_the_check_survives_reformatting_but_not_invention():
     assert _check(_entry(support_span="the measured effect was 9.9 percent")).verdict == (
         "span_not_found"
     )
+
+
+@pytest.mark.parametrize("support_span", ["*", "``", "   "])
+def test_a_span_that_normalizes_to_nothing_cannot_be_supported(support_span):
+    assert _check(_entry(support_span=support_span)).verdict == "span_not_found"
+
+
+def test_a_claim_that_normalizes_to_nothing_points_at_nothing():
+    assert _check(_entry(claim="*")).verdict == "claim_not_in_report"
 
 
 def test_a_claim_that_is_not_in_the_report_points_at_nothing():
@@ -177,6 +187,17 @@ def test_the_record_carries_every_entry_with_its_verdict():
     assert written[0]["locator"] == "p. 4, table 2"
     # Serializable as-is: the store writes this straight to `support/rNN.json`.
     json.dumps(written)
+
+
+def test_support_content_lives_in_a_purgeable_dir(tmp_path):
+    store = RunStore(tmp_path, "run-support")
+    store.support(1, {"entries": [{"support_span": "quoted page text"}]})
+    store.event("support_manifest", entries=1)
+
+    purge(tmp_path, "run-support", content_only=True)
+
+    assert not list((store.dir / "support").iterdir())
+    assert (store.dir / "events.jsonl").exists()
 
 
 @pytest.mark.parametrize(

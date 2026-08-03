@@ -4266,11 +4266,11 @@ what to claim from exactly that. Bodies were fetched only afterwards, and only f
 lens (D-source-verification) — which is to say the system could read a page to *check* a claim
 and could not read one to *make* it.
 
-Three consequences, all visible in `run-c4c0e64b4128`. Broad books and tertiary pages appeared
-in `## Sources` at bibliography level, with no page, chapter or section locator, because a
-snippet cannot tell you where in a book the support is. Some sources were attached to claims
-narrower than the exposed provenance would license. And nothing downstream could tell the
-difference: a snippet-sourced citation and a read-and-quoted one are the same line of markdown.
+The originating issue identified the resulting traceability gap: a snippet does not expose a
+page, chapter or section locator, does not establish that a narrow claim occurs in the cited
+source, and leaves snippet-sourced and read-and-quoted citations looking identical in the report.
+The private run that motivated the issue is design context, not public evidence for a general
+claim.
 
 **Decision.** Writers get a second, bounded tool — `read_source` — and, where configured, are
 asked afterwards to record where each cited claim's support actually sits.
@@ -4291,8 +4291,9 @@ reaches the fetch boundary and costs no budget — otherwise a writer could exha
 reads on addresses it was never offered and arrive at the real ones with nothing to spend.
 
 *Bounded three ways.* `search.read_budget` caps reads per run; `search.read_char_budget` caps
-the total page text handed to writers, because a per-page cap cannot see the total and a long
-context is a correctness problem here rather than a cost one (principle #6);
+the total page text handed to writers, because a per-page cap cannot see the total and retrieval
+degrades when relevant information is buried in long context
+([Liu et al. 2023](https://arxiv.org/abs/2307.03172); principle #6);
 `search.read_max_chars` caps one page. Bytes off the wire were already capped by
 `search.fetch_max_bytes` inside the fetcher. The character budget truncates rather than refusing
 — a page that runs into the last of the budget is still worth its first few thousand characters
@@ -4319,7 +4320,9 @@ argument D-source-verification makes for the evidence critic. See docs/isolation
 for `citation_id -> url -> locator -> support_span -> claim`, one entry per claim that rests on
 a page it read. `support.check` then rules on each entry **mechanically**, by string containment
 against text this run holds — `triage._normalize`, so reformatting does not decide a verdict and
-invention still does.
+invention still does. A claim or support span that normalizes to no text fails before containment;
+otherwise markup-only strings would exploit the fact that the empty string is a substring of every
+report and page.
 
 Six verdicts, and three of them exist to stop "unchecked" being read as "unsupported":
 
@@ -4430,6 +4433,22 @@ findings.
 * *Manifest spans and URLs in `events.jsonl` would outlive a content purge.* The manifest goes to
   `support/`, a `CONTENT_DIRS` entry; the event carries counts and closed-vocabulary verdicts only
   (RA-016).
+
+
+## D-support-normalized-text — normalized-empty text cannot establish support
+
+**Finding.** `SupportEntry` bounds the writer's raw `claim` and `support_span`, but quote
+normalization intentionally removes markdown punctuation and whitespace. A raw value such as `*`
+or a pair of backticks therefore satisfies the schema while normalizing to the empty string, and Python considers
+the empty string a substring of every report and source body. The support manifest could record
+`supported` without establishing any quoted text.
+
+**Decision.** `support.check` normalizes each claim and span once and requires the normalized value
+to be non-empty before testing containment. A normalized-empty claim is `claim_not_in_report`; a
+normalized-empty span is `span_not_found`. This mirrors the existing `triage._verbatim` rule for
+critic evidence, preserves every manifest entry, and changes no critic, orchestrator or controller
+input. `tests/test_support.py` fixes the markup-only and whitespace-only cases at the mechanical
+boundary.
 
 
 ## Open items for a future round
