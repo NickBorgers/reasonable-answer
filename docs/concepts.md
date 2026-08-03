@@ -215,6 +215,19 @@ it — each one, again, a guard against a known LLM failure mode:
   built on retrieval still measured hallucination rates of 17–33%
   ([Magesh et al. 2024](https://arxiv.org/abs/2405.20362)), which is why the output is labelled
   *not fact-checked* no matter how many switches are on.
+- **Reading the page, not just the snippet.** Search fixes *where* a citation came from; it does
+  not fix what the writer knew when it chose the claim, because a result is a title, a URL and one
+  line. `search.read_sources` gives writers a `read_source` tool bounded to URLs their own search
+  returned in the same call, so a claim can rest on text they read — with per-run caps on pages
+  (`search.read_budget`) and on characters (`search.read_char_budget`, `search.read_max_chars`).
+  Page bodies are third-party text, so they arrive fenced as untrusted data like every other input.
+- **Recording where the support actually is.** `search.support_manifest` then asks the writer, in a
+  separate pass, to name `citation id -> URL -> locator -> verbatim span -> claim` for each cited
+  claim, and checks every span by string containment against the page it names. It exists to expose
+  bibliography-level provenance — a whole book attached to a narrow claim — which no support tally
+  can show, so locators are counted separately. It is deliberately **audit-side**: the writer
+  authors the manifest, so letting it feed acceptance would be a writer grading its own review.
+  Both switches are off in the shipped config for the same egress reason as verification.
 - **Date grounding.** Every prompt carries the run's actual date, because a model's sense of
   "now" is frozen at its training cutoff — without this, critics have flagged legitimate current
   citations as impossible future-dated fabrications.

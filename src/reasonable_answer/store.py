@@ -24,7 +24,7 @@ from pydantic import BaseModel
 #: (D-question-refinement) has to live here rather than as a root-level `refinement.json` because `purge`
 #: (below) only sweeps directories on a content-only purge -- a root file would silently
 #: survive it and outlive the reports/critiques it was meant to retire alongside.
-CONTENT_DIRS = ("reports", "critiques", "disputes", "refinements")
+CONTENT_DIRS = ("reports", "critiques", "disputes", "refinements", "support")
 
 #: A run id becomes a filesystem path and, via `purge`, an rmtree target. Anything
 #: outside this alphabet — separators, `..`, absolute paths — is rejected outright.
@@ -137,6 +137,18 @@ class RunStore:
         `purge --content-only` (D-writer-disputes)."""
         name = f"r{round_no:02d}-{sequence:02d}.json"
         self._write(Path("disputes") / name, json.dumps(payload, indent=2, default=str))
+
+    def support(self, round_no: int, payload: dict[str, Any]) -> None:
+        """The support manifest for one draft (D-writer-source-reads).
+
+        Every field of it is content: spans quoted from the report and from third-party
+        pages, plus the URLs they came from. So it lives in a purgeable content dir and
+        never in events.jsonl, which survives `purge --content-only` and carries only
+        the closed-vocabulary verdict counts (RA-016) — exactly the split `dispute`
+        above makes for the same reason.
+        """
+        name = f"r{round_no:02d}.json"
+        self._write(Path("support") / name, json.dumps(payload, indent=2, default=str))
 
     def refinement(self, payload: dict[str, Any]) -> None:
         """The full pre-run refinement record (D-question-refinement): question at offer, suggestions

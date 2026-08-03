@@ -20,6 +20,7 @@ from reasonable_answer.schemas import (
     ArbiterVerdict,
     CritiqueOutput,
     OrchestratorRecommendation,
+    SupportManifest,
     WriterDisputes,
 )
 
@@ -98,6 +99,17 @@ class FakeClient:
     tool_results: list[str] = field(default_factory=list)
     #: callable(alias, user) -> WriterDisputes; None means "no disputes raised"
     dispute_fn: Any | None = None
+    #: callable(alias, user) -> SupportManifest; None means "an empty manifest"
+    support_fn: Any | None = None
+    #: The tool calls this "model" makes when a handler is supplied, as
+    #: `(name, raw_arguments)` pairs. The default is the one `web_search` every
+    #: pre-D-writer-source-reads test was written against; a test that wants to drive
+    #: `read_source` scripts it here. May also be `callable(alias) -> pairs`, which is
+    #: what a test needs to give two writer attempts *different* tool behaviour — the
+    #: only way to observe that each attempt gets its own `ReadSession`.
+    tool_script: Any = field(
+        default_factory=lambda: [("web_search", '{"query": "probe"}')]
+    )
     #: callable(alias, user) -> ArbiterVerdict; None means an arbiter call is a
     #: test error (the run under test was not expected to reach one)
     arbiter_fn: Any | None = None
@@ -154,14 +166,16 @@ class FakeClient:
         # Drive the handler once when one is supplied, so tests can assert on what a
         # tool result actually looks like by the time it reaches a model.
         handler = kwargs.get("tool_handler")
+        script = self.tool_script(alias) if callable(self.tool_script) else self.tool_script
         if handler is not None:
-            self.tool_results.append(handler("web_search", '{"query": "probe"}'))
+            for name, arguments in script:
+                self.tool_results.append(handler(name, arguments))
         return Completion(
             text=self.report_fn(self.generations),
             model_reported=alias,
             prompt_tokens=0,
             completion_tokens=0,
-            tool_calls=1 if handler is not None else 0,
+            tool_calls=len(script) if handler is not None else 0,
         )
 
     @property
@@ -197,6 +211,10 @@ class FakeClient:
                 if self.dispute_fn is None:
                     return WriterDisputes(disputes=[])
                 return self.dispute_fn(alias, user)
+            if schema is SupportManifest:
+                if self.support_fn is None:
+                    return SupportManifest(entries=[])
+                return self.support_fn(alias, user)
             if schema is ArbiterVerdict:
                 if self.arbiter_fn is None:
                     raise AssertionError("unexpected arbiter call")

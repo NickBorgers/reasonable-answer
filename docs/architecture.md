@@ -69,7 +69,7 @@ Invariants (enforced in code, covered by tests):
 | Node | Reads | Produces | Model | Trust model |
 |------|-------|----------|-------|-------------|
 | **intake** | question + **markdown** seed | normalized `question` / `seed`; routing | none | deterministic |
-| **generate** | question + latest report + **defect list** | next report (with citations) — under `revision.mode: patch` only the paragraphs a fix task named are edited, the rest returned byte-identical (D-scoped-revision) | non-author (alternating) | LLM (untrusted output) |
+| **generate** | question + latest report + **defect list**; with retrieval on, its own `web_search` results and — with `search.read_sources` — the pages it read from them (D-writer-source-reads) | next report (with citations) — under `revision.mode: patch` only the paragraphs a fix task named are edited, the rest returned byte-identical (D-scoped-revision); plus, with `search.support_manifest`, an **audit-side** support manifest | non-author (alternating) | LLM (untrusted output) |
 | **adjudicate** *(D-writer-disputes, opt-in)* | pending disputes + finding + one paragraph | `AdjudicationRecord[]` | mechanical fetch-check, else an arbiter ≠ disputer ≠ raiser | mechanical, or LLM inside a closed 2-field schema |
 | **critique** | report + question + **one lens** + taxonomy | `Issue[]` per critic | `review.depth` non-author models per lens, drawn as one slate (`roles.critic_slate`) | LLM (untrusted output) |
 | **triage** | this tick's `Issue[]` (minus **upheld-adjudication suppressions**, D-writer-disputes) | `OrchestratorView` + `DefectList` | none — **mechanical** | deterministic |
@@ -250,6 +250,52 @@ one written — and rendered by `export.py` on all three surfaces. Each of a len
 independently, so `_record_coverage` arbitrates: one record per artifact, the observation that
 reached furthest, and an audit event only for a tally that took the record. It is observation only:
 no controller rule reads it, no `OrchestratorView` field carries it, and it mints no defect.
+
+## Writer retrieval: search, then read, then trace (D-retrieval-opt-in, D-writer-source-reads)
+
+Retrieval reaches the writer in two steps, each its own opt-in switch and each off by default.
+
+```mermaid
+flowchart LR
+    W["writer call (one fresh context)"] --> S["web_search<br/>title · URL · snippet"]
+    S --> SES["ReadSession — the URLs THIS call was offered"]
+    SES --> R["read_source<br/>only a URL in the session"]
+    R --> F["fetch.SourceFetcher → fetch.http_get<br/>(the one egress point; cache shared with verification)"]
+    F --> P["prompts.source_read_block<br/>fenced untrusted page text"]
+    P --> W
+    W --> D["draft"]
+    D --> M["support manifest pass (structured, separate call)"]
+    M --> C["support.check — mechanical, against the bodies THIS call read"]
+    C --> A["support/rNN.json + verdict counts in events.jsonl"]
+```
+
+`search.enabled` gives the writer `web_search`, so a cited URL is one a result returned.
+`search.read_sources` adds `read_source`, whose allowlist is `reading.ReadSession` — the URLs that
+writer call's own searches returned, and nothing else. Both tools are driven by one
+`(name, arguments) -> text` handler assembled in `graph._retrieval_kwargs`, which is where the
+composition lives so `search` and `reading` need not import each other. Budgets are whole-run
+(`read_budget` calls, `read_char_budget` characters) plus a per-page `read_max_chars`; bytes off
+the wire are bounded already by `fetch_max_bytes`.
+
+`search.support_manifest` then adds a separate structured pass asking the same writer for
+`citation_id -> url -> locator -> support_span -> claim`, one entry per claim resting on a page it
+read. `support.check` rules on each entry by string containment against the report and the bodies
+that were read, using triage's quote normalization. A normalized claim or span must still contain
+quotable text: markup-only or whitespace-only strings cannot satisfy containment. The check never
+guesses where no body exists, and
+distinguishes `body_not_read` (an abstract, a paywall) and `different_document` (an open-access
+copy) from `span_not_found`. The result is **audit-side**: `support/rNN.json` holds the entries and
+their verdicts, `events.jsonl` holds counts only, and nothing reaches a critic, the defect list,
+the `OrchestratorView` or the controller.
+
+`search.verify_sources` is independent of both and unchanged: it alone decides whether the evidence
+lens receives fetched pages and whether a dispute can be settled mechanically. When reading and
+verification are both on they share one `SourceFetcher`, so a page is downloaded once and both see
+the same bytes; `Runtime.fetcher` is nevertheless set only for verification, so turning reading on
+cannot switch the critic-facing channel on by accident. They share the cache but not the cap: it
+stores the larger of `fetch_max_chars` and `read_max_chars`, and verification is handed a
+`fetch.CappedFetcher` view clipped back to `fetch_max_chars`, so `read_max_chars` never widens what
+a critic reads or what `dispute.adjudicate_mechanical` searches.
 
 **Format conversion happens at the edge, not here.** `intake` requires markdown, because
 `report.parse` builds the `[S<n>.P<m>]` loci from `#` headings and `fetch.extract_source_urls`

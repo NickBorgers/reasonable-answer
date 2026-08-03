@@ -42,7 +42,7 @@ import urllib.error
 import urllib.parse
 import urllib.request
 from collections.abc import Callable, Mapping
-from dataclasses import dataclass
+from dataclasses import dataclass, replace
 from enum import Enum
 from html.parser import HTMLParser
 from typing import Any
@@ -121,6 +121,11 @@ class SourceOutcome(str, Enum):
     #: A tier that could have resolved this was out of per-run calls. Without this,
     #: an operator reads a column of `blocked` and blames the sites.
     BUDGET_EXHAUSTED = "budget_exhausted"
+    #: Nothing was fetched: a writer asked `read_source` for a URL that no search
+    #: result in its own context had offered (D-writer-source-reads). A refusal, not a
+    #: failure — the site was never contacted, so this says nothing whatever about the
+    #: source, and it must never be read alongside `blocked` or `not_found`.
+    NOT_RETRIEVED = "not_retrieved"
 
 
 #: Statuses that mean "refused", as distinct from "not there". 999 is LinkedIn's
@@ -859,6 +864,48 @@ class SourceFetcher:
             status=resp.status,
             outcome=SourceOutcome.FULL_TEXT,
         )
+
+
+class CappedFetcher:
+    """A read-through view of a :class:`SourceFetcher` that clips bodies to one
+    consumer's character cap (D-writer-source-reads).
+
+    Two consumers now share one fetcher so that a page is downloaded once and both see
+    the same bytes — but they do not share a cap. The underlying fetcher must therefore
+    store the *larger* of the two, and the smaller consumer needs its own limit applied
+    somewhere. Here, rather than at each render site, because there are three of them
+    (`prompts.fetched_sources_block`, `dispute.adjudicate_mechanical`, and the
+    evidence-URL check beside it) and one of them decides whether a defect is suppressed:
+    a longer body makes `adjudicate_mechanical`'s containment test more likely to uphold
+    a dispute, so an unclipped view would let `search.read_sources` change the stop
+    decision. `search.verify_sources` alone must decide what the verification path sees,
+    and that is only true if the cap travels with the handle rather than with the cache.
+
+    Clipping is a no-op when the caps are equal, which is the default and every
+    configuration that leaves `read_max_chars` at or below `fetch_max_chars`.
+    """
+
+    def __init__(self, inner: SourceFetcher, *, max_chars: int) -> None:
+        self._inner = inner
+        self._max_chars = max_chars
+
+    def fetch(self, url: str) -> FetchedSource:
+        return clip_body(self._inner.fetch(url), self._max_chars)
+
+    def fetch_all(self, urls: list[str]) -> list[FetchedSource]:
+        return [self.fetch(u) for u in urls]
+
+
+def clip_body(source: FetchedSource, max_chars: int) -> FetchedSource:
+    """Trim a fetched body to `max_chars`, leaving every other outcome untouched.
+
+    Only a `FULL_TEXT` result carries a body; a registry record, a refusal or a
+    not-found is already bounded by this module's own per-field caps and is the answer
+    a consumer most needs, so it is never what a cap silences.
+    """
+    if source.outcome is not SourceOutcome.FULL_TEXT or len(source.text) <= max_chars:
+        return source
+    return replace(source, text=source.text[:max_chars])
 
 
 def _looks_like_pdf(url: str, content_type: str) -> bool:
