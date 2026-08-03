@@ -81,7 +81,7 @@ and which controller rule fired:
 round 2   writer deepseek-v4-flash
   logic         glm-5.2          2 issues
   evidence      glm-5.2          clean
-  completeness  mistral-large-3  clean
+  completeness  gemma4           clean
   1 major  ->  rule 14  generate  material issues remain
 ```
 
@@ -288,7 +288,7 @@ roster:
   critics:
     logic:        [glm-5.2, minimax-m3, mistral-large-3]
     evidence:     [glm-5.2, minimax-m3, gemma4]
-    completeness: [mistral-large-3, glm-5.2, gemma4]
+    completeness: [gemma4, glm-5.2]
 ```
 
 Every entry is **open-weight** and small enough to load on the target local box (see
@@ -390,11 +390,12 @@ abstract is not the source's text. See D-existence-vs-body.
 **Known limitations.** Output is labelled *consensus-reviewed with in-artifact sourcing* by default
 and *…with retrieved sourcing* when `search.enabled: true`. When `verify_sources` is also on the
 label is not a posture at all but the run's **measured** coverage of the draft it shipped —
-*consensus-reviewed — source review: 15 cited; 3 addressable; 3 existence confirmed; 3 bodies read;
-12 not independently checked* — because a feature being switched on says nothing about how much of a
-bibliography it reached (D-observed-source-coverage). When the shipped draft has a recorded evidence
-lens measurement, its exports and run page carry the full breakdown; otherwise they report no
-coverage rather than rendering zeros. **None of it is fact-checked.** Verification establishes that
+*consensus-reviewed — source review: 15 cited; 3 addressable; 3 existence confirmed; 3 source
+bodies read (backing 3 cited entries); 12 not independently checked* — because a feature being
+switched on says nothing about how much of a bibliography it reached
+(D-observed-source-coverage). When the shipped draft has a recorded evidence lens measurement, its
+exports and run page carry the full breakdown; otherwise they report no coverage rather than
+rendering zeros. **None of it is fact-checked.** Verification establishes that
 a cited source exists and, when a body can be read, that the page says something compatible with the
 claim — not that the page is correct, and not that the roster chose good sources. A
 registry-confirmed source whose body cannot be read proves existence only, and an open-access mirror

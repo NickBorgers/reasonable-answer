@@ -202,9 +202,11 @@ it — each one, again, a guard against a known LLM failure mode:
   carry a new text to acceptance.
 - **Search and source verification.** Writers can be given a real web-search tool, so cited URLs
   are ones a search actually returned rather than remembered (LLM memory is where fabricated
-  citations come from). With the full feature set enabled, the system also fetches the cited
-  pages and hands them to the evidence lens, turning "does this source say that?" from a
-  plausibility guess into a check against the page — the same per-claim-against-fetched-text move
+  citations come from). With the full feature set enabled, the system also attempts the
+  addressable, deduplicated citation URLs up to `search.max_sources` and hands successful bodies
+  to the evidence lens. Entries without a fetchable URL and entries beyond that cap remain
+  unchecked. For attempted pages this turns "does this source say that?" from a plausibility
+  guess into a check against the page — the same per-claim-against-fetched-text move
   that [FActScore](https://arxiv.org/abs/2305.14251) (Min et al. 2023) uses to score long-form
   factuality. (The shipped config leaves that last switch off only because fetching model-chosen
   URLs needs a network egress boundary the deployment must provide — see
@@ -221,7 +223,12 @@ it — each one, again, a guard against a known LLM failure mode:
   controls, and graded by plain code — measuring both whether they catch what's there and whether
   they invent what isn't. A control is graded by every lens, so it has to be sound under every
   lens (D-control-soundness): a "sound" control carrying one real uncited claim scores every
-  competent evidence critic as an inventor of defects, which is what it did. The fixtures are
+  competent evidence critic as an inventor of defects, which is what it did. That cuts both ways,
+  and usefully: the noise metric is a joint measurement of the model and the corpus, so a spike in
+  it is a hypothesis about either. Five more control defects — a miscount, a source decomposed
+  backwards, two self-contradictions and an unsupported attribution — were found by the critics
+  the controls were grading, on the run that was grading them, and fixed
+  (D-control-defect-sweep). The fixtures are
   written in the exact shape the writer prompt mandates — conclusion first, a counterargument
   section engaged on the merits, inline `[1]` citations resolving to a numbered `## Sources`
   section — because the harness uses the production critic prompt, and a corpus in any other shape
@@ -266,6 +273,13 @@ it — each one, again, a guard against a known LLM failure mode:
   fetched page well, and not even that it handles the weaker on-its-face prompt production runs on
   a citation whose fetch failed. Certifying either needs deterministic offline source packets
   shipped with the fixtures, which is an open item.
+  A floor is still only a floor *of the right thing*: the audition pins every model to the same
+  structured-output mode a run would pin it to, by probing the proxy before it measures anything
+  (D-audition-probe-parity). Unprobed it did not, and a `schema_failures` count is a count of one
+  particular extraction path — so a model reliable under `json_schema` was being graded on
+  prompt-mode failures it would never have in production. The mode is recorded on the verdict and
+  re-measured when it moves; the cache-read paths that must never spend a call read across a
+  difference they cannot afford to detect, and `ra doctor` reports it instead.
 - **The dispute channel.** Critics can be wrong, and a false positive is otherwise
   indistinguishable from a real defect — floors escalate it, the blind referee counts it, and a
   compliant writer would "fix" the report into falsehood. An opt-in channel (D-writer-disputes) lets the writer

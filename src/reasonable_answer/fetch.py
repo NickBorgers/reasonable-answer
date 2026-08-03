@@ -413,7 +413,7 @@ _UNREAD = frozenset(
 #: absorbed; an unmapped outcome falls through to `blocked_or_unreadable`, which
 #: understates coverage rather than overstating it — the only safe direction.
 _OUTCOME_BUCKET: dict[SourceOutcome, str] = {
-    SourceOutcome.FULL_TEXT: "bodies_read",
+    SourceOutcome.FULL_TEXT: "body_backed_entries",
     SourceOutcome.METADATA_ONLY: "metadata_only",
     SourceOutcome.NOT_FOUND: "not_found",
     SourceOutcome.BUDGET_EXHAUSTED: "budget_exhausted",
@@ -425,17 +425,20 @@ _OUTCOME_BUCKET: dict[SourceOutcome, str] = {
 class SourceCoverage:
     """What source verification actually reached on one artifact's bibliography.
 
-    Counted in *entries*, not in fetches: two entries citing one URL are two entries the
-    report stands on, and the fetcher's per-run cache means they cost one call between
-    them. Every field is a bounded non-negative integer derived from the artifact's own
-    text and the outcomes recorded against it — no URL, no page text, no model identity —
-    so the whole record is safe to put in `final.json` and the audit trail (RA-016).
+    Dispositions are counted in *entries*, not in fetches: two entries citing one URL are
+    two entries the report stands on, and the fetcher's per-run cache means they cost one
+    call between them. `bodies_read` is the exception made explicit in its name: it counts
+    distinct cited URLs whose body was read, while `body_backed_entries` says how many
+    bibliography entries that work supports. Every field is a bounded non-negative integer
+    derived from the artifact's own text and the outcomes recorded against it — no URL, no
+    page text, no model identity — so the whole record is safe to put in `final.json` and
+    the audit trail (RA-016).
 
     `cited` is partitioned twice, and each partition sums to it exactly:
 
     * by addressability — `addressable + not_addressable`
-    * by disposition — `bodies_read + metadata_only + blocked_or_unreadable + not_found
-      + budget_exhausted + not_attempted + not_addressable`
+    * by disposition — `body_backed_entries + metadata_only + blocked_or_unreadable
+      + not_found + budget_exhausted + not_attempted + not_addressable`
 
     `existence_confirmed` and `not_independently_checked` cut across both and are
     derived rather than stored, so they can never disagree with the counts.
@@ -450,6 +453,11 @@ class SourceCoverage:
     #: artifact, or cited in a draft whose evidence lens never got that far. Distinct
     #: from `not_addressable`: this one *could* have been checked.
     not_attempted: int = 0
+    #: Entries whose cited source body was read. This belongs to the entry disposition
+    #: partition; several entries may be backed by the same body.
+    body_backed_entries: int = 0
+    #: Distinct cited URLs for which a source body was read. This is the count rendered
+    #: as bodies, and is deliberately not part of the entry disposition partition.
     bodies_read: int = 0
     metadata_only: int = 0
     #: Refused, paywalled, empty, an unreadable format, or a transport error. Each is
@@ -473,7 +481,7 @@ class SourceCoverage:
         (`SourceOutcome.PAYWALLED` is not emitted today) would have to do. Until then
         this undercounts rather than overcounts, which is the safe direction.
         """
-        return self.bodies_read + self.metadata_only
+        return self.body_backed_entries + self.metadata_only
 
     @property
     def not_independently_checked(self) -> int:
@@ -499,6 +507,7 @@ class SourceCoverage:
             "not_addressable": self.not_addressable,
             "attempted": self.attempted,
             "not_attempted": self.not_attempted,
+            "body_backed_entries": self.body_backed_entries,
             "bodies_read": self.bodies_read,
             "metadata_only": self.metadata_only,
             "blocked_or_unreadable": self.blocked_or_unreadable,
@@ -529,12 +538,13 @@ def coverage(
         not_addressable=0,
         attempted=0,
         not_attempted=0,
-        bodies_read=0,
+        body_backed_entries=0,
         metadata_only=0,
         blocked_or_unreadable=0,
         not_found=0,
         budget_exhausted=0,
     )
+    bodies_read: set[str] = set()
     for entry in source_entries(report):
         tallies["cited"] += 1
         url = entry_url(entry)
@@ -548,7 +558,13 @@ def coverage(
             continue
         tallies["attempted"] += 1
         tallies[_OUTCOME_BUCKET.get(source.outcome, "blocked_or_unreadable")] += 1
-    return SourceCoverage(**tallies, verification_enabled=verification_enabled)
+        if source.outcome is SourceOutcome.FULL_TEXT:
+            bodies_read.add(url)
+    return SourceCoverage(
+        **tallies,
+        bodies_read=len(bodies_read),
+        verification_enabled=verification_enabled,
+    )
 
 
 def coverage_sentence(observed: Mapping[str, Any]) -> str:
@@ -567,12 +583,15 @@ def coverage_sentence(observed: Mapping[str, Any]) -> str:
 
     if count("cited") == 0:
         return "source review: the shipped draft cites no sources"
-    read = count("bodies_read")
+    bodies = count("bodies_read")
+    backed = count("body_backed_entries")
+    bodies_label = "source body" if bodies == 1 else "source bodies"
+    entries_label = "cited entry" if backed == 1 else "cited entries"
     return (
         f"source review: {count('cited')} cited; "
         f"{count('addressable')} addressable; "
         f"{count('existence_confirmed')} existence confirmed; "
-        f"{read} {'body' if read == 1 else 'bodies'} read; "
+        f"{bodies} {bodies_label} read (backing {backed} {entries_label}); "
         f"{count('not_independently_checked')} not independently checked"
     )
 

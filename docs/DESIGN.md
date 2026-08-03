@@ -46,7 +46,7 @@ token, so active-parameter counts do not reduce this):
 | `kimi-k3` | 2.8T/A50B | ~1.4TB | no — cannot load |
 | `deepseek-v4-pro` | 1.6T/A49B | ~800GB | no — cannot load |
 | `glm-5.2` | 744B/A40B | ~375GB | yes — critic-only, all lenses |
-| `mistral-large-3` | 675B/A41B | ~340GB | yes — writer + completeness |
+| `mistral-large-3` | 675B/A41B | ~340GB | yes — writer + logic (dropped from completeness, D-completeness-pool-noise) |
 | `nemotron-3-ultra` | 550B/A55B | ~275GB | yes — writer (D-provider-retry) |
 | `deepseek-v4-flash` | 284B/A13B | ~145GB | yes — writer |
 | `minimax-m3` | 230B/A10B | ~115GB | yes — logic, evidence |

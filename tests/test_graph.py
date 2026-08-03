@@ -467,6 +467,7 @@ def plant_unfit_verdict(config: Config, identity: str, tmp_path: Path) -> None:
                 prompt_hash=audition.prompt_hash(),
                 rubric_hash=audition.rubric_hash(),
                 require_verbatim_spans=config.require_verbatim_spans,
+                structured_output_mode="json_schema",
                 repetitions=config.audition.repetitions,
                 recorded_at=time.time(),
             )

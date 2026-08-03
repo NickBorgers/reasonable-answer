@@ -63,6 +63,7 @@ def test_verification_label_states_the_measured_coverage(config, identities):
         "not_addressable": 12,
         "attempted": 3,
         "not_attempted": 0,
+        "body_backed_entries": 3,
         "bodies_read": 3,
         "metadata_only": 0,
         "blocked_or_unreadable": 0,
@@ -81,7 +82,8 @@ def test_verification_label_states_the_measured_coverage(config, identities):
     )
     assert summary["label"] == (
         "consensus-reviewed — source review: 15 cited; 3 addressable; "
-        "3 existence confirmed; 3 bodies read; 12 not independently checked"
+        "3 existence confirmed; 3 source bodies read (backing 3 cited entries); "
+        "12 not independently checked"
     )
     assert "verified sourcing" not in summary["label"]
     assert summary["source_coverage"] == coverage

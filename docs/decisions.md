@@ -2565,7 +2565,9 @@ onto definitions. What *is* checked is the resolvable part: in-text citations re
 `MIN_CONTROL_SOURCES` distinct sources so it cannot earn `one_sided_sourcing` honestly. The
 omission and presupposition classes that drive the `completeness` rate have no mechanical form
 at all; they rest on the soundness contract recorded in each control's manifest and on review.
-A gate that covers part of a property should say which part.
+A gate that covers part of a property should say which part. (D-control-defect-sweep extends that
+contract: a control must also be internally consistent across sections, which is the same
+unmechanisable half of the property showing up on the logic lens rather than the evidence one.)
 
 **Rejected: raising `max_control_material_rate`.** It is the correct threshold. A critic
 inventing more than one material issue per sound report manufactures work every round, drains
@@ -3938,14 +3940,16 @@ label is replaced by the measurement.
 
 *Measured.* `fetch.coverage` reads the shipped draft's own `## Sources` section and tallies it in
 **entries**, not in fetches: `cited`, `addressable` / `not_addressable`, `attempted` /
-`not_attempted`, and a disposition for each attempt — `bodies_read`, `metadata_only`,
-`blocked_or_unreadable`, `not_found`, `budget_exhausted`. `existence_confirmed` is derived from body
-and registry hits. `not_independently_checked` is derived only from `not_addressable`,
-`not_attempted`, `blocked_or_unreadable`, and `budget_exhausted`; a definitive `not_found` is an
-independent determination of absence, not an unchecked entry. Both derived values are written from
-those counts so the summary line and the breakdown cannot disagree. Entries rather than fetches
-because two entries citing one URL are two things the report stands on, and the per-run fetch cache
-collapses them into one call.
+`not_attempted`, and a disposition for each attempt — `body_backed_entries`, `metadata_only`,
+`blocked_or_unreadable`, `not_found`, `budget_exhausted`. `bodies_read` is deliberately outside that
+entry partition: it counts distinct cited URLs whose body was read. `existence_confirmed` is derived
+from body-backed entries and registry hits. `not_independently_checked` is derived only from
+`not_addressable`, `not_attempted`, `blocked_or_unreadable`, and `budget_exhausted`; a definitive
+`not_found` is an independent determination of absence, not an unchecked entry. Both derived values
+are written from those counts so the summary line and the breakdown cannot disagree. Two entries
+citing one URL are two things the report stands on, but the per-run fetch cache collapses them into
+one call, so the record says two body-backed entries and one body read rather than calling one body
+two.
 
 *Keyed to an artifact.* The tally is taken in `_critique_one` where the evidence lens fetches, and
 written into checkpointed state under the artifact's hash — never latest-wins. On a non-accepted
@@ -3958,16 +3962,17 @@ terminal `_finalize` ships the best-scoring draft, which need not be the last on
 bibliography twice, concurrently, against a fetch cache that is monotone but last-write-wins
 (`fetch.SourceFetcher.fetch`). Two critics that both miss the cache on the same URL can therefore
 observe genuinely different outcomes, and no aggregate of the two exists to read back afterwards.
-`graph._record_coverage` keeps the observation that **reached furthest** — entries independently
-checked first, bodies read breaking the tie — rather than whichever thread happened to finish
-first. Two properties follow, and both are what the choice is for: the record does not depend on
-thread scheduling, and it can only ever move toward more coverage. Taking the maximum is not the
-same as claiming both critics saw it: it is the honest reading of "what did verification reach for
-this draft", which is a question about the run, not about a critic. Only a tally that takes the
-record is emitted as a `source_coverage` event, so the **last** such event for an artifact is
-always the one `final.json` carries. This is deliberately not true of `fetch_sources`, which still
-fires once per evidence critic and therefore double-counts a depth-2 pass; it was never a coverage
-measurement, which is the gap this decision exists to close.
+`graph._record_coverage` keeps the observation that **reached furthest** rather than whichever
+thread happened to finish first. Its total ordering compares entries independently checked,
+distinct bodies read, body-backed entries, registry confirmations, definitive absences and the
+remaining disposition counts, with a canonical-record tie-breaker for future fields. Equal-reach
+but different observations therefore cannot fall back to arrival order. Taking the maximum is not
+the same as claiming both critics saw it: it is the honest reading of "what did verification reach
+for this draft", which is a question about the run, not about a critic. A record update and its
+`source_coverage` event execute under the same lock, so two callbacks cannot interleave and the
+**last** event for an artifact is always the one `final.json` carries. This is deliberately not true
+of `fetch_sources`, which still fires once per evidence critic and therefore double-counts a
+depth-2 pass; it was never a coverage measurement, which is the gap this decision exists to close.
 
 *Persisted and rendered.* `final.json` gains `source_coverage`; `export.Provenance` carries it; the
 markdown export, the HTML export and the run page render the same breakdown from one definition, as
@@ -3976,13 +3981,13 @@ artifact's own text — no URL, no page text, no model identity — so the recor
 trail on RA-016's terms, and `OrchestratorView` is untouched: the controller still sees none of it.
 
 *The label.* With verification on, the label is now the observation —
-`consensus-reviewed — source review: 15 cited; 3 addressable; 3 existence confirmed; 3 bodies read;
-12 not independently checked`. Verification on with nothing recorded says exactly that rather than
-falling back to the old wording, because an absent measurement must not read as a passing one. The
-two non-verification labels are unchanged: neither ever claimed verification, so neither was
-overstating anything — but their coverage is still measured and still rendered, so a retrieval-only
-run now states in its export how much of its bibliography went unchecked, which its label never
-could.
+`consensus-reviewed — source review: 15 cited; 3 addressable; 3 existence confirmed; 3 source bodies
+read (backing 3 cited entries); 12 not independently checked`. Verification on with nothing recorded
+says exactly that rather than falling back to the old wording, because an absent measurement must
+not read as a passing one. The two non-verification labels are unchanged: neither ever claimed
+verification, so neither was overstating anything — but their coverage is still measured and still
+rendered, so a retrieval-only run now states in its export how much of its bibliography went
+unchecked, which its label never could.
 
 **What the numbers must not be read as saying.** Two misreadings are invited by the counts and
 foreclosed in the rendering, which carries the caveat under every breakdown. An entry that was not
@@ -3990,15 +3995,18 @@ independently checked is *unverified*, not suspect. A `blocked` or `paywalled` e
 *unreadable*, not absent — reading it as absence is precisely the inference D-notfound-fabrication
 forbids. A definitive not-found is independently checked and establishes that a cited page does not
 exist. The existence-vs-body doctrine of D-existence-vs-body survives intact in the columns:
-`metadata_only` confirms existence and is counted separately from `bodies_read`, because a registry
-record is not the source's text.
+`metadata_only` confirms existence and is counted separately from `body_backed_entries` and
+`bodies_read`, because a registry record is not the source's text. Entry counts and distinct-body
+counts are labelled separately everywhere they render.
 
 **Where the measurement is deliberately conservative.** Entry splitting is a heuristic over
 model-written markdown — list markers where the section has them, one entry per line where it does
 not — and "addressable" means *carries an http(s) URL*, so a bare `doi:10.…` with no resolver URL
-counts as not independently addressable. Both choices err toward reporting **less** coverage than
-was achieved, which is the only direction a claim about verification is allowed to be wrong in. The
-counts are therefore reported as observed, never as a completeness claim.
+counts as not independently addressable. Text before the first list marker is treated as section
+prose, so a URL there may be fetched without entering the bibliography denominator. All three
+choices err toward reporting **less** coverage than was achieved, which is the only direction a
+claim about verification is allowed to be wrong in. The counts are therefore reported as observed,
+never as a completeness claim.
 
 **Deliberately not done.** No controller change: coverage does not gate acceptance, does not enter
 `OrchestratorView`, and mints no defect. No deduplication of `fetch_sources`, which fires once per
@@ -4010,8 +4018,351 @@ outcomes the evidence lens already produced, so `_finalize` still performs no I/
 reports the coverage its checkpoint carries. No change to `search.max_sources`, whose truncation is
 now visible as `not_attempted` rather than fixed.
 
+## D-audition-probe-parity — the audition measures a critic in the extraction regime a run would pin it to
+
+**The problem.** `ra audition` built an `LLMClient` and went straight to `run_audition` without ever
+calling `client.probe_structured_output`. Both of the other paths that use the client do probe:
+`ra doctor` fills a whole column with the results, and `graph.build_runtime` probes every alias at
+startup and logs the pinned mode. Unprobed, `LLMClient.structured` falls through to
+`mode = mode or self.mode_for(alias)`, and `mode_for` answers the default `"prompt"` for any alias
+it has never probed — the weakest rung of the extraction ladder.
+
+So every audition call was made under prompt-mode extraction, for every model, whatever mode a run
+would pin that model to. The harness certified critics in a regime production does not run them in.
+A model reliable under `json_schema` but flaky under prompt extraction is graded on failures it will
+never have in production; a model that is the reverse gets a pass it has not earned. Neither
+direction was visible in the verdict, because the verdict did not record which regime produced it.
+`schema_failures` is the counter most directly affected — it is a count *of* an extraction path —
+and it feeds a hardcoded `unfit` gate, not a tunable threshold.
+
+The gap was found by adversarial review of the 2026-08-02 audition run and its 30-call spot check,
+which observed no schema failures attributable to it in the sampled pairs. So this is a fidelity
+gap, not the cause of the noise findings that run reported. `ra audition-refine` had the identical
+gap against `RefinementService.preflight`, which does probe before serving.
+
+**The fix, part one: probe before measuring.** Both audition commands now probe every alias they
+will call, before any measurement and before any cached verdict is read. The probe memoises, so the
+harness's own calls cost nothing extra.
+
+An alias that cannot be pinned to any mode **fails the command closed** (exit 2), rather than being
+auditioned under the fallback. That is parity too: `build_runtime` refuses to start a run staffed by
+such an alias, so measuring it under a mode no run would use would be this same defect in a new
+place. The cost is that one unprobeable model blocks the whole command; `--alias` and `--lens` are
+the escape, and the operator's fix — re-roster it — is the same either way.
+
+**The fix, part two: the verdict names the regime.** `CacheEntry.structured_output_mode` is a
+required field with no default, and a term in `matches()`. The precedent is
+D-audition-rubric-identity: an entry that cannot say what regime produced it fails
+`model_validate`, `load_cache` drops it, and the pre-probe cache reads as *not audited* — never as a
+pass carried across a regime change. The same field, for the same reason, is on `RefineCacheEntry`.
+`ra audition --json` and `ra audition-refine --json` both emit the mode, and the table prints it
+beneath itself, so a report that does not name its regime cannot be mistaken for one taken in the
+right regime.
+
+**The decision the issue asked to be made explicitly: the mode is compared on the measuring path and
+only reported on the free ones.** `matches()` takes `structured_output_mode` as a required keyword
+that accepts `None` to mean *deliberately not compared*. `ra audition` and `ra audition-refine` pass
+the probed mode and re-measure on a mismatch. `cached_judgements` — and through it `ra doctor`'s
+table and the `audition.enforce` startup gate — and `refine_cached_judgement` pass `None`.
+
+That asymmetry is the whole of this decision, and it is not the obvious symmetric answer, so:
+
+- **Every other term in the identity is free to compute; this one is not.** The corpus hash, the
+  prompt hash, the rubric hash and `require_verbatim_spans` come from disk, from code, or from
+  config. The mode comes from probing a paid proxy. `cached_judgements` promises never to spend —
+  `test_the_gate_takes_no_client_and_so_can_never_spend` pins it, because the gate runs on every
+  `ra run` and every web boot, and a keyless checkout must still boot. Making the mode a term in the
+  free read would mean either handing the gate a client (forbidden) or threading a probed map into
+  it from `build_runtime`, which would move the probes *ahead* of the gate, so a roster with a known
+  `unfit` critic would start spending before being refused.
+- **A non-deterministic prober would silently disarm enforcement.** `config/roster.yaml` documents
+  `minimax-m3` as probing non-deterministically across `json_schema`, `json_object` and `prompt`.
+  If the free read dropped a mode-mismatched entry, that model's `unfit` verdict would stop blocking
+  on most boots — not because anything was re-measured, but because the probe landed elsewhere. The
+  gate blocks only on a *positive* `unfit`, so every invalidation is a step toward not blocking.
+  Trading a real block for a mode-fidelity scruple is the wrong direction for a fail-closed gate.
+- **Reading across the difference is only safe if the difference is visible.** So `mode_drift()`
+  reports every slot whose cached verdict was measured under a mode the alias no longer probes to,
+  naming both modes and the re-measure command. `ra doctor` prints it beside the other roster
+  warnings — free there, because doctor probes every alias anyway. It takes the probed modes as
+  data, never a client, and the no-client test now covers it too.
+
+The net effect is that a verdict is *measured* under the production regime and *invalidated* the
+moment a paying caller sees a different one, while a free reader keeps whatever measurement exists
+and is told when it disagrees with today's probe.
+
+**Cost.** `ra audition` now spends one probe call per distinct alias in the filtered slot set, even
+when every verdict is cached, because the mode has to be known before the freshness check. That is
+bounded by the roster size and is a rounding error against |models| × |fixtures| × repetitions.
+Existing `.ra-audition.json` and refine cache files are dropped as unvalidatable, so the first
+audition after this lands re-measures the roster — the same one-off cost D-audition-rubric-identity
+accepted, and safe to land under enforcement for the same reason: it degrades to *not audited*.
+
+**Deliberately not done.** The mode is not hashed into `prompt_hash()`. That hash is about the
+prompt *surface* — what text a critic is shown — and D-audition-source-mode already fixed its
+meaning to the source-less surface; folding a per-alias, probe-dependent value into a corpus-wide
+hash would invalidate every model's verdict whenever any one model's probe moved. The mode is not
+added to `Metrics` either: it is a condition the measurement was taken under, which is what
+`CacheEntry` holds, and putting it there would change `rubric_hash`'s field set for a value that is
+not a grading rule. `graph.build_runtime`'s ordering is unchanged — the cache-read gate still runs
+before the probes. And nothing here changes what the audition *grades*: `prompt_hash`,
+`rubric_hash`, the thresholds and the fixture corpus are untouched, so a verdict's meaning changes
+only in that it now says which extraction path produced it.
+
+## D-completeness-pool-noise — a critic that invents work is removed from the lens it invents it on
+
+**The measurement.** The public source record is
+[issue #148](https://github.com/NickBorgers/reasonable-answer/issues/148), which records the
+audition metrics, the 30-call manual-review protocol, its per-control result, and the two observed
+failure signatures. The 2026-08-02 audition graded `mistral-large-3` **`unfit`** on completeness:
+**2.61 material issues invented per sound control report**, the highest noise rate measured on any
+(model, lens) pair and 2.6× the `max_control_material_rate` fail-closed line. Its sensitivity on
+that same lens was **1.00** — it found every planted defect. The two numbers are not in tension,
+they are the finding: this model reports *everything*, and on completeness most of what it reports
+is not there.
+
+A 30-call spot check confirmed the noise is the model's and not the corpus's, which is the reading
+D-control-soundness exists to force us to rule out. Across **13 material issues filed on 5 of the 6
+controls, zero were real defects**, and they fall into two reproducible signatures:
+
+- **Hedge-blindness.** It reads explicitly hedged language as absolutist and then flags the
+  absolutism it supplied. It flagged *"'Public health infrastructure' covers **at least** three
+  distinct things"* as presupposing the three categories are exhaustive — the artifact's "at least"
+  says the opposite, in the span the model itself quoted.
+- **Inexhaustible-counterargument demand.** It files `omitted_counterargument` for an
+  ever-further alternative mechanism on controls whose `## The strongest counterargument` section
+  already engages the strongest objection at length — including cases where its own `related_span`
+  quotes the passage stating the supposedly omitted point. This is not a bar a report can clear:
+  every rebuttal admits one more mechanism, so a run reviewed by this critic on this lens stagnates
+  rather than converging.
+
+**Why the false-positive direction alone is disqualifying.** D-critic-audition already states that
+both directions gate, and this is the case it was written for. The convergence loop is asymmetric
+about the two errors: a missed defect costs one lens one round of evidence, while an invented
+material issue blocks acceptance outright, spends a writer call and three-to-six critic calls
+"fixing" prose that was correct, and pushes the run toward rule 13 `exhausted_unresolved` on a
+report that was fine. Perfect sensitivity buys nothing back, because nothing downstream can tell an
+invented material issue from a real one — the defect list is the same shape either way. A critic
+whose findings must be discounted is not a cheap critic; it is a critic the harness cannot use.
+
+**Decision.** `mistral-large-3` is removed from `roster.critics.completeness` in both shipped
+rosters, and the remaining pool is ordered **fit-first**:
+
+```yaml
+completeness:
+  - gemma4     # fit:      0.89 sensitivity, 0.17 invented per control
+  - glm-5.2    # marginal: 0.72 invented per control
+```
+
+Ordering is load-bearing for the same reason D-critic-audition's position analysis was: whichever
+slot a pass reaches first is the one whose *silence* the run acts on. Putting the measured-`fit`
+model at position 1 also settles, for this lens only, the standing worry that `gemma4` is the same
+checkpoint that flagged nothing across six completeness calls in `run-d5934276fafd`. That worry is
+now answered by measurement rather than by hiding the model at position 3 — 0.89 sensitivity is a
+model that reviews. On **evidence** `gemma4` is still at position 3 and still unmeasured, and the
+roster comment there is unchanged.
+
+**What survives the drop.** The pool keeps two model families (Google + Zhipu), so
+`validate_roster_health` reports no `roster_limited` warning for completeness against any writer,
+`critic_slate`'s one-model-per-family rule can still fill a depth-2 slate, and `lens_statuses` can
+still count two distinct clean families — a strong `accepted` remains reachable on this lens. The
+loss is bounded more tightly than the diff looks: `mistral-large-3` is a writer, so author
+exclusion already emptied its completeness slot on every round it authored (R1 and every odd
+round). On those rounds the pool *was* `{glm-5.2, gemma4}`; this change makes the even rounds match.
+
+**What is genuinely lost, stated plainly.** Two things. First, mistral's Western corpus was this
+lens's decorrelation argument against two CN-lab priors (QP2); the remaining pair is Google and
+Zhipu, which is still cross-family and still cross-lab, but the pool is narrower than the other two
+lenses. Second, at `review.depth: 2` a two-model pool has **no spare**, and the consequence is
+worth spelling out rather than waving at, because it is not the gentle one. Suppose a depth-2
+completeness pass where one critic returns a clean review and the other fails. `unreviewed_lenses`
+is empty, so rule 2 does not re-ask; both identities are in `used_critics` (a failed review still
+marks its critic used), so `unused_eligible` is 0 and the lens is **not toppable** — rule 8 has
+nobody to call. And `roster_limited` is `eligible_count < 2` counted in *families*, which is
+exactly 2 here, so rule 10's honest weaker guarantee does not apply either. The artifact is clean
+with `cleared_count == 1`, and the run falls through to **rule 11, `exhausted_unresolved`**.
+
+That is the pre-existing behaviour of a two-family lens, not a new rule — the same thing already
+happened on completeness every round `mistral-large-3` authored — but before this change the even
+rounds had a third family to top up with, and now no round does. Set against it: the third family
+was the one filing 2.61 imaginary defects per sound report, which does not merely fail to confirm a
+clean artifact, it *prevents* one. A lens staffed by two critics that can return an honest clean is
+worth more than a lens staffed by three when the third manufactures work every round. Restoring
+depth is the right end state, and the open item below says so — but the replacement has to be
+measured first, because filling the slot on corpus-decorrelation reasoning alone is what produced
+this.
+
+**Deliberately not done.** `mistral-large-3` stays in the logic pool and in the writer pool. Its
+logic verdict is `marginal`, not `unfit`, and the spot check attributed part of the logic-lens
+noise *cohort-wide* — every critic on that lens — to defects in the control fixtures themselves,
+which are being repaired separately; grading a model on a corpus known to be wrong is exactly the
+mistake D-control-soundness names. The logic-lens roster call therefore waits for the post-fix
+re-audition. Nothing here touches the audition thresholds, the fixtures, the grader, or any file
+under `src/`: this decision is a roster edit, three tests pinning the composition it chose, and the
+evidence for both — which is the whole point of having a measured eligibility term. No audition
+cache is committed (`.ra-audition.json` is a property of the
+deployment, not the repo), so the verdicts above are cited, not shipped — re-running `ra audition`
+is what reproduces them.
+## D-control-defect-sweep — the noise metric measured the corpus too, and five control defects fall out of it
+
+**The observation.** The first `ra audition` on the reshaped 17-fixture corpus (2026-08-02) flagged
+several critics as noisy on the controls. A 30-call spot check that read every filed issue against
+the artifact it was filed on found that a substantial share of the supposedly invented issues were
+**real, material, lens-relevant defects in the controls** — D-control-soundness's failure mode a
+second time, in a corpus that had been rewritten specifically to close it.
+
+That is not a new kind of mistake, but it is a new piece of evidence about the harness: three of the
+five defects below were found by the critics the controls were grading, on the run that was
+supposed to be grading *them*. `control_material_rate` counts findings a control should not admit;
+it cannot tell "the model invented this" from "the fixture author was wrong", and this round it was
+measuring the second. The metric worked in both directions — it is a joint measurement of the model
+and the corpus, and a spike in it is a hypothesis about either.
+
+**The five defects.**
+
+| fixture | locus | category the critics filed | what was wrong |
+|---|---|---|---|
+| `control-base-congestion-pricing-01` | S1.P1 | `overstated_claim` / `uncited_claim` | "none of the **four** reviewed here has been repealed" against three implementations — London [1], Stockholm [2], New York [3]. Both `## Key findings` and the evidence section list three, and `omitted-counterargument-01`, cut from this same base, still says three. |
+| `control-base-remote-work-01` | S2.P1, S4.P1 | `misrepresented_source` | Bloom et al. (2015) decomposed backwards: "roughly two-thirds from more calls per minute and one-third from more hours worked". The paper reports 9 of the 13 points from more minutes worked per shift and 4 from more calls per minute. |
+| `control-base-minimum-wage-01` | S4.P2 vs S3.P2 | `contradicted_claim` | S4.P2 said the bunching design "answers the comparison-group problem"; S3.P2 said that same design "rest[s] on contestable comparison groups". |
+| `control-sound-02` | S5.P2 | `invalid_inference` | "Much of the distance between the two results is that discount-rate assumption" — a cross-study attribution licensed only by [2]'s own within-study sensitivity. |
+| `control-sound-01` | S5.P2 | `contradicted_claim` | "the component on which the answer above is most confidently negative" against S3.P2's "hedged rather than negative" and S1.P1's "absence of studies, not absence of effect", with the reconciling distinction never stated. |
+
+The Bloom correction is fetch-verified per QP9/QP10 rather than derived by negating the wrong
+sentence: the published abstract reads "a 13% performance increase, of which 9% was from working
+more minutes per shift (fewer breaks and sick days) and 4% from more calls per minute"
+([QJE 130(1), 165–218](https://doi.org/10.1093/qje/qju032); [NBER w18871](https://www.nber.org/papers/w18871)).
+The fixture also glossed the 9 points as "more hours worked", which implies longer shifts rather
+than the fewer breaks and sick days the paper attributes them to; both sentences now say "more
+minutes worked per shift".
+
+**Decision.** All five are corrected in the fixtures, and the soundness contract in each manifest
+records what was wrong and why the corrected sentence is what the sources carry. Two of the
+corrections extend that contract past its previous scope: it required every empirical claim to
+carry a resolving citation, and said nothing about whether two sections could assert opposite
+things. **A control is internally consistent across sections, or it is not sound** — an artifact
+that contradicts itself hands the logic lens a real finding, and D-control-soundness's rule ("sound
+under every lens or it is not a control") already implies this. The two `contradicted_claim` defects
+are the demonstration that the implication needed saying.
+
+Each correction is the smallest edit that removes the defect and leaves the report's posture
+intact. `control-sound-01` keeps its hedge and gains the sentence that makes the sanitation
+confidence consistent with it; `control-base-minimum-wage-01` qualifies S4.P2 rather than deleting
+S3.P2's caveat; `control-sound-02` says what [2] actually shows instead of dropping the paragraph.
+No source is added or removed in any fixture, so the source counts `test_corpus_class_is_not_readable_off_source_count`
+compares are unchanged, and the length band still clears `MAX_LENGTH_SPREAD`.
+
+**Two planted fixtures are edited, and that is what keeps them measuring.** `fabricated-citation-01`
+and `uncited-claim-01` share the corrected prose with their control bases — the paragraphs are
+literally the same text, because each plant *is* its base with one paragraph mutated. Correcting
+only the control would make the pair differ in two paragraphs instead of one, and the second
+difference would be a feature separating the noise set from the sensitivity set, which is the
+confound D-fixture-report-shape and D-conceptual-conflation exist to keep out. The mirrored edits
+are byte-identical to the control's and touch no planted locus, no manifest `defects` block, no
+threshold and no grader: the plant/control delta is exactly what it was, namely the planted defect.
+`MINIMAL_PAIRS` does not yet assert one-paragraph minimality for these two pairs — their manifests
+claim it in prose — so no test forced this; the diff was checked by hand and the differing-hunk
+count is unchanged.
+
+**Consequence for the cache.** Editing any fixture changes `corpus_hash`, and
+`AuditionEntry.matches` therefore invalidates every cached verdict (D-audition-rubric-identity).
+That is the intended behaviour and the reason the hash covers artifact bytes: the previous verdicts
+were measured against a corpus that graded competent critics as inventors, so they are not verdicts
+about the models. A re-audition follows this change, and the noise figures it produces are the
+first ones that mean what `control_material_rate` says they mean.
+
+**Deliberately not done.** No threshold moved. `max_control_material_rate` stays at 1.0: the fix for
+a corpus that hands out real findings is to stop handing them out, not to raise the bar for how
+many a control may hand out. No test is added — the two mechanically checkable properties here
+(citation resolution, source counts) already have tests that pass, and the three that are not
+mechanically checkable are exactly the ones D-control-soundness assigned to review and to the
+manifest contracts, because no regex distinguishes a paragraph that contradicts another from one
+that qualifies it. The audition structured-output probe gap and the completeness-pool roster
+change are filed separately and are not touched here.
+
+## D-decisions-merge-driver — a merge driver resolves the common append-only collision, not a file split
+
+**The problem.** Every new decision is appended immediately before `## Open items for a future round`
+(D-decision-slugs). Almost every PR here is agent-authored (docs/ci-pipeline.md's "Syncing with the
+base branch": "Almost every PR here is agent-authored, so when the base moves there is no human in
+the loop to resync"), and most add a decision. Two independent, non-conflicting PRs that both append
+collide at that identical insertion point: a 3-way merge diffs
+each side against the same base line and has no way to order two insertions anchored on it, so the
+result is a genuine git conflict with no semantic disagreement behind it — the same shape every time,
+regardless of which two decisions collided. The repository already carries dedicated machinery for
+exactly this: `review-fixer.yml`'s "Sync with the base branch" step and `fixer.md`'s "Merge conflicts"
+section exist because an agent hits this class of conflict routinely enough to need a documented,
+gated resolution path rather than treating it as exceptional.
+
+**The decision.** A repo-local git merge driver (`scripts/merge_decisions.py`, registered by
+`.gitattributes` and `git config merge.decisions-append.driver`) special-cases the "both sides purely
+appended sections before the tail marker" shape and merges it automatically. Anything else — an edit to
+an existing section, an edit to the Open-items section itself, a genuine same-slug collision with
+differing content, or any parse ambiguity — falls through to exactly what an unconfigured merge would
+have done (`git merge-file`'s own diff3 merge, conflict markers and all). The driver is registered at
+every place this repository actually runs a merge of this kind: `review-fixer.yml`'s two sync-merge call
+sites, `review-pipeline.yml`'s merge-tree recreation step (D-inherit-whole-range), and
+`.devcontainer/setup.sh` for a human resolving the same conflict locally.
+
+The recognized shape is exact: appended text must be one or more complete `## D-<slug> — …` sections,
+nothing else, with at least one blank line separating the last one from the tail marker. Any prose
+that isn't itself a decision section, a stray non-decision heading, or a section running straight
+into the marker with no blank line at all makes the driver decline, not merge something malformed.
+
+**Registration is conditional, because a broken driver is worse than none.** "Falls through to what
+an unconfigured merge would have done" is a property of the driver's *decisions*, not of its
+*existence*: a driver whose command cannot start does not fall through to anything. Git marks the
+path conflicted, leaves "ours" in the worktree with no conflict markers, and records the path as
+merely `UU` in the index — and `review-fixer.yml`'s commit step runs `git add -A` before its marker
+gate, which resolves that entry and leaves `git ls-files -u` and `git diff --check --cached` both
+empty. The gate passes and the pipeline pushes a merge that dropped every base-side change to a
+normative spec file, with no marker anywhere for a human or an agent to notice. The whole marker
+gate assumes an unresolved conflict leaves markers behind, and a non-executing driver is the one
+thing that breaks that assumption. So every site registers through
+`scripts/register_decisions_driver.sh`, which first runs the exact command git will run against a
+synthetic append (must merge it) and a synthetic same-section conflict (must decline it *and* leave
+markers), and registers only if both hold — clearing any earlier registration if they do not. A
+missing or broken driver therefore degrades to real plain-git behaviour rather than failing the job:
+a stuck PR buys no safety here, and the conflict is then resolved exactly as it was before this
+decision existed. The fixer's sync step carries the matching backstop, refusing to continue if a
+path routed to the driver comes back conflicted with no markers in it.
+
+Splitting the file into one-decision-per-file was considered and rejected: the single append-only log is
+load-bearing in `scripts/validate-decision-numbers.sh` and `tests/test_decision_numbers.py`'s
+whole-file duplicate scan, `tests/test_reviewer_prompt_ranges.py`'s membership check, several CI
+reviewer prompts under `.github/scripts/review/prompts/` that cite the slug scheme against this one
+file, `pr-validation.yml`'s path-filtered `decisions` job, and `mkdocs.yml`'s single top-level nav entry
+(with its own comment explaining the file is deliberately not split). A split would touch all of that to
+solve a problem a merge driver solves without touching any of it — and it would still need a variant of
+this same driver, or a numbering scheme, to keep the resulting many-file index itself append-safe.
+
+**Invariants.** None of the six tabulated pipeline-core safety invariants (author exclusion, blind
+orchestrator, fail-closed lenses, severity floors, termination, untrusted text) is in reach — none
+constrains how a model's context is built, and this changes none of them. It does narrow
+D-inherit-whole-range's tree-identity gate: a `docs/decisions.md` merge this driver resolved now
+recreates identically and can inherit a prior verdict, where before this decision any conflict in
+that file forced a full review regardless of shape (see docs/ci-pipeline.md's "Cycle control" and
+"Syncing with the base branch", and QP7/QP8 in quality-principles.md, all updated alongside this
+entry). That narrowing is deliberate and bounded — the gate stays a pure, deterministic function of
+git content, never an LLM judgment, and only the append-only shape is affected. It holds only because
+every registration executes the driver from the trusted `main` checkout (`$GITHUB_WORKSPACE` in
+review-fixer.yml, `$GITHUB_WORKSPACE/main-checkout` in review-pipeline.yml), never the PR checkout
+under review: the inherit step is a verifier and must not run code the commit it is verifying
+supplied, and the sync steps hold `WORKFLOW_PAT` and must not execute a contributor's edit to this
+file before anything is reviewed. The driver's own default is fail-closed within that boundary: any
+condition it cannot confirm true (marker missing, an edit inside the head, any slug named on both
+sides) makes it abstain to the exact behavior git would have used unconfigured, so a conflict of any
+other shape is unaffected and reviewed exactly as before.
+
 ## Open items for a future round
 
+- A third completeness critic, chosen by measurement (D-completeness-pool-noise). The pool is down
+  to two families, which is enough for a strong `accepted` but leaves no spare for a rule 8 top-up:
+  a clean pass where one of the two reviews fails now ends at rule 11 `exhausted_unresolved`.
+  Restoring depth means auditioning a candidate on that lens first — the thing that went wrong here
+  was a slot filled on corpus-decorrelation reasoning alone. Worth pairing with the question of
+  whether a *non*-roster-limited lens that cannot be topped up deserves a gentler terminal status
+  than a budget exhaustion; that is a controller change, so it is its own decision.
 - A non-gating diagnostic channel for minor-floor categories in `ra audition`
   (D-minor-floor-fixtures), and a `loaded_language` fixture to put in it. The harness currently has
   exactly one bar — post-clamp materiality — so the three minor-floor categories cannot be

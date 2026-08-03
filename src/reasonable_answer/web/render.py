@@ -278,8 +278,9 @@ def render_index(
         else ""
     )
     # "Fetched and checked against what the report says they say" is the D-source-verification verified-sourcing
-    # posture (`search.verify_sources: true`): the cited pages are fetched and handed to the
-    # evidence lens. The shipped roster enables retrieval only and keeps verification off (D-run-date-grounding),
+    # posture (`search.verify_sources: true`): addressable cited pages up to the configured
+    # limit are fetched and handed to the evidence lens. The shipped roster enables retrieval
+    # only and keeps verification off (D-run-date-grounding),
     # and retrieval alone does not establish that a page supports the claim attached to it
     # (docs/convergence.md). So this claim is config-derived, unlike the static header tagline:
     # here `render_index` has the `Config` the tagline's element does not.

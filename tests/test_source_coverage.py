@@ -71,6 +71,17 @@ def test_an_unmarked_section_counts_one_entry_per_line():
     assert len(fetch.source_entries(report)) == 2
 
 
+def test_plain_numbered_list_entries_are_split():
+    report = (
+        "# T\n\n## Sources\n\n"
+        "1. Smith 2019. https://example.org/a\n"
+        "2) Jones 2020. https://example.org/b\n"
+    )
+    entries = fetch.source_entries(report)
+    assert len(entries) == 2
+    assert fetch.entry_url(entries[1]) == "https://example.org/b"
+
+
 def test_no_sources_section_means_nothing_cited():
     assert fetch.source_entries("# T\n\nJust prose.\n") == []
     assert fetch.coverage("# T\n\nJust prose.\n").cited == 0
@@ -117,6 +128,7 @@ def test_a_mixed_bibliography_tallies_every_outcome_separately():
     assert observed.not_addressable == 1
     assert observed.attempted == 4
     assert observed.not_attempted == 0
+    assert observed.body_backed_entries == 1
     assert observed.bodies_read == 1
     assert observed.metadata_only == 1
     assert observed.blocked_or_unreadable == 1
@@ -158,7 +170,7 @@ def test_the_partitions_sum_to_the_number_of_entries():
     observed = fetch.coverage(REPORT, _mixed_outcomes())
     assert observed.addressable + observed.not_addressable == observed.cited
     assert (
-        observed.bodies_read
+        observed.body_backed_entries
         + observed.metadata_only
         + observed.blocked_or_unreadable
         + observed.not_found
@@ -179,9 +191,9 @@ def test_an_addressable_entry_nobody_fetched_is_reported_as_unattempted():
     assert observed.not_independently_checked == 5
 
 
-def test_two_entries_citing_one_url_are_two_entries():
-    """Counted in entries, not fetches: the per-run cache collapses them into one call,
-    and both are still things the report stands on."""
+def test_two_entries_citing_one_url_are_two_entries_backed_by_one_body():
+    """Entry dispositions and fetched bodies are separate units: both citations count,
+    but one cached URL may never be described as two bodies read."""
     report = (
         "# T\n\n## Sources\n\n[1] https://example.org/a\n[2] Also https://example.org/a\n"
     )
@@ -189,14 +201,18 @@ def test_two_entries_citing_one_url_are_two_entries():
         report, {"https://example.org/a": FetchedSource(url="https://example.org/a", text="b")}
     )
     assert observed.cited == 2
-    assert observed.bodies_read == 2
+    assert observed.body_backed_entries == 2
+    assert observed.bodies_read == 1
+    assert "1 source body read (backing 2 cited entries)" in fetch.coverage_sentence(
+        observed.as_dict()
+    )
 
 
 def test_the_sentence_reads_off_the_persisted_shape():
     observed = fetch.coverage(REPORT, _mixed_outcomes())
     assert fetch.coverage_sentence(observed.as_dict()) == (
         "source review: 5 cited; 4 addressable; 2 existence confirmed; "
-        "1 body read; 2 not independently checked"
+        "1 source body read (backing 1 cited entry); 2 not independently checked"
     )
 
 
@@ -205,7 +221,7 @@ def test_the_sentence_survives_a_record_it_does_not_recognise():
     as more coverage than the record supports."""
     assert fetch.coverage_sentence({"cited": 4}) == (
         "source review: 4 cited; 0 addressable; 0 existence confirmed; "
-        "0 bodies read; 0 not independently checked"
+        "0 source bodies read (backing 0 cited entries); 0 not independently checked"
     )
     assert fetch.coverage_sentence({}) == "source review: the shipped draft cites no sources"
 
@@ -262,6 +278,7 @@ def test_the_evidence_lens_records_coverage_for_the_artifact_it_read(
 
     assert set(sink) == {"h" * 64}
     assert sink["h" * 64]["cited"] == 5
+    assert sink["h" * 64]["body_backed_entries"] == 1
     assert sink["h" * 64]["bodies_read"] == 1
     assert sink["h" * 64]["not_independently_checked"] == 2
     assert sink["h" * 64]["verification_enabled"] is True
@@ -395,6 +412,7 @@ def test_finalize_reports_the_chosen_rounds_coverage_not_the_last_rounds(
     assert summary["artifact_hash"] == earlier_hash
     # The shipped draft's tally, not round 2's all-unattempted one.
     assert summary["source_coverage"]["attempted"] == 4
+    assert summary["source_coverage"]["body_backed_entries"] == 1
     assert summary["source_coverage"]["bodies_read"] == 1
     assert "2 existence confirmed" in summary["label"]
 
@@ -404,7 +422,8 @@ def test_finalize_reports_the_chosen_rounds_coverage_not_the_last_rounds(
 _FINAL = {
     "terminal_status": "accepted",
     "label": "consensus-reviewed — source review: 5 cited; 4 addressable; "
-    "2 existence confirmed; 1 body read; 2 not independently checked",
+    "2 existence confirmed; 1 source body read (backing 1 cited entry); "
+    "2 not independently checked",
     "rounds": 2,
     "chosen_round": 2,
     "artifact_hash": "a" * 64,
@@ -418,7 +437,8 @@ def test_the_markdown_export_renders_the_breakdown_and_the_caveat():
     document = export.export_markdown("Q?", REPORT, _FINAL, "run-x", exported_on="2026-01-01")
     assert "### Source review" in document
     assert "- Entries cited: 5" in document
-    assert "- Body read: 1" in document
+    assert "- Entries backed by a read source body: 1" in document
+    assert "- Distinct source bodies read: 1" in document
     assert "- Definitively not found (404/410): 1" in document
     assert "- Not independently checked: 2" in document
     assert export.COVERAGE_CAVEAT in document
@@ -454,9 +474,23 @@ def test_a_record_with_no_coverage_renders_no_source_review_section():
 
 
 def test_a_malformed_coverage_record_is_ignored_rather_than_rendered():
-    for broken in ("not-an-object", {"cited": "many"}, {"bodies_read": 3}):
+    for broken in (
+        "not-an-object",
+        {"cited": "many"},
+        {"cited": True},
+        {"bodies_read": 3},
+    ):
         prov = export.provenance("Q?", {**_FINAL, "source_coverage": broken}, "run-x")
         assert prov.source_coverage == {}
+
+
+def test_boolean_counts_are_not_rendered_as_one():
+    raw = {**_FINAL["source_coverage"], "body_backed_entries": True}
+    prov = export.provenance("Q?", {**_FINAL, "source_coverage": raw}, "run-x")
+    assert "body_backed_entries" not in prov.source_coverage
+    assert "Entries backed by a read source body" not in export.export_markdown(
+        "Q?", REPORT, {**_FINAL, "source_coverage": raw}, "run-x"
+    )
 
 
 # ------------------------------------------- several critics, one record per artifact
@@ -490,12 +524,40 @@ def test_a_body_read_outranks_a_registry_confirmation_at_equal_reach():
     from reasonable_answer.graph import _record_coverage
 
     body = fetch.coverage(REPORT, _mixed_outcomes()).as_dict()
-    registry = {**body, "bodies_read": 0, "metadata_only": 2}
+    registry = {
+        **body,
+        "body_backed_entries": 0,
+        "bodies_read": 0,
+        "metadata_only": 2,
+    }
 
     sink: dict[str, dict] = {}
     _record_coverage(sink, "h" * 64, registry)
     assert _record_coverage(sink, "h" * 64, body) is True
     assert sink["h" * 64]["bodies_read"] == 1
+
+
+def test_equal_reach_has_a_stable_information_order():
+    """A registry confirmation and a definitive absence both independently check one
+    entry, but the selected record must not depend on which critic finished first."""
+    from reasonable_answer.graph import _record_coverage
+
+    report = "# T\n\n## Sources\n\n[1] https://example.org/a\n"
+    metadata = FetchedSource(
+        url="https://example.org/a",
+        error="HTTP 403; crossref confirms the source exists",
+        outcome=SourceOutcome.METADATA_ONLY,
+        metadata=SourceMetadata(title="A", registry="crossref"),
+    )
+    not_found = FetchedSource(url="https://example.org/a", status=404, error="HTTP 404")
+    confirmed = fetch.coverage(report, {metadata.url: metadata}).as_dict()
+    absent = fetch.coverage(report, {not_found.url: not_found}).as_dict()
+
+    for first, second in ((confirmed, absent), (absent, confirmed)):
+        sink: dict[str, dict] = {}
+        _record_coverage(sink, "h" * 64, first)
+        _record_coverage(sink, "h" * 64, second)
+        assert sink["h" * 64] == confirmed
 
 
 def test_an_equal_tally_does_not_displace_the_record():
@@ -507,6 +569,44 @@ def test_an_equal_tally_does_not_displace_the_record():
     sink: dict[str, dict] = {}
     assert _record_coverage(sink, "h" * 64, observed) is True
     assert _record_coverage(sink, "h" * 64, dict(observed)) is False
+
+
+def test_record_updates_and_audit_callbacks_cannot_interleave():
+    """The event for a displaced record must finish before the better record and its
+    event take the lock, so the final event reconstructs the final state."""
+    import threading
+    from concurrent.futures import ThreadPoolExecutor
+
+    from reasonable_answer.graph import _record_coverage
+
+    poor = fetch.coverage(REPORT, {}).as_dict()
+    rich = fetch.coverage(REPORT, _mixed_outcomes()).as_dict()
+    first_callback_started = threading.Event()
+    release_first_callback = threading.Event()
+    emitted: list[dict] = []
+
+    def emit(record):
+        emitted.append(record)
+        if record is poor:
+            first_callback_started.set()
+            assert release_first_callback.wait(timeout=2)
+
+    sink: dict[str, dict] = {}
+    with ThreadPoolExecutor(max_workers=2) as pool:
+        first = pool.submit(
+            _record_coverage, sink, "h" * 64, poor, on_recorded=emit
+        )
+        assert first_callback_started.wait(timeout=2)
+        second = pool.submit(
+            _record_coverage, sink, "h" * 64, rich, on_recorded=emit
+        )
+        assert not second.done()
+        release_first_callback.set()
+        assert first.result() is True
+        assert second.result() is True
+
+    assert emitted == [poor, rich]
+    assert emitted[-1] == sink["h" * 64]
 
 
 class _DegradingFetcher:
@@ -591,6 +691,7 @@ def test_the_record_is_the_furthest_reaching_critics_tally_not_the_first_to_fini
     out = _critique(_critique_state(identities), rt)
 
     observed = out["source_coverage"][_hash(REPORT)]
+    assert observed["body_backed_entries"] == 1
     assert observed["bodies_read"] == 1
     assert observed["not_independently_checked"] == 2  # not the all-blocked 5
 
@@ -695,6 +796,7 @@ def test_a_verified_run_carries_its_measured_coverage_all_the_way_out(
 
     observed = summary["source_coverage"]
     assert observed["cited"] == 5
+    assert observed["body_backed_entries"] == 1
     assert observed["bodies_read"] == 1
     assert observed["existence_confirmed"] == 2
     assert observed["not_independently_checked"] == 2

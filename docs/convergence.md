@@ -200,22 +200,28 @@ prompt-hash surface: it is run context, not lens semantics.
 
 **The label states measured coverage, not that verification was enabled (D-observed-source-coverage).**
 With verification on, `final.json`'s label is the observation — *consensus-reviewed — source review:
-15 cited; 3 addressable; 3 existence confirmed; 3 bodies read; 12 not independently checked* —
-because a switch that is on says nothing about how much of a bibliography it reached.
+15 cited; 3 addressable; 3 existence confirmed; 3 source bodies read (backing 3 cited entries);
+12 not independently checked* — because a switch that is on says nothing about how much of a
+bibliography it reached.
 `fetch.coverage` tallies the shipped draft's own `## Sources` section in **entries**: `cited`,
 `addressable` / `not_addressable`, `attempted` / `not_attempted`, and a disposition per attempt
-(`bodies_read`, `metadata_only`, `blocked_or_unreadable`, `not_found`, `budget_exhausted`), with
-`existence_confirmed` derived from body and registry hits, and `not_independently_checked` derived
-only from unaddressable, unattempted, blocked or unreadable, and budget-exhausted entries. A
-definitive not-found is independently checked and found absent, so it belongs in neither derived
-count. The tally is taken where the evidence lens fetches and keyed to the artifact's hash, so a
+(`body_backed_entries`, `metadata_only`, `blocked_or_unreadable`, `not_found`,
+`budget_exhausted`). `bodies_read` separately counts distinct cited URLs whose body was read, so two
+bibliography entries sharing one URL render as two body-backed entries and one body, never two
+bodies. `existence_confirmed` is derived from body-backed entries and registry hits, and
+`not_independently_checked` is derived only from unaddressable, unattempted, blocked or unreadable,
+and budget-exhausted entries. A definitive not-found is independently checked and found absent, so
+it belongs in neither derived count. The tally is taken where the evidence lens fetches and keyed to
+the artifact's hash, so a
 non-accepted terminal that ships an earlier draft reports *that* draft's coverage; a draft with no
 record reads as *not recorded*, which is neither zero coverage nor a pass. At review depth above 1
 the lens tallies the same bibliography once per critic; an artifact still gets exactly **one**
-record, the one that reached furthest, so what the run reports does not depend on which critic
-finished first and can only move toward more coverage. `final.json` carries a
-record when one exists, and the markdown export, the HTML export and the run page render the same
-breakdown from it. Coverage is a report, never a gate: it enters no controller rule, no
+record, selected by a stable total ordering of independent checks, distinct bodies, body-backed
+entries, metadata confirmations, and definitive absences. Equal-reach observations therefore do
+not fall back to arrival order. Record replacement and its audit event share one lock, so the last
+coverage event and `final.json` cannot diverge under concurrency. The markdown export, the HTML
+export and the run page render the same breakdown. Coverage is a report, never a gate: it enters no
+controller rule, no
 `OrchestratorView`, and mints no defect.
 
 Two readings the counts must never be given, carried as a caveat under every rendering of them. An

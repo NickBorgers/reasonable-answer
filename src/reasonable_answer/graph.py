@@ -15,6 +15,7 @@ import json
 import logging
 import threading
 import uuid
+from collections.abc import Callable
 from concurrent.futures import ThreadPoolExecutor
 from contextlib import closing
 from dataclasses import dataclass, field
@@ -869,20 +870,45 @@ def _resolution_tiers(sources: list) -> dict[str, int]:
 _COVERAGE_LOCK = threading.Lock()
 
 
-def _coverage_reach(observed: dict) -> tuple[int, int]:
-    """How far verification actually got, as a key two tallies can be ranked on.
+def _coverage_rank(observed: dict) -> tuple[int | str, ...]:
+    """How far verification actually got, as a total key two tallies can be ranked on.
 
     Entries *independently checked* comes first — `cited` minus the ones nothing
     reached, which counts a definitive not-found as checked, because it is
-    (D-notfound-fabrication). Bodies read breaks the tie, since reading a body reaches
-    further than a registry confirming the entry exists (D-existence-vs-body).
+    (D-notfound-fabrication). Distinct bodies read, body-backed entries, registry
+    confirmations and definitive not-founds then order equal-reach observations by how
+    much direct evidence they contain (D-existence-vs-body). The canonical record is a
+    final tie-breaker so future fields cannot quietly reintroduce arrival-order behavior.
     """
-    cited = observed.get("cited", 0)
-    checked = cited - observed.get("not_independently_checked", 0)
-    return (checked, observed.get("bodies_read", 0))
+
+    def count(key: str) -> int:
+        value = observed.get(key)
+        return value if isinstance(value, int) and not isinstance(value, bool) else 0
+
+    checked = max(0, count("cited") - count("not_independently_checked"))
+    numeric = (
+        checked,
+        count("bodies_read"),
+        count("body_backed_entries"),
+        count("metadata_only"),
+        count("not_found"),
+        count("attempted"),
+        -count("blocked_or_unreadable"),
+        -count("budget_exhausted"),
+        -count("not_attempted"),
+        -count("not_addressable"),
+    )
+    canonical = json.dumps(observed, sort_keys=True, separators=(",", ":"))
+    return (*numeric, canonical)
 
 
-def _record_coverage(sink: dict[str, dict], artifact_hash: str, observed: dict) -> bool:
+def _record_coverage(
+    sink: dict[str, dict],
+    artifact_hash: str,
+    observed: dict,
+    *,
+    on_recorded: Callable[[dict], None] | None = None,
+) -> bool:
     """Put `observed` on the record for this artifact if it reached furthest; say whether
     it did.
 
@@ -891,18 +917,20 @@ def _record_coverage(sink: dict[str, dict], artifact_hash: str, observed: dict) 
     (`fetch.SourceFetcher.fetch`). Two critics that both miss the cache on the same URL
     can therefore observe different outcomes, and there is no aggregate to read back
     afterwards — so the run keeps the observation that reached furthest rather than
-    whichever thread happened to finish first. That makes the record independent of
-    scheduling, and it can only ever move toward more coverage, never less.
+    whichever thread happened to finish first. The total rank makes the record independent
+    of scheduling even when two observations reached equally far but ended differently.
 
-    Returning the decision is what keeps the audit trail honest: only a tally that became
-    the record is emitted, so the last `source_coverage` event for an artifact is always
-    the one `final.json` will carry.
+    `on_recorded` runs while the same lock is held. That is what keeps the audit trail
+    honest: updates and their events cannot interleave, so the last `source_coverage` event
+    for an artifact is always the one `final.json` will carry.
     """
     with _COVERAGE_LOCK:
         current = sink.get(artifact_hash)
-        if current is not None and _coverage_reach(current) >= _coverage_reach(observed):
+        if current is not None and _coverage_rank(current) >= _coverage_rank(observed):
             return False
         sink[artifact_hash] = observed
+        if on_recorded is not None:
+            on_recorded(observed)
         return True
 
 
@@ -1000,10 +1028,15 @@ def _critique_one(
             observed = fetch.coverage(
                 report_text, by_url, verification_enabled=rt.verify_sources
             )
-            if _record_coverage(coverage_sink, artifact_hash, observed.as_dict()):
-                rt.store.event(
-                    "source_coverage", artifact_hash=artifact_hash, **observed.as_dict()
-                )
+            coverage_record = observed.as_dict()
+            _record_coverage(
+                coverage_sink,
+                artifact_hash,
+                coverage_record,
+                on_recorded=lambda record: rt.store.event(
+                    "source_coverage", artifact_hash=artifact_hash, **record
+                ),
+            )
 
     result = critique_mod.critique_once(
         rt.client,

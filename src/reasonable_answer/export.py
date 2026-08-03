@@ -243,7 +243,8 @@ COVERAGE_ROWS: tuple[tuple[str, str], ...] = (
     ("cited", "Entries cited"),
     ("addressable", "Addressable (carry a URL this pipeline can fetch)"),
     ("not_addressable", "Not independently addressable"),
-    ("bodies_read", "Body read"),
+    ("body_backed_entries", "Entries backed by a read source body"),
+    ("bodies_read", "Distinct source bodies read"),
     ("metadata_only", "Existence confirmed by a registry, body not read"),
     ("blocked_or_unreadable", "Blocked, paywalled or unreadable"),
     ("not_found", "Definitively not found (404/410)"),
@@ -259,10 +260,11 @@ COVERAGE_ROWS: tuple[tuple[str, str], ...] = (
 #: treating any other failed fetch that way is the error D-notfound-fabrication prevents.
 COVERAGE_CAVEAT = (
     "These are observed counts for the report shipped here, not a verdict on its "
-    "citations. An entry that was not independently checked is unverified, which is not "
-    "evidence that it is wrong; a blocked or paywalled source was unreadable, not absent. "
-    "A definitive not-found was independently checked and establishes that the cited page "
-    "does not exist."
+    "citations. Bibliography entries are counted separately even when they cite the same "
+    "URL; distinct source bodies are counted once. An entry that was not independently "
+    "checked is unverified, which is not evidence that it is wrong; a blocked or paywalled "
+    "source was unreadable, not absent. A definitive not-found was independently checked "
+    "and establishes that the cited page does not exist."
 )
 
 #: Said when verification was off for this run: the entries were counted, and none of
@@ -281,7 +283,11 @@ def _coverage(raw: Any) -> dict[str, Any]:
     than as a bibliography of zero entries — the difference between "not measured" and
     "nothing cited", which the rendering keeps apart.
     """
-    if not isinstance(raw, dict) or not isinstance(raw.get("cited"), int):
+    if (
+        not isinstance(raw, dict)
+        or not isinstance(raw.get("cited"), int)
+        or isinstance(raw.get("cited"), bool)
+    ):
         return {}
     out: dict[str, Any] = {
         key: value
