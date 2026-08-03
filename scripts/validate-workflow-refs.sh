@@ -46,6 +46,31 @@ while IFS= read -r line; do
 # is not mistaken for a real reference.
 done < <(grep -rn --include='*.yml' --include='*.yaml' -E '^[[:space:]]*(-[[:space:]]+)?uses:[[:space:]]*\./' .github/ || true)
 
+# Resolves an invocation path to a file in this repository, or fails.
+#
+# A workflow rarely names a script the way it sits on disk. It may run it from a checkout in
+# a subdirectory (`./main-checkout/scripts/x.sh`), or through a variable holding the
+# workspace root — `"${GITHUB_WORKSPACE}/scripts/x.sh"`. The match below cannot see inside
+# `${...}`, so the latter arrives here looking absolute (`/scripts/x.sh`) even though no such
+# path exists or is meant to.
+#
+# So leading segments are dropped one at a time until something resolves. This is the same
+# tradeoff the `uses:` check above already makes with `stripped`: a suffix could in principle
+# match a different file of the same name, which is a false pass — but the alternative is a
+# false *failure* on every variable-rooted invocation, and this gate blocks the merge queue.
+resolve_script() {
+  local candidate="${1#./}"
+  while :; do
+    if [[ -f "$candidate" ]]; then
+      printf '%s\n' "$candidate"
+      return 0
+    fi
+    # No segment left to drop — a bare filename that does not exist.
+    [[ "$candidate" == */* ]] || return 1
+    candidate="${candidate#*/}"
+  done
+}
+
 echo "Checking scripts invoked from workflows..."
 while IFS= read -r line; do
   file="${line%%:*}"
@@ -54,12 +79,11 @@ while IFS= read -r line; do
   # missing even though it is right there.
   script="$(echo "$line" | grep -oE '\.?/?([A-Za-z0-9_.-]+/)*scripts/[A-Za-z0-9_./-]+\.sh' | head -1)"
   [[ -n "$script" ]] || continue
-  script="${script#./}"
 
-  if [[ ! -f "$script" ]]; then
+  if ! resolved="$(resolve_script "$script")"; then
     note "$file invokes '$script' but it does not exist"
-  elif [[ ! -x "$script" ]]; then
-    note "$script is invoked from $file but is not executable (chmod +x)"
+  elif [[ ! -x "$resolved" ]]; then
+    note "$resolved is invoked from $file but is not executable (chmod +x)"
   fi
 done < <(grep -rn --include='*.yml' --include='*.yaml' -E '(\./)?scripts/[A-Za-z0-9_./-]+\.sh' .github/ \
   | grep -vE ':[[:space:]]*#' || true)
