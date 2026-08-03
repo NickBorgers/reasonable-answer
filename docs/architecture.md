@@ -25,6 +25,16 @@ reports the cached status, and `audition.enforce` fails startup closed on a cach
 (`marginal` / stale / not-audited stay warnings). That gate runs in `build_runtime` before any tokens
 are spent; it does not feed the stop decision.
 
+The fixture corpus is part of that measurement boundary, not illustrative test prose
+(D-control-soundness, D-audition-source-integrity). A control must be free of material defects
+under every lens. A planted fixture must contain only its declared defect: except when the plant
+is specifically `fabricated_citation`, every bibliography entry names a publication that resolves
+at a stable locator and every source-dependent claim stays within what the fetched publication
+supports. A `one_sided_sourcing` plant therefore uses real publications selected from one source
+cluster; invented publishers would plant fabrication as a second, easier defect. Offline tests pin
+citation mechanics and the fixed cluster, while source support remains a fetched-text review
+obligation because a regex cannot establish what a paper says.
+
 The diagram below shows a minimal roster for clarity; generator selection is round-robin among
 writers excluding the current artifact's author, preserving `critic(Rₙ) ≠ generator(Rₙ)`.
 

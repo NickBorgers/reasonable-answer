@@ -28,5 +28,12 @@
 # "more hours worked", which implies longer shifts rather than fewer breaks. The same two
 # sentences are corrected identically in `fabricated-citation-01`, because the pair's
 # whole value is that it differs *only* in source [2] and the sentences describing it.
+#
+# D-audition-source-integrity correction: the previous synthesis said task composition
+# explained most cross-study disagreement and selection explained much of the rest.
+# Emanuel & Harrington instead find both negative selection and a negative treatment
+# effect in call-centre work, and explicitly leave the contrast with other papers open.
+# The shared prose now reports those results and treats task, incentives, management,
+# site selection and context as unresolved candidates rather than a decomposition.
 kind: control
 question: "Does remote work reduce team productivity?"

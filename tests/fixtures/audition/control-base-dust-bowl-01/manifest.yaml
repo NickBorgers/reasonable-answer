@@ -22,5 +22,11 @@
 # independence within the same national literature, not geographic spread — rather than
 # restoring a claim nothing in the body supports). Magnitudes the author cannot stand
 # behind are stated as unidentified rather than quoted precisely.
+#
+# D-audition-source-integrity correction: the previous text said Long & Siu followed
+# migrants who "kept moving" and that no cited study measured individuals. The paper
+# links the same people only at the 1930 and 1940 censuses, so it cannot observe repeated
+# moves between those endpoints; it is itself an individual-level outcome study. The
+# artifact now states the outcomes and the two-endpoint limitation the paper reports.
 kind: control
 question: "Did the Dust Bowl migration permanently depress wages in California?"
