@@ -149,6 +149,7 @@ def doctor(
     table.add_column("audition")
     if config.search.enabled:
         table.add_column("tool calls")
+    modes: dict[str, str] = {}
     for alias in config.roster.all_aliases:
         roles_ = []
         if alias in config.roster.writers:
@@ -159,6 +160,7 @@ def doctor(
         if alias == config.roster.orchestrator_alias:
             roles_.append("orchestrator")
         mode = client.probe_structured_output(alias)
+        modes[alias] = mode
         row = [alias, identities[alias], ", ".join(roles_), mode, _audition_cell(config, identities, alias)]
         if config.search.enabled:
             # Only writers hold the tool today, so a critic's inability to call one
@@ -173,11 +175,13 @@ def doctor(
     console.print(table)
 
     warnings = validate_roster_health(config, identities)
-    warnings += _audition_warnings(config, identities)
+    warnings += _audition_warnings(config, identities, modes)
     for warning in warnings:
         console.print(f"[yellow]warning:[/yellow] {warning}")
     if not warnings:
-        console.print("[green]roster healthy: every lens has >=2 eligible non-author models[/green]")
+        console.print(
+            "[green]roster healthy: every lens has >=2 eligible non-author model families[/green]"
+        )
 
     # Surfaced here because `unknown` is otherwise invisible: it costs nothing at the time
     # and only shows up much later, as a month of runs that cannot be attributed to a
@@ -384,6 +388,22 @@ def audition(
         console.print("[yellow]no critic slots match those filters[/yellow]")
         raise typer.Exit(code=0)
 
+    # Pin every alias to the structured-output mode a run would pin it to, *before*
+    # anything is measured or any cached verdict is read (D-audition-probe-parity).
+    # Without this every audition call resolves `mode_for` to the default prompt mode,
+    # so the harness certifies critics in an extraction regime production never runs
+    # them in. Probing here rather than inside `run_assignment` is deliberate: the mode
+    # is part of the cache identity below, so it has to be known before the freshness
+    # check, and `probe_structured_output` memoises, making the harness's own calls free.
+    # An alias that cannot be pinned at all fails closed exactly as `build_runtime`
+    # would fail a run staffed by it — measuring it under a fallback mode would be the
+    # same fidelity gap in a new place.
+    try:
+        modes = {slot.alias: client.probe_structured_output(slot.alias) for slot in slots}
+    except ConfigError as exc:
+        console.print(f"[red]fail closed:[/red] {exc}")
+        raise typer.Exit(code=2) from exc
+
     now = time.time()
     ph = audition_mod.prompt_hash()
     rh = audition_mod.rubric_hash()
@@ -393,7 +413,9 @@ def audition(
     stale_or_missing = [
         s
         for s in slots
-        if not _cache_usable(cache, s, fixtures.corpus_hash, ph, rh, spans, cfg, now)
+        if not _cache_usable(
+            cache, s, fixtures.corpus_hash, ph, rh, spans, cfg, now, modes[s.alias]
+        )
     ]
     if stale_or_missing:
         calls = len(stale_or_missing) * len(fixtures.fixtures) * cfg.repetitions
@@ -418,6 +440,7 @@ def audition(
                     prompt_hash=ph,
                     rubric_hash=rh,
                     require_verbatim_spans=spans,
+                    structured_output_mode=modes[metrics.alias],
                     repetitions=cfg.repetitions,
                     recorded_at=now,
                 )
@@ -431,6 +454,7 @@ def audition(
         if entry is None or not entry.matches(
             fixtures.corpus_hash, ph, cfg.repetitions,
             rubric_hash=rh, require_verbatim_spans=spans,
+            structured_output_mode=modes[slot.alias],
         ):
             rows.append((slot, None, None))
             continue
@@ -451,6 +475,10 @@ def audition(
                         "identity": s.identity,
                         "lens": s.lens.value,
                         "position": s.position,
+                        # The regime the numbers to the right were taken in. A report
+                        # that does not say which extraction path it measured cannot be
+                        # compared with one taken under another (D-audition-probe-parity).
+                        "structured_output_mode": modes[s.alias],
                         "metrics": m.model_dump(mode="json") if m else None,
                         "verdict": j.verdict.value if j else audition_mod.Status.NOT_AUDITED.value,
                         "reasons": list(j.reasons) if j else [],
@@ -460,9 +488,11 @@ def audition(
             }
         )
     else:
-        _render_audition(rows)
+        _render_audition(rows, modes)
 
-    for warning in audition_mod.roster_warnings(config.roster, identities, judgements):
+    for warning in audition_mod.roster_warnings(
+        config.roster, identities, judgements, config.review
+    ):
         console.print(f"[yellow]warning:[/yellow] {warning}")
 
     unfit = [s.alias for s, _, j in rows if j and j.verdict is audition_mod.Verdict.UNFIT]
@@ -530,6 +560,14 @@ def audition_refine(
     client = LLMClient(config)
     alias = config.refine.effective_alias(config.roster)
     identity = client.resolve_identities([alias])[alias]
+    # Same parity gap the critic audition had: unprobed, every call here would resolve
+    # to the default prompt mode while `RefinementService.preflight` pins the strongest
+    # supported one before serving (D-audition-probe-parity).
+    try:
+        mode = client.probe_structured_output(alias)
+    except ConfigError as exc:
+        console.print(f"[red]fail closed:[/red] {exc}")
+        raise typer.Exit(code=2) from exc
 
     now = time.time()
     ph = refine_mod.refine_prompt_hash(enabled)
@@ -538,7 +576,9 @@ def audition_refine(
     entry = cache.get(key)
     if (
         entry is None
-        or not entry.matches(fixtures.corpus_hash, ph, cfg.repetitions)
+        or not entry.matches(
+            fixtures.corpus_hash, ph, cfg.repetitions, structured_output_mode=mode
+        )
         or entry.is_stale(now, cfg.max_age_days)
     ):
         runnable = fixtures.runnable(enabled)
@@ -551,6 +591,7 @@ def audition_refine(
             metrics=metrics,
             corpus_hash=fixtures.corpus_hash,
             prompt_hash=ph,
+            structured_output_mode=mode,
             repetitions=cfg.repetitions,
             recorded_at=now,
         )
@@ -568,6 +609,7 @@ def audition_refine(
                 "prompt_hash": ph,
                 "alias": alias,
                 "identity": identity,
+                "structured_output_mode": mode,
                 "transforms": sorted(enabled),
                 "skipped_fixtures": sorted(skipped),
                 "metrics": metrics.model_dump(mode="json"),
@@ -648,16 +690,20 @@ def _refine_doctor_line(config: Config, client: LLMClient) -> str | None:
     return line
 
 
-def _cache_usable(cache, slot, corpus_hash, ph, rh, spans, cfg, now) -> bool:
+def _cache_usable(cache, slot, corpus_hash, ph, rh, spans, cfg, now, mode) -> bool:
     entry = cache.get(audition_mod.cache_key(slot.identity, slot.lens))
     if entry is None or not entry.matches(
-        corpus_hash, ph, cfg.repetitions, rubric_hash=rh, require_verbatim_spans=spans
+        corpus_hash, ph, cfg.repetitions, rubric_hash=rh, require_verbatim_spans=spans,
+        # This path has probed and is already spending, so it is the one place a
+        # mode mismatch can be answered by re-measuring rather than reported
+        # (D-audition-probe-parity).
+        structured_output_mode=mode,
     ):
         return False
     return not entry.is_stale(now, cfg.max_age_days)
 
 
-def _render_audition(rows) -> None:
+def _render_audition(rows, modes) -> None:
     table = Table(title="critic audition")
     # `cover` sits beside the rates because it says what they were measured over: a
     # fixture no call ever graded is absent from every denominator to its right
@@ -694,6 +740,12 @@ def _render_audition(rows) -> None:
             f"[{style}]{judgement.verdict.value}[/{style}]",
         )
     console.print(table)
+    # Said out loud rather than added as a tenth column: the mode is per alias, not per
+    # slot, and a reader who does not know which extraction path produced a
+    # `schema` count cannot interpret it (D-audition-probe-parity).
+    if modes:
+        pinned = ", ".join(f"{alias}={mode}" for alias, mode in sorted(modes.items()))
+        console.print(f"[dim]measured under structured-output mode: {pinned}[/dim]")
     for slot, _, judgement in rows:
         for reason in judgement.reasons if judgement else ():
             console.print(f"[yellow]{slot.alias} / {slot.lens.value}:[/yellow] {reason}")
@@ -724,6 +776,10 @@ def _audition_cells(config: Config, identities: dict[str, str]) -> dict[str, str
             config.audition.repetitions,
             rubric_hash=rh,
             require_verbatim_spans=config.require_verbatim_spans,
+            # Mode-agnostic, like the gate: doctor's own probe results are reported as
+            # drift by `_audition_warnings`, never used to hide a cached verdict
+            # (D-audition-probe-parity).
+            structured_output_mode=None,
         ):
             cell = f"[dim]{audition_mod.Status.NOT_AUDITED.value}[/dim]"
         elif entry.is_stale(now, config.audition.max_age_days):
@@ -747,16 +803,26 @@ def _audition_cell(config: Config, identities: dict[str, str], alias: str) -> st
     return _audition_cells(config, identities).get(alias, "[dim]n/a[/dim]")
 
 
-def _audition_warnings(config: Config, identities: dict[str, str]) -> list[str]:
+def _audition_warnings(
+    config: Config, identities: dict[str, str], modes: dict[str, str]
+) -> list[str]:
     """Roster-level audition warnings, from cached verdicts only.
 
     `ra doctor` must not spend an audition's worth of calls, so anything unmeasured is
     simply absent here and shows as `not audited` in the table.
+
+    `modes` is what doctor's own structured-output probe already found — passed in as
+    data, so this stays a cache read. A verdict measured under a different mode than the
+    alias now pins to is still read (D-audition-probe-parity), so the divergence has to
+    be reported or it is invisible.
     """
     judgements = audition_mod.cached_judgements(
         config.audition, config.roster, identities, config.require_verbatim_spans
     )
-    warnings = audition_mod.roster_warnings(config.roster, identities, judgements)
+    warnings = audition_mod.roster_warnings(
+        config.roster, identities, judgements, config.review
+    )
+    warnings += audition_mod.mode_drift(config.audition, config.roster, identities, modes)
     # Enforcement with nothing measured is the failure mode that got `audition.enabled`
     # deleted: a setting that reads as a safety control while gating nothing. It cannot
     # be an error (a fresh checkout has no cache and must still run) so it is said out

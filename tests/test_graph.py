@@ -10,7 +10,7 @@ import pytest
 from fakes import FakeClient
 
 from reasonable_answer.config import Budgets, Config, ConfigError
-from reasonable_answer.graph import run
+from reasonable_answer.graph import _lens_results, run
 from reasonable_answer.schemas import CritiqueOutput, RawIssue, StructuralRef
 from reasonable_answer.taxonomy import Category, Lens, Severity
 
@@ -22,6 +22,22 @@ A claim that is fully supported [1].
 
 [1] A real-looking source.
 """
+
+
+def test_legacy_single_result_checkpoint_shape_is_wrapped_for_resume():
+    legacy = {
+        "lens": "logic",
+        "artifact_hash": "h" * 64,
+        "critic_alias": "logic-spec",
+        "critic_identity": "vendor/logic",
+        "artifact_author_identity": "vendor/writer",
+        "issues": [],
+        "failed": False,
+        "failure_reason": None,
+        "attempt": 1,
+    }
+
+    assert _lens_results({"lens_results": {"logic": legacy}}) == {"logic": [legacy]}
 
 
 def lens_of(user: str) -> str:
@@ -360,7 +376,12 @@ def test_rule_2_retries_keep_rotating_after_the_critic_pool_is_exhausted(
     (`critique_rounds`), not `len(used_critics)` — which would freeze `attempt` and pin
     every later retry on one fallback (run-3b4fe4760289 spent 11 of 12 attempts on one
     critic and aborted). This drives the round-level `_critique` so the graph, not just
-    `pick_critic`, is exercised."""
+    `pick_critic`, is exercised.
+
+    At the default review depth of 2 (D-front-loaded-depth) the first pass draws both
+    eligible models at once, so the pool is exhausted one pass sooner; the guarantee
+    being pinned here is about the retries *after* that, which is where the regression
+    was."""
     from reasonable_answer.graph import Runtime, _critique
     from reasonable_answer.llm import ModelCallError
     from reasonable_answer.store import RunStore
@@ -392,17 +413,22 @@ def test_rule_2_retries_keep_rotating_after_the_critic_pool_is_exhausted(
         "run_date": "2026-07-28",
     }
 
-    picks = []
+    picks: list[list[str]] = []
+    seen = 0
     for _ in range(5):
         out = _critique(state, rt)
         state = {**state, **out}
-        assert state["lens_results"]["logic"]["failed"] is True
-        picks.append(state["lens_results"]["logic"]["critic_identity"])
+        results = state["lens_results"]["logic"]
+        assert all(r["failed"] for r in results)
+        picks.append([r["critic_identity"] for r in results[seen:]])
+        seen = len(results)
 
-    # The first two retries exhaust the pool; the guarantee is about what happens after.
-    assert set(picks[:2]) == pool, picks
-    assert set(picks[2:]) == pool, picks  # later retries still cover the whole pool
-    assert picks[2] != picks[3], picks  # consecutive post-exhaustion retries alternate
+    # The depth-2 first pass exhausts the pool; the guarantee is about what follows.
+    assert set(picks[0]) == pool, picks
+    later = [p[0] for p in picks[1:]]
+    assert all(len(p) == 1 for p in picks[1:]), picks  # nothing fresh left to double up
+    assert set(later) == pool, picks  # later retries still cover the whole pool
+    assert later[0] != later[1], picks  # consecutive post-exhaustion retries alternate
 
 
 def test_intake_rejects_a_seed_without_a_question(identities, config):
@@ -441,6 +467,7 @@ def plant_unfit_verdict(config: Config, identity: str, tmp_path: Path) -> None:
                 prompt_hash=audition.prompt_hash(),
                 rubric_hash=audition.rubric_hash(),
                 require_verbatim_spans=config.require_verbatim_spans,
+                structured_output_mode="json_schema",
                 repetitions=config.audition.repetitions,
                 recorded_at=time.time(),
             )

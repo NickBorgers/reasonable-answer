@@ -680,6 +680,53 @@ class RevisionConfig(BaseModel):
     scope_check: Literal["warn", "off"] = "warn"
 
 
+class ReviewConfig(BaseModel):
+    """How many independent critics read each draft, per lens (D-front-loaded-depth).
+
+    `depth: 2` is the production default and the thing this section exists to say:
+    every generated artifact is read by **two** eligible non-author model families on every
+    lens, before any revision. It used to be one, with the second critic deferred to
+    controller rule 8 — which only fires once a pass has already reported the draft
+    clean. Front-loading makes the configured witnesses' findings available to the
+    same triage pass instead of after the run has acted on the first review's silence.
+
+    `depth: 1` restores the old single-critic discovery pass. A failed rule-8
+    confirmation now remains alongside the completed review instead of replacing it,
+    so that pre-existing top-up path no longer aborts merely because a confirmation
+    provider failed (D-front-loaded-depth).
+
+    The depth is a **ceiling, not a quota**: a pass runs `min(depth, fresh eligible
+    non-author models)` critics, so a roster-limited lens still runs one critic and
+    still terminates `converged_unconfirmed` rather than aborting. Author exclusion and
+    resolved-identity and model-family distinctness are enforced per slot by
+    `roles.critic_slate`, so no slate can contain the author, the same model twice, or
+    two same-family models presented as independent witnesses.
+    """
+
+    model_config = ConfigDict(extra="forbid")
+
+    #: Bounded like every other budget: an unbounded depth is a way to spend a roster's
+    #: whole critic pool on one draft by editing one number.
+    depth: int = Field(default=2, ge=1, le=4)
+    #: Per-lens overrides, keyed by lens name. Absent lenses use `depth`.
+    per_lens: dict[str, int] = Field(default_factory=dict)
+
+    @model_validator(mode="after")
+    def _check(self) -> ReviewConfig:
+        unknown = sorted(set(self.per_lens) - {lens.value for lens in LENSES})
+        if unknown:
+            raise ConfigError(f"review.per_lens names unknown lenses: {unknown}")
+        for lens, value in sorted(self.per_lens.items()):
+            if not 1 <= value <= 4:
+                raise ConfigError(
+                    f"review.per_lens['{lens}'] must be between 1 and 4 (got {value})"
+                )
+        return self
+
+    def depth_for(self, lens: Lens) -> int:
+        return self.per_lens.get(lens.value, self.depth)
+
+
 class AuthConfig(BaseModel):
     """Who the web layer believes is asking.
 
@@ -824,6 +871,7 @@ class Config(BaseModel):
     auth: AuthConfig = Field(default_factory=AuthConfig)
     roster: Roster
     budgets: Budgets = Field(default_factory=Budgets)
+    review: ReviewConfig = Field(default_factory=ReviewConfig)
     revision: RevisionConfig = Field(default_factory=RevisionConfig)
     search: SearchConfig = Field(default_factory=SearchConfig)
     sources: SourcesConfig = Field(default_factory=SourcesConfig)
@@ -901,10 +949,11 @@ def validate_roster_health(config: Config, identities: dict[str, str]) -> list[s
                     f"fail closed: lens '{lens.value}' has no eligible non-author critic "
                     f"when '{writer}' is the author"
                 )
-            if len(eligible) < 2:
+            eligible_families = {model_family(identity) for identity in eligible}
+            if len(eligible_families) < 2:
                 warnings.append(
                     f"lens '{lens.value}' is roster_limited when '{writer}' authors "
-                    f"(only {len(eligible)} eligible model) — acceptance will degrade to "
+                    f"(only {len(eligible_families)} eligible model family) — acceptance will degrade to "
                     f"converged_unconfirmed"
                 )
         if len(pool_ids) < len(roster.critics_for(lens)):
@@ -912,7 +961,7 @@ def validate_roster_health(config: Config, identities: dict[str, str]) -> list[s
                 f"lens '{lens.value}' has aliases resolving to the same underlying model; "
                 f"they do not count as distinct reviewers"
             )
-        families = {_family(identities[a]) for a in roster.critics_for(lens)}
+        families = {model_family(identities[a]) for a in roster.critics_for(lens)}
         if len(families) < 2:
             warnings.append(
                 f"lens '{lens.value}' critic pool shares one model family {sorted(families)} — "
@@ -938,7 +987,7 @@ def validate_roster_health(config: Config, identities: dict[str, str]) -> list[s
     return warnings
 
 
-def _family(identity: str) -> str:
+def model_family(identity: str) -> str:
     """Coarse model-family key taken from the model *name*, ignoring the provider or
     serving-backend prefix: 'openrouter/google/gemma-4-31b-it' and
     'ollama_chat/gemma4:26b-a4b-it-q8_0' are both 'gemma'.
@@ -950,3 +999,6 @@ def _family(identity: str) -> str:
     stem = identity.split("/")[-1].split(":")[0].lower()
     match = _FAMILY_STEM.match(stem)
     return match.group(0) if match else stem
+
+
+_family = model_family

@@ -17,6 +17,7 @@ step makes, no network and no token.
 from __future__ import annotations
 
 import os
+import stat
 import subprocess
 from pathlib import Path
 
@@ -59,7 +60,9 @@ def _git(repo: Path, *args: str) -> str:
 
 
 def _write(repo: Path, name: str, body: str) -> None:
-    (repo / name).write_text(body, encoding="utf-8")
+    path = repo / name
+    path.parent.mkdir(parents=True, exist_ok=True)
+    path.write_text(body, encoding="utf-8")
 
 
 def _commit(repo: Path, message: str) -> str:
@@ -91,11 +94,11 @@ class Bench:
         _git(self.work, "push", "-q", "origin", "main")
         _git(self.work, "checkout", "-q", "-b", "pr")
 
-    def advance_main(self, name: str) -> str:
+    def advance_main(self, name: str, body: str = "") -> str:
         """A commit on the base branch, as another merged PR would leave it."""
         current = _git(self.work, "rev-parse", "--abbrev-ref", "HEAD")
         _git(self.work, "checkout", "-q", "main")
-        _write(self.work, name, f"{name}\n")
+        _write(self.work, name, body or f"{name}\n")
         sha = _commit(self.work, f"main: {name}")
         _git(self.work, "push", "-q", "origin", "main")
         _git(self.work, "checkout", "-q", current)
@@ -104,6 +107,31 @@ class Bench:
     def commit_on_pr(self, name: str, body: str = "") -> str:
         _write(self.work, name, body or f"{name}\n")
         return _commit(self.work, f"pr: {name}")
+
+    def seed_shared_files(self, files: dict[str, str]) -> str:
+        """Commit files while `pr` and `main` still coincide (right after construction),
+        then fast-forward both refs. Used to give `main` and `pr` a common ancestor that
+        already carries docs/decisions.md and .gitattributes, before either branch appends
+        a decision of its own (D-decisions-merge-driver)."""
+        for name, body in files.items():
+            _write(self.work, name, body)
+        sha = _commit(self.work, "seed " + ", ".join(sorted(files)))
+        _git(self.work, "push", "-q", "origin", "HEAD:main")
+        _git(self.work, "branch", "-f", "main", "HEAD")
+        return sha
+
+    def install_trusted_driver_script(self) -> None:
+        """Populate `$GITHUB_WORKSPACE/main-checkout/scripts/` with the real driver and the
+        registration helper that smoke-tests it, mirroring review-pipeline.yml's trusted
+        `main-checkout` layout — the registration under test runs from there, not from the
+        untrusted `pr-head` working copy. Omitting this stands in for a `main` older than
+        D-decisions-merge-driver, where the step registers nothing at all."""
+        scripts = self.work.parent / "main-checkout" / "scripts"
+        scripts.mkdir(parents=True, exist_ok=True)
+        for name in ("merge_decisions.py", "register_decisions_driver.sh"):
+            dest = scripts / name
+            dest.write_bytes((REPO_ROOT / "scripts" / name).read_bytes())
+            dest.chmod(dest.stat().st_mode | stat.S_IEXEC)
 
     def merge_main(self) -> str:
         _git(self.work, "fetch", "-q", "origin", "main")
@@ -144,6 +172,11 @@ class Bench:
             "PRIOR_CYCLE_SHA": prior_sha,
             "FORCE_REVIEW": force_review,
             "GITHUB_OUTPUT": str(output),
+            # Real review-pipeline.yml sets this for every job; the docs-decisions.md
+            # driver registration resolves the trusted script relative to it
+            # (D-decisions-merge-driver). Harmless for tests that never touch
+            # docs/decisions.md -- the driver is only invoked when that path conflicts.
+            "GITHUB_WORKSPACE": str(self.work.parent),
         }
         proc = subprocess.run(
             ["bash", "-c", script],
@@ -378,3 +411,70 @@ def test_reviewed_sha_no_longer_in_history_is_reviewed(bench: Bench, script: str
     result = bench.run(script, head, reviewed)
     assert result["inherit"] == "false"
     assert "is not an ancestor of" in result["_log"]
+
+
+_DECISIONS_ATTRS = ".gitattributes"
+_DECISIONS_FILE = "docs/decisions.md"
+_DECISIONS_BASE = "# Decisions\n\n## Open items for a future round\n"
+
+
+def _decisions_with(slug: str) -> str:
+    return f"# Decisions\n\n## {slug} — scratch\n\nbody.\n\n## Open items for a future round\n"
+
+
+def test_decisions_driver_resync_still_inherits(bench: Bench, script: str) -> None:
+    """A docs/decisions.md merge the append-only driver resolved must recreate to the same
+    tree, so the resync it exists for still inherits (D-decisions-merge-driver).
+
+    `pr` and `main` each append a *different* decision before the tail marker -- exactly the
+    shape that conflicts in a plain 3-way merge. review-fixer.yml's sync resolves it with the
+    driver; this proves review-pipeline.yml's recreation, using the same driver from its own
+    trusted-checkout registration, reproduces the identical tree rather than mismatching.
+    """
+    bench.seed_shared_files({_DECISIONS_ATTRS: "docs/decisions.md merge=decisions-append\n",
+                              _DECISIONS_FILE: _DECISIONS_BASE})
+    bench.install_trusted_driver_script()
+    _git(bench.work, "config", "merge.decisions-append.driver",
+         f"python3 {REPO_ROOT / 'scripts' / 'merge_decisions.py'} %O %A %B")
+
+    reviewed = bench.commit_on_pr(_DECISIONS_FILE, _decisions_with("D-pr-side"))
+    bench.advance_main(_DECISIONS_FILE, _decisions_with("D-main-side"))
+    head = bench.merge_main()
+    # The registration above stood in for review-fixer.yml resolving the merge, which happens
+    # in a different checkout entirely. `pr-head` is a fresh `actions/checkout` and carries no
+    # merge config of its own, so dropping it here is what makes the step's own registration
+    # -- the thing under test -- the only one that can affect the recreation below.
+    _git(bench.work, "config", "--unset", "merge.decisions-append.driver")
+
+    result = bench.run(script, head, reviewed)
+    assert result["inherit"] == "true", result["_log"]
+    assert result["inherited_verdict"] == PRIOR_VERDICT
+
+
+def test_decisions_driver_resync_fails_closed_without_the_trusted_script(
+    bench: Bench, script: str
+) -> None:
+    """Sanity check for the test above, and the regression this fix closes: if the trusted
+    copy the registration points at is missing, recreation fails closed to a full review
+    rather than matching by coincidence -- proving the registration is load-bearing, not
+    redundant with something else that would have inherited anyway.
+    """
+    bench.seed_shared_files({_DECISIONS_ATTRS: "docs/decisions.md merge=decisions-append\n",
+                              _DECISIONS_FILE: _DECISIONS_BASE})
+    # Deliberately no install_trusted_driver_script(): $GITHUB_WORKSPACE/main-checkout does
+    # not exist, so the step's own registration points at a script that cannot run.
+    _git(bench.work, "config", "merge.decisions-append.driver",
+         f"python3 {REPO_ROOT / 'scripts' / 'merge_decisions.py'} %O %A %B")
+
+    reviewed = bench.commit_on_pr(_DECISIONS_FILE, _decisions_with("D-pr-side"))
+    bench.advance_main(_DECISIONS_FILE, _decisions_with("D-main-side"))
+    head = bench.merge_main()
+    # The registration above stood in for review-fixer.yml resolving the merge, which happens
+    # in a different checkout entirely. `pr-head` is a fresh `actions/checkout` and carries no
+    # merge config of its own, so dropping it here is what makes the step's own registration
+    # -- the thing under test -- the only one that can affect the recreation below.
+    _git(bench.work, "config", "--unset", "merge.decisions-append.driver")
+
+    result = bench.run(script, head, reviewed)
+    assert result["inherit"] == "false"
+    assert "could not cleanly recreate" in result["_log"]

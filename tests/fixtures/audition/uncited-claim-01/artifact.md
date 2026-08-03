@@ -20,7 +20,7 @@ What that objection gets right is that no summary here is assumption-free: which
 
 Card and Krueger compared fast-food employment in New Jersey and eastern Pennsylvania around New Jersey's 1992 increase and found no employment decline, and a possible small increase [1]. Neumark and Wascher revisited the same episode using payroll records rather than telephone survey data and reported declines of 3 to 4 percent, arguing that the original survey measurement was unreliable [2]. The exchange is the origin of the modern dispute, and it is a dispute about measurement before it is one about economics.
 
-Cengiz, Dube, Lindner and Zipperer applied a bunching estimator across 138 state-level increases, counting jobs below and just above the new minimum. Jobs paying below the minimum fell; jobs paying at or just above it rose by a nearly offsetting amount [3]. The design answers the comparison-group problem by using the wage distribution itself rather than a neighbouring state.
+Cengiz, Dube, Lindner and Zipperer applied a bunching estimator across 138 state-level increases, counting jobs below and just above the new minimum. Jobs paying below the minimum fell; jobs paying at or just above it rose by a nearly offsetting amount [3]. The design relocates the comparison-group problem rather than settling it: the counterfactual is drawn from the shape of the wage distribution itself rather than from a neighbouring state, which trades a contestable geography for a contestable assumption about what the jobs just above the new minimum would otherwise have done.
 
 ## Where the effects concentrate
 

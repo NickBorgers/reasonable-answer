@@ -881,7 +881,7 @@ def test_other_lenses_never_see_the_fetched_pages(lens, marker, tmp_path, identi
     from reasonable_answer.graph import _critique_one
 
     rt, client = _runtime(tmp_path, identities, config, fetcher=_Fetcher())
-    _critique_one(rt, lens, "q?", REPORT, "h" * 64, "vendor-a/model-a", set(), attempt=1)
+    _critique_one(rt, lens, f"{lens.value}-spec", "q?", REPORT, "h" * 64, "vendor-a/model-a", attempt=1)
 
     assert marker not in client.calls[-1].user
 
@@ -891,7 +891,7 @@ def test_evidence_lens_sees_the_fetched_pages(tmp_path, identities, config):
 
     rt, client = _runtime(tmp_path, identities, config, fetcher=_Fetcher())
     _critique_one(
-        rt, Lens.EVIDENCE, "q?", REPORT, "h" * 64, "vendor-a/model-a", set(), attempt=1
+        rt, Lens.EVIDENCE, "evidence-spec", "q?", REPORT, "h" * 64, "vendor-a/model-a", attempt=1
     )
 
     for marker in _SOURCE_MARKERS:
@@ -906,7 +906,7 @@ def test_verification_off_leaves_the_evidence_prompt_unchanged(
 
     rt, client = _runtime(tmp_path, identities, config, fetcher=None)
     _critique_one(
-        rt, Lens.EVIDENCE, "q?", REPORT, "h" * 64, "vendor-a/model-a", set(), attempt=1
+        rt, Lens.EVIDENCE, "evidence-spec", "q?", REPORT, "h" * 64, "vendor-a/model-a", attempt=1
     )
 
     assert "PAGES CITED BY THE REPORT" not in client.calls[-1].user
@@ -929,7 +929,7 @@ def test_the_audit_trail_records_what_was_fetched(tmp_path, identities, config):
 
     rt, _ = _runtime(tmp_path, identities, config, fetcher=_PartlyFailing())
     _critique_one(
-        rt, Lens.EVIDENCE, "q?", REPORT, "h" * 64, "vendor-a/model-a", set(), attempt=1
+        rt, Lens.EVIDENCE, "evidence-spec", "q?", REPORT, "h" * 64, "vendor-a/model-a", attempt=1
     )
 
     events = [
@@ -966,7 +966,7 @@ def test_the_audit_trail_tallies_which_tier_produced_each_source(
 
     rt, _ = _runtime(tmp_path, identities, config, fetcher=_Mixed())
     _critique_one(
-        rt, Lens.EVIDENCE, "q?", REPORT, "h" * 64, "vendor-a/model-a", set(), attempt=1
+        rt, Lens.EVIDENCE, "evidence-spec", "q?", REPORT, "h" * 64, "vendor-a/model-a", attempt=1
     )
 
     events = [
@@ -1016,7 +1016,7 @@ def test_fetch_failure_reasons_are_redacted_to_their_class(tmp_path, identities,
 
     rt, _ = _runtime(tmp_path, identities, config, fetcher=_LeakyFailures())
     _critique_one(
-        rt, Lens.EVIDENCE, "q?", REPORT, "h" * 64, "vendor-a/model-a", set(), attempt=1
+        rt, Lens.EVIDENCE, "evidence-spec", "q?", REPORT, "h" * 64, "vendor-a/model-a", attempt=1
     )
 
     events = [
@@ -1060,8 +1060,8 @@ def test_a_report_with_no_sources_section_fetches_nothing(tmp_path, identities, 
 
     rt, client = _runtime(tmp_path, identities, config, fetcher=_Boom())
     _critique_one(
-        rt, Lens.EVIDENCE, "q?", "# T\n\nNo sources here.\n", "h" * 64,
-        "vendor-a/model-a", set(), attempt=1,
+        rt, Lens.EVIDENCE, "evidence-spec", "q?", "# T\n\nNo sources here.\n", "h" * 64,
+        "vendor-a/model-a", attempt=1,
     )
     assert "PAGES CITED BY THE REPORT" not in client.calls[-1].user
 
@@ -1152,7 +1152,7 @@ def test_twelve_of_twelve_404_does_not_clear_the_evidence_lens(tmp_path, identit
 
     rt, _ = _runtime(tmp_path, identities, config, fetcher=_AllNotFound())
     result = _critique_one(
-        rt, Lens.EVIDENCE, "q?", _TWELVE, "h" * 64, "vendor-a/model-a", set(), attempt=1
+        rt, Lens.EVIDENCE, "evidence-spec", "q?", _TWELVE, "h" * 64, "vendor-a/model-a", attempt=1
     )
 
     # The critic elected zero issues (fake returns []); the twelve findings are the
@@ -1180,7 +1180,7 @@ def test_twelve_of_twelve_403_still_clears_the_evidence_lens(tmp_path, identitie
 
     rt, _ = _runtime(tmp_path, identities, config, fetcher=_AllBlocked())
     result = _critique_one(
-        rt, Lens.EVIDENCE, "q?", _TWELVE, "h" * 64, "vendor-a/model-a", set(), attempt=1
+        rt, Lens.EVIDENCE, "evidence-spec", "q?", _TWELVE, "h" * 64, "vendor-a/model-a", attempt=1
     )
 
     assert not result.failed
@@ -1214,7 +1214,7 @@ def test_a_failed_critic_lens_is_not_promoted_by_a_mechanical_finding(
         fetcher=_AllNotFound(),
     )
     result = _critique_one(
-        rt, Lens.EVIDENCE, "q?", _TWELVE, "h" * 64, "vendor-a/model-a", set(), attempt=1
+        rt, Lens.EVIDENCE, "evidence-spec", "q?", _TWELVE, "h" * 64, "vendor-a/model-a", attempt=1
     )
 
     assert result.failed

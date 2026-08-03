@@ -21,6 +21,7 @@ from reasonable_answer.taxonomy import (
 #: The categories whose defect is an absence or a property of arrangement, so no span of
 #: "the offending text" exists and `claim_span` must anchor to present text instead (D-absence-anchor).
 ABSENCE_CATEGORIES = (
+    Category.INCOMPLETE_ANSWER,
     Category.OMITTED_COUNTERARGUMENT,
     Category.UNEXAMINED_PRESUPPOSITION,
     Category.UNCLEAR_STRUCTURE,
@@ -57,6 +58,42 @@ def test_bias_floors_match_bias_md():
     assert SEVERITY_FLOOR[Category.ONE_SIDED_SOURCING] is Severity.MAJOR
     assert SEVERITY_FLOOR[Category.LOADED_LANGUAGE] is Severity.MINOR
     assert SEVERITY_FLOOR[Category.UNEXAMINED_PRESUPPOSITION] is Severity.MAJOR
+
+
+def test_conceptual_conflation_is_a_major_logic_category():
+    # docs/convergence.md is normative for both values (D-conceptual-conflation):
+    # `invalid_inference`'s sibling, floored with it, on the lens that reads how the
+    # argument moves.
+    assert SEVERITY_FLOOR[Category.CONCEPTUAL_CONFLATION] is Severity.MAJOR
+    assert SEVERITY_FLOOR[Category.CONCEPTUAL_CONFLATION] is SEVERITY_FLOOR[
+        Category.INVALID_INFERENCE
+    ]
+    owners = [lens for lens in LENSES if Category.CONCEPTUAL_CONFLATION in LENS_CATEGORIES[lens]]
+    assert owners == [Lens.LOGIC]
+
+
+def test_the_logic_brief_carries_both_triggers_and_their_exclusions():
+    """D-conceptual-conflation. The two rules the decision adds have a wide
+    false-positive surface, and the exclusions are the whole thing keeping them narrow:
+    without them `conceptual_conflation` becomes a licence to demand arbitrary
+    distinctions and the widened `overstated_claim` reads as "quantify everything".
+    Both directions are measured by the paired controls, but the critic only ever sees
+    the brief."""
+    prompt = critic_user(Lens.LOGIC, "q", "# r\n\nbody\n")
+
+    # Conflation: both halves of the trigger, and each named exclusion.
+    assert "materially distinct" in prompt
+    assert "carries an inference or a conclusion" in prompt
+    assert "NOT a different word for the same thing" in prompt
+    assert "NOT the absence of a subgroup breakdown" in prompt
+    assert "genuinely covers both" in prompt
+    assert "an aggregation the report" in prompt
+
+    # Anchoring: the trigger, the kind/mechanism carve-out, and the resolvability rule
+    # that keeps the fix inside the report even with retrieval off.
+    assert "magnitude, prevalence, timing or change" in prompt
+    assert "kind, mechanism or character needs no" in prompt
+    assert "Never demand a specific dataset or document as the only fix" in prompt
 
 
 def test_bias_categories_reach_their_lens_prompt():
@@ -99,7 +136,16 @@ def test_absence_categories_anchor_to_present_text():
     for category in ABSENCE_CATEGORIES:
         assert category in LENS_CATEGORIES[Lens.COMPLETENESS]
         assert _CATEGORY_ANCHOR[category] in prompt
-    # The two whose defect is missing *content* must redirect that content to a field
+    # The three whose defect is missing *content* must redirect that content to a field
     # that is not span-validated, or the advice is "drop the issue" by implication.
+    assert "`rationale`" in _CATEGORY_ANCHOR[Category.INCOMPLETE_ANSWER]
     assert "`instruction`" in _CATEGORY_ANCHOR[Category.OMITTED_COUNTERARGUMENT]
     assert "`rationale`" in _CATEGORY_ANCHOR[Category.UNEXAMINED_PRESUPPOSITION]
+
+
+def test_completeness_scope_covers_literal_obligations_and_rejects_easy_substitutes():
+    prompt = critic_user(Lens.COMPLETENESS, "q", "# r\n\nbody\n")
+    assert "every explicit, material part of the question" in prompt
+    assert "answers an adjacent question in its place" in prompt
+    assert "does not challenge a load-bearing conclusion" in prompt
+    assert "Do not invent an unstated goal" in prompt

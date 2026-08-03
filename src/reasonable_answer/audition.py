@@ -68,7 +68,7 @@ import yaml
 from pydantic import BaseModel, ConfigDict, Field, model_validator
 
 from . import prompts
-from .config import AuditionConfig, AuditionThresholds, ConfigError, Roster
+from .config import AuditionConfig, AuditionThresholds, ConfigError, ReviewConfig, Roster
 from .critique import critique_once
 from .llm import LLMClient
 from .schemas import LensResult, RawIssue, StructuralRef
@@ -145,12 +145,13 @@ class PlantedDefect(BaseModel):
     locus: StructuralRef
     #: Skip the locus window and match this defect anywhere in the artifact.
     #:
-    #: Some defects have no honest location. An `omitted_counterargument` is defined by
-    #: absence: a critic may reasonably anchor it to the thesis that overreaches, to the
-    #: section where the rebuttal belonged, or to the conclusion that ignores it. Grading
-    #: those as misses would measure agreement with the fixture author's filing choice
-    #: rather than the critic's ability to notice the omission. `locus` stays required
-    #: as documentation of where the fixture author considers it to live.
+    #: Some defects have no honest location. An `omitted_counterargument` or
+    #: `incomplete_answer` is defined by absence: a critic may reasonably anchor it to
+    #: the thesis that overreaches, the section where material belonged, or the partial
+    #: conclusion. Grading those as misses would measure agreement with the fixture
+    #: author's filing choice rather than the critic's ability to notice the omission.
+    #: `locus` stays required as documentation of where the fixture author considers it
+    #: to live.
     anywhere: bool = False
     #: Human-facing only. Never used for matching — matching on prose would either
     #: need an LLM or degenerate into brittle substring checks.
@@ -688,7 +689,8 @@ class Assignment:
     alias: str
     identity: str
     lens: Lens
-    #: Index in the lens pool. Position >= 2 is only reachable on the rule 8
+    #: Index in the lens pool. Positions below the lens's `review.depth` read every
+    #: draft (D-front-loaded-depth); the rest are only reachable on the rule 8
     #: confirmation top-up, which is where a false clean grants `strong_met`.
     position: int
 
@@ -851,13 +853,19 @@ class CacheEntry(BaseModel):
     #: The span-validation regime the calls were made under. A loose quote fails the
     #: lens closed when this is on, so it changes what a critic can score.
     require_verbatim_spans: bool
+    #: The structured-output mode `LLMClient` was pinned to for every call behind these
+    #: `Metrics` — the extraction path a `schema_failures` count is a count *of*
+    #: (D-audition-probe-parity). Recorded because a verdict measured under prompt-mode
+    #: extraction is not the same claim as one measured under `json_schema`.
+    structured_output_mode: str
     repetitions: int
     recorded_at: float
 
-    # `rubric_hash` and `require_verbatim_spans` are required, with no default, on
-    # purpose (D-audition-rubric-identity). An entry written before they existed fails
-    # `model_validate`, and `load_cache` drops anything that fails — so the pre-rubric
-    # cache degrades to *not audited*, never to a pass carried across a rule change.
+    # `rubric_hash`, `require_verbatim_spans` and `structured_output_mode` are required,
+    # with no default, on purpose (D-audition-rubric-identity, D-audition-probe-parity).
+    # An entry written before they existed fails `model_validate`, and `load_cache` drops
+    # anything that fails — so the older cache degrades to *not audited*, never to a pass
+    # carried across a rule change or across a regime the entry cannot name.
 
     def is_stale(self, now: float, max_age_days: int) -> bool:
         return (now - self.recorded_at) > max_age_days * 86400
@@ -870,6 +878,7 @@ class CacheEntry(BaseModel):
         *,
         rubric_hash: str,
         require_verbatim_spans: bool,
+        structured_output_mode: str | None,
     ) -> bool:
         """A cached verdict is only about the measurement that produced it.
 
@@ -880,14 +889,30 @@ class CacheEntry(BaseModel):
         grading rules and the span-validation regime are as much a part of what a
         score means as the corpus and the prompt (D-audition-rubric-identity).
 
-        The two newer dimensions are keyword-only because both hashes are strings and
-        a transposed positional argument would silently compare the wrong pair.
+        The newer dimensions are keyword-only because the hashes are all strings and a
+        transposed positional argument would silently compare the wrong pair.
+
+        `structured_output_mode` is the one term a caller may decline to compare, and
+        it must pass `None` explicitly to decline. Unlike every other dimension here,
+        the mode is knowable neither from config nor from the corpus: it is discovered
+        by probing the proxy, which costs a call. So the paths that already hold a
+        client and are already spending — `ra audition`, `ra audition-refine` — compare
+        it and re-measure on a mismatch, while the cache-read-only paths that must never
+        spend (`cached_judgements`, and through it the `enforce` startup gate) pass
+        `None` and read a verdict whatever mode produced it. D-audition-probe-parity
+        argues that asymmetry; the short version is that a free read which dropped a
+        mode-mismatched entry would turn a non-deterministic probe into a randomly
+        disarmed enforcement gate, and `mode_drift` reports the divergence instead.
         """
         return (
             self.corpus_hash == corpus_hash
             and self.prompt_hash == prompt_hash
             and self.rubric_hash == rubric_hash
             and self.require_verbatim_spans == require_verbatim_spans
+            and (
+                structured_output_mode is None
+                or self.structured_output_mode == structured_output_mode
+            )
             and self.repetitions == repetitions
         )
 
@@ -1016,6 +1041,11 @@ def cached_judgements(
     it lives on `Config`, not `AuditionConfig`, and both callers hold a `Config`. A
     default would let a caller silently compare against the wrong regime — the exact
     class of bug D-audition-rubric-identity exists to close.
+
+    The structured-output mode is deliberately *not* compared here (`None` below,
+    D-audition-probe-parity): learning it costs a probe call, which is precisely what
+    this function promises never to spend. `mode_drift` reports the divergence for
+    callers that have probed anyway.
     """
     try:
         corpus_hash = load_fixtures().corpus_hash
@@ -1035,11 +1065,46 @@ def cached_judgements(
             cfg.repetitions,
             rubric_hash=rh,
             require_verbatim_spans=require_verbatim_spans,
+            structured_output_mode=None,
         ):
             continue
         if entry.is_stale(at, cfg.max_age_days):
             continue
         out[(slot.identity, slot.lens)] = judge(entry.metrics, cfg.thresholds)
+    return out
+
+
+def mode_drift(
+    cfg: AuditionConfig,
+    roster: Roster,
+    identities: dict[str, str],
+    probed_modes: dict[str, str],
+) -> list[str]:
+    """Slots whose cached verdict was measured under a different structured-output mode
+    than the alias pins to now (D-audition-probe-parity).
+
+    `cached_judgements` cannot compare the mode without spending a probe, so it reads
+    across a divergence rather than silently discarding the entry. This is where the
+    divergence is said out loud, for a caller that has probed for its own reasons —
+    `ra doctor` fills a whole column with the probe results already, so the report is
+    free there.
+
+    Takes the modes as data, not a client, for the same reason the gate does: a
+    reporting helper on the doctor path must not be able to bill an audition.
+    """
+    cache = load_cache(cfg.cache_path)
+    out: list[str] = []
+    for slot in assignments(roster, identities):
+        probed = probed_modes.get(slot.alias)
+        entry = cache.get(cache_key(slot.identity, slot.lens))
+        if probed is None or entry is None or entry.structured_output_mode == probed:
+            continue
+        out.append(
+            f"'{slot.alias}' on {slot.lens.value} was auditioned under structured-output "
+            f"mode '{entry.structured_output_mode}' but now probes to '{probed}' — the "
+            f"cached verdict measures a different extraction path than a run would use. "
+            f"Re-measure with `ra audition --alias {slot.alias}`"
+        )
     return out
 
 
@@ -1081,29 +1146,44 @@ def roster_warnings(
     roster: Roster,
     identities: dict[str, str],
     judgements: dict[tuple[str, Lens], Judgement],
+    review: ReviewConfig | None = None,
 ) -> list[str]:
     """Roster-level consequences of the per-model verdicts.
 
-    Two checks that no single-model verdict can express.
+    Two checks that no single-model verdict can express, plus the position check below,
+    whose threshold is the deployment's own review depth.
     """
     warnings: list[str] = []
     slots = assignments(roster, identities)
+    review = review or ReviewConfig()
 
     for slot in slots:
         judgement = judgements.get((slot.identity, slot.lens))
         if judgement is None or judgement.verdict in (Verdict.FIT, Verdict.INSUFFICIENT):
             continue
-        # Position-aware: a weak critic is far more dangerous late in the pool than
-        # early. `pick_critic` prefers an identity that has not yet reviewed this
-        # artifact, so index >= 2 is unreachable on the first pass and is reached on
-        # the rule 8 confirmation top-up — where clearing the lens is the whole point.
-        if slot.position >= 2:
+        # Position-aware: a weak critic is dangerous in a different way depending on
+        # where in the pool it sits, and review depth is what decides which. A pass
+        # draws the first `depth` fresh eligible models (`roles.critic_slate`), so every
+        # slot inside that window reads every draft and every slot outside it is only
+        # reached on the rule 8 confirmation top-up.
+        depth = review.depth_for(slot.lens)
+        if slot.position >= depth:
             warnings.append(
                 f"'{slot.alias}' is {judgement.verdict.value} on {slot.lens.value} and sits "
                 f"at position {slot.position + 1} in that pool. It is unreachable on the "
                 f"first pass and will be reached on the rule 8 confirmation top-up, where "
                 f"a false clean raises cleared_count to 2, satisfies strong_met, and "
                 f"terminates the run 'accepted'"
+            )
+        elif slot.position >= 1:
+            # Front-loaded by D-front-loaded-depth: this slot used to be a top-up and is
+            # now part of ordinary discovery, so its verdict is worth re-measuring
+            # against the production-shaped corpus before the roster ships.
+            warnings.append(
+                f"'{slot.alias}' is {judgement.verdict.value} on {slot.lens.value} and sits "
+                f"at position {slot.position + 1} in that pool, inside a review depth of "
+                f"{depth}. It reads EVERY draft, so a false clean satisfies strong_met on "
+                f"the first pass — re-audition it before trusting this lineup"
             )
 
     for lens in LENS_CATEGORIES:

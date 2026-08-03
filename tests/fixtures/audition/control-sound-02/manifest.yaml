@@ -25,5 +25,15 @@
 # out of honest reach on its own mechanical terms. The `## Conclusion` section summarises
 # material cited below it, per the conclusion-first report template — a critic that raises
 # `uncited_claim` against it is over-flagging, which is what this fixture measures.
+#
+# D-control-defect-sweep correction: S5.P2 asserted that "much of the distance between the
+# two results is that discount-rate assumption rather than any disagreement about
+# engineering cost". Nothing cited supports that decomposition: [2] reports that *its own*
+# gap narrows at low discount rates, a within-study sensitivity, and [1] and [2] also
+# differ in method and in the countries they cover, so the cross-study distance is not
+# attributable from what ships here. That is `invalid_inference` in a fixture declared
+# sound. S5.P2 now says what [2] shows and states that nothing cited separates the
+# contributions — the honest version of the same point, and consistent with S3's refusal
+# to resolve the contingency question. No source is added or removed.
 kind: control
 question: "Is nuclear power cost-competitive with solar and wind?"

@@ -22,6 +22,7 @@ from reasonable_answer.config import (
     AuditionThresholds,
     Budgets,
     ConfigError,
+    ReviewConfig,
     Roster,
 )
 from reasonable_answer.schemas import CritiqueOutput, LensResult, RawIssue, StructuralRef
@@ -370,6 +371,57 @@ def test_control_citations_resolve_in_both_directions(fixture_id):
         assert n in cited, f"{fixture_id}: Sources entry {n} is never cited"
 
 
+#: Planted fixture -> the control that is the same artifact with the defect removed
+#: (D-conceptual-conflation). Only the pairs whose minimality is claimed in their manifests
+#: are listed: D-fixture-report-shape shipped four bases without asserting a
+#: one-paragraph mutation, and retrofitting that claim onto them is not this decision's
+#: work.
+MINIMAL_PAIRS = (
+    ("conceptual-conflation-01", "control-base-paid-leave-01"),
+    ("overstated-claim-03", "control-base-open-source-01"),
+)
+
+
+@pytest.mark.parametrize(("planted_id", "control_id"), MINIMAL_PAIRS)
+def test_a_paired_control_differs_from_its_plant_in_one_paragraph(planted_id, control_id):
+    """D-conceptual-conflation, the confound half of D-fixture-report-shape applied per pair.
+
+    A planted fixture and its control are graded on disjoint metrics — sensitivity on one,
+    noise on the other — so any difference between them other than the defect is a feature
+    a critic can score on without reading the argument. Both new categories are
+    especially exposed to this: "was there a conflation" and "did this report about paid
+    leave bother me" produce the same finding unless the two artifacts are otherwise
+    identical. Asserting the mutation is exactly one paragraph is what makes the pair
+    measure the defect.
+    """
+    from reasonable_answer import report as report_mod
+
+    fixtures = {f.id: f for f in audition.load_fixtures(CORPUS).fixtures}
+    planted, control = fixtures[planted_id], fixtures[control_id]
+    assert planted.question == control.question, "a pair must answer the same question"
+    assert control.is_control and not planted.is_control
+
+    left = [p.text for p in report_mod.parse(planted.artifact).paragraphs]
+    right = [p.text for p in report_mod.parse(control.artifact).paragraphs]
+    assert len(left) == len(right), (
+        f"{planted_id} has {len(left)} paragraphs against {len(right)} in {control_id}: "
+        f"paragraph count is itself a feature separating the two classes"
+    )
+    differing = [i for i, (a, b) in enumerate(zip(left, right, strict=True)) if a != b]
+    assert len(differing) == 1, (
+        f"{planted_id} and {control_id} differ in {len(differing)} paragraphs, not one"
+    )
+
+    # ...and the one that differs is the one the manifest plants the defect at, or its
+    # neighbour: a pair that mutates a paragraph the grader never looks at measures nothing.
+    (index,) = differing
+    changed = report_mod.parse(planted.artifact).paragraphs[index]
+    assert any(
+        audition._locus_matches(d.locus, StructuralRef(section=changed.section, paragraph=changed.paragraph))
+        for d in planted.defects
+    ), f"{planted_id}: the mutated paragraph S{changed.section}.P{changed.paragraph} is not a planted locus"
+
+
 def _headings(artifact: str) -> list[str]:
     return [ln[3:].strip() for ln in artifact.splitlines() if ln.startswith("## ")]
 
@@ -463,6 +515,18 @@ def test_corpus_class_is_not_readable_off_source_count():
             f"against {sorted(set(control))} for controls: a class-exclusive count would "
             f"be a usable proxy for whether the artifact has a defect"
         )
+
+
+def test_incomplete_answer_fixture_changes_the_question_not_the_report():
+    """D-answer-obligations: isolate answer coverage from every artifact-level cue."""
+    fixtures = {f.id: f for f in audition.load_fixtures(CORPUS).fixtures}
+    control = fixtures["control-base-dust-bowl-01"]
+    planted = fixtures["incomplete-answer-01"]
+
+    assert planted.artifact == control.artifact
+    assert planted.question != control.question
+    assert "unionization" in planted.question
+    assert Category.INCOMPLETE_ANSWER in {defect.category for defect in planted.defects}
 
 
 # ------------------------------------------------------------------- grading
@@ -1004,8 +1068,9 @@ IDENTITIES = {
 
 
 def test_warns_when_a_weak_critic_sits_in_the_confirmation_position():
-    """Position 3 is unreachable on pass 1 and reached on the rule 8 top-up, where a
-    false clean raises cleared_count to 2 and terminates the run `accepted`."""
+    """Position 3 is outside the default review depth of 2, so it is unreachable on
+    pass 1 and reached on the rule 8 top-up, where a false clean raises cleared_count
+    to 2 and terminates the run `accepted`."""
     judgements = {
         ("p/weak", Lens.EVIDENCE): audition.Judgement(audition.Verdict.UNFIT, ("silent",)),
     }
@@ -1013,12 +1078,39 @@ def test_warns_when_a_weak_critic_sits_in_the_confirmation_position():
     assert any("position 3" in w and "strong_met" in w for w in warnings)
 
 
-def test_no_position_warning_when_the_weak_critic_is_first():
+def test_no_position_warning_for_the_head_of_the_pool():
+    """Position 1 has always read every draft, so its own verdict is the whole story
+    and a position warning would say nothing the verdict does not."""
     judgements = {
-        ("p/weak", Lens.LOGIC): audition.Judgement(audition.Verdict.UNFIT, ("silent",)),
+        ("p/good", Lens.LOGIC): audition.Judgement(audition.Verdict.UNFIT, ("silent",)),
     }
     warnings = audition.roster_warnings(roster(), IDENTITIES, judgements)
     assert not any("position" in w for w in warnings)
+
+
+def test_a_front_loaded_weak_critic_is_flagged_as_reading_every_draft():
+    """D-front-loaded-depth: at review depth 2, position 2 is no longer a rule-8
+    formality — it reads every draft, so the warning has to say so rather than repeat
+    the old 'unreachable on the first pass' line, which is now false."""
+    judgements = {
+        ("p/weak", Lens.LOGIC): audition.Judgement(audition.Verdict.UNFIT, ("silent",)),
+    }
+    warnings = audition.roster_warnings(
+        roster(), IDENTITIES, judgements, ReviewConfig(depth=2)
+    )
+    assert any("position 2" in w and "EVERY draft" in w for w in warnings)
+    assert not any("unreachable" in w for w in warnings)
+
+
+def test_depth_one_puts_the_second_critic_back_on_the_rule_8_top_up():
+    """The threshold is the deployment's own depth, not a constant."""
+    judgements = {
+        ("p/weak", Lens.LOGIC): audition.Judgement(audition.Verdict.UNFIT, ("silent",)),
+    }
+    warnings = audition.roster_warnings(
+        roster(), IDENTITIES, judgements, ReviewConfig(depth=1)
+    )
+    assert any("position 2" in w and "rule 8 confirmation top-up" in w for w in warnings)
 
 
 def test_warns_when_an_entire_lens_is_unstaffed():
@@ -1051,6 +1143,7 @@ def entry(**kwargs) -> audition.CacheEntry:
         prompt_hash="prompt",
         rubric_hash="rubric",
         require_verbatim_spans=True,
+        structured_output_mode="json_schema",
         repetitions=3,
         recorded_at=time.time(),
     )
@@ -1065,6 +1158,7 @@ def matches_current(e: audition.CacheEntry, **overrides) -> bool:
         repetitions=3,
         rubric_hash="rubric",
         require_verbatim_spans=True,
+        structured_output_mode="json_schema",
     )
     args.update(overrides)
     return e.matches(
@@ -1073,9 +1167,10 @@ def matches_current(e: audition.CacheEntry, **overrides) -> bool:
 
 
 def test_cache_entry_is_invalidated_by_any_dimension_of_what_it_measured():
-    """Corpus, prompts, repetitions, grading rubric and span-validation regime are all
-    part of what a score means (D-audition-rubric-identity). A verdict carried across a
-    change in any of them is a claim about a measurement that no longer exists."""
+    """Corpus, prompts, repetitions, grading rubric, span-validation regime and
+    structured-output mode are all part of what a score means (D-audition-rubric-identity,
+    D-audition-probe-parity). A verdict carried across a change in any of them is a claim
+    about a measurement that no longer exists."""
     e = entry()
     assert matches_current(e)
     assert not matches_current(e, corpus_hash="other-corpus")
@@ -1083,6 +1178,24 @@ def test_cache_entry_is_invalidated_by_any_dimension_of_what_it_measured():
     assert not matches_current(e, repetitions=5)
     assert not matches_current(e, rubric_hash="other-rubric")
     assert not matches_current(e, require_verbatim_spans=False)
+    assert not matches_current(e, structured_output_mode="prompt")
+
+
+def test_only_the_structured_output_mode_may_be_left_uncompared():
+    """The mode is the one dimension a caller can decline to compare, and declining is
+    explicit (D-audition-probe-parity). A cache-read-only caller cannot learn the mode
+    without spending the probe it promises not to spend, so it reads across the
+    difference and `mode_drift` reports it — rather than dropping the entry and
+    disarming the `enforce` gate every time a non-deterministic prober lands elsewhere.
+
+    Nothing else may be waived: every other term is knowable for free from config, the
+    corpus or the code.
+    """
+    e = entry(structured_output_mode="json_schema")
+    assert matches_current(e, structured_output_mode=None)
+    assert not matches_current(e, structured_output_mode="prompt")
+    with pytest.raises(TypeError):
+        e.matches("corpus", "prompt", 3, rubric_hash="rubric", require_verbatim_spans=True)
 
 
 def test_cache_entry_expires():
@@ -1116,6 +1229,18 @@ def test_a_pre_rubric_cache_file_reads_as_not_audited(tmp_path):
         "recorded_at": time.time(),
     }
     path.write_text(json.dumps({audition.cache_key("p/m", Lens.LOGIC): old_shape}))
+    assert audition.load_cache(path) == {}
+
+
+def test_a_pre_probe_cache_file_reads_as_not_audited(tmp_path):
+    """An entry written before the audition probed cannot say which extraction path its
+    `schema_failures` were counted on, and a defaulted mode would assert one it never
+    recorded. So it fails validation and is dropped — the same safe direction
+    D-audition-rubric-identity established (D-audition-probe-parity)."""
+    path = tmp_path / "cache.json"
+    legacy = entry().model_dump(mode="json")
+    legacy.pop("structured_output_mode")
+    path.write_text(json.dumps({audition.cache_key("p/m", Lens.LOGIC): legacy}))
     assert audition.load_cache(path) == {}
 
 
@@ -1350,29 +1475,39 @@ def test_all_repetitions_failing_one_fixture_leaves_that_fixture_uncovered():
     Before coverage accounting, the fixture then contributed nothing to any denominator:
     sensitivity was computed as though it did not exist.
 
-    The evidence lens owes 10 fixtures now: 4 planted (D-category-coverage's
-    `misrepresented-source-01` alongside the original 3) plus 6 controls
-    (D-fixture-report-shape), against every lens, every merged with this decision in the
-    same round. One fixture failing every repetition no longer lands the rate exactly on
-    `max_schema_failure_rate` by itself (1/10, not 1/5 or 1/6). To keep exercising the
-    boundary the gate is calibrated against — "admitted at exactly the threshold, not
-    merely under it" — every other non-control planted fixture (there are exactly three:
-    `fabricated-citation-01`, `misrepresented-source-01`, `uncited-claim-01`) is made to
-    fail schema validation on exactly one of its calls too. `repetitions=3` is chosen so
-    the arithmetic is exact: 3 (the fully-failed target) + 3 (one flake each from the
-    three other planted fixtures) = 6 failing calls out of 10 fixtures x 3 repetitions =
-    30, i.e. 20% on the nose. Each flaky fixture still has two gradable calls, so all
-    three stay covered; only the target is uncovered.
+    One fixture failing every repetition has not landed the rate on
+    `max_schema_failure_rate` by itself since the corpus outgrew five fixtures per lens.
+    To keep exercising the boundary the gate is calibrated against — "admitted at exactly
+    the threshold, not merely under it" — enough *other* fixtures are made to fail
+    validation on exactly one of their calls to make up the difference. Each of those
+    still has `repetitions - 1` gradable calls, so all of them stay covered; only the
+    target is uncovered.
+
+    The arithmetic is derived rather than hardcoded, because it has now been re-derived
+    twice as the corpus grew (D-category-coverage and D-fixture-report-shape added planted
+    fixtures and controls; D-conceptual-conflation added two more controls, which every
+    lens owes). `repetitions=5` is the one choice that survives the next growth too: the
+    threshold is 20%, so the wanted failure count is `owed * repetitions / 5`, which is a
+    whole number for every corpus size when `repetitions` is a multiple of 5. The exact-
+    rate assertion below is what would catch it if that ever stopped holding.
     """
     fixtures = audition.load_fixtures(CORPUS)
     slot = audition.Assignment(alias="a", identity="p/m", lens=Lens.EVIDENCE, position=0)
     owed = fixtures.for_lens(Lens.EVIDENCE)
     target = "one-sided-sourcing-01"
     target_question = next(f for f in owed if f.id == target).question
-    flaky = [f for f in owed if f.id != target and not f.is_control]
-    assert len(flaky) == 3, "expected exactly three other non-control planted fixtures"
+    repetitions = 5
+    total_calls = len(owed) * repetitions
+    wanted_failures = total_calls * THRESHOLDS.max_schema_failure_rate
+    assert wanted_failures == int(wanted_failures), (
+        f"{total_calls} calls cannot fail at exactly "
+        f"{THRESHOLDS.max_schema_failure_rate:.0%} — the boundary would go untested"
+    )
+    # The target burns `repetitions` of the failure budget on its own; the rest is spread
+    # one call each over other fixtures, taken in corpus order so the set is deterministic.
+    flaky = [f for f in owed if f.id != target][: int(wanted_failures) - repetitions]
+    assert 0 < len(flaky) < len(owed), "the flake budget must fit inside the corpus"
     flaky_questions = {f.question for f in flaky}
-    repetitions = 3
     flaky_calls_seen: dict[str, int] = {}
 
     def respond(alias, user):
@@ -1390,9 +1525,8 @@ def test_all_repetitions_failing_one_fixture_leaves_that_fixture_uncovered():
         return []
 
     m = audition.run_assignment(ScriptedClient(respond), slot, fixtures, repetitions=repetitions)
-    total_calls = len(owed) * repetitions
-    assert m.calls == total_calls == 30
-    assert m.schema_failures == repetitions + len(flaky) == 6
+    assert m.calls == total_calls
+    assert m.schema_failures == repetitions + len(flaky) == wanted_failures
     assert m.schema_failure_rate == pytest.approx(THRESHOLDS.max_schema_failure_rate)
     assert m.uncovered_fixtures == (target,)
     assert m.fixtures_covered == len(owed) - 1
@@ -1423,6 +1557,7 @@ def unfit_cache(
     lens: Lens,
     cfg: AuditionConfig,
     require_verbatim_spans: bool = True,
+    structured_output_mode: str = "json_schema",
 ) -> None:
     """Write a cache the gate will actually accept: real corpus, prompt and rubric
     hashes, the span-validation regime it was measured under, the configured repetition
@@ -1442,6 +1577,7 @@ def unfit_cache(
                 prompt_hash=audition.prompt_hash(),
                 rubric_hash=audition.rubric_hash(),
                 require_verbatim_spans=require_verbatim_spans,
+                structured_output_mode=structured_output_mode,
                 repetitions=cfg.repetitions,
                 recorded_at=time.time(),
             )
@@ -1511,12 +1647,53 @@ def test_flipping_require_verbatim_spans_drops_cached_verdicts_to_not_audited(tm
     assert audition.cached_judgements(cfg, roster(), IDENTITIES, False)
 
 
+def test_the_gate_still_blocks_on_a_verdict_measured_under_another_mode(tmp_path):
+    """D-audition-probe-parity's deliberate asymmetry, in the direction that matters.
+
+    The free read cannot know today's mode without spending a probe, so it declines to
+    compare. Had it instead dropped a mode-mismatched entry, `minimax-m3` — documented in
+    `config/roster.yaml` as probing non-deterministically — would disarm the enforcement
+    gate on most boots simply by probing somewhere else, and an `unfit` critic would
+    start a run. Reading across the difference keeps the block; `mode_drift` is what
+    makes the difference visible.
+    """
+    cfg = AuditionConfig(enforce=True, cache_path=tmp_path / "c.json")
+    unfit_cache(cfg.cache_path, "p/good", Lens.LOGIC, cfg, structured_output_mode="prompt")
+    assert audition.cached_judgements(cfg, roster(), IDENTITIES, True)
+    with pytest.raises(ConfigError):
+        audition.enforce_fitness(cfg, roster(), IDENTITIES, True)
+
+
+def test_mode_drift_names_the_slot_and_stays_silent_when_the_mode_agrees(tmp_path):
+    """The report that replaces the invalidation the free read cannot afford. It has to
+    name the slot and the two modes, or an operator cannot tell which verdict to
+    re-measure (D-audition-probe-parity)."""
+    cfg = AuditionConfig(cache_path=tmp_path / "c.json")
+    unfit_cache(cfg.cache_path, "p/good", Lens.LOGIC, cfg, structured_output_mode="prompt")
+
+    agreed = audition.mode_drift(cfg, roster(), IDENTITIES, {"c_good": "prompt"})
+    assert agreed == []
+
+    drifted = audition.mode_drift(cfg, roster(), IDENTITIES, {"c_good": "json_schema"})
+    assert len(drifted) == 1
+    assert "c_good" in drifted[0] and "logic" in drifted[0]
+    assert "prompt" in drifted[0] and "json_schema" in drifted[0]
+
+    # An alias nobody probed is not drift: an absent measurement of today's mode says
+    # nothing about the mode the verdict was taken under.
+    assert audition.mode_drift(cfg, roster(), IDENTITIES, {}) == []
+
+
 def test_the_gate_takes_no_client_and_so_can_never_spend(tmp_path):
     """`test_grader_needs_no_client` in spirit, for the startup path. The gate runs on
     every `ra run` and every web boot; if it ever grew a client it would quietly bill an
-    audition per run, and a keyless checkout would stop booting."""
+    audition per run, and a keyless checkout would stop booting.
+
+    `mode_drift` is held to the same rule: it reports on probe results but takes them as
+    data, so the doctor-path reporter cannot grow into a spender (D-audition-probe-parity).
+    """
     import inspect
 
-    for fn in (audition.enforce_fitness, audition.cached_judgements):
+    for fn in (audition.enforce_fitness, audition.cached_judgements, audition.mode_drift):
         params = set(inspect.signature(fn).parameters)
         assert not params & {"client", "llm"}, f"{fn.__name__} gained a call path"
