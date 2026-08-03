@@ -364,9 +364,58 @@ jobs:
             echo "issue_num=${ISSUE_NUM}"
           } >> "$GITHUB_OUTPUT"
 
+      # ── Has this session already proved unresumable? ─────────────────────────
+      #
+      # A wedged session does not heal. The same `Author-Session:` trailer is read on every
+      # cycle and on every re-review of the PR, so without a memory the pipeline pays the
+      # resume budget again for a session it has already watched fail — twice over, since
+      # the cold fixer that actually does the work only starts afterwards (D-resume-stall-guard).
+      #
+      # The record is an artifact named for the session, written by the step below when a
+      # resume produces no fix. Artifacts are the only repo-wide, run-crossing store this
+      # pipeline already uses, and they are keyed by name rather than by commit — which is
+      # what this fact needs. The per-SHA commit statuses that carry cycle state (see
+      # docs/ci-pipeline.md) cannot express it: a session outlives every SHA it is asked
+      # about, and each cycle asks from a new one.
+      #
+      # Failing open is deliberate. If the query errors, the worst outcome is the old
+      # behaviour — one resume attempt, now bounded by the stall guard — whereas failing
+      # closed would drop the resume path entirely on an unrelated API blip.
+      - name: Has this author session already failed to resume?
+        id: burned
+        if: steps.trailer.outputs.agent != '' && steps.trailer.outputs.run_id != ''
+        env:
+          GH_TOKEN: ${{ secrets.WORKFLOW_PAT }}
+          REPO: ${{ github.repository }}
+          AGENT: ${{ steps.trailer.outputs.agent }}
+          RUN_ID: ${{ steps.trailer.outputs.run_id }}
+        run: |
+          set -euo pipefail
+          NAME="session-hung-${AGENT}-${RUN_ID}"
+
+          # `expired` matters: retention outlives the session artifact itself, but once the
+          # marker is gone there is nothing to resume either, so a stale answer is harmless.
+          HITS=$(gh api "repos/${REPO}/actions/artifacts?name=${NAME}&per_page=100" \
+                   --jq '[.artifacts[] | select(.expired == false)] | length' 2>/dev/null || echo "")
+          if ! [[ "$HITS" =~ ^[0-9]+$ ]]; then
+            echo "::warning::could not check for a ${NAME} marker; assuming the session is usable."
+            HITS=0
+          fi
+
+          if [ "$HITS" -gt 0 ]; then
+            echo "::warning::Author session ${AGENT}/${RUN_ID} already failed to resume in an earlier cycle; going straight to a cold fixer instead of paying for it again."
+            echo "quarantined=true" >> "$GITHUB_OUTPUT"
+          else
+            echo "quarantined=false" >> "$GITHUB_OUTPUT"
+          fi
+
       - name: Download the author session artifact
         id: session-download
-        if: steps.trailer.outputs.agent != '' && steps.trailer.outputs.run_id != '' && steps.trailer.outputs.issue_num != ''
+        if: >-
+          steps.trailer.outputs.agent != ''
+          && steps.trailer.outputs.run_id != ''
+          && steps.trailer.outputs.issue_num != ''
+          && steps.burned.outputs.quarantined != 'true'
         continue-on-error: true
         uses: actions/download-artifact@v4
         with:
@@ -383,12 +432,18 @@ jobs:
           RUN_ID: ${{ steps.trailer.outputs.run_id }}
           ISSUE_NUM: ${{ steps.trailer.outputs.issue_num }}
           DOWNLOAD_OUTCOME: ${{ steps.session-download.outcome }}
+          QUARANTINED: ${{ steps.burned.outputs.quarantined }}
         run: |
           set -euo pipefail
           MODE="cold"
           SESSION_DIR=""
 
-          if [ -n "$AGENT" ] && [ -n "$RUN_ID" ] && [ -n "$ISSUE_NUM" ] && [ "$DOWNLOAD_OUTCOME" = "success" ]; then
+          if [ "$QUARANTINED" = "true" ]; then
+            # Said plainly and separately from the expiry case below: those look identical
+            # from here — no session mounted — and confusing "this one is known bad" with
+            # "this one aged out" is what would make a re-broken quarantine invisible.
+            echo "Author session ${AGENT}/${RUN_ID} is quarantined after an earlier failed resume; running cold."
+          elif [ -n "$AGENT" ] && [ -n "$RUN_ID" ] && [ -n "$ISSUE_NUM" ] && [ "$DOWNLOAD_OUTCOME" = "success" ]; then
             TAR=$(find "${RUNNER_TEMP}/author-session" -name '*.tgz' -type f | head -n1)
             if [ -n "$TAR" ]; then
               SESSION_DIR=$(./scripts/ci-session-store.sh unpack "$AGENT" "$ISSUE_NUM" "$RUN_ID" "$TAR")
@@ -662,6 +717,54 @@ jobs:
             echo "Author-resume fixer produced a result; no fallback."
           fi
           echo "ok=${ok}" >> "$GITHUB_OUTPUT"
+
+      # ── Remember that this session could not be resumed ──────────────────────
+      #
+      # Written before the fallback rather than after it: this records a fact about the
+      # *resume attempt*, which is already known here, and recording it first means a
+      # failure anywhere in the cold path cannot cost the pipeline the memory. The reason
+      # text is for a human reading the artifact; the marker's existence is the signal.
+      #
+      # Only a real resume attempt quarantines a session. A cycle that never got to run one
+      # — no blockers, a skipped or cancelled job — leaves no marker, so a session is never
+      # condemned for something that did not happen to it.
+      - name: Record that the author session could not be resumed
+        id: quarantine
+        if: >-
+          !cancelled()
+          && steps.work.outputs.agent == 'true'
+          && steps.session.outputs.mode == 'author-resume'
+          && steps.resume_result.outputs.ok != 'true'
+        env:
+          AGENT: ${{ steps.trailer.outputs.agent }}
+          RUN_ID: ${{ steps.trailer.outputs.run_id }}
+          PR_NUMBER: ${{ inputs.pr_number }}
+          CYCLE: ${{ inputs.cycle }}
+        run: |
+          set -euo pipefail
+          DIR="${RUNNER_TEMP}/session-hung"
+          rm -rf "$DIR"
+          mkdir -p "$DIR"
+          SENTINEL="${GITHUB_WORKSPACE}/${PR_WORKSPACE}/.review-output/fixer-incomplete.sentinel"
+          {
+            echo "session: ${AGENT}/${RUN_ID}"
+            echo "observed-by: run ${GITHUB_RUN_ID} (PR #${PR_NUMBER}, cycle ${CYCLE})"
+            echo "reason: $(cat "$SENTINEL" 2>/dev/null || echo 'resume produced no fixer-result.json')"
+          } > "${DIR}/reason.txt"
+          cat "${DIR}/reason.txt"
+
+      # Not fatal: the upload is an optimisation for later cycles, and losing it costs one
+      # wasted resume attempt — now bounded by the stall guard — not a fix. `overwrite` so a
+      # re-run of this same run cannot collide with its own earlier marker.
+      - name: Upload the session quarantine marker
+        if: steps.quarantine.outcome == 'success'
+        continue-on-error: true
+        uses: actions/upload-artifact@v4
+        with:
+          name: session-hung-${{ steps.trailer.outputs.agent }}-${{ steps.trailer.outputs.run_id }}
+          path: ${{ runner.temp }}/session-hung
+          retention-days: 90
+          overwrite: true
 
       # ── Cold fallback: only when the resume attempt did not produce a fix ──────
       #
