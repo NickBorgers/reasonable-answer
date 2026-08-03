@@ -4363,11 +4363,13 @@ the egress boundary is a deployment concern (docs/ssrf-egress-isolation.md), and
 only where one exists.
 
 **What did not change.** `search.verify_sources` still decides, alone, whether the evidence lens
-receives fetched pages and whether disputes can be adjudicated mechanically. `Runtime.fetcher` is
-still set only for verification, and the reader holds its own reference to the shared fetcher,
-precisely so a deployment that turns reading on does not silently acquire a critic-facing channel
-it did not ask for. The controller, the 14 rules, the taxonomy, the severity floors, the
-`OrchestratorView` and the terminal statuses are untouched.
+receives fetched pages, how much of a page it receives, and whether disputes can be adjudicated
+mechanically. `Runtime.fetcher` is still set only for verification, and it is a
+`fetch.CappedFetcher` view clipped to `fetch_max_chars` rather than the shared cache itself —
+"alone" has to cover the *volume* as well as the channel, because mechanical adjudication turns on
+string containment and a longer body upholds more disputes. The reader holds its own reference to
+the same cache, so a page is still downloaded once. The controller, the 14 rules, the taxonomy, the
+severity floors, the `OrchestratorView` and the terminal statuses are untouched.
 
 **What this still does not establish.** A read page shows what a page says, not that the page is
 right; `supported` means the chain is traceable, not that the claim is true. The output label is
@@ -4401,10 +4403,24 @@ findings.
   repeated inside the block, capped per read and per run — and the writer's output channel is
   unchanged, so reading adds evidence rather than a way to emit anything.
 * *A run-wide allowlist would leak one writer's retrieval into another's context.* `ReadSession` is
-  per `complete()` call; the next writer starts with an empty allowlist, and a test asserts it.
+  per `complete()` call; the next writer starts with an empty allowlist. The subtle case is the
+  **retry loop**, not the next round: `_generate` rotates through the pool on a failed or empty
+  completion, so attempt two is a different model, and a session hoisted out of that loop would let
+  it open a page attempt one's search found and would let its manifest be checked against bodies it
+  never saw. The session is therefore constructed inside the loop, and
+  `test_a_retried_writer_starts_with_an_empty_allowlist` drives exactly that path.
 * *Building a fetcher for reading could switch on the evidence-lens page channel by accident.*
   `Runtime.fetcher` is set only when `verify_sources`; the reader holds the shared instance
   separately, and the existing verification tests are what would catch a regression.
+* *Sharing one fetcher shares one character cap, and the caps are not the same.* The cache must
+  store the larger of `fetch_max_chars` and `read_max_chars` or the reader would be silently
+  clipped to the critic's cap — so verification is handed a `fetch.CappedFetcher` view that clips
+  back to `fetch_max_chars`, and the cap travels with the handle rather than with the cache. Left
+  unclipped this would not merely show a critic more text: `dispute.adjudicate_mechanical` upholds
+  on string containment, an upheld dispute suppresses a finding, and `search.read_sources` would
+  thereby have acquired a path into the stop decision. The resolver ladder is built with the cache
+  cap for the same reason, so a body reached through an open-access mirror is bounded like one
+  fetched directly.
 * *A writer-authored manifest feeding acceptance would be a writer grading itself.* Closed by
   construction — no `Defect`, no `OrchestratorView` field, no controller input — and asserted:
   `tests/test_reading.py` checks the manifest enters no other model's context.

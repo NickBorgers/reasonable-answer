@@ -205,7 +205,11 @@ class SearchConfig(BaseModel):
     #: writer reads candidates, not only the sources it ends up citing, and every round
     #: draws on the same pool.
     read_budget: int = Field(default=24, ge=1, le=2_000)
-    #: Characters of page text shown to the writer per read.
+    #: Characters of page text shown to the writer per read. Raising this above
+    #: `fetch_max_chars` enlarges the shared fetch cache and nothing else: verification
+    #: is handed a `fetch.CappedFetcher` clipped back to `fetch_max_chars`, so what the
+    #: evidence lens sees — and what `dispute.adjudicate_mechanical` searches — stays a
+    #: function of `verify_sources` alone (D-writer-source-reads).
     read_max_chars: int = Field(default=6_000, ge=500, le=100_000)
     #: Whole-run cap on page text handed to writers. The per-read cap cannot see the
     #: total, and a long context is a correctness problem here, not a cost one

@@ -270,7 +270,10 @@ the `OrchestratorView` or the controller.
 lens receives fetched pages and whether a dispute can be settled mechanically. When reading and
 verification are both on they share one `SourceFetcher`, so a page is downloaded once and both see
 the same bytes; `Runtime.fetcher` is nevertheless set only for verification, so turning reading on
-cannot switch the critic-facing channel on by accident.
+cannot switch the critic-facing channel on by accident. They share the cache but not the cap: it
+stores the larger of `fetch_max_chars` and `read_max_chars`, and verification is handed a
+`fetch.CappedFetcher` view clipped back to `fetch_max_chars`, so `read_max_chars` never widens what
+a critic reads or what `dispute.adjudicate_mechanical` searches.
 
 **Format conversion happens at the edge, not here.** `intake` requires markdown, because
 `report.parse` builds the `[S<n>.P<m>]` loci from `#` headings and `fetch.extract_source_urls`

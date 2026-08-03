@@ -86,14 +86,36 @@ def check(
 
     `bodies` is what one writer call read — `reading.ReadSession.reads`. Keyed by the
     URL the writer asked for, which is the URL it must name in the manifest for the
-    chain to be traceable at all.
+    chain to be traceable at all; both sides are compared through `_normalize_url`, so
+    a fragment or a trailing slash does not become a claim about provenance.
 
     Order matters. The report check comes first because an entry whose claim is not in
     the report is untraceable whatever the source says: it points at nothing. Only then
     is the source consulted.
     """
     report = _normalize(report_text or "")
-    return [CheckedEntry(entry=e, verdict=_verdict(e, report, bodies)) for e in manifest.entries]
+    indexed = {_normalize_url(url): source for url, source in bodies.items()}
+    return [CheckedEntry(entry=e, verdict=_verdict(e, report, indexed)) for e in manifest.entries]
+
+
+def _normalize_url(url: str) -> str:
+    """The form both sides of the lookup are compared in.
+
+    `not_retrieved` is a statement about *provenance* — the writer cited a source it
+    never opened — so it must not be reachable by a transcription slip. A fragment, a
+    trailing slash and the scheme/host's case are all differences that name the same
+    request, and the reader's own allowlist already refused anything that was not
+    offered, so nothing is widened here: the URL under comparison was read by this
+    writer either way. Query strings are left alone, because they routinely select the
+    document.
+    """
+    text = (url or "").strip()
+    text, _, _ = text.partition("#")
+    scheme, sep, rest = text.partition("://")
+    if sep:
+        host, slash, path = rest.partition("/")
+        text = f"{scheme.lower()}://{host.lower()}{slash}{path}"
+    return text.rstrip("/")
 
 
 def _verdict(
@@ -102,7 +124,7 @@ def _verdict(
     if _normalize(entry.claim) not in normalized_report:
         return "claim_not_in_report"
 
-    source = bodies.get(entry.url.strip())
+    source = bodies.get(_normalize_url(entry.url))
     if source is None:
         return "not_retrieved"
     if source.outcome is not SourceOutcome.FULL_TEXT:

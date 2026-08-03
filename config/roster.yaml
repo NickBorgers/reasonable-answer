@@ -125,7 +125,9 @@ search:
   #
   # read_sources: false
   # read_budget: 24            # whole-run reads
-  # read_max_chars: 6000       # page text shown per read
+  # read_max_chars: 6000       # page text shown per read; raising it above
+  #                            # fetch_max_chars widens the writer's view only, never
+  #                            # the evidence lens's or mechanical adjudication's
   # read_char_budget: 200000   # whole-run page text handed to writers
   #
   # And the audit half: after each draft, ask its writer where each cited claim's

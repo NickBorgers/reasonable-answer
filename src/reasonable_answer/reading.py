@@ -123,6 +123,12 @@ class ReadSession:
     by searching. Per-call is the tighter of the two and is the one that matches what
     the tool description promises the model.
 
+    "Per call" is meant literally, and the case that makes it bite is `_generate`'s
+    retry loop rather than the next round: a failed or empty completion rotates to the
+    **next model in the pool**, so a session shared across attempts would hand writer B
+    what writer A's search found, and would have `support.check` rule on bodies B never
+    saw. The construction therefore lives inside that loop.
+
     The read log is the other half of the job: :mod:`.support` needs the bodies this
     writer actually saw in order to check its support spans against them, and the
     session is the only place that knows.

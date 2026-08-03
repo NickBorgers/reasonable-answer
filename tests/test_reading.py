@@ -419,6 +419,67 @@ def test_reading_on_builds_a_reader_with_the_configured_budget(tmp_path):
     assert reader.budget.max_chars == 1_234
 
 
+# ------------------------------------------- the cap each consumer of the cache sees
+
+
+def test_reading_widens_the_shared_cache_but_not_the_verification_path(tmp_path):
+    """One fetcher, two caps. The cache must hold the larger, or the reader would be
+    silently clipped to the critic's cap — but the cap has to travel with the *handle*,
+    or raising `read_max_chars` would widen what the evidence lens is shown."""
+    from reasonable_answer.graph import _cache_max_chars
+
+    both = _config(
+        tmp_path,
+        enabled=True,
+        verify_sources=True,
+        read_sources=True,
+        fetch_max_chars=1_000,
+        read_max_chars=5_000,
+    )
+    assert _cache_max_chars(both) == 5_000
+    # Reading off: the cache is exactly what verification always stored, so a
+    # verification-only deployment is byte-identical to what it was.
+    verify_only = _config(
+        tmp_path, enabled=True, verify_sources=True, fetch_max_chars=1_000
+    )
+    assert _cache_max_chars(verify_only) == 1_000
+
+
+def test_the_verification_handle_clips_to_the_critics_cap():
+    """`fetch_max_chars` is what the evidence lens and mechanical adjudication see,
+    whatever the shared cache holds. The stakes are not cosmetic: a longer body makes
+    `dispute.adjudicate_mechanical`'s containment test more likely to uphold a dispute,
+    and an upheld dispute suppresses a defect — so an unclipped handle would give
+    `search.read_sources` a path into the stop decision."""
+    from reasonable_answer.fetch import CappedFetcher
+
+    long_page = "A" * 4_000 + "TAIL MARKER"
+    inner = _Fetcher({READ_URL: _body(READ_URL, long_page)})
+    capped = CappedFetcher(inner, max_chars=1_000)
+
+    seen = capped.fetch(READ_URL)
+    assert len(seen.text) == 1_000
+    assert "TAIL MARKER" not in seen.text
+    # The cache itself is untouched, so the reader still gets the whole stored body.
+    assert "TAIL MARKER" in inner.fetch(READ_URL).text
+    assert capped.fetch_all([READ_URL])[0].text == seen.text
+
+
+@pytest.mark.parametrize(
+    "source",
+    [
+        FetchedSource(url="u", error="HTTP 403", outcome=SourceOutcome.BLOCKED),
+        FetchedSource(url="u", text="short enough", status=200),
+    ],
+)
+def test_a_cap_never_silences_an_answer_that_fits(source):
+    """A refusal carries no body to clip, and a body under the cap is returned as it
+    is — the same object, so nothing downstream can tell a cap was applied."""
+    from reasonable_answer.fetch import clip_body
+
+    assert clip_body(source, 1_000) is source
+
+
 # ------------------------------------------------------------------- generate node
 
 READ_URL = "https://example.org/paper"
@@ -540,6 +601,50 @@ def test_a_writer_cannot_read_a_url_its_own_search_did_not_return(
     assert fetcher.calls == []
 
 
+def test_a_retried_writer_starts_with_an_empty_allowlist(tmp_path, identities, config):
+    """The allowlist is per `complete()` call, and a writer *attempt* is a call.
+
+    `_generate` rotates through the pool on failure, so attempt two is a **different
+    model**. If the session were hoisted out of the retry loop, that model could open a
+    page the failed attempt's search found — the cross-context affordance the per-call
+    scope exists to refuse — and its support manifest would be checked against bodies it
+    never saw. Attempt one here searches and fails; attempt two reads without searching,
+    and must be told the URL was never offered to it.
+    """
+    from fakes import FakeClient
+
+    from reasonable_answer.graph import _generate
+    from reasonable_answer.schemas import CritiqueOutput
+
+    reader, fetcher = _reader({READ_URL: _body(READ_URL, PAGE_TEXT)})
+    searched: list[str] = []
+
+    def script(alias):
+        # The first attempt searches (and so fills its own session); every later one
+        # only reads, having been offered nothing itself.
+        if not searched:
+            searched.append(alias)
+            return [("web_search", '{"query": "probe"}')]
+        return [("read_source", f'{{"url": "{READ_URL}"}}')]
+
+    client = FakeClient(
+        identities=identities,
+        critique_fn=lambda a, u: CritiqueOutput(issues=[]),
+        # An empty first draft is what makes `_generate` rotate to the next writer.
+        report_fn=lambda n: "" if n == 1 else DRAFT,
+        tool_script=script,
+    )
+    rt, _ = _graph_runtime(
+        tmp_path, identities, config, searcher=_Searcher(), reader=reader, client=client
+    )
+    _generate({"question": "q?", "round": 0}, rt)
+
+    assert [c.alias for c in client.calls][:2] != [], "the retry path did not run"
+    assert client.calls[0].alias != client.calls[1].alias
+    assert "NOT ATTEMPTED" in client.tool_results[-1]
+    assert fetcher.calls == []
+
+
 def test_the_audit_trail_records_what_the_draft_read(tmp_path, identities, config):
     """The deeper version of "did this draft search?": did it open anything, and what
     came back — as counts and a closed vocabulary, never a URL (RA-016)."""
@@ -564,9 +669,44 @@ def test_the_audit_trail_records_what_the_draft_read(tmp_path, identities, confi
     _generate({"question": "q?", "round": 0}, rt)
 
     event = _events(rt, "generate")[-1]
-    assert event["sources_read"] == 1
+    assert event["read_attempts"] == 1
+    assert event["bodies_read"] == 1
     assert event["read_outcomes"] == {"full_text": 1}
     assert READ_URL not in (rt.store.dir / "events.jsonl").read_text()
+
+
+def test_an_attempt_that_read_no_body_is_not_counted_as_one(tmp_path, identities, config):
+    """`read_attempts` counts what reached the reader; `bodies_read` counts what came
+    back. A blocked page is an attempt and not a read, and an operator scanning one
+    number must not have to guess which it is looking at."""
+    from fakes import FakeClient
+
+    from reasonable_answer.fetch import FetchedSource, SourceOutcome
+    from reasonable_answer.graph import _generate
+    from reasonable_answer.schemas import CritiqueOutput
+
+    blocked = FetchedSource(
+        url=READ_URL, status=403, error="HTTP 403", outcome=SourceOutcome.BLOCKED
+    )
+    reader, _ = _reader({READ_URL: blocked})
+    client = FakeClient(
+        identities=identities,
+        critique_fn=lambda a, u: CritiqueOutput(issues=[]),
+        report_fn=lambda n: DRAFT,
+        tool_script=[
+            ("web_search", '{"query": "probe"}'),
+            ("read_source", f'{{"url": "{READ_URL}"}}'),
+        ],
+    )
+    rt, _ = _graph_runtime(
+        tmp_path, identities, config, searcher=_Searcher(), reader=reader, client=client
+    )
+    _generate({"question": "q?", "round": 0}, rt)
+
+    event = _events(rt, "generate")[-1]
+    assert event["read_attempts"] == 1
+    assert event["bodies_read"] == 0
+    assert event["read_outcomes"] == {"blocked": 1}
 
 
 def test_a_draft_written_without_reading_records_zero(tmp_path, identities, config):
@@ -575,7 +715,8 @@ def test_a_draft_written_without_reading_records_zero(tmp_path, identities, conf
     rt, _ = _graph_runtime(tmp_path, identities, config, searcher=_Searcher())
     _generate({"question": "q?", "round": 0}, rt)
 
-    assert _events(rt, "generate")[-1]["sources_read"] == 0
+    assert _events(rt, "generate")[-1]["read_attempts"] == 0
+    assert _events(rt, "generate")[-1]["bodies_read"] == 0
 
 
 # ------------------------------------------------------------- the support manifest

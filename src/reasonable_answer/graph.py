@@ -198,11 +198,7 @@ def build_runtime(
         fetch.SourceFetcher(
             timeout=config.search.fetch_timeout_seconds,
             max_bytes=config.search.fetch_max_bytes,
-            # The larger of the two consumers' caps, so neither is silently clipped to
-            # the other's. Each applies its own cap to what it renders.
-            max_chars=max(config.search.fetch_max_chars, config.search.read_max_chars)
-            if config.search.read_sources
-            else config.search.fetch_max_chars,
+            max_chars=_cache_max_chars(config),
             read_pdfs=read_pdfs,
             pdf_max_bytes=config.sources.pdf.max_bytes,
             pdf_max_pages=config.sources.pdf.max_pages,
@@ -211,7 +207,16 @@ def build_runtime(
         if (config.search.verify_sources or config.search.read_sources)
         else None
     )
-    fetcher = source_fetcher if config.search.verify_sources else None
+    # Verification sees `fetch_max_chars` and nothing more, whatever the cache holds.
+    # Without the cap travelling with the handle, raising `read_max_chars` would widen
+    # both the evidence lens's page text and `dispute.adjudicate_mechanical`'s
+    # containment window — and a dispute upheld there suppresses a defect, so
+    # `search.read_sources` would have a path into the stop decision it must not have.
+    fetcher = (
+        fetch.CappedFetcher(source_fetcher, max_chars=config.search.fetch_max_chars)
+        if config.search.verify_sources and source_fetcher is not None
+        else None
+    )
     reader = _build_reader(config, source_fetcher)
 
     run_id = run_id or f"run-{uuid.uuid4().hex[:12]}"
@@ -317,6 +322,19 @@ def _extraction_call_ceiling(config: Config) -> int:
     return max(1, config.search.max_sources * config.budgets.hard_cap)
 
 
+def _cache_max_chars(config: Config) -> int:
+    """The cap the shared fetch cache stores a body at.
+
+    The larger of the two consumers' caps, so neither is clipped to the other's — each
+    is then handed a view that applies its own (`fetch.CappedFetcher`). The resolver
+    ladder uses the same number, or a body reached through an open-access mirror would
+    be bounded differently from one fetched directly (D-writer-source-reads).
+    """
+    if config.search.read_sources:
+        return max(config.search.fetch_max_chars, config.search.read_max_chars)
+    return config.search.fetch_max_chars
+
+
 def _build_resolver(config: Config, warnings: list[str]):
     """Construct the resolver ladder (D-existence-vs-body), or return None when no tier is on.
 
@@ -333,10 +351,14 @@ def _build_resolver(config: Config, warnings: list[str]):
     tiers = _enabled_tiers(config)
     if not tiers:
         return None
-    if not config.search.verify_sources:
+    # `read_sources` also builds a fetcher (D-writer-source-reads), so the ladder runs
+    # for a writer's reads even with verification off. The warning is about a
+    # configuration in which nothing fetches at all, which is now both switches off.
+    if not (config.search.verify_sources or config.search.read_sources):
         warnings.append(
-            "sources: resolver tiers are enabled but search.verify_sources is off, so "
-            "nothing fetches and no tier will ever run"
+            "sources: resolver tiers are enabled but search.verify_sources and "
+            "search.read_sources are both off, so nothing fetches and no tier will "
+            "ever run"
         )
 
     sources = config.sources
@@ -396,7 +418,7 @@ def _build_resolver(config: Config, warnings: list[str]):
             extraction_api_key=extraction_key,
             extraction_timeout=sources.extraction.timeout_seconds,
             extraction_budget=_extraction_call_ceiling(config),
-            max_chars=config.search.fetch_max_chars,
+            max_chars=_cache_max_chars(config),
         )
     except resolve.UnknownProvider as exc:
         raise ConfigError(f"fail closed: {exc}") from exc
@@ -657,12 +679,6 @@ def _generate(state: State, rt: Runtime) -> dict:
     else:
         user = prompts.writer_first_draft(state["question"], current_date=run_date)
 
-    # One session per writer call: the `read_source` allowlist is what *this* call's
-    # searches returned, and the read log it accumulates is what the support manifest
-    # is checked against (D-writer-source-reads).
-    session = reading.ReadSession()
-    search_kwargs = _retrieval_kwargs(rt, session)
-
     # One flaky response must not cost the run. Attempts rotate through the eligible
     # pool and wrap, so a model that is down, rate-limited, or answering with nothing
     # is routed around when there is somewhere to route to — and simply given another,
@@ -679,6 +695,14 @@ def _generate(state: State, rt: Runtime) -> dict:
         if offset > 0:
             rt.client.backoff_between_writer_attempts(offset)
         alias = pool[(rotation + offset) % len(pool)]
+        # A fresh session per `complete()` call, inside the loop rather than outside it,
+        # because each attempt is a *different model* from the pool. Hoisting this would
+        # let a retry read a page the failed attempt's search found, and would let the
+        # support manifest be checked against bodies the drafting model never saw — the
+        # cross-context affordance the per-call allowlist exists to refuse
+        # (D-writer-source-reads, principle #6).
+        session = reading.ReadSession()
+        search_kwargs = _retrieval_kwargs(rt, session)
         try:
             reply = rt.client.complete(
                 alias,
@@ -769,13 +793,18 @@ def _read_fields(session: reading.ReadSession) -> dict[str, Any]:
     """
     reads = session.reads
     if not reads:
-        return {"sources_read": 0}
+        return {"read_attempts": 0, "bodies_read": 0}
     outcomes: dict[str, int] = {}
     for source in reads.values():
         key = source.outcome.value
         outcomes[key] = outcomes.get(key, 0) + 1
     return {
-        "sources_read": len(reads),
+        # `read_attempts`, not `sources_read`: a blocked page, a 404 and a spent budget
+        # are all recorded here, and an operator scanning one number must not read
+        # "the writer opened nine pages" off a column of refusals. `bodies_read` is the
+        # number that means what the longer name would have implied.
+        "read_attempts": len(reads),
+        "bodies_read": outcomes.get(fetch.SourceOutcome.FULL_TEXT.value, 0),
         "sources_offered": session.offered_count,
         "read_outcomes": outcomes,
     }
@@ -810,10 +839,15 @@ def _record_support(
         # refuses at load time, arriving by another road.
         return
 
+    # A hard cap, not an approximate one: the length is added *before* the decision, so
+    # the pass cannot overshoot `support_max_chars` by a whole final page. The first
+    # body is always shown even if it alone exceeds the budget — a manifest pass with no
+    # source text in front of it would collect spans quoted from memory, which is the
+    # failure this whole check exists to catch.
     budget = rt.config.search.support_max_chars
     shown, used = [], 0
     for source in readable:
-        if used >= budget:
+        if shown and used + len(source.text) > budget:
             break
         shown.append(source)
         used += len(source.text)

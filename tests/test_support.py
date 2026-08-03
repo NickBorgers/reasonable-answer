@@ -82,6 +82,29 @@ def test_a_url_the_writer_never_read_is_recorded_as_such_not_as_unsupported():
 
 
 @pytest.mark.parametrize(
+    "written",
+    [
+        "https://example.org/paper/",
+        "https://example.org/paper#results",
+        "HTTPS://Example.org/paper",
+        "  https://example.org/paper  ",
+    ],
+)
+def test_a_transcription_slip_is_not_reported_as_a_provenance_fact(written):
+    """`not_retrieved` says the writer never opened the source. A trailing slash, a
+    fragment, host case and stray whitespace all name the same request, so none of them
+    may produce that verdict — the page was read either way, and the reader's own
+    allowlist already refused anything that was not offered."""
+    assert _check(_entry(url=written)).verdict == support.VERIFIED
+
+
+def test_a_query_string_still_identifies_a_different_document():
+    """Normalization stops at the path. A query string routinely selects the document,
+    so dropping it would let a span from one article vouch for another."""
+    assert _check(_entry(url="https://example.org/paper?v=2")).verdict == "not_retrieved"
+
+
+@pytest.mark.parametrize(
     "source",
     [
         FetchedSource(
