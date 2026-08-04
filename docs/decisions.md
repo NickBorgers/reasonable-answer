@@ -4660,9 +4660,13 @@ The judge knew which blockers the fixer had been credited with; that knowledge s
 **The decision.** The credited set travels with the verdict as `addressed_blocker_ids`, and the
 comment partitions on it.
 
-- `aggregate()` returns the namespaced ids it credited, on every path — including the fail-closed
-  `pipeline_error` returns, where it is empty. A field the renderer reads unconditionally must not be
-  undefined on exactly the paths taken when something is already wrong.
+- Every verdict carries the namespaced ids the fixer was credited with. A verdict is constructed in
+  exactly three places — `aggregate()`, the inline no-reviewer-artifacts verdict in `judge.mjs`, and
+  `checkExpectedRoles()` — and the field is on all three, empty on the two fail-closed
+  `pipeline_error` paths, which never reach aggregation. A field the renderer reads unconditionally
+  must not be undefined on exactly the paths taken when something has already gone wrong; the
+  `checkExpectedRoles()` site is reached when a *reviewer* has failed, which is the last place a
+  second, unrelated defect should appear.
 - The comment renders two headings — *still outstanding* and *raised this cycle, fixed by the fixer* —
   and each is emitted only when it has entries, so a clean panel still shows no blocker section at all.
   The fixed list names the commit the fix landed in when one did.

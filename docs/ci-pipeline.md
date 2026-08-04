@@ -174,9 +174,12 @@ The credited set travels **with the verdict**, as `addressed_blocker_ids`, along
 `unaddressed_blocker_ids` (D-addressed-blockers-visible). That is what lets the finalize comment separate a
 blocker the fixer closed from one that still stands, and it means the comment and the merge
 gate are reading the same decision rather than two recomputations of it. Both fields are
-present on every verdict, including the fail-closed `pipeline_error` paths, because the
-renderer reads them unconditionally and the one comment written when things are already
-broken must not be the one that breaks.
+present on every verdict, because the renderer reads them unconditionally and the one comment
+written when things are already broken must not be the one that breaks. A verdict is built in
+exactly three places, and all three carry both: `aggregate()`, the inline no-reviewer-artifacts
+verdict in `judge.mjs`, and `checkExpectedRoles()` in `expected-roles.mjs` — the last two being
+fail-closed `pipeline_error` paths, where both sets are empty because neither ever reached
+aggregation.
 
 The comment renders the two sets under separate headings — *still outstanding*, and *raised
 this cycle, fixed by the fixer* — and the per-reviewer table counts what is outstanding,

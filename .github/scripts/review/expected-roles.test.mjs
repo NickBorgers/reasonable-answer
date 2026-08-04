@@ -44,3 +44,13 @@ test("no expected roles supplied leaves the decision to aggregate()", () => {
   assert.equal(checkExpectedRoles([], []), null);
   assert.equal(checkExpectedRoles([], undefined), null);
 });
+
+
+// The verdict this returns is handed straight to the finalize renderer, which reads both id
+// sets unconditionally (D-addressed-blockers-visible). Asserted here as well as in judge.test.mjs because this
+// is where the object is built, and a field dropped here fails a long way from its cause.
+test("the fail-closed verdict carries both blocker id sets", () => {
+  const v = checkExpectedRoles([{ role: "invariant" }], ["invariant", "security"]);
+  assert.deepEqual(v.unaddressed_blocker_ids, []);
+  assert.deepEqual(v.addressed_blocker_ids, []);
+});
