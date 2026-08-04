@@ -52,6 +52,12 @@ cold fixer rather than opening another resume loop, and the session quarantine p
 attempts for the same recorded session. Together these preserve QP7's capped-loop requirement at
 the author-resume entry point without shortening the total budget of an active attempt.
 
+**Application — reviewer validation wait (D-validation-wait-budget).** The reviewer guard's inner
+wait is capped at 40 polls with 15-second intervals, sleeps only between polls so every interval is
+observed by a later check, and remains inside the guard job's 15-minute outer timeout. The inner cap,
+outer timeout, and terminal poll ordering are one QP7-governed bounded loop: changing any of them
+requires re-checking the others rather than treating the constants independently.
+
 **Application — answer obligations (D-answer-obligations).** `incomplete_answer` is structured
 completeness output with a mechanical `major` floor under QP1. Its writer and critic prompt
 obligations change what each isolated role must assess, not what crosses contexts, so QP5's traffic

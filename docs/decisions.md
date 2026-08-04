@@ -4649,11 +4649,17 @@ from recorded intent rather than remembered intent and cannot claim `body_clarif
 successfully on the reviewed SHA before a self-hosted runner is allocated. On a `pull_request`
 event the guard and PR Validation start at the same instant, so the guard polls — and its budget
 was 10 polls at 15s, 2m30s. PR Validation on this repository measured 2m15s, 3m12s, 2m57s and
-3m03s across four consecutive runs: three of the four exceeded the entire budget. The loop also
-slept *after* its final poll and then gave up without looking again, so the last 15 seconds were
-unobserved by construction.
+3m03s across four consecutive runs ([30818177449](https://github.com/NickBorgers/reasonable-answer/actions/runs/30818177449),
+[30818436118](https://github.com/NickBorgers/reasonable-answer/actions/runs/30818436118),
+[30824582023](https://github.com/NickBorgers/reasonable-answer/actions/runs/30824582023), and
+[30867764495](https://github.com/NickBorgers/reasonable-answer/actions/runs/30867764495)): three of
+the four exceeded the entire budget. The loop also slept *after* its final poll and then gave up
+without looking again, so the last 15 seconds were unobserved by construction.
 
-PR #156 lost exactly that race. Validation succeeded at 01:10:26Z on SHA `a735e39`; the guard had
+PR #156 lost exactly that race. The
+[validation run](https://github.com/NickBorgers/reasonable-answer/actions/runs/30867764495)
+succeeded at 01:10:26Z on SHA `a735e39`; the
+[review pipeline run](https://github.com/NickBorgers/reasonable-answer/actions/runs/30867764721)
 declared it unfinished at 01:10:32Z, six seconds into the dead interval. All five reviewers
 skipped, the judge received an empty artifact set, and `finalize` published
 `NO-GO — pipeline could not trust its inputs (cycle 1)` on a PR nothing was wrong with. Because a

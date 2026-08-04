@@ -90,8 +90,11 @@ association, the reviewed SHA is still the PR head — and then requires
 `PR Validation Required` to have **completed successfully on that exact SHA**. Reviewing a tree
 that does not lint or pass its tests produces findings the author already has.
 
-The guard's decision is the workflow's `reviewed` output, and every refusal is a skip, not a
-job failure: nothing was read, so the run consumes no cycle (see [Cycle control](#cycle-control)).
+The guard's decision is the workflow's `reviewed` output, which is false for every refusal. Fork
+PRs and untrusted author associations also fail the guard job, because they violate the boundary
+that keeps contributor-controlled state off the self-hosted runner. A superseded head SHA or a
+validation-gate refusal is a clean skip instead. In every case nothing was read, so the run
+consumes no cycle (see [Cycle control](#cycle-control)).
 
 **The wait is the normal path, so its budget has to clear what it waits for**
 (D-validation-wait-budget). On a `pull_request` event the guard and PR Validation start at the same
