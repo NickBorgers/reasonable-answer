@@ -119,6 +119,9 @@ if (!reviewerDirExists) {
     category: "pipeline_error",
     reasons: ["pipeline could not trust its inputs: no reviewer artifacts (reviews skipped?)"],
     unaddressed_blocker_ids: [],
+    // Same shape as every aggregate() return: the finalize comment reads this field
+    // unconditionally, and this path is reached when things are already broken.
+    addressed_blocker_ids: [],
   };
 } else {
   // A reviewer that failed publishes no artifact, so it would simply be absent from the
