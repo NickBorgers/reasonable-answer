@@ -119,6 +119,10 @@ jobs:
           CYCLE: ${{ inputs.cycle }}
           VERDICT: ${{ inputs.verdict }}
           CATEGORY: ${{ inputs.category }}
+          # So the comment can name the commit a fixed blocker was fixed in. Equal to
+          # reviewed_sha on every path where no fix landed, which the renderer treats as
+          # "resolved in this cycle" rather than inventing a commit reference.
+          POST_FIX_SHA: ${{ inputs.post_fix_sha }}
           VERDICT_DIR: verdict
           REVIEWER_DIR: reviewer-artifacts
           RUN_URL: ${{ github.server_url }}/${{ github.repository }}/actions/runs/${{ github.run_id }}

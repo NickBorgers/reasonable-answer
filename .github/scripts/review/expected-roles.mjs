@@ -14,7 +14,7 @@
 /**
  * @param {Array<{role: string}>} reviewers  artifacts that were present and parseable
  * @param {string[]} expected                roles the classifier selected
- * @returns {null | {verdict: "NO-GO", category: "pipeline_error", reasons: string[], unaddressed_blocker_ids: []}}
+ * @returns {null | {verdict: "NO-GO", category: "pipeline_error", reasons: string[], unaddressed_blocker_ids: [], addressed_blocker_ids: []}}
  *          null when every expected role is present (caller proceeds to aggregate)
  */
 export function checkExpectedRoles(reviewers, expected) {
@@ -32,5 +32,11 @@ export function checkExpectedRoles(reviewers, expected) {
         `A reviewer that fails must block the merge, not drop out of the review set.`,
     ],
     unaddressed_blocker_ids: [],
+    // Every verdict carries both id sets, this one included (D-addressed-blockers-visible). The finalize
+    // comment reads them unconditionally to tell a blocker the fixer closed from one that
+    // still stands, and this is a path taken when a reviewer has already failed — the last
+    // place that should degrade into a second, unrelated defect. Empty because a run that
+    // lost a reviewer credits nothing: it never reached aggregate().
+    addressed_blocker_ids: [],
   };
 }

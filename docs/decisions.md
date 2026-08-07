@@ -4703,6 +4703,120 @@ the lint refusal, the marker gate, the remote-head check — and a quarantined s
 both mechanisms fail toward the **cold** path, which is the more conservative of the two: it works
 from recorded intent rather than remembered intent and cannot claim `body_clarification`.
 
+## D-validation-wait-budget — the reviewer guard waits longer than validation takes, and looks after its last sleep
+
+**The problem.** Each reviewer's guard requires `PR Validation Required` to have completed
+successfully on the reviewed SHA before a self-hosted runner is allocated. On a `pull_request`
+event the guard and PR Validation start at the same instant, so the guard polls — and its budget
+was 10 polls at 15s, 2m30s. PR Validation on this repository measured 2m15s, 3m12s, 2m57s and
+3m03s across four consecutive runs ([30818177449](https://github.com/NickBorgers/reasonable-answer/actions/runs/30818177449),
+[30818436118](https://github.com/NickBorgers/reasonable-answer/actions/runs/30818436118),
+[30824582023](https://github.com/NickBorgers/reasonable-answer/actions/runs/30824582023), and
+[30867764495](https://github.com/NickBorgers/reasonable-answer/actions/runs/30867764495)): three of
+the four exceeded the entire budget. The loop also slept *after* its final poll and then gave up
+without looking again, so the last 15 seconds were unobserved by construction.
+
+PR #156 lost exactly that race. The
+[validation run](https://github.com/NickBorgers/reasonable-answer/actions/runs/30867764495)
+succeeded at 01:10:26Z on SHA `a735e39`; the
+[review pipeline run](https://github.com/NickBorgers/reasonable-answer/actions/runs/30867764721)
+declared it unfinished at 01:10:32Z, six seconds into the dead interval. All five reviewers
+skipped, the judge received an empty artifact set, and `finalize` published
+`NO-GO — pipeline could not trust its inputs (cycle 1)` on a PR nothing was wrong with. Because a
+hand-posted `/review` arrives long after validation has settled and clears on its first poll, the
+failure preferentially hit the **unattended** path — the one no human was watching, and the one
+this pipeline exists to be.
+
+**The decision.** Keep the requirement; fix its arithmetic.
+
+1. **Poll after the last sleep.** The loop sleeps only *between* polls. A sleep no poll follows is
+   an interval the gate can go green in unseen, and it is the interval most likely to contain the
+   transition, because it sits closest to when validation finishes. Even on the old budget this
+   alone would have let PR #156 through.
+2. **A budget well clear of the measured range.** 40 polls at 15s, ~9m45s of waiting against a
+   measured worst case of 3m12s. The asymmetry sets it: waiting costs an idle `ubuntu-latest` job
+   polling an API, while giving up early costs a five-reviewer panel, a wasted pipeline run and a
+   red merge gate. The guard's `timeout-minutes: 15` is the outer bound on that wait and must stay
+   above it — if the job timeout fires instead, the guard is killed mid-wait and reports no
+   decision at all, which is the same false negative minus the log line explaining it.
+3. **The give-up message is derived from the budget, not restated.** The old line read
+   `Attempt N/10`, a second copy of the count that a change to the loop would leave stale. A log
+   that disagrees with the code is how this defect stayed invisible in the run transcript.
+
+**What is deliberately unchanged.** Whether reviewers should wait on validation at all is not
+reopened: they should, because findings about code that does not lint are findings the author
+already has. Both refusals stay fail-closed — a **genuine** timeout and a red, cancelled or absent
+gate all still skip the review, and no reviewer may read a SHA that did not validate. The bug was
+calling a race a failure, not the refusal.
+
+**Verification.** The guard is inline `github-script`, so it is not importable.
+`.github/scripts/review/reviewer-guard.test.mjs` extracts the block out of `review-reviewer.yml`
+and *runs* it against a stubbed `checks.listForRef`, passing `setTimeout` in as a parameter so the
+full budget is exercised in milliseconds and every sleep is recorded — the same "run the deployed
+guard rather than restate it" approach `tests/test_ci_model_pins.py` takes with the agent
+composite's inline shell guard. Testing an extract keeps one authoritative copy of the logic:
+there is no second implementation to drift. The four tests that describe this defect fail against
+the pre-fix script and pass after it; the six that pin the fail-closed refusals pass against both,
+which is what makes them a fence rather than a restatement. `review-reviewer.yml` is added to the
+`review_scripts` paths filter in `pr-validation.yml`, so an edit to the guard runs the test that
+covers it.
+
+**Invariants.** None of the six report-pipeline invariants is in reach. Author exclusion and the
+blind orchestrator are properties of the refinement graph, not of CI; this changes neither what may
+enter a generator's context nor who may critique what. Within the pipeline's own safety model the
+change is conservative in the direction that matters: it makes the guard *less* likely to skip a
+reviewer, and strictly no more likely to clear one. Every path that clears still requires a
+completed, successful `PR Validation Required` on the exact reviewed SHA, and the fork,
+author-association and head-SHA refusals are untouched and still evaluated before the wait begins.
+
+## D-addressed-blockers-visible — a blocker the fixer closed is reported as closed, not as a blocker
+
+**The problem.** The finalize comment on PR #153 announced `✅ GO — cleared at cycle 1` and then,
+eleven lines later, a heading reading **Blocking issues** listing two `high`/`medium` findings. Both
+had been fixed by the fixer in that same cycle. Nothing in the section said so. The only signal was a
+count inside a *Why* bullet — "2 blocker(s) addressed by fixer" — and the per-reviewer table still
+showed `quality · request_changes · 2`. Read top to bottom, the comment said the merge gate had
+cleared a PR with two outstanding blockers, which is precisely the failure the gate exists to prevent.
+The owner read it that way, which is the only test that matters for a comment.
+
+The renderer had no way to do better: it printed every reviewer's `blocking_issues[]` unconditionally,
+because the verdict artifact carried only `unaddressed_blocker_ids` — empty by construction on a GO.
+The judge knew which blockers the fixer had been credited with; that knowledge simply never left it.
+
+**The decision.** The credited set travels with the verdict as `addressed_blocker_ids`, and the
+comment partitions on it.
+
+- Every verdict carries the namespaced ids the fixer was credited with. A verdict is constructed in
+  exactly three places — `aggregate()`, the inline no-reviewer-artifacts verdict in `judge.mjs`, and
+  `checkExpectedRoles()` — and the field is on all three, empty on the two fail-closed
+  `pipeline_error` paths, which never reach aggregation. A field the renderer reads unconditionally
+  must not be undefined on exactly the paths taken when something has already gone wrong; the
+  `checkExpectedRoles()` site is reached when a *reviewer* has failed, which is the last place a
+  second, unrelated defect should appear.
+- The comment renders two headings — *still outstanding* and *raised this cycle, fixed by the fixer* —
+  and each is emitted only when it has entries, so a clean panel still shows no blocker section at all.
+  The fixed list names the commit the fix landed in when one did.
+- The per-reviewer table counts **outstanding** blockers, with the fixed count beside it
+  (`0 (2 fixed)`). The table is read first, so leaving a bare `2` there would reproduce the same
+  contradiction one line higher up.
+
+**Why partition rather than suppress.** Hiding a fixed blocker would make the comment agree with
+itself by deleting the record of what the reviewer actually found — and that record is why the panel
+runs. A reader needs to see that `quality` raised a QP12 drift and that it was answered, not that
+nothing happened.
+
+**Why the judge's set and not a recomputation.** The comment and the merge gate must never disagree
+about which blockers stand. `addressed_blocker_ids` is the same set the verdict was computed from, so
+a divergence is not merely unlikely, it is unrepresentable. Matching is on the namespaced `role/id`
+for the reason the judge namespaces: two reviewers can raise the same bare id, and a bare-id lookup
+would report a still-open blocker as fixed — a false clear, in the one direction that must not fail.
+Absent field, absent artifact, or unreadable JSON all render everything as outstanding.
+
+**Invariants.** None of the six is in reach — this changes what the pipeline *says*, never what it
+*decides*. The verdict, `unaddressed_blocker_ids`, the merge-gate status and every cycle rule are
+untouched, and the aggregation tests that pin the GO/NO-GO boundary are unchanged. The one contract
+change is additive: a new field on the verdict artifact, which nothing outside the renderer reads.
+
 ## Open items for a future round
 
 - A third completeness critic, chosen by measurement (D-completeness-pool-noise). The pool is down

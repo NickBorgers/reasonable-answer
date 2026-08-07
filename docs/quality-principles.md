@@ -45,12 +45,23 @@ review findings the way `D<n>` ids are.
 | QP11 | **Evidence-base freshness is checked mechanically and is never blocking.** See the marker line above and [§3](#3-refreshing-the-evidence-base). | this file | — |
 | QP12 | **Principles-as-spec drift is blocking, in both directions.** Behavior governed by QP1–QP10 changing without this file and `decisions.md` moving too — or a principle here weakening with no new fetchable evidence in the diff — is the `quality` reviewer's row-12 analogue. See [§4](#4-retiring-or-weakening-a-principle). | this file + every surface above | — |
 
+**Application — addressed blockers in finalize comments (D-addressed-blockers-visible).** Addressed
+and unaddressed blocker ids are derived mechanically from the same structured reviewer and fixer
+artifacts under QP8. The added verdict field changes how the finalize comment classifies findings for
+display, not the GO/NO-GO boundary; no LLM prose or ordinal judgment enters either classification.
+
 **Application — resumed-agent stall bounds (D-resume-stall-guard).** The resumed fixer remains under
 the unchanged outer agent timeout, while a 3-minute first-output deadline and a 10-minute
 between-output deadline add earlier bounds for silent attempts. Both idle deadlines route to the
 cold fixer rather than opening another resume loop, and the session quarantine prevents repeated
 attempts for the same recorded session. Together these preserve QP7's capped-loop requirement at
 the author-resume entry point without shortening the total budget of an active attempt.
+
+**Application — reviewer validation wait (D-validation-wait-budget).** The reviewer guard's inner
+wait is capped at 40 polls with 15-second intervals, sleeps only between polls so every interval is
+observed by a later check, and remains inside the guard job's 15-minute outer timeout. The inner cap,
+outer timeout, and terminal poll ordering are one QP7-governed bounded loop: changing any of them
+requires re-checking the others rather than treating the constants independently.
 
 **Application — answer obligations (D-answer-obligations).** `incomplete_answer` is structured
 completeness output with a mechanical `major` floor under QP1. Its writer and critic prompt

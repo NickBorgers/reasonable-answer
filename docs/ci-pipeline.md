@@ -82,6 +82,41 @@ no per-role cost telemetry (D-ci-model-pinning). The family split those pins sit
 with `quality` cross-family from `invariant`. Both the roles and the models are visible in one
 place, `review-pipeline.yml`.
 
+### The reviewer guard, and what it waits for
+
+Every role runs behind a `ubuntu-latest` guard that must clear before a self-hosted runner is
+allocated. It re-checks the things its callers already checked — same-repo head, trusted author
+association, the reviewed SHA is still the PR head — and then requires
+`PR Validation Required` to have **completed successfully on that exact SHA**. Reviewing a tree
+that does not lint or pass its tests produces findings the author already has.
+
+The guard's decision is the workflow's `reviewed` output, which is false for every refusal. Fork
+PRs and untrusted author associations also fail the guard job, because they violate the boundary
+that keeps contributor-controlled state off the self-hosted runner. A superseded head SHA or a
+validation-gate refusal is a clean skip instead. In every case nothing was read, so the run
+consumes no cycle (see [Cycle control](#cycle-control)).
+
+**The wait is the normal path, so its budget has to clear what it waits for**
+(D-validation-wait-budget). On a `pull_request` event the guard and PR Validation start at the same
+moment, so the guard is *expected* to poll. It polls the checks API up to **40 times at 15-second
+intervals**, and — load-bearing — it sleeps only *between* polls, never after the last one. Two
+rules follow, and both exist because breaking either produced a false `pipeline_error` NO-GO on a
+healthy PR:
+
+- The budget must stay well clear of how long PR Validation actually takes. Measured runs on this
+  repository span 2m15s–3m12s; the budget is ~9m45s. Waiting costs an idle runner polling an API,
+  while giving up early costs a five-reviewer panel and a red merge gate, so the asymmetry is
+  resolved in favour of waiting.
+- A sleep that no poll follows is an interval the gate can go green in unobserved. The budget's
+  final interval is the one most likely to contain the transition, because it is the one closest
+  to when validation finishes.
+
+Refusing on a **genuine** timeout and on a red or absent gate is deliberate and unchanged: no
+reviewer may read a SHA that did not validate. `reviewer-guard.test.mjs` extracts the guard's
+inline script out of `review-reviewer.yml` and drives it against a stubbed checks API, pinning
+both directions — that a slow-but-passing validation clears, and that a failing, cancelled,
+absent, or never-completing one does not.
+
 ### Reviewer contract
 
 A reviewer is strictly read-only. It produces a JSON artifact conforming to
@@ -169,6 +204,25 @@ are not in the tree. PR #49 reported one of three blockers unaddressed when in f
 the three had landed. The finalize comment now says so explicitly, because "the fixer
 claimed fixes but pushed nothing" and "the fixer did nothing" send an operator to two
 different places.
+
+The credited set travels **with the verdict**, as `addressed_blocker_ids`, alongside
+`unaddressed_blocker_ids` (D-addressed-blockers-visible). That is what lets the finalize comment separate a
+blocker the fixer closed from one that still stands, and it means the comment and the merge
+gate are reading the same decision rather than two recomputations of it. Both fields are
+present on every verdict, because the renderer reads them unconditionally and the one comment
+written when things are already broken must not be the one that breaks. A verdict is built in
+exactly three places, and all three carry both: `aggregate()`, the inline no-reviewer-artifacts
+verdict in `judge.mjs`, and `checkExpectedRoles()` in `expected-roles.mjs` — the last two being
+fail-closed `pipeline_error` paths, where both sets are empty because neither ever reached
+aggregation.
+
+The comment renders the two sets under separate headings — *still outstanding*, and *raised
+this cycle, fixed by the fixer* — and the per-reviewer table counts what is outstanding,
+with what was fixed named beside it (`0 (2 fixed)`). One undifferentiated **Blocking
+issues** list was the previous behaviour, and on a GO it read as a merge gate that had
+passed a PR with open blockers: the only trace of the fixer's work was a count inside a *Why*
+bullet. Nothing is hidden — a fixed blocker is still shown, with what the reviewer said,
+because the record of what was raised is the point.
 
 A reviewer only publishes its artifact under the name the judge consumes **if it
 validated**, and the judge separately requires every role the classifier selected to be
@@ -735,6 +789,11 @@ Every knob lives in [`review-agent-run`](https://github.com/NickBorgers/reasonab
   guard, so job `result` cannot answer "did anyone review this?". `review-reviewer.yml`
   exposes the guard's decision as a workflow output (`reviewed`) for that reason — read it,
   not `needs.<job>.result`.
+- A poll loop whose last act is a sleep gives up during the interval most likely to contain
+  the thing it is waiting for. The reviewer guard's PR Validation wait therefore polls after
+  its final sleep, and its give-up message is derived from the budget rather than restating
+  it — a hardcoded `/10` in the log outlived the loop that ran ten times
+  (D-validation-wait-budget).
 - `hashFiles()` silently returns empty for paths outside the workspace, so gate steps on
   step outputs instead.
 - `gh pr comment`, never `gh pr review --approve` — the latter fails whenever the PAT user
