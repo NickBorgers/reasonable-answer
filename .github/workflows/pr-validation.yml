@@ -85,6 +85,11 @@ jobs:
               - 'config/**'
             review_scripts:
               - '.github/scripts/review/**'
+              # reviewer-guard.test.mjs extracts and runs the inline github-script block out
+              # of this workflow, so an edit to the guard is an edit to code under test. Left
+              # off this list, the one test that would catch the next arithmetic slip in it
+              # (issue #157) never runs on the PR that makes the slip.
+              - '.github/workflows/review-reviewer.yml'
             decisions:
               - 'docs/decisions.md'
               - 'scripts/validate-decision-numbers.sh'

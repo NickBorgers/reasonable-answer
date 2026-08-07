@@ -82,6 +82,41 @@ no per-role cost telemetry (D-ci-model-pinning). The family split those pins sit
 with `quality` cross-family from `invariant`. Both the roles and the models are visible in one
 place, `review-pipeline.yml`.
 
+### The reviewer guard, and what it waits for
+
+Every role runs behind a `ubuntu-latest` guard that must clear before a self-hosted runner is
+allocated. It re-checks the things its callers already checked — same-repo head, trusted author
+association, the reviewed SHA is still the PR head — and then requires
+`PR Validation Required` to have **completed successfully on that exact SHA**. Reviewing a tree
+that does not lint or pass its tests produces findings the author already has.
+
+The guard's decision is the workflow's `reviewed` output, which is false for every refusal. Fork
+PRs and untrusted author associations also fail the guard job, because they violate the boundary
+that keeps contributor-controlled state off the self-hosted runner. A superseded head SHA or a
+validation-gate refusal is a clean skip instead. In every case nothing was read, so the run
+consumes no cycle (see [Cycle control](#cycle-control)).
+
+**The wait is the normal path, so its budget has to clear what it waits for**
+(D-validation-wait-budget). On a `pull_request` event the guard and PR Validation start at the same
+moment, so the guard is *expected* to poll. It polls the checks API up to **40 times at 15-second
+intervals**, and — load-bearing — it sleeps only *between* polls, never after the last one. Two
+rules follow, and both exist because breaking either produced a false `pipeline_error` NO-GO on a
+healthy PR:
+
+- The budget must stay well clear of how long PR Validation actually takes. Measured runs on this
+  repository span 2m15s–3m12s; the budget is ~9m45s. Waiting costs an idle runner polling an API,
+  while giving up early costs a five-reviewer panel and a red merge gate, so the asymmetry is
+  resolved in favour of waiting.
+- A sleep that no poll follows is an interval the gate can go green in unobserved. The budget's
+  final interval is the one most likely to contain the transition, because it is the one closest
+  to when validation finishes.
+
+Refusing on a **genuine** timeout and on a red or absent gate is deliberate and unchanged: no
+reviewer may read a SHA that did not validate. `reviewer-guard.test.mjs` extracts the guard's
+inline script out of `review-reviewer.yml` and drives it against a stubbed checks API, pinning
+both directions — that a slow-but-passing validation clears, and that a failing, cancelled,
+absent, or never-completing one does not.
+
 ### Reviewer contract
 
 A reviewer is strictly read-only. It produces a JSON artifact conforming to
@@ -754,6 +789,11 @@ Every knob lives in [`review-agent-run`](https://github.com/NickBorgers/reasonab
   guard, so job `result` cannot answer "did anyone review this?". `review-reviewer.yml`
   exposes the guard's decision as a workflow output (`reviewed`) for that reason — read it,
   not `needs.<job>.result`.
+- A poll loop whose last act is a sleep gives up during the interval most likely to contain
+  the thing it is waiting for. The reviewer guard's PR Validation wait therefore polls after
+  its final sleep, and its give-up message is derived from the budget rather than restating
+  it — a hardcoded `/10` in the log outlived the loop that ran ten times
+  (D-validation-wait-budget).
 - `hashFiles()` silently returns empty for paths outside the workspace, so gate steps on
   step outputs instead.
 - `gh pr comment`, never `gh pr review --approve` — the latter fails whenever the PAT user

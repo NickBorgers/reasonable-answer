@@ -68,6 +68,10 @@ jobs:
   guard:
     name: Guard
     runs-on: ubuntu-latest
+    # Must stay comfortably above the PR Validation poll budget below (~9m45s of sleeping
+    # plus one API call per poll). If this bound is the thing that fires, the guard is
+    # killed mid-wait and reports no decision at all — the same false-negative shape as
+    # giving up early, minus the log line that explains it.
     timeout-minutes: 15
     outputs:
       ok: ${{ steps.authorize.outputs.ok }}
@@ -110,23 +114,53 @@ jobs:
             // Require PR Validation to have passed on this exact commit before spending
             // agent time. Reviewing code that does not lint, build, or pass its tests
             // produces findings the author already knows about.
-            for (let attempt = 1; attempt <= 10; attempt++) {
+            //
+            // On a `pull_request` event this guard and PR Validation start at the same
+            // moment, so waiting is the normal path rather than an edge case — and the
+            // budget has to clear what it waits for. It did not: 10 polls at 15s is 2m30s,
+            // while PR Validation on this repository measured 2m15s–3m12s across four
+            // consecutive runs. Worse, the loop slept *after* its last poll and then gave
+            // up without looking again, so that final interval was dead time. PR #156 went
+            // green six seconds inside it; all five reviewers skipped and the pipeline
+            // finalized a `pipeline_error` NO-GO on a PR nothing was wrong with (issue
+            // #157). The failure preferentially hit the unattended path, because a
+            // hand-posted `/review` arrives long after validation has settled.
+            //
+            // So: a budget well clear of the measured range, and a poll after the last
+            // sleep — the guard sleeps *between* polls, never after the final one. Waiting
+            // costs an idle ubuntu-latest job polling an API; giving up early costs a
+            // five-reviewer panel and a false NO-GO on the merge gate, and that asymmetry
+            // is what sets the budget.
+            //
+            // Both refusals below are unchanged and deliberate: a red gate and a genuine
+            // timeout still skip the review. The bug was calling a race a failure, not the
+            // refusal itself. `.github/scripts/review/reviewer-guard.test.mjs` drives this
+            // very script against a stubbed API and pins both directions.
+            const POLL_ATTEMPTS = 40;
+            const POLL_INTERVAL_MS = 15000;
+            for (let attempt = 1; attempt <= POLL_ATTEMPTS; attempt++) {
               const { data: checks } = await github.rest.checks.listForRef({
                 owner: context.repo.owner, repo: context.repo.repo, ref: sha, per_page: 100,
               });
               const gate = checks.check_runs.find((c) => c.name === 'PR Validation Required');
               if (gate?.status === 'completed') {
                 if (gate.conclusion === 'success') {
-                  core.info('PR Validation passed; proceeding.');
+                  core.info(`PR Validation passed on poll ${attempt}; proceeding.`);
                   return core.setOutput('ok', 'true');
                 }
                 core.warning(`PR Validation concluded '${gate.conclusion}'; skipping review until it passes.`);
                 return core.setOutput('ok', 'false');
               }
-              core.info(`Attempt ${attempt}/10: PR Validation not finished yet; waiting 15s...`);
-              await new Promise((r) => setTimeout(r, 15000));
+              // No sleep after the last poll: there is nothing left to wait for, and
+              // sleeping here is exactly the interval issue #157 was lost in.
+              if (attempt === POLL_ATTEMPTS) break;
+              core.info(`Poll ${attempt}/${POLL_ATTEMPTS}: PR Validation not finished yet; waiting ${POLL_INTERVAL_MS / 1000}s...`);
+              await new Promise((r) => setTimeout(r, POLL_INTERVAL_MS));
             }
-            core.warning('PR Validation did not complete in time; skipping review.');
+            // Derived from the budget rather than restated: a log line carrying its own copy
+            // of the count is one more place the arithmetic goes stale unnoticed.
+            const waited = ((POLL_ATTEMPTS - 1) * POLL_INTERVAL_MS) / 60000;
+            core.warning(`PR Validation did not complete within ${POLL_ATTEMPTS} polls over ${waited} minutes; skipping review.`);
             core.setOutput('ok', 'false');
 
   review:
