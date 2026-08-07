@@ -9,6 +9,7 @@ from reasonable_answer.schemas import LensResult, RawIssue, StructuralRef
 from reasonable_answer.taxonomy import Category, Lens, Severity
 from reasonable_answer.triage import (
     LensValidationError,
+    ViolationCode,
     clamp,
     clean_records,
     material_count,
@@ -298,6 +299,77 @@ def test_a_category_out_of_scope_offers_no_hint():
         validate_issue(Lens.COMPLETENESS, wrong, STRUCTURE)
 
     assert exc.value.repair_hint() == ""
+
+
+def test_a_rejection_names_its_class_so_a_log_can_tell_them_apart():
+    """`LensValidationError` alone cannot distinguish the four rejection classes."""
+    misquote = issue(Category.UNCITED_CLAIM, Severity.MAJOR).model_copy(
+        update={"claim_span": "a claim the report never makes"}
+    )
+    with pytest.raises(LensValidationError) as exc:
+        validate_issue(Lens.EVIDENCE, misquote, STRUCTURE)
+    assert exc.value.code is ViolationCode.SPAN_NOT_VERBATIM
+    assert exc.value.diagnostics()["field"] == "claim_span"
+    assert exc.value.diagnostics()["locus"] == "S1.P1"
+
+    with pytest.raises(LensValidationError) as exc:
+        validate_issue(Lens.COMPLETENESS, issue(Category.UNCITED_CLAIM, Severity.MAJOR), STRUCTURE)
+    assert exc.value.code is ViolationCode.CATEGORY_OUT_OF_SCOPE
+
+    invented = issue(Category.UNCITED_CLAIM, Severity.MAJOR, section=9, paragraph=9)
+    with pytest.raises(LensValidationError) as exc:
+        validate_issue(Lens.EVIDENCE, invented, STRUCTURE)
+    assert exc.value.code is ViolationCode.LOCUS_ABSENT
+
+    empty = issue(Category.UNCITED_CLAIM, Severity.MAJOR).model_copy(
+        update={"claim_span": "*"}
+    )
+    with pytest.raises(LensValidationError) as exc:
+        validate_issue(Lens.EVIDENCE, empty, STRUCTURE)
+    assert exc.value.code is ViolationCode.SPAN_EMPTY
+    assert exc.value.diagnostics()["field"] == "claim_span"
+    assert exc.value.diagnostics()["locus"] == "S1.P1"
+
+
+def test_the_span_fingerprint_separates_a_re_roll_from_a_search():
+    """The question the failure message cannot answer: across repair attempts, did the
+    critic re-emit the same rejected span, or a different one? Same normalized span ->
+    same fingerprint; a genuinely different span -> a different one."""
+
+    def fingerprint_of(span: str) -> str:
+        bad = issue(Category.UNCITED_CLAIM, Severity.MAJOR).model_copy(
+            update={"claim_span": span}
+        )
+        with pytest.raises(LensValidationError) as exc:
+            validate_issue(Lens.EVIDENCE, bad, STRUCTURE)
+        return exc.value.fingerprint()
+
+    repeated = fingerprint_of("a claim the report never makes")
+    assert fingerprint_of("a claim the report never makes") == repeated
+    # Reformatting is not a different answer — the fingerprint folds what `_normalize`
+    # folds, so a re-roll that only retypes its span still reads as a re-roll.
+    assert fingerprint_of("  A CLAIM   the report  never makes ") == repeated
+    assert fingerprint_of("a different invention entirely") != repeated
+    assert len(repeated) == 8
+
+
+def test_a_rejected_span_never_reaches_the_error_message():
+    """RA-016. `critique_once` puts this message into `LensResult.failure_reason`, which
+    is persisted and logged at WARNING — both outside the 0700 run tree. The span may
+    travel in the repair hint, which stays inside the run; it must not travel here."""
+    secret = "a claim the report never makes"
+    bad = issue(Category.UNCITED_CLAIM, Severity.MAJOR).model_copy(
+        update={"claim_span": secret}
+    )
+
+    with pytest.raises(LensValidationError) as exc:
+        validate_issue(Lens.EVIDENCE, bad, STRUCTURE)
+
+    assert secret not in str(exc.value)
+    assert secret not in " ".join(exc.value.diagnostics().values())
+    # The hint hands back the *source* text the span should have come from, never the
+    # rejected span itself — so there is no path from here to a log either.
+    assert secret not in exc.value.repair_hint()
 
 
 def test_typographic_punctuation_does_not_make_an_honest_quote_a_misquote():

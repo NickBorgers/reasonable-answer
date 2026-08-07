@@ -611,12 +611,15 @@ class LLMClient:
                 # validator quotes back. It feeds the repair prompt below, which stays
                 # inside the run, but must never reach an ordinary log: `RA_LOG_LEVEL=INFO`
                 # is the container default (D-provider-retry), and stdout/log aggregation lives outside
-                # the 0700 `runs/<id>/` tree. Log only the bounded, content-free class.
+                # the 0700 `runs/<id>/` tree. Log the bounded, content-free class, plus
+                # whatever equally bounded diagnostics the validator offers about its own
+                # rejection — never `last_err`, and never a rejected value.
                 log.info(
-                    "schema violation from %s (attempt %d): %s",
+                    "schema violation from %s (attempt %d): %s%s",
                     alias,
                     attempt + 1,
                     exc.__class__.__name__,
+                    _diagnostics_suffix(exc),
                 )
                 # Duck-typed rather than a shared base class: the validators that carry
                 # guidance live in `triage`, which is deliberately LLM-free and must not
@@ -631,6 +634,27 @@ class LLMClient:
                     f"Return corrected JSON only. No prose, no code fence."
                 )
         raise MalformedOutputError(f"{alias}: schema violation after repair: {last_err}")
+
+
+def _diagnostics_suffix(exc: Exception) -> str:
+    """Bounded detail a validator offers about its own rejection, rendered for a log.
+
+    Duck-typed for the same reason `repair_hint` is: the validators that carry this live
+    in `triage`, which is deliberately LLM-free and must not import this module to say
+    so. A validator that offers nothing (a plain pydantic `ValidationError`) yields "",
+    leaving the line exactly as it was.
+
+    The contract on anything reaching this is RA-016: closed-enum labels, structural
+    references, integers and hashes only. A validator that returned report text here
+    would put it on stdout, which is outside the 0700 run tree.
+    """
+    diagnostics = getattr(exc, "diagnostics", None)
+    if not callable(diagnostics):
+        return ""
+    fields = diagnostics()
+    if not fields:
+        return ""
+    return " [" + " ".join(f"{key}={value}" for key, value in fields.items()) + "]"
 
 
 def _message_dict(message: Any) -> dict[str, Any]:

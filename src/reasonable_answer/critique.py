@@ -66,8 +66,15 @@ def critique_once(
     structure = report_mod.parse(report_text)
 
     def validate(output: CritiqueOutput) -> None:
-        for issue in output.issues:
-            triage.validate_issue(lens, issue, structure, require_verbatim_spans)
+        for index, issue in enumerate(output.issues):
+            try:
+                triage.validate_issue(lens, issue, structure, require_verbatim_spans)
+            except triage.LensValidationError as exc:
+                # `validate_issue` sees one issue and cannot know where it sat in the
+                # response. Which issue of how many failed is what separates a critic
+                # stuck on a single bad span from one whose whole response is unanchored.
+                exc.at_issue(index, of=len(output.issues))
+                raise
 
     try:
         output = client.structured(
