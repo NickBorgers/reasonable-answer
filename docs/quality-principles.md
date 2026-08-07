@@ -71,6 +71,14 @@ silently reset by a machine merge that answered no blockers. The gate it feeds i
 merge is deterministic git content on both sides of D-inherit-whole-range's tree-identity test, so
 QP8's "never an LLM grading prose" holds at the new entry point too.
 
+**Application — the inherit anchor (D-inherit-reviewed-anchor).** That same gate was measuring from
+the wrong commit: `review/cycle` lands on the fixer's push, so the range walk and the tree
+recreation compared a head with itself and inherited unconditionally. Anchoring both on
+`review/reviewed-sha` — the commit the published verdict is about — keeps QP8's determinism (still
+git plumbing and commit statuses, still no model) while restoring what QP7 depends on for the cap to
+mean anything: a cycle is preserved only for a push that was *verified* to add nothing, and a fixer
+push that added something is read rather than re-stamped.
+
 **Application — answer obligations (D-answer-obligations).** `incomplete_answer` is structured
 completeness output with a mechanical `major` floor under QP1. Its writer and critic prompt
 obligations change what each isolated role must assess, not what crosses contexts, so QP5's traffic

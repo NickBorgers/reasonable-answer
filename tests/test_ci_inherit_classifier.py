@@ -8,6 +8,14 @@ everything committed underneath that merge. Push content, then `git merge origin
 the prior verdict was re-published over content nobody read (D-inherit-whole-range; observed
 on #126, #127 and #130, each having real fixes re-stamped with a stale NO-GO).
 
+The second version of the same failure was not in the predicate but in what it measured
+from: both tests anchored on the SHA the cycle counter was recorded on, which *is* the head
+being classified whenever the fixer's push carried it. `SHA..SHA` is empty and a merge-tree
+of a head against its own already-merged parent reproduces that head's tree, so a fixer push
+never followed by another commit could not be re-reviewed at all (#163, observed on PR #162).
+The anchor is now the `review/reviewed-sha` status — the commit the inherited verdict was
+published for (D-inherit-reviewed-anchor).
+
 There is no way to exercise that step short of running it, so these tests extract the `run:`
 block from the workflow and drive it under `bash` against throwaway git repositories built
 here. Fully offline: real `git`, a stub `gh` on `PATH` that answers the one status query the
@@ -146,17 +154,34 @@ class Bench:
         *,
         force_review: str = "false",
         verdict: str = PRIOR_VERDICT,
+        last_reviewed: str | None = None,
     ) -> dict:
-        """Run the extracted step and return its `$GITHUB_OUTPUT` as a dict."""
+        """Run the extracted step and return its `$GITHUB_OUTPUT` as a dict.
+
+        `last_reviewed` is the `review/reviewed-sha` anchor the step reads off the
+        cycle-recorded SHA — the commit the prior verdict was published *for*
+        (D-inherit-reviewed-anchor). It defaults to `prior_sha` because that is what the
+        two coincide to on every path where the fixer did not push; pass it explicitly to
+        model a fixer push recorded onto the cycle it fixed, or `""` for a cycle recorded
+        before this status existed.
+        """
         output = self.work.parent / "github_output"
         output.write_text("", encoding="utf-8")
         stub_bin = self.work.parent / "bin"
         stub_bin.mkdir(exist_ok=True)
         gh = stub_bin / "gh"
-        # The step's only API call is "what verdict does the prior reviewed SHA carry".
+        # Two API calls, both "what does this context say on the cycle-recorded SHA".
+        # Dispatched on the context named in the --jq filter, so a step that queried the
+        # wrong one would read an empty answer rather than silently getting the other's.
         gh.write_text(
             "#!/usr/bin/env bash\n"
-            'if [ -n "${GH_STUB_VERDICT:-}" ]; then printf "%s\\n" "$GH_STUB_VERDICT"; fi\n',
+            'if printf "%s\\n" "$@" | grep -q "review/reviewed-sha"; then\n'
+            '  if [ -n "${GH_STUB_REVIEWED_SHA:-}" ]; then printf "%s\\n" "$GH_STUB_REVIEWED_SHA"; fi\n'
+            'elif printf "%s\\n" "$@" | grep -q "review/verdict"; then\n'
+            '  if [ -n "${GH_STUB_VERDICT:-}" ]; then printf "%s\\n" "$GH_STUB_VERDICT"; fi\n'
+            "else\n"
+            '  echo "gh stub: unexpected query: $*" >&2; exit 1\n'
+            "fi\n",
             encoding="utf-8",
         )
         gh.chmod(0o755)
@@ -166,6 +191,7 @@ class Bench:
             "PATH": f"{stub_bin}{os.pathsep}{os.environ['PATH']}",
             "GH_TOKEN": "stub",
             "GH_STUB_VERDICT": verdict,
+            "GH_STUB_REVIEWED_SHA": prior_sha if last_reviewed is None else last_reviewed,
             "REPO": "owner/repo",
             "SHA": sha,
             "BASE_REF": "main",
@@ -398,6 +424,119 @@ def test_a_plain_content_push_is_reviewed(bench: Bench, script: str) -> None:
 
     result = bench.run(script, head, reviewed)
     assert result["inherit"] == "false"
+
+
+def test_a_fixer_push_recorded_on_its_own_cycle_is_reviewed(bench: Bench, script: str) -> None:
+    """The bug this anchor closes, in the shape observed on PR #162, run 31190337154.
+
+    Cycle 1's panel read `reviewed`; the cold fixer then pushed a merge that resolved
+    conflicts with the base *and* addressed the blockers, and `review-finalize.yml` stamped
+    `review/cycle` on that push. So the next run's cycle-recorded SHA **is** the head being
+    classified: the range `head..head` is empty, and `merge-tree` of a head against its own
+    already-merged second parent trivially reproduces the head's tree. Everything inherits,
+    and three files of fixes were re-stamped with the pre-fix NO-GO.
+
+    The anchor is the only variable here — the second run below is the old behaviour,
+    reproduced by pointing the anchor back at the cycle-recorded SHA — so this fails on a
+    revert of the anchor change and on nothing else.
+    """
+    reviewed = bench.commit_on_pr("feature.txt")
+    bench.advance_main("other.txt")
+
+    _git(bench.work, "fetch", "-q", "origin", "main")
+    _git(bench.work, "merge", "-q", "--no-commit", "--no-ff", "origin/main")
+    _write(bench.work, "blocker-fix.txt", "the fix the panel never read\n")
+    _git(bench.work, "add", "-A")
+    _git(bench.work, "commit", "-q", "-m", "merge: resolve conflicts + address reviewer findings")
+    fixer_push = _git(bench.work, "rev-parse", "HEAD")
+
+    result = bench.run(script, fixer_push, fixer_push, last_reviewed=reviewed)
+    assert result["inherit"] == "false"
+    assert result["inherited_verdict"] == ""
+    assert "recreating the merge yields tree" in result["_log"]
+
+    anchored_on_the_cycle_sha = bench.run(script, fixer_push, fixer_push, last_reviewed=fixer_push)
+    assert anchored_on_the_cycle_sha["inherit"] == "true", "the anchor is what decides this"
+
+
+def test_a_resync_stacked_on_a_fixer_push_is_reviewed(bench: Bench, script: str) -> None:
+    """The same bug one commit further along, which the whole-range test alone cannot see.
+
+    A clean base resync lands on top of the fixer's push. Every commit in the range is a
+    merge whose merged-in parents are on the base branch, so test 1 passes — it is the tree
+    recreation, measured from the commit the panel actually read, that still refuses.
+    """
+    reviewed = bench.commit_on_pr("feature.txt")
+    bench.advance_main("first.txt")
+    _git(bench.work, "fetch", "-q", "origin", "main")
+    _git(bench.work, "merge", "-q", "--no-commit", "--no-ff", "origin/main")
+    _write(bench.work, "blocker-fix.txt", "the fix the panel never read\n")
+    _git(bench.work, "add", "-A")
+    _git(bench.work, "commit", "-q", "-m", "merge: resolve conflicts + address reviewer findings")
+    fixer_push = _git(bench.work, "rev-parse", "HEAD")
+
+    bench.advance_main("second.txt")
+    head = bench.merge_main()
+
+    result = bench.run(script, head, fixer_push, last_reviewed=reviewed)
+    assert result["inherit"] == "false"
+    assert "recreating the merge yields tree" in result["_log"]
+
+
+def test_an_unchanged_reviewed_head_inherits(bench: Bench, script: str) -> None:
+    """Re-entering on the very commit the verdict was published for reads nothing new.
+
+    `review-entry.yml` fires on `reopened` and `ready_for_review` as well as `synchronize`,
+    and `cleanup-claim` releases the dedup claim on every path, so gather can run again on a
+    head whose verdict is already published. There is no range to walk and no merge to
+    recreate; re-stamping the verdict that head already carries costs nothing, while
+    reviewing would spend a cycle re-reading a commit the panel has read. Note the head here
+    is not a merge commit at all — the shape tests below this branch would have refused it.
+    """
+    head = bench.commit_on_pr("feature.txt")
+
+    result = bench.run(script, head, head, last_reviewed=head)
+    assert result["inherit"] == "true"
+    assert result["inherited_verdict"] == PRIOR_VERDICT
+    assert "nothing has been pushed since" in result["_log"]
+
+
+def test_an_unchanged_head_with_no_verdict_reviews_normally(bench: Bench, script: str) -> None:
+    """The trivial-inherit branch is not a way around "there must be a verdict to inherit"."""
+    head = bench.commit_on_pr("feature.txt")
+
+    result = bench.run(script, head, head, last_reviewed=head, verdict="")
+    assert result["inherit"] == "false"
+    assert "no prior verdict to inherit" in result["_log"]
+
+
+def test_a_missing_anchor_reviews_normally(bench: Bench, script: str) -> None:
+    """A cycle recorded before this status existed says nothing about what was read.
+
+    It could be the commit a panel read or the commit a fixer pushed, and those are the
+    inherit decision and its inverse. Fail closed: one full read, after which the next
+    finalize writes the anchor and the PR inherits normally again.
+    """
+    reviewed = bench.commit_on_pr("feature.txt")
+    bench.advance_main("other.txt")
+    head = bench.merge_main()
+
+    assert bench.run(script, head, reviewed)["inherit"] == "true"  # the anchor is the variable
+
+    missing = bench.run(script, head, reviewed, last_reviewed="")
+    assert missing["inherit"] == "false"
+    assert "carries no review/reviewed-sha anchor" in missing["_log"]
+
+
+def test_a_malformed_anchor_reviews_normally(bench: Bench, script: str) -> None:
+    """Anything that is not a full 40-hex object id is not an anchor either."""
+    reviewed = bench.commit_on_pr("feature.txt")
+    bench.advance_main("other.txt")
+    head = bench.merge_main()
+
+    result = bench.run(script, head, reviewed, last_reviewed=reviewed[:7])
+    assert result["inherit"] == "false"
+    assert "carries no review/reviewed-sha anchor" in result["_log"]
 
 
 def test_reviewed_sha_no_longer_in_history_is_reviewed(bench: Bench, script: str) -> None:

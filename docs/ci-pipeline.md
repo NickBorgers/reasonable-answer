@@ -64,7 +64,8 @@ review-entry            authorize · fork-reject · resolve SHA · prior-GO chec
        │                non-agentic, clean-merge-only sync pass when the panel was guarded
        │                off and the branch is behind the base (D-unguarded-sync)
        ├─ judge         deterministic, from main, contents: read
-       └─ finalize      labels · summary comment · merge gate
+       └─ finalize      labels · summary comment · merge gate · review/cycle +
+                        review/verdict + review/reviewed-sha on the post-fix SHA
 ```
 
 Roles run on different model families deliberately. This project's own design argues that
@@ -286,6 +287,22 @@ it holds `contents: read`, so it could not push if it tried.
   deterministically through a trusted merge driver run from `main`, not a judgement call, so
   a merge that shape resolved does re-create cleanly and can still inherit — see "Syncing
   with the base branch" below and D-decisions-merge-driver.
+
+  **"The last reviewed SHA" is the commit a panel read, not the commit the cycle counter
+  was recorded on (D-inherit-reviewed-anchor).** Those two differ exactly when the fixer
+  pushed: `review/cycle` and `review/verdict` land on the fixer's push, because the fixer
+  claims that SHA and no other run will ever stamp it. Anchoring on it compared the head
+  with *itself* — an empty range, and a `merge-tree` of a head against its own
+  already-merged second parent, which reproduces that head's tree by construction — so
+  every fixer push that was not followed by another commit inherited its own pre-fix
+  verdict, and the review → fix → re-review loop could not close. `review-finalize.yml`
+  therefore writes a third status, `review/reviewed-sha`, whose description is the commit
+  the published verdict is *about*; both tests measure from there. A cycle carrying no such
+  anchor — one recorded before this existed — is reviewed rather than guessed at, and an
+  anchor that *is* the head inherits directly, since nothing has been pushed since the
+  commit the panel read. That last case is reachable because `review-entry.yml` also fires
+  on `reopened` and `ready_for_review`, and `cleanup-claim` releases the dedup claim on
+  every path, so an unchanged head can be entered again after its verdict was published.
 - **A fixer-authored commit has no per-author exemption from the merge-from-base rule.** A clean,
   tree-identical base resync is inherited; a conflict-resolved merge is reviewed under
   D-inherit-whole-range. A prior version of this rule (PR #65, responding to PR #49) refused
@@ -497,7 +514,7 @@ deadlock moved one commit forward. So `sync_only` suppresses the claim, and the 
 gets the panel the pass itself could not run.
 
 **And it is not passed to finalize as `post_fix_sha`.** That input is where `review/cycle`,
-`review/verdict`, and the merge gate land, and stamping them on the pushed SHA is only safe
+`review/verdict`, `review/reviewed-sha`, and the merge gate land, and stamping them on the pushed SHA is only safe
 because the fixer's claim means no other run will ever write them there. Suppressing the claim
 removes that guarantee, so a sync-only successor would reach its own panel pre-stamped with a
 cycle it never spent — and at cycle 2 would arrive already capped, before the panel it was
@@ -716,6 +733,12 @@ Because the event is suppressed, nothing else will ever publish `review/cycle`,
 same run, taking `post_fix_sha` as an explicit input rather than defaulting to the pre-fix
 `reviewed_sha`. Writing the merge gate on the wrong SHA would leave the PR's actual head
 permanently ungated, which is exactly the failure this stamping exists to prevent.
+
+The same run also writes `review/reviewed-sha` there, naming `reviewed_sha` — the commit
+those statuses are *about*, which on this path is the fixer push's parent rather than the
+fixer push. Without it a later run cannot tell "a panel read this commit" from "a fixer
+pushed this commit", and the inherit short-circuit above measures its range and its tree
+recreation from the wrong end (D-inherit-reviewed-anchor).
 `cleanup-claim` (bottom of `review-pipeline.yml`) advances `review/pipeline` to a terminal
 state on both the reviewed SHA and the post-fix SHA for the same reason: a claim this run
 makes and never revisits would otherwise leak `pending` forever and block every future

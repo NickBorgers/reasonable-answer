@@ -155,6 +155,15 @@ jobs:
       # base-resync merge, *and* recreating that merge from the reviewed SHA must reproduce
       # this commit's tree exactly. The second test is the one a conflict resolution — the
       # place arbitrary content can hide inside a correctly-shaped merge — cannot pass.
+      #
+      # Both tests anchor on the SHA a panel actually read and published a verdict for,
+      # which is *not* the SHA the cycle counter was recorded on whenever the fixer pushed
+      # (D-inherit-reviewed-anchor). `review/cycle` lands on the fixer's own push, so
+      # anchoring there compares the head with itself: an empty range, and a merge-tree of
+      # a head against its own already-merged parent that trivially reproduces the head's
+      # tree — so everything inherits, always. `review/reviewed-sha`, written next to
+      # `review/verdict` by review-finalize.yml and naming the commit that verdict is
+      # *about*, is the anchor read here instead.
       - name: Detect merge-from-main
         id: inherit
         working-directory: pr-head
@@ -201,6 +210,25 @@ jobs:
             exit 0
           }
 
+          # The one way out with `inherit=true`. Reads the verdict from the same commit the
+          # anchor was read from — review-finalize.yml writes `review/verdict` and
+          # `review/reviewed-sha` together, so the verdict found there is the verdict that
+          # was published *for* the anchor. A recorded cycle whose verdict never landed
+          # (the judge failed, say) has nothing to re-stamp and falls back to the panel.
+          inherit_prior() {
+            inherited=$(gh api "repos/${REPO}/commits/${PRIOR_CYCLE_SHA}/statuses" \
+              --jq '[.[] | select(.context == "review/verdict")] | sort_by(.created_at) | last | .description // empty')
+            if [ -z "$inherited" ]; then
+              review_normally "$1, but there is no prior verdict to inherit"
+            fi
+            echo "gather: $1; inheriting prior verdict '${inherited}'"
+            {
+              echo "inherit=true"
+              echo "inherited_verdict=$inherited"
+            } >> "$GITHUB_OUTPUT"
+            exit 0
+          }
+
           # `/review` outranks this. Inheriting is an optimisation for automatic triggers —
           # a resync should not burn a cycle — but it also re-stamps the prior verdict
           # without reading anything, so a PR whose head is a merge-from-base had no way to
@@ -216,6 +244,45 @@ jobs:
             review_normally "no prior reviewed SHA"
           fi
 
+          # The anchor: the commit the prior verdict was published *for*. Distinct from
+          # PRIOR_CYCLE_SHA — the commit that verdict was *stamped on* — exactly when the
+          # fixer pushed, because review-finalize.yml stamps cycle and verdict on the
+          # fixer's push while the panel read its parent (D-inherit-reviewed-anchor).
+          #
+          # Fail-closed when it is absent or malformed. A cycle recorded by a `main` older
+          # than this decision carries no anchor, and the two candidates it could mean —
+          # "the panel read this commit" and "the fixer pushed this commit" — are the
+          # inherit decision and its inverse. An anchor that cannot be verified is not an
+          # anchor, so those PRs get one full read rather than a guess; the next finalize
+          # writes the status and they inherit normally again.
+          LAST_REVIEWED_SHA=$(gh api "repos/${REPO}/commits/${PRIOR_CYCLE_SHA}/statuses" \
+            --jq '[.[] | select(.context == "review/reviewed-sha")] | sort_by(.created_at) | last | .description // empty')
+          if [[ ! "$LAST_REVIEWED_SHA" =~ ^[0-9a-f]{40}$ ]]; then
+            review_normally "${PRIOR_CYCLE_SHA} carries no review/reviewed-sha anchor, so what it recorded a cycle for cannot be established"
+          fi
+
+          # "Everything since the reviewed SHA" only means something while that SHA is still
+          # in this commit's history. A force-push replaces the chain and gets a fresh read.
+          # Checked before the head's shape, because an unusable anchor makes every test
+          # below meaningless rather than merely false.
+          if ! git merge-base --is-ancestor "$LAST_REVIEWED_SHA" "$SHA"; then
+            review_normally "${LAST_REVIEWED_SHA} is not an ancestor of ${SHA}"
+          fi
+
+          # The panel read this exact commit. Nothing has been pushed since, so there is no
+          # range to walk and no merge to recreate — the tests below would both pass
+          # vacuously, and only for a head that happens to be a merge commit. Saying so
+          # here means an entry on an unchanged head — `reopened` or `ready_for_review`
+          # after a verdict was published, or a re-delivered `synchronize` once
+          # `cleanup-claim` has released the dedup claim — re-stamps the verdict that head
+          # already carries instead of spending a cycle re-reading a commit already read.
+          #
+          # Note what this is not: the head compares against itself only when the anchor
+          # genuinely names it, never because the anchor drifted onto it.
+          if [ "$LAST_REVIEWED_SHA" = "$SHA" ]; then
+            inherit_prior "${SHA} is the commit the prior verdict was published for; nothing has been pushed since"
+          fi
+
           # A merge commit has two or more parents: "<sha> <parent1> <parent2>" is 3 words.
           parents=$(git rev-list --parents -n 1 "$SHA" | wc -w)
           if [ "$parents" -lt 3 ]; then
@@ -229,12 +296,6 @@ jobs:
           # rather than bringing new work in from somewhere else.
           if ! git merge-base --is-ancestor "${SHA}^2" "$base"; then
             review_normally "${SHA}^2 is not on ${BASE_REF}"
-          fi
-
-          # "Everything since the reviewed SHA" only means something while that SHA is still
-          # in this commit's history. A force-push replaces the chain and gets a fresh read.
-          if ! git merge-base --is-ancestor "$PRIOR_CYCLE_SHA" "$SHA"; then
-            review_normally "${PRIOR_CYCLE_SHA} is not an ancestor of ${SHA}"
           fi
 
           # Test 1 — whole-range shape. Every commit reachable from the head but from
@@ -258,10 +319,10 @@ jobs:
                 added=$((added + 1))
               fi
             done
-          done < <(git rev-list "${PRIOR_CYCLE_SHA}..${SHA}" "^${base}")
+          done < <(git rev-list "${LAST_REVIEWED_SHA}..${SHA}" "^${base}")
 
           if [ "$added" -gt 0 ]; then
-            review_normally "${added} unreviewed change(s) since ${PRIOR_CYCLE_SHA}"
+            review_normally "${added} unreviewed change(s) since ${LAST_REVIEWED_SHA}"
           fi
 
           # Test 2 — tree identity. Shape alone still trusts a merge to contain only the
@@ -273,25 +334,15 @@ jobs:
           # `--write-tree` needs git >= 2.38, and a recreate that conflicts exits non-zero.
           # Both land on the same branch, which reviews rather than inherits. Fail-closed is
           # the right direction: the cost is one spent cycle, never an unread merge.
-          if ! merged_tree=$(git merge-tree --write-tree "$PRIOR_CYCLE_SHA" "${SHA}^2" 2>/dev/null); then
-            review_normally "could not cleanly recreate the merge of ${PRIOR_CYCLE_SHA} and ${SHA}^2"
+          if ! merged_tree=$(git merge-tree --write-tree "$LAST_REVIEWED_SHA" "${SHA}^2" 2>/dev/null); then
+            review_normally "could not cleanly recreate the merge of ${LAST_REVIEWED_SHA} and ${SHA}^2"
           fi
           head_tree=$(git rev-parse "${SHA}^{tree}")
           if [ "$merged_tree" != "$head_tree" ]; then
             review_normally "recreating the merge yields tree ${merged_tree}, not ${head_tree}"
           fi
 
-          inherited=$(gh api "repos/${REPO}/commits/${PRIOR_CYCLE_SHA}/statuses" \
-            --jq '[.[] | select(.context == "review/verdict")] | sort_by(.created_at) | last | .description // empty')
-          if [ -z "$inherited" ]; then
-            review_normally "pure merge-from-${BASE_REF} but no prior verdict to inherit"
-          fi
-
-          echo "gather: pure merge-from-${BASE_REF} since ${PRIOR_CYCLE_SHA}; inheriting prior verdict '${inherited}'"
-          {
-            echo "inherit=true"
-            echo "inherited_verdict=$inherited"
-          } >> "$GITHUB_OUTPUT"
+          inherit_prior "pure merge-from-${BASE_REF} since ${LAST_REVIEWED_SHA}"
 
       - name: Compute cycle
         id: cycle
