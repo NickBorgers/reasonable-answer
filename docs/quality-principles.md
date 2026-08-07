@@ -85,6 +85,13 @@ but it is the minimum compliant pool and has no spare critic after a failed dept
 fit-first order applies QP8's deterministic audition verdict to roster position; it does not treat
 an LLM's prose assessment as a control decision.
 
+**Application — critic retirement and ordering (D-minimax-retirement).** Removing a critic graded
+unfit on both of its lenses leaves logic with Mistral and Zhipu witnesses and evidence with Zhipu and
+Google witnesses, preserving QP2 family diversity. Author exclusion thins logic to one eligible
+critic when `mistral-large-3` authored the report, so that lens cannot supply the two clean families
+required for strong acceptance on those rounds. Fit-first ordering applies QP8's deterministic
+audition verdicts and measured sensitivity to roster position; no LLM prose grades the roster.
+
 **Application — writer source reads (D-writer-source-reads,
 D-support-normalized-text).** Writer-read page bodies are production evidence, not critique: QP5
 requires them to enter the writer context as fenced untrusted data, and no page instruction or

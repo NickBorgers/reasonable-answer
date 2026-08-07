@@ -38,19 +38,31 @@ roster:
   # pass and nothing else: rule 9 is cap-gated and the LLM can only *enable* it.
   orchestrator: gemma4-small
 
-  # minimax-m3 probes non-deterministically: json_schema, json_object and prompt have
-  # each come back across repeated `ra doctor` runs. The mode is pinned once at startup,
-  # so an unlucky probe puts it on tolerant extraction with repair_retries: 1 for the
-  # whole run. It is listed second on both lenses rather than first for that reason —
-  # pick_critic reaches it only after glm-5.2 has already reviewed the artifact.
+  # minimax-m3 is retired from both pools it held (D-minimax-retirement). Three audits
+  # across 2026-08-02..07 agreed and worsened: on logic 1.12 invented material issues
+  # per sound control with obvious-tier sensitivity down to 0.33, on evidence 1.52
+  # invented with sensitivity 0.58 — measured under the `json_schema` mode a run
+  # actually pins it to (D-audition-probe-parity). A 30-call spot check attributed the
+  # noise to the model, not the corpus: it repeatedly flags a clause while its own
+  # quoted span contains the adjacent qualifier that resolves the complaint. A critic
+  # whose findings are mostly invented cannot return an honest clean, so runs it
+  # reviews stagnate rather than converge. It was critic-only, so it leaves the roster.
   critics:
+    # Ordered fit-first (D-completeness-pool-noise precedent): mistral-large-3 is the
+    # lens's only measured `fit` (0.94 sensitivity, 0.08 invented per control) and the
+    # pass acts on position 1's silence. glm-5.2 (marginal: 1.00 sensitivity, 0.75
+    # invented) backs it. mistral also writes, so on rounds it authors the pool thins
+    # to glm-5.2 alone — the price of fit-first here; two families (Mistral + Zhipu)
+    # keep a strong `accepted` reachable on every other round.
     logic:
+      - mistral-large-3
       - glm-5.2            # critic-only: highest GPQA of any shipped open model
-      - minimax-m3
-      - mistral-large-3    # eligible whenever deepseek-v4-flash authors
+    # Both survivors are marginal (glm-5.2: 0.92 sensitivity / 0.42 invented; gemma4:
+    # 0.50 sensitivity / 0.12 invented) — the higher-sensitivity model leads because a
+    # position-1 miss is the one the run acts on. This is the thinnest lens; the open
+    # item is auditioning a replacement candidate, not reshuffling these two.
     evidence:
       - glm-5.2            # critic-only: lowest hallucination of the open frontier
-      - minimax-m3
       - gemma4
     # Ordered fit-first (D-completeness-pool-noise). The 2026-08-02 audition measured this
     # lens end to end: gemma4 `fit` (0.89 sensitivity, 0.17 invented material issues per
@@ -291,8 +303,9 @@ audition:
   enforce: false
   cache_path: .ra-audition.json
   max_age_days: 30
-  # Critics are non-deterministic (see the minimax-m3 note above). Single-shot
-  # auditioning would inherit that flakiness and report it as capability.
+  # Critics are non-deterministic — the same model returns different issue lists on
+  # repeated calls. Single-shot auditioning would inherit that flakiness and report it
+  # as capability.
   repetitions: 3
   max_concurrency: 3
   thresholds:
