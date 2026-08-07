@@ -6,16 +6,16 @@ name: Sync open PRs with the base branch
 # D-decisions-merge-driver registered the driver everywhere the *review pipeline* merges,
 # and every one of those places is reachable only from a review cycle. A PR that has
 # already been cleared has no cycle left to run, so when the base moves under it nothing
-# executes the driver — and GitHub's own merge machinery (mergeability, the merge button,
-# auto-merge) never consults a repo-local merge driver. The event that needs the driver is
-# therefore this one: the base branch moved.
+# executes the driver. The repository can name a custom driver in `.gitattributes`, but
+# the command is checkout-local git config; the event that needs that registered checkout
+# is therefore this one: the base branch moved.
 #
-# Deliberately narrow. A PR is only touched when the plain three-way merge — exactly what
-# GitHub computes — conflicts AND the trusted driver resolves it. A PR that is merely
-# behind is left alone: GitHub can merge that itself, and re-merging it here would churn a
+# Deliberately narrow. A PR is only touched when the unconfigured three-way merge conflicts
+# AND the trusted driver resolves it. A PR that is merely behind is left alone: the driver
+# is not what unblocks it, and re-merging it here would churn a
 # SHA that the reviewers, the SHA-keyed dedup and the cycle counter are all keyed on.
 #
-# Security model. Two checkouts: `trusted`, this branch, which is the only thing ever
+# Security model. Two checkouts: `trusted`, the default branch, which is the only thing ever
 # executed; and `work`, which is reset to a contributor's branch and never run from. That
 # is the same split, for the same reason, as review-fixer.yml's sync step and
 # review-pipeline.yml's inherit step — this job holds WORKFLOW_PAT and can push to any
@@ -25,15 +25,12 @@ name: Sync open PRs with the base branch
 on:
   push:
     branches: [main]
-  # A PR skipped because a review run was in flight, or because the driver was not yet on
-  # the base branch, has no other way back other than waiting for the next push.
-  workflow_dispatch:
 
 permissions:
   # Reads only. The push below authenticates with WORKFLOW_PAT, which is also what makes
-  # the resulting `synchronize` event start a review run: a push made with GITHUB_TOKEN
-  # fires no workflows, so the merge-gate status would never be republished on the new
-  # SHA and auto-merge would stay blocked on a check that can no longer arrive.
+  # the resulting `synchronize` event start a review run automatically. GitHub documents
+  # a PR update made with GITHUB_TOKEN as approval-required; without automatic publication
+  # the merge-gate status would wait for a human to approve the run on the new SHA.
   contents: read
   pull-requests: read
   actions: read
@@ -75,6 +72,7 @@ jobs:
         uses: actions/checkout@v4
         with:
           path: trusted
+          ref: ${{ github.event.repository.default_branch }}
 
       # The work tree. Reset to each PR's head in turn, never executed from. Full depth
       # deliberately: a branch further behind than a shallow fetch would get a merge base
@@ -85,6 +83,7 @@ jobs:
         with:
           path: work
           fetch-depth: 0
+          ref: ${{ github.event.repository.default_branch }}
           token: ${{ secrets.WORKFLOW_PAT }}
 
       - name: Re-merge the base into every PR the driver can unblock
@@ -93,7 +92,7 @@ jobs:
         env:
           GH_TOKEN: ${{ secrets.WORKFLOW_PAT }}
           REPO: ${{ github.repository }}
-          BASE_REF: ${{ github.ref_name }}
+          BASE_REF: ${{ github.event.repository.default_branch }}
           # review-pipeline.yml resets the cycle counter on a commit not authored this way,
           # reading it as a human answering the blockers. A resync is not that.
           AGENT_COMMIT_EMAIL: 'ci@reasonable-answer.local'

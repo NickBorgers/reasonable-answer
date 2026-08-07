@@ -4302,7 +4302,8 @@ differing content, or any parse ambiguity — falls through to exactly what an u
 have done (`git merge-file`'s own diff3 merge, conflict markers and all). The driver is registered at
 every place this repository actually runs a merge of this kind: `review-fixer.yml`'s two sync-merge call
 sites, `review-pipeline.yml`'s merge-tree recreation step (D-inherit-whole-range), and
-`.devcontainer/setup.sh` for a human resolving the same conflict locally.
+`sync-open-prs.yml`'s base-moved resync (D-base-moved-resync), plus `.devcontainer/setup.sh` for a
+human resolving the same conflict locally.
 
 The recognized shape is exact: appended text must be one or more complete `## D-<slug> — …` sections,
 nothing else, with at least one blank line separating the last one from the tail marker. Any prose
@@ -4831,17 +4832,18 @@ was never invoked. The PR sat conflicted for three days and was freed by a hand 
 web editor (`aade6d3`, the head of `refs/pull/158/head`) — the exact gesture the decision exists to
 abolish, on the exact shape it recognizes.
 
-GitHub cannot cover this gap. A repo-local merge driver is `.gitattributes` naming it *plus* a
-`merge.<name>.driver` command in a `.git/config`, and a config is not part of the repository — it is
-established per checkout, which is why every registration in this codebase is a `git config` call in
-a job. Mergeability, the merge button and auto-merge are computed server-side with no such checkout,
-so a PR whose sole obstacle is this collision stays blocked until *some job in this repository*
-performs the merge.
+Repository contents alone cannot cover this gap. [Git defines a custom merge driver's command in
+`$GIT_DIR/config` or `$HOME/.gitconfig`, not in
+`.gitattributes`](https://git-scm.com/docs/gitattributes#_defining_a_custom_merge_driver), which is
+why every registration in this codebase is a `git config` call in a checkout. PR #158 supplies the
+repository-specific observation: the unconfigured merge stayed conflicted while the registered
+driver resolved the same three-way inputs. A PR whose sole obstacle is this collision therefore
+stays blocked until a configured checkout performs the merge.
 
 **The decision.** A new workflow, `sync-open-prs.yml`, fires on push to the base branch and re-merges
 the base into open PRs — but only where the driver is what makes the merge succeed. Per PR it runs
-the merge twice through `scripts/sync_pr_with_base.sh`: once with no driver registered, which is the
-only shape a server-side merge can compute, and if that conflicts, once with the trusted driver
+the merge twice through `scripts/sync_pr_with_base.sh`: once with no driver registered as the
+unconfigured baseline, and if that conflicts, once with the trusted driver
 registered. It pushes only when the first conflicts and the second is clean. Everything else is a
 state the PR was already in and keeps: `none` (already contains the base tip), `plain` (merges
 without the driver, so nothing here is what unblocks it), `conflicts` (a shape the driver declines — an
@@ -4855,11 +4857,13 @@ workflow adds nothing GitHub could have done itself.
 
 **Why a push, and why with `WORKFLOW_PAT`.** The merge has to reach the branch for auto-merge to see
 a mergeable PR, and the new head needs the merge-gate status republished on it or auto-merge simply
-waits on a check that can never arrive. A push made with `GITHUB_TOKEN` fires no workflow events, so
-the PAT is what makes the resulting `synchronize` start a run at all. That run does not cost a cycle:
-a base-resync merge is precisely what D-inherit-whole-range's classifier inherits through, and
-because both this workflow and that classifier register the same trusted driver, a driver-resolved
-merge recreates tree-identically there too.
+waits on a check that can never arrive. [GitHub documents that a PR `synchronize` event caused by
+`GITHUB_TOKEN` creates a workflow run in an approval-required state, while a personal access token
+allows it to run automatically](https://docs.github.com/en/actions/how-tos/write-workflows/choose-when-workflows-run/trigger-a-workflow#triggering-a-workflow-from-a-workflow).
+The PAT is therefore what republishes the gate without a human approval step. That run does not cost
+a cycle: a base-resync merge is precisely what D-inherit-whole-range's classifier inherits through,
+and because both this workflow and that classifier register the same trusted driver, a
+driver-resolved merge recreates tree-identically there too.
 
 The merge is authored as `AGENT_COMMIT_EMAIL`. `review-pipeline.yml` resets the cycle counter to 1 on
 any commit not authored that way, reading it as a human who answered the blockers; a resync is nobody
@@ -4871,14 +4875,17 @@ fixes if the branch moved, so a push landing underneath it is not merely redunda
 flight also does not need help: gather detects the drift and the fixer performs the same merge with
 the same driver. So the workflow waits for an in-flight run on that branch rather than racing it,
 under one 10-minute deadline for the whole loop, and skips the PR if the run outlasts it — the next
-push to the base branch, or `workflow_dispatch`, retries. `sync_pr_with_base.sh` carries the matching
-backstop, refusing to push when the remote head is no longer the SHA it merged from.
+push to the base branch retries. `sync_pr_with_base.sh` carries the matching backstop, refusing to
+push when the remote head is no longer the SHA it merged from.
 
 **Trust boundary.** Two checkouts: `trusted`, the base branch, checked out with no token and the only
 thing ever executed; and `work`, which holds the credential that can push and is reset to a
 contributor's branch, never run from. This is the same split, for the same reason, as the sync and
 inherit steps — a PR's own `scripts/merge_decisions.py` must not run in a job that can push to any
-branch in the repository. Fork PRs are excluded outright: their branches are not ours to push to.
+branch in the repository. The workflow has no manual-dispatch entry point, and both checkouts plus
+`BASE_REF` are pinned to `github.event.repository.default_branch`; an event-selected ref must never
+decide which code runs with `WORKFLOW_PAT`. Fork PRs are excluded outright: their branches are not
+ours to push to.
 Nothing here fails the workflow for a PR it cannot help, because not syncing is the pre-decision
 baseline and strands nobody, while a red X on `main` for a PR the script declined to touch is noise
 on every push. The one exception is a driver-routed path that comes back merged while still carrying

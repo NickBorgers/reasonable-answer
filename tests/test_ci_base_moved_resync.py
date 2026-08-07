@@ -4,7 +4,7 @@ The decisions merge driver already existed and already worked; what it never had
 site reachable from the event that needs it (D-base-moved-resync). Every registration
 D-decisions-merge-driver added lives inside a review cycle, so a PR that has already been
 cleared — the state PR #158 sat in for three days with auto-merge enabled — had nothing to
-run the driver on its behalf, and GitHub's own merge does not consult one.
+run the driver on its behalf, and its unconfigured merge remained conflicted.
 
 This script is that call site, and three of its properties are safety-relevant:
 
@@ -348,7 +348,10 @@ def test_the_workflow_calls_the_script_from_the_trusted_checkout() -> None:
     trust boundary has to be pinned where it is actually made. `trusted` is checked out
     without a token and is the only thing executed; `work` holds the credential that can
     push and is only ever data."""
-    steps = yaml.safe_load(WORKFLOW.read_text(encoding="utf-8"))["jobs"]["sync"]["steps"]
+    workflow_text = WORKFLOW.read_text(encoding="utf-8")
+    workflow = yaml.safe_load(workflow_text)
+    steps = workflow["jobs"]["sync"]["steps"]
+    assert "workflow_dispatch:" not in workflow_text
     checkouts = {
         step["with"]["path"]: step["with"]
         for step in steps
@@ -357,8 +360,13 @@ def test_the_workflow_calls_the_script_from_the_trusted_checkout() -> None:
     assert set(checkouts) == {"trusted", "work"}
     assert "token" not in checkouts["trusted"]
     assert "WORKFLOW_PAT" in checkouts["work"]["token"]
+    default_branch = "${{ github.event.repository.default_branch }}"
+    assert checkouts["trusted"]["ref"] == default_branch
+    assert checkouts["work"]["ref"] == default_branch
 
-    run = next(step for step in steps if step.get("id") == "resync")["run"]
+    resync = next(step for step in steps if step.get("id") == "resync")
+    assert resync["env"]["BASE_REF"] == default_branch
+    run = resync["run"]
     assert 'TRUSTED="${GITHUB_WORKSPACE}/trusted"' in run
     assert '"${TRUSTED}/scripts/sync_pr_with_base.sh" "${TRUSTED}" "${WORK}"' in run
     assert "${WORK}/scripts" not in run

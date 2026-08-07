@@ -18,7 +18,7 @@ than reproducing that archaeology.
 | `ci-image.yml` | changes to `.github/ci/**`, manual | `ubuntu-latest` | builds the agent image and verifies every tool inside it runs |
 | `resolve-issue.yml` | issue opened/reopened/unlabeled, `/autoresolve` comment | `[self-hosted, homelab]` | an agent implements the issue and opens a PR |
 | `review-entry.yml` → `review-pipeline.yml` | PR events, `/review` | mixed | authorize → gather → reviewers → judge → finalize |
-| `sync-open-prs.yml` | push to `main`, manual | `ubuntu-latest` | re-merges `main` into open PRs that only the `docs/decisions.md` merge driver can unblock (D-base-moved-resync) |
+| `sync-open-prs.yml` | push to `main` | `ubuntu-latest` | re-merges `main` into open PRs that only the `docs/decisions.md` merge driver can unblock (D-base-moved-resync) |
 
 ## PR validation is secret-free, on purpose
 
@@ -435,16 +435,19 @@ arbitrary variables.
 **The driver also runs when the base moves, outside any cycle (D-base-moved-resync).** All
 three registrations above sit inside a review cycle, so a PR that has already been cleared
 has nothing left to run them: it just goes conflicted when `main` moves and waits for a
-human, because a merge driver is a `.git/config` entry that only a checkout has, and
-GitHub's mergeability, merge button and auto-merge are computed without one.
+human. [Git defines the custom merge-driver command in checkout-local config, not in
+`.gitattributes`](https://git-scm.com/docs/gitattributes#_defining_a_custom_merge_driver),
+so repository contents alone cannot install that command into an unconfigured merge.
 `sync-open-prs.yml` fires on push to `main` and closes that gap, running
 `scripts/sync_pr_with_base.sh` per open same-repo, non-draft PR. It merges twice — once with
-no driver registered, the only shape a server-side merge can compute, and if that conflicts,
-once with the trusted driver — and pushes only when the first conflicts and the second is
+no driver registered, the unconfigured baseline, and if that conflicts, once with the
+trusted driver — and pushes only when the first conflicts and the second is
 clean. A PR that is merely behind is left alone: nothing here is what unblocks it, and
 pushing would churn the SHA dedup, the cycle counter and the artifact names are keyed on.
-The push uses `WORKFLOW_PAT`, because a `GITHUB_TOKEN` push
-fires no events and the merge-gate status would never be republished on the new head; the
+The push uses `WORKFLOW_PAT`, because [GitHub documents that a PR `synchronize` event caused
+by `GITHUB_TOKEN` creates an approval-required run, while a personal access token lets it
+run automatically](https://docs.github.com/en/actions/how-tos/write-workflows/choose-when-workflows-run/trigger-a-workflow#triggering-a-workflow-from-a-workflow);
+without that automatic run the merge-gate status would not be republished on the new head. The
 merge is authored as `AGENT_COMMIT_EMAIL` so it does not read as a human answering the
 blockers and reset the cycle counter. A review run already in flight on the branch is waited
 for rather than raced — it performs the same merge itself, and the fixer discards a whole
