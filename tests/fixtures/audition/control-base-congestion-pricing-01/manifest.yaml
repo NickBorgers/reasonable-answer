@@ -22,5 +22,11 @@
 # `overstated_claim` and as `uncited_claim` and were right on both readings; it is now
 # "three". The "claims no more than the implementations support" clause above covers
 # arithmetic about those implementations too.
+#
+# D-audition-source-integrity correction: the previous artifact called an 8 percent
+# initial reduction a first-quarter result and cited a standalone "First Quarter Report"
+# that the MTA did not publish under that title. The resolvable April committee book
+# reports a 13 percent March reduction and presents January-March as a chart, not one
+# quarter-wide percentage; the artifact now preserves that timeframe and locator.
 kind: control
 question: "Should cities adopt congestion pricing?"

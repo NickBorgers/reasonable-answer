@@ -1,7 +1,6 @@
-# Production shape per D-fixture-report-shape. Derived from a sound base whose five
-# sources were drawn from independent evaluations and both sides of the dispute; the
-# base is not shipped, because rewriting every citation is not the single minimal
-# mutation the paired controls are built on.
+# Production shape per D-fixture-report-shape. The report uses five real publications
+# selected from one advocacy publisher; its source-selection defect is planted in the
+# bibliography and synthesis rather than by inventing any individual citation.
 lens: evidence
 tier: obvious
 question: "Should the state adopt a school voucher program?"
@@ -11,7 +10,8 @@ defects:
     anywhere: true
     note: >
       A contested policy question where every single source — five of five — comes from
-      one advocacy organization or its house publication, and the text never corroborates
+      one advocacy organization, EdChoice (including its former name, the Friedman
+      Foundation for Educational Choice), and the text never corroborates
       independently nor acknowledges the imbalance. The citations are individually
       well-formed and accurately described, so a critic checking only fabrication or
       misrepresentation finds nothing; the defect is the selection. The report does
@@ -20,6 +20,3 @@ defects:
       purely one of sourcing. `anywhere` is set because a sourcing pattern has no honest
       single locus; a critic may reasonably anchor it to the Sources block in S7.P1 or to
       any of the load-bearing claims that rest on the cluster.
-slots:
-  advocacy_org: ["the Center for Education Freedom", "the School Choice Alliance", "the Foundation for Parental Options"]
-  journal_name: ["Education Freedom Review", "School Choice Quarterly", "Parental Options Journal"]
