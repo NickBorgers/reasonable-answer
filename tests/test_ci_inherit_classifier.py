@@ -13,8 +13,9 @@ from: both tests anchored on the SHA the cycle counter was recorded on, which *i
 being classified whenever the fixer's push carried it. `SHA..SHA` is empty and a merge-tree
 of a head against its own already-merged parent reproduces that head's tree, so a fixer push
 never followed by another commit could not be re-reviewed at all (#163, observed on PR #162).
-The anchor is now the `review/reviewed-sha` status — the commit the inherited verdict was
-published for (D-inherit-reviewed-anchor).
+The anchor and verdict now share one `review/verdict-anchor` status — its description names
+the commit the verdict was published for and its state carries the verdict
+(D-inherit-reviewed-anchor, D-atomic-verdict-anchor).
 
 There is no way to exercise that step short of running it, so these tests extract the `run:`
 block from the workflow and drive it under `bash` against throwaway git repositories built
@@ -34,6 +35,7 @@ import yaml
 
 REPO_ROOT = Path(__file__).resolve().parents[1]
 PIPELINE = REPO_ROOT / ".github" / "workflows" / "review-pipeline.yml"
+FINALIZE = REPO_ROOT / ".github" / "workflows" / "review-finalize.yml"
 
 PRIOR_VERDICT = "GO"
 
@@ -155,30 +157,31 @@ class Bench:
         force_review: str = "false",
         verdict: str = PRIOR_VERDICT,
         last_reviewed: str | None = None,
+        display_verdict: str | None = None,
     ) -> dict:
         """Run the extracted step and return its `$GITHUB_OUTPUT` as a dict.
 
-        `last_reviewed` is the `review/reviewed-sha` anchor the step reads off the
-        cycle-recorded SHA — the commit the prior verdict was published *for*
-        (D-inherit-reviewed-anchor). It defaults to `prior_sha` because that is what the
-        two coincide to on every path where the fixer did not push; pass it explicitly to
-        model a fixer push recorded onto the cycle it fixed, or `""` for a cycle recorded
-        before this status existed.
+        `last_reviewed` is the description of the `review/verdict-anchor` status the step
+        reads off the cycle-recorded SHA. `verdict` selects that same object's state. They
+        default to the ordinary no-fix case; pass `last_reviewed` explicitly to model a fixer
+        push recorded onto the cycle it fixed, or `""` for a cycle recorded before this
+        status existed. `display_verdict` models the separate compatibility status and must
+        never affect inheritance (D-atomic-verdict-anchor).
         """
         output = self.work.parent / "github_output"
         output.write_text("", encoding="utf-8")
         stub_bin = self.work.parent / "bin"
         stub_bin.mkdir(exist_ok=True)
         gh = stub_bin / "gh"
-        # Two API calls, both "what does this context say on the cycle-recorded SHA".
-        # Dispatched on the context named in the --jq filter, so a step that queried the
-        # wrong one would read an empty answer rather than silently getting the other's.
+        anchor_state = {"GO": "success", "NO-GO": "failure"}.get(verdict, verdict)
         gh.write_text(
             "#!/usr/bin/env bash\n"
-            'if printf "%s\\n" "$@" | grep -q "review/reviewed-sha"; then\n'
-            '  if [ -n "${GH_STUB_REVIEWED_SHA:-}" ]; then printf "%s\\n" "$GH_STUB_REVIEWED_SHA"; fi\n'
+            'if printf "%s\\n" "$@" | grep -q "review/verdict-anchor"; then\n'
+            '  if [ -n "${GH_STUB_REVIEWED_SHA:-}" ]; then\n'
+            '    printf "%s|%s\\n" "$GH_STUB_ANCHOR_STATE" "$GH_STUB_REVIEWED_SHA"\n'
+            "  fi\n"
             'elif printf "%s\\n" "$@" | grep -q "review/verdict"; then\n'
-            '  if [ -n "${GH_STUB_VERDICT:-}" ]; then printf "%s\\n" "$GH_STUB_VERDICT"; fi\n'
+            '  if [ -n "${GH_STUB_DISPLAY_VERDICT:-}" ]; then printf "%s\\n" "$GH_STUB_DISPLAY_VERDICT"; fi\n'
             "else\n"
             '  echo "gh stub: unexpected query: $*" >&2; exit 1\n'
             "fi\n",
@@ -190,7 +193,10 @@ class Bench:
             **os.environ,
             "PATH": f"{stub_bin}{os.pathsep}{os.environ['PATH']}",
             "GH_TOKEN": "stub",
-            "GH_STUB_VERDICT": verdict,
+            "GH_STUB_ANCHOR_STATE": anchor_state,
+            "GH_STUB_DISPLAY_VERDICT": (
+                display_verdict if display_verdict is not None else verdict
+            ),
             "GH_STUB_REVIEWED_SHA": prior_sha if last_reviewed is None else last_reviewed,
             "REPO": "owner/repo",
             "SHA": sha,
@@ -414,7 +420,7 @@ def test_no_prior_verdict_reviews_normally(bench: Bench, script: str) -> None:
 
     empty = bench.run(script, head, reviewed, verdict="")
     assert empty["inherit"] == "false"
-    assert "no prior verdict to inherit" in empty["_log"]
+    assert "no inheritable verdict in review/verdict-anchor" in empty["_log"]
 
 
 def test_a_plain_content_push_is_reviewed(bench: Bench, script: str) -> None:
@@ -507,7 +513,42 @@ def test_an_unchanged_head_with_no_verdict_reviews_normally(bench: Bench, script
 
     result = bench.run(script, head, head, last_reviewed=head, verdict="")
     assert result["inherit"] == "false"
-    assert "no prior verdict to inherit" in result["_log"]
+    assert "no inheritable verdict in review/verdict-anchor" in result["_log"]
+
+
+def test_interleaved_display_verdict_cannot_replace_atomic_anchor_verdict(
+    bench: Bench, script: str
+) -> None:
+    """A compatibility GO cannot pair with another run's NO-GO anchor.
+
+    This models two finalize runs on one SHA whose separate display-status writes interleave.
+    The newest atomic object says NO-GO for this head while `review/verdict` says GO. Gather
+    must inherit the verdict carried by the same object as the anchor, never the display status.
+    """
+    head = bench.commit_on_pr("feature.txt")
+
+    result = bench.run(
+        script,
+        head,
+        head,
+        verdict="NO-GO",
+        last_reviewed=head,
+        display_verdict="GO",
+    )
+    assert result["inherit"] == "true"
+    assert result["inherited_verdict"] == "NO-GO"
+
+
+def test_finalize_writes_the_verdict_and_anchor_in_one_status() -> None:
+    """The publisher must create the atomic object the classifier trusts."""
+    spec = yaml.safe_load(FINALIZE.read_text(encoding="utf-8"))
+    steps = spec["jobs"]["finalize"]["steps"]
+    anchor = next(step for step in steps if step.get("name") == "Stamp review/verdict-anchor on post-fix SHA")
+    inputs = anchor["with"]
+
+    assert inputs["context"] == "review/verdict-anchor"
+    assert inputs["state"] == "${{ inputs.verdict == 'GO' && 'success' || 'failure' }}"
+    assert inputs["description"] == "${{ inputs.reviewed_sha }}"
 
 
 def test_a_missing_anchor_reviews_normally(bench: Bench, script: str) -> None:
@@ -525,7 +566,7 @@ def test_a_missing_anchor_reviews_normally(bench: Bench, script: str) -> None:
 
     missing = bench.run(script, head, reviewed, last_reviewed="")
     assert missing["inherit"] == "false"
-    assert "carries no review/reviewed-sha anchor" in missing["_log"]
+    assert "carries no valid review/verdict-anchor" in missing["_log"]
 
 
 def test_a_malformed_anchor_reviews_normally(bench: Bench, script: str) -> None:
@@ -536,7 +577,7 @@ def test_a_malformed_anchor_reviews_normally(bench: Bench, script: str) -> None:
 
     result = bench.run(script, head, reviewed, last_reviewed=reviewed[:7])
     assert result["inherit"] == "false"
-    assert "carries no review/reviewed-sha anchor" in result["_log"]
+    assert "carries no valid review/verdict-anchor" in result["_log"]
 
 
 def test_reviewed_sha_no_longer_in_history_is_reviewed(bench: Bench, script: str) -> None:

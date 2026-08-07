@@ -4984,11 +4984,11 @@ unobserved one re-stamps a **GO** over anything recorded onto a prior cycle — 
 bypass, resurfaced through the cycle-recording seam rather than through the head's shape.
 
 **Decision.** Anchor both tests on the commit the inherited verdict was published *for*.
-`review-finalize.yml` writes a third per-SHA status alongside the two it already writes:
-`review/reviewed-sha`, on `post_fix_sha`, whose description is `reviewed_sha`. The inherit step
-reads it off `PRIOR_CYCLE_SHA` — the same commit it reads the verdict from, and the two are written
-together, so the verdict found there is the verdict published for the anchor found there — and runs
-the range walk and the merge-tree recreation from that anchor.
+`review-finalize.yml` writes a third per-SHA status alongside the two it already writes. The original
+form was `review/reviewed-sha`, on `post_fix_sha`, whose description was `reviewed_sha`; the inherit
+step read it off `PRIOR_CYCLE_SHA` and ran the range walk and merge-tree recreation from that anchor.
+D-atomic-verdict-anchor supersedes the separate-status pairing: the same anchor now lives in the
+description of `review/verdict-anchor`, with its verdict in that status object's state.
 
 Everything else is unchanged: `/review` still outranks the whole path, an empty prior still reviews,
 a recreation that conflicts still reviews, a recorded cycle with no verdict still reviews, and the
@@ -5004,7 +5004,7 @@ status carried that, so the fix is a new one rather than a different read of an 
 **Two guards the new anchor needs.**
 
 - *An unverifiable anchor is not an anchor.* A cycle recorded by a `main` older than this decision
-  carries no `review/reviewed-sha`, and the two things it could mean — "the panel read this commit"
+  carries no `review/verdict-anchor`, and the two things it could mean — "the panel read this commit"
   and "the fixer pushed this commit" — are the inherit decision and its exact inverse. So an absent
   or malformed anchor (anything but a 40-hex object id) reviews normally. The cost is one full read
   for PRs mid-flight across this change, after which their next finalize writes the status and they
@@ -5037,6 +5037,34 @@ strengthening direction — the set of pushes that can inherit shrinks to those 
 commit a panel actually read, plus the head-equals-anchor case that reads nothing new by
 construction. QP7 and QP8's citations of that gate stand as written; QP8's "deterministic
 whole-range/tree-identity gate" is now deterministic in its origin as well as its tests.
+
+## D-atomic-verdict-anchor — inherit one verdict/anchor object, never a paired latest value
+
+**Finding.** D-inherit-reviewed-anchor originally published the inherited verdict and its reviewed
+SHA in two commit statuses, `review/verdict` and `review/reviewed-sha`, then selected the newest of
+each context independently. That is not a transaction. The post-push claim race deliberately permits
+a second pipeline to reach the same fixer SHA, and `/review` and `synchronize` runs do not share one
+concurrency group. If two such runs finalize with different verdicts or reviewed SHAs, their API
+writes can interleave so the newest status in each context forms a pair no run published. The inherit
+classifier would then be deterministic over false provenance: one run's verdict attached to another
+run's anchor.
+
+**Decision.** The trust input is one `review/verdict-anchor` commit status on `post_fix_sha`. Its
+description is `reviewed_sha`; its state encodes the verdict (`success` = GO, `failure` = NO-GO).
+The inherit classifier selects the newest object in that context once and derives both facts from
+that object. Missing, malformed, pending, or error states review normally. `review/verdict` remains
+for human-readable compatibility, but it is not consulted by inheritance. This supersedes only
+D-inherit-reviewed-anchor's separate-status pairing; its reviewed-SHA origin, ancestry guard,
+unchanged-head case, whole-range walk, and tree-identity recreation are unchanged.
+
+**Tests.** `tests/test_ci_inherit_classifier.py` verifies that finalize writes both facts into the
+combined status and models interleaved finalizers by exposing a display GO beside an atomic NO-GO
+for the same head. Gather inherits NO-GO from the combined object and never queries the display
+status as a second trust input.
+
+**Invariants.** None of the six pipeline-core model invariants changes. This strengthens the CI
+merge gate described by QP7 and QP8: the classifier still uses only bounded status fields and git
+plumbing, but the provenance tuple it consumes is now atomic rather than assembled across races.
 
 ## Open items for a future round
 

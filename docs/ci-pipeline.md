@@ -65,7 +65,7 @@ review-entry            authorize · fork-reject · resolve SHA · prior-GO chec
        │                off and the branch is behind the base (D-unguarded-sync)
        ├─ judge         deterministic, from main, contents: read
        └─ finalize      labels · summary comment · merge gate · review/cycle +
-                        review/verdict + review/reviewed-sha on the post-fix SHA
+                        review/verdict + review/verdict-anchor on the post-fix SHA
 ```
 
 Roles run on different model families deliberately. This project's own design argues that
@@ -296,9 +296,12 @@ it holds `contents: read`, so it could not push if it tried.
   already-merged second parent, which reproduces that head's tree by construction — so
   every fixer push that was not followed by another commit inherited its own pre-fix
   verdict, and the review → fix → re-review loop could not close. `review-finalize.yml`
-  therefore writes a third status, `review/reviewed-sha`, whose description is the commit
-  the published verdict is *about*; both tests measure from there. A cycle carrying no such
-  anchor — one recorded before this existed — is reviewed rather than guessed at, and an
+  therefore writes a third status, `review/verdict-anchor`, whose state carries the verdict
+  (`success` = GO, `failure` = NO-GO) and whose description is the commit the verdict is
+  *about*; both tests measure from there and inherit the verdict from that same object
+  (D-atomic-verdict-anchor). `review/verdict` remains a display/compatibility status, never a
+  separately paired trust input. A cycle carrying no such anchor — one recorded before this
+  existed — is reviewed rather than guessed at, and an
   anchor that *is* the head inherits directly, since nothing has been pushed since the
   commit the panel read. That last case is reachable because `review-entry.yml` also fires
   on `reopened` and `ready_for_review`, and `cleanup-claim` releases the dedup claim on
@@ -514,7 +517,7 @@ deadlock moved one commit forward. So `sync_only` suppresses the claim, and the 
 gets the panel the pass itself could not run.
 
 **And it is not passed to finalize as `post_fix_sha`.** That input is where `review/cycle`,
-`review/verdict`, `review/reviewed-sha`, and the merge gate land, and stamping them on the pushed SHA is only safe
+`review/verdict`, `review/verdict-anchor`, and the merge gate land, and stamping them on the pushed SHA is only safe
 because the fixer's claim means no other run will ever write them there. Suppressing the claim
 removes that guarantee, so a sync-only successor would reach its own panel pre-stamped with a
 cycle it never spent — and at cycle 2 would arrive already capped, before the panel it was
@@ -734,11 +737,13 @@ same run, taking `post_fix_sha` as an explicit input rather than defaulting to t
 `reviewed_sha`. Writing the merge gate on the wrong SHA would leave the PR's actual head
 permanently ungated, which is exactly the failure this stamping exists to prevent.
 
-The same run also writes `review/reviewed-sha` there, naming `reviewed_sha` — the commit
-those statuses are *about*, which on this path is the fixer push's parent rather than the
-fixer push. Without it a later run cannot tell "a panel read this commit" from "a fixer
-pushed this commit", and the inherit short-circuit above measures its range and its tree
-recreation from the wrong end (D-inherit-reviewed-anchor).
+The same run also writes `review/verdict-anchor` there: its state carries the verdict and its
+description names `reviewed_sha` — the commit that verdict is *about*, which on this path is
+the fixer push's parent rather than the fixer push. Keeping both facts in one status is
+load-bearing because concurrent finalizers can otherwise interleave separate writes into a
+verdict/anchor pair no run produced. `review/verdict` remains for display and compatibility;
+inheritance trusts only the combined object (D-inherit-reviewed-anchor,
+D-atomic-verdict-anchor).
 `cleanup-claim` (bottom of `review-pipeline.yml`) advances `review/pipeline` to a terminal
 state on both the reviewed SHA and the post-fix SHA for the same reason: a claim this run
 makes and never revisits would otherwise leak `pending` forever and block every future

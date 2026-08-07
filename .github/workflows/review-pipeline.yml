@@ -161,9 +161,9 @@ jobs:
       # (D-inherit-reviewed-anchor). `review/cycle` lands on the fixer's own push, so
       # anchoring there compares the head with itself: an empty range, and a merge-tree of
       # a head against its own already-merged parent that trivially reproduces the head's
-      # tree — so everything inherits, always. `review/reviewed-sha`, written next to
-      # `review/verdict` by review-finalize.yml and naming the commit that verdict is
-      # *about*, is the anchor read here instead.
+      # tree — so everything inherits, always. `review/verdict-anchor`, written by
+      # review-finalize.yml with the verdict in its state and the commit that verdict is
+      # about in its description, is the single atomic trust input read here instead.
       - name: Detect merge-from-main
         id: inherit
         working-directory: pr-head
@@ -210,21 +210,14 @@ jobs:
             exit 0
           }
 
-          # The one way out with `inherit=true`. Reads the verdict from the same commit the
-          # anchor was read from — review-finalize.yml writes `review/verdict` and
-          # `review/reviewed-sha` together, so the verdict found there is the verdict that
-          # was published *for* the anchor. A recorded cycle whose verdict never landed
-          # (the judge failed, say) has nothing to re-stamp and falls back to the panel.
+          # The one way out with `inherit=true`. INHERITED_VERDICT and LAST_REVIEWED_SHA
+          # came from the same review/verdict-anchor object, so no interleaving finalize runs
+          # can pair one run's verdict with another run's anchor (D-atomic-verdict-anchor).
           inherit_prior() {
-            inherited=$(gh api "repos/${REPO}/commits/${PRIOR_CYCLE_SHA}/statuses" \
-              --jq '[.[] | select(.context == "review/verdict")] | sort_by(.created_at) | last | .description // empty')
-            if [ -z "$inherited" ]; then
-              review_normally "$1, but there is no prior verdict to inherit"
-            fi
-            echo "gather: $1; inheriting prior verdict '${inherited}'"
+            echo "gather: $1; inheriting prior verdict '${INHERITED_VERDICT}'"
             {
               echo "inherit=true"
-              echo "inherited_verdict=$inherited"
+              echo "inherited_verdict=$INHERITED_VERDICT"
             } >> "$GITHUB_OUTPUT"
             exit 0
           }
@@ -250,16 +243,22 @@ jobs:
           # fixer's push while the panel read its parent (D-inherit-reviewed-anchor).
           #
           # Fail-closed when it is absent or malformed. A cycle recorded by a `main` older
-          # than this decision carries no anchor, and the two candidates it could mean —
+          # than this decision carries no combined status, and the two candidates it could mean —
           # "the panel read this commit" and "the fixer pushed this commit" — are the
           # inherit decision and its inverse. An anchor that cannot be verified is not an
           # anchor, so those PRs get one full read rather than a guess; the next finalize
           # writes the status and they inherit normally again.
-          LAST_REVIEWED_SHA=$(gh api "repos/${REPO}/commits/${PRIOR_CYCLE_SHA}/statuses" \
-            --jq '[.[] | select(.context == "review/reviewed-sha")] | sort_by(.created_at) | last | .description // empty')
+          verdict_anchor=$(gh api "repos/${REPO}/commits/${PRIOR_CYCLE_SHA}/statuses" \
+            --jq '[.[] | select(.context == "review/verdict-anchor")] | sort_by(.created_at) | last | "\(.state // "")|\(.description // "")"')
+          IFS='|' read -r verdict_state LAST_REVIEWED_SHA <<< "$verdict_anchor"
           if [[ ! "$LAST_REVIEWED_SHA" =~ ^[0-9a-f]{40}$ ]]; then
-            review_normally "${PRIOR_CYCLE_SHA} carries no review/reviewed-sha anchor, so what it recorded a cycle for cannot be established"
+            review_normally "${PRIOR_CYCLE_SHA} carries no valid review/verdict-anchor, so what it recorded a cycle for cannot be established"
           fi
+          case "$verdict_state" in
+            success) INHERITED_VERDICT=GO ;;
+            failure) INHERITED_VERDICT=NO-GO ;;
+            *) review_normally "${PRIOR_CYCLE_SHA} carries no inheritable verdict in review/verdict-anchor" ;;
+          esac
 
           # "Everything since the reviewed SHA" only means something while that SHA is still
           # in this commit's history. A force-push replaces the chain and gets a fresh read.

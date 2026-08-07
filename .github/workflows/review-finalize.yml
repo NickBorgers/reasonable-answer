@@ -95,26 +95,29 @@ jobs:
           description: ${{ inputs.verdict }}
           github_token: ${{ secrets.WORKFLOW_PAT }}
 
-      # Which commit that verdict is *about*. Equal to post_fix_sha on every path where no
-      # fix landed, and to its first parent's side of the fixer's merge when one did — and
-      # that difference is the whole reason this status exists (D-inherit-reviewed-anchor).
-      # `review/cycle` says only "a cycle was recorded here"; a later run's inherit check
-      # needs "a panel read *this* commit and this is what it concluded", because anchoring
-      # its range walk and merge-tree recreation on the fixer's own push compares that push
-      # with itself and inherits the pre-fix verdict over content nobody read.
+      # The verdict and the commit it is *about*, in one status object. The description is
+      # reviewed_sha; success means GO and failure means NO-GO. Equal to post_fix_sha on every
+      # path where no fix landed, and to its first parent's side of the fixer's merge when one
+      # did — and that difference is the whole reason this status exists
+      # (D-inherit-reviewed-anchor, D-atomic-verdict-anchor).
+      #
+      # These two facts must be atomic. Two runs can finalize on the same fixer SHA, and
+      # separate review/verdict + review/reviewed-sha writes can interleave into a pair no run
+      # produced. A later inherit decision trusts only this combined status; review/verdict
+      # above remains the human-readable compatibility status.
       #
       # Written on all three finalize paths, including the two with no panel behind them,
       # because the claim it makes is about the *verdict*, not about a panel: on the
       # inherited path the inherit decision established that this head contains nothing the
       # anchor it inherited from did not, so it is a sound anchor in turn; on the cycle-cap
       # path the verdict is always NO-GO, which is the fail-closed direction.
-      - name: Stamp review/reviewed-sha on post-fix SHA
+      - name: Stamp review/verdict-anchor on post-fix SHA
         uses: ./.github/actions/review-state
         with:
           op: write-status
           sha: ${{ inputs.post_fix_sha }}
-          context: review/reviewed-sha
-          state: success
+          context: review/verdict-anchor
+          state: ${{ inputs.verdict == 'GO' && 'success' || 'failure' }}
           description: ${{ inputs.reviewed_sha }}
           github_token: ${{ secrets.WORKFLOW_PAT }}
 
