@@ -6,7 +6,7 @@ Cities with severe, persistent central-area congestion and a transit network abl
 
 - London's 2003 charge reduced traffic in the zone by roughly 15 percent in its first year and cut delays by about 30 percent [1].
 - Stockholm's 2006 trial reduced zone traffic by around 20 percent, and a referendum held after the trial converted it into a permanent scheme [2].
-- New York's 2025 scheme reduced vehicle entries to the Manhattan central business district by about 8 percent in its first quarter, with transit ridership rising over the same period [3].
+- New York's 2025 scheme reduced average daily vehicle entries to the Manhattan central business district by 13 percent in March relative to the historical March average [3].
 - The incidence of a cordon charge is not uniformly regressive: it depends on car ownership by income, on the alternatives available, and above all on how the revenue is spent [4][5].
 - In the Stockholm case, the charge's direct burden was mildly regressive before revenue use was accounted for, and the sign of the net effect turned on what the revenue funded [4].
 
@@ -20,7 +20,7 @@ What the objection gets right is that the direct burden is real and that "the re
 
 London's 2003 charge reduced traffic in the zone by roughly 15 percent in its first year and cut delays by about 30 percent, effects that persisted through the monitoring period [1]. Stockholm's 2006 trial reduced zone traffic by around 20 percent; the referendum that followed converted the trial into a permanent scheme, and support was substantially higher after residents had experienced it than before [2].
 
-New York's 2025 scheme reduced vehicle entries to the Manhattan central business district by about 8 percent in its first quarter, with transit ridership rising over the same period [3]. The scheme is too new for anything beyond first-quarter effects to be read from it.
+The MTA's first-quarter monitoring covers the January 5 start through March 31 rather than reporting one quarter-wide percentage. By March, average daily vehicle entries to the Manhattan central business district were 13 percent below the historical March average [3]. The scheme is too new in that report for longer-run effects to be read from it.
 
 ## Design and revenue
 
@@ -32,6 +32,6 @@ Revenue use is the lever that decides the distributional question rather than a 
 
 1. Transport for London (2007). *Central London Congestion Charging: Impacts Monitoring, Fifth Annual Report*.
 2. Eliasson, J. (2014). *The Stockholm congestion charges: an overview*. Centre for Transport Studies Working Paper 2014:7.
-3. Metropolitan Transportation Authority (2025). *Central Business District Tolling Program: First Quarter Report*.
+3. Metropolitan Transportation Authority (2025). Central Business District Tolling Program, in *MTA Bridges and Tunnels Committee Meeting, April 28, 2025*, p. 47. https://www.mta.info/document/170871
 4. Eliasson, J., & Mattsson, L.-G. (2006). Equity effects of congestion pricing: Quantitative methodology and a case study for Stockholm. *Transportation Research Part A*, 40(7), 602-620.
 5. Santos, G., & Rojey, L. (2004). Distributional impacts of road pricing: The truth behind the myth. *Transportation*, 31(1), 21-42.

@@ -6,7 +6,7 @@ Cities with severe, persistent central-area congestion and a transit network abl
 
 - London's 2003 charge reduced traffic in the zone by roughly 15 percent in its first year and cut delays by about 30 percent [1].
 - Stockholm's 2006 trial reduced zone traffic by around 20 percent, and a referendum held after the trial converted it into a permanent scheme [2].
-- New York's 2025 scheme reduced vehicle entries to the Manhattan central business district by about 8 percent in its first quarter, with transit ridership rising over the same period [3].
+- New York's 2025 scheme reduced average daily vehicle entries to the Manhattan central business district by 13 percent in March relative to the historical March average [3].
 - Support for the Stockholm scheme was substantially higher after residents had experienced the trial than before it, and both the traffic effect and that support held five years on [2][5].
 - The standard theory of congestion pricing treats the charge as a correction to a price that is otherwise set below marginal social cost, which is why scheme design rather than the decision to price carries most of the practical difficulty [4].
 - Both the London and Stockholm schemes direct net revenue to transit capital programmes, and the durability of each appears to track visible reinvestment [1][2].
@@ -21,7 +21,7 @@ What the objection gets right is that the boundary effect is real and measurable
 
 London's 2003 charge reduced traffic in the zone by roughly 15 percent in its first year and cut delays by about 30 percent, effects that persisted through the monitoring period [1]. Stockholm's 2006 trial reduced zone traffic by around 20 percent; the referendum that followed converted the trial into a permanent scheme, and support was substantially higher after residents had experienced it than before [2].
 
-New York's 2025 scheme reduced vehicle entries to the Manhattan central business district by about 8 percent in its first quarter, with transit ridership rising over the same period [3]. The scheme is too new for anything beyond first-quarter effects to be read from it.
+The MTA's first-quarter monitoring covers the January 5 start through March 31 rather than reporting one quarter-wide percentage. By March, average daily vehicle entries to the Manhattan central business district were 13 percent below the historical March average [3]. The scheme is too new in that report for longer-run effects to be read from it.
 
 The Stockholm case is the only one with a long enough record to say whether first-year effects hold. Reviewed five years after introduction, the traffic reduction persisted and public acceptability was higher than at any point before the trial [5]. That is the closest thing in this evidence to a durability result, and it is a single city.
 
@@ -37,6 +37,6 @@ Revenue is substantial and, in every scheme reviewed, hypothecated. Both the Lon
 
 1. Transport for London (2007). *Central London Congestion Charging: Impacts Monitoring, Fifth Annual Report*.
 2. Eliasson, J. (2014). *The Stockholm congestion charges: an overview*. Centre for Transport Studies Working Paper 2014:7.
-3. Metropolitan Transportation Authority (2025). *Central Business District Tolling Program: First Quarter Report*.
+3. Metropolitan Transportation Authority (2025). Central Business District Tolling Program, in *MTA Bridges and Tunnels Committee Meeting, April 28, 2025*, p. 47. https://www.mta.info/document/170871
 4. Small, K. A., Verhoef, E. T., & Lindsey, R. (2007). *The Economics of Urban Transportation*. Routledge.
 5. Börjesson, M., Eliasson, J., Hugosson, M. B., & Brundell-Freij, K. (2012). The Stockholm congestion charges — 5 years on. Effects, acceptability and lessons learnt. *Transport Policy*, 20, 1-12.

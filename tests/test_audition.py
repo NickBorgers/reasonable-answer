@@ -517,6 +517,22 @@ def test_corpus_class_is_not_readable_off_source_count():
         )
 
 
+def test_one_sided_sourcing_uses_real_fixed_publications_from_one_cluster():
+    """D-audition-source-integrity.
+
+    The defect is selection from one advocacy publisher, not fabricated publications.
+    Randomized fictional organization and journal names previously made fabrication a
+    second, easier defect that same-lens grading could credit instead.
+    """
+    fixture_dir = CORPUS / "one-sided-sourcing-01"
+    manifest = yaml.safe_load((fixture_dir / "manifest.yaml").read_text())
+    artifact = (fixture_dir / "artifact.md").read_text()
+
+    assert "slots" not in manifest
+    assert "{{" not in artifact
+    assert artifact.count("https://www.edchoice.org/") == 5
+
+
 def test_incomplete_answer_fixture_changes_the_question_not_the_report():
     """D-answer-obligations: isolate answer coverage from every artifact-level cue."""
     fixtures = {f.id: f for f in audition.load_fixtures(CORPUS).fixtures}
