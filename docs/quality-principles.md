@@ -63,6 +63,14 @@ observed by a later check, and remains inside the guard job's 15-minute outer ti
 outer timeout, and terminal poll ordering are one QP7-governed bounded loop: changing any of them
 requires re-checking the others rather than treating the constants independently.
 
+**Application — base-moved resync (D-base-moved-resync).** `sync-open-prs.yml` adds a call site for
+the `docs/decisions.md` merge driver outside any review cycle, and two QP7-governed bounds hold it:
+its wait for an in-flight review run is capped by a single deadline shared across the whole loop, not
+one per PR, and the merge it pushes is authored as `AGENT_COMMIT_EMAIL` so `MAX_CYCLES` is not
+silently reset by a machine merge that answered no blockers. The gate it feeds is unchanged — the
+merge is deterministic git content on both sides of D-inherit-whole-range's tree-identity test, so
+QP8's "never an LLM grading prose" holds at the new entry point too.
+
 **Application — answer obligations (D-answer-obligations).** `incomplete_answer` is structured
 completeness output with a mechanical `major` floor under QP1. Its writer and critic prompt
 obligations change what each isolated role must assess, not what crosses contexts, so QP5's traffic
