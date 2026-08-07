@@ -49,10 +49,17 @@ esac
       # merge reproduces this tree exactly — so there is no content here to read
       # (D-inherit-whole-range). The old wording claimed this of a push it had only
       # inspected the head of.
-      echo "> Everything pushed since the last reviewed commit is a merge of the base"
-      echo "> branch, and re-creating that merge reproduces this commit's tree exactly, so"
-      echo "> there is no new content to read. It inherits the previous verdict rather than"
-      echo "> consuming a review cycle. Comment \`/review\` to read it anyway."
+      #
+      # "the commit this PR's last verdict was published for", not "the last reviewed
+      # commit" as the cycle counter records it: those differ whenever the fixer pushed,
+      # and measuring from the second compared that push with itself
+      # (D-inherit-reviewed-anchor). Worded to stay true of the case where that commit
+      # *is* this one and the range is empty.
+      echo "> Every commit pushed since the one this PR's last verdict was published for"
+      echo "> is a merge of the base branch, and re-creating those merges reproduces this"
+      echo "> commit's tree exactly, so there is no new content to read. It inherits the"
+      echo "> previous verdict rather than consuming a review cycle. Comment \`/review\` to"
+      echo "> read it anyway."
       echo
       ;;
   esac
