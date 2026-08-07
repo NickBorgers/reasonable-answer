@@ -360,6 +360,11 @@ carried no headings is accepted with a warning; the warning rides the run's exis
   automatic content-only sweep every `retention_sweep_interval_seconds` (RC-007), reclaiming the
   bulk of disk past `retention_days` without waiting for a manual `purge`; live runs are skipped and
   full-directory removal stays the explicit human escape hatch, keeping the decision record longer.
+  **Container stdout is outside that tree** and has none of its protections, so what a failure may
+  say there is bounded separately: a validation rejection logs closed-enum labels, structural
+  references, counts and hashes only — never the rejected span, the source excerpt, or the
+  validator's message (D-repair-diagnostics). The span travels as an 8-hex hash of its *normalized*
+  text, which distinguishes one attempt's rejection from the next without quoting either.
 
 ## Round sequence (one tick)
 

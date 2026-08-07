@@ -31,6 +31,7 @@ def structured_with_repair(
     produce: Callable[[str], Any],
     validate: Callable[[Any], None] | None,
     repair_retries: int | None,
+    record: Callable[[Exception], None] | None = None,
 ) -> Any:
     """Mirror `LLMClient.structured`'s repair loop for a test double.
 
@@ -38,6 +39,11 @@ def structured_with_repair(
     budget before failing closed. A double that ignored it would let `critique_once`'s
     fail-closed validation pass unrun, and every test asserting a bad critique fails its
     lens would pass for the wrong reason. Shared so the doubles cannot drift apart.
+
+    `record` is handed every rejection as it happens. The real client turns these into a
+    log line and then discards them, so without it a test can only see the final
+    `MalformedOutputError` — which deliberately carries no diagnostics (RA-016) and so
+    cannot show which issue of how many failed.
     """
     attempts = (repair_retries if repair_retries is not None else 0) + 1
     attempt_user = user
@@ -51,6 +57,8 @@ def structured_with_repair(
             return result
         except (ValidationError, ValueError) as exc:
             last_err = str(exc)[:800]
+            if record is not None:
+                record(exc)
             if attempt == attempts - 1:
                 break
             # The re-ask carries the rejection and whatever guidance the error offers,
@@ -97,6 +105,9 @@ class FakeClient:
     tool_capable: dict[str, bool] = field(default_factory=dict)
     #: every tool-result string the fake handed back to a "model"
     tool_results: list[str] = field(default_factory=list)
+    #: every validation rejection the repair loop saw, in order — what the real client
+    #: logs and drops. Lets a test assert on the diagnostics a production log would show.
+    validation_errors: list[Exception] = field(default_factory=list)
     #: callable(alias, user) -> WriterDisputes; None means "no disputes raised"
     dispute_fn: Any | None = None
     #: callable(alias, user) -> SupportManifest; None means "an empty manifest"
@@ -221,7 +232,9 @@ class FakeClient:
                 return self.arbiter_fn(alias, user)
             raise AssertionError(f"unexpected schema {schema}")
 
-        return structured_with_repair(alias, user, produce, validate, repair_retries)
+        return structured_with_repair(
+            alias, user, produce, validate, repair_retries, self.validation_errors.append
+        )
 
 
 def http_stub(body: bytes | str, *, ctype: str = "text/html", status: int = 200):

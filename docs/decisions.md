@@ -4817,6 +4817,53 @@ Absent field, absent artifact, or unreadable JSON all render everything as outst
 untouched, and the aggregation tests that pin the GO/NO-GO boundary are unchanged. The one contract
 change is additive: a new field on the verdict artifact, which nothing outside the renderer reads.
 
+## D-repair-diagnostics — a rejected critique says which class it failed, without quoting itself
+
+**The problem.** Six lens failures in production over 2026-08-01 → 08-04 (19 runs) shared one
+signature: `triage._require_quote` rejected a span and the `critic_repair_retries` budget ran out.
+They spanned three critics (glm-5.2, minimax-m3, gemma4) and all three lenses, with every alias
+pinned to `json_schema` on every boot — so not one weak model, and not an extraction-mode problem.
+149 first-attempt violations were logged in the same window, of which ~96% were repaired.
+
+Why that could not be diagnosed further: the repair loop logs only `exc.__class__.__name__`
+(RA-016 — see the audit/privacy bullet in [architecture.md](./architecture.md)), and
+`critique_once` records only the **final** failure. So the logs cannot distinguish the two
+hypotheses that matter, which have different fixes:
+
+* the critic **re-emits the same rejected span** each attempt — the repair carried no usable
+  correction, and the fix is to the repair turn;
+* the critic emits a **different span** each attempt — it is searching and cannot find a valid
+  anchor at all, and the fix is to the prompt or the category contract (D-absence-anchor's
+  territory).
+
+Nothing in a run's stored evidence separates them either: `LensResult.failure_reason` is the same
+content-free sentence.
+
+**The decision.** A rejection carries bounded diagnostics, and the repair loop logs them.
+`triage.ViolationCode` names the class (`category_out_of_scope`, `locus_absent`, `span_empty`,
+`span_not_verbatim`); `LensValidationError` additionally carries the field, the locus, which issue
+of how many failed (attached by `critique.critique_once`, which is the only caller that knows the
+index), and `fingerprint()` — the first 8 hex of a SHA-256 over the **normalized** rejected span.
+`llm._diagnostics_suffix` renders whatever a validator offers, duck-typed exactly as `repair_hint`
+already is, because `triage` is LLM-free and must not import the client to say so.
+
+The fingerprint is what makes the loop legible: identical across attempts means a re-roll,
+different means a search. It folds what `_normalize` folds, so a critic that merely retypes its
+span still reads as a re-roll rather than looking like progress.
+
+**What this deliberately does not do.** The rejected span itself never enters `str(exc)`. That is
+not incidental: the message becomes `LensResult.failure_reason`, which is persisted into the
+critique event and logged at WARNING, both outside the 0700 `runs/<id>/` tree. The span continues
+to travel in `repair_hint()`, which stays inside the run. A test pins the message, the diagnostics
+and the hint against the span text, so the property cannot regress into a leak.
+
+This changes what a failure *reports*, never what the pipeline *decides*: validation, the repair
+budget, fail-closed lens failure and every controller rule are untouched.
+
+**Invariants.** None of the six is in reach. Fail-closed lenses is the nearest — a rejection still
+fails the whole review once the budget is gone, and no subset of issues is salvaged. Untrusted text
+still reaches no generator as instruction; the diagnostics travel to a log, not to a prompt.
+
 ## Open items for a future round
 
 - A third completeness critic, chosen by measurement (D-completeness-pool-noise). The pool is down
