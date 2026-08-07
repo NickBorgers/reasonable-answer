@@ -63,6 +63,14 @@ observed by a later check, and remains inside the guard job's 15-minute outer ti
 outer timeout, and terminal poll ordering are one QP7-governed bounded loop: changing any of them
 requires re-checking the others rather than treating the constants independently.
 
+**Application — base-moved resync (D-base-moved-resync).** `sync-open-prs.yml` adds a call site for
+the `docs/decisions.md` merge driver outside any review cycle, and two QP7-governed bounds hold it:
+its wait for an in-flight review run is capped by a single deadline shared across the whole loop, not
+one per PR, and the merge it pushes is authored as `AGENT_COMMIT_EMAIL` so `MAX_CYCLES` is not
+silently reset by a machine merge that answered no blockers. The gate it feeds is unchanged — the
+merge is deterministic git content on both sides of D-inherit-whole-range's tree-identity test, so
+QP8's "never an LLM grading prose" holds at the new entry point too.
+
 **Application — answer obligations (D-answer-obligations).** `incomplete_answer` is structured
 completeness output with a mechanical `major` floor under QP1. Its writer and critic prompt
 obligations change what each isolated role must assess, not what crosses contexts, so QP5's traffic
@@ -76,6 +84,13 @@ still cross-family under QP2 and can supply the two clean families required for 
 but it is the minimum compliant pool and has no spare critic after a failed depth-2 review. The
 fit-first order applies QP8's deterministic audition verdict to roster position; it does not treat
 an LLM's prose assessment as a control decision.
+
+**Application — critic retirement and ordering (D-minimax-retirement).** Removing a critic graded
+unfit on both of its lenses leaves logic with Mistral and Zhipu witnesses and evidence with Zhipu and
+Google witnesses, preserving QP2 family diversity. Author exclusion thins logic to one eligible
+critic when `mistral-large-3` authored the report, so that lens cannot supply the two clean families
+required for strong acceptance on those rounds. Fit-first ordering applies QP8's deterministic
+audition verdicts and measured sensitivity to roster position; no LLM prose grades the roster.
 
 **Application — writer source reads (D-writer-source-reads,
 D-support-normalized-text).** Writer-read page bodies are production evidence, not critique: QP5

@@ -1,0 +1,181 @@
+---
+name: Sync open PRs with the base branch
+
+# The missing call site for the docs/decisions.md merge driver (D-base-moved-resync).
+#
+# D-decisions-merge-driver registered the driver everywhere the *review pipeline* merges,
+# and every one of those places is reachable only from a review cycle. A PR that has
+# already been cleared has no cycle left to run, so when the base moves under it nothing
+# executes the driver. The repository can name a custom driver in `.gitattributes`, but
+# the command is checkout-local git config; the event that needs that registered checkout
+# is therefore this one: the base branch moved.
+#
+# Deliberately narrow. A PR is only touched when the unconfigured three-way merge conflicts
+# AND the trusted driver resolves it. A PR that is merely behind is left alone: the driver
+# is not what unblocks it, and re-merging it here would churn a
+# SHA that the reviewers, the SHA-keyed dedup and the cycle counter are all keyed on.
+#
+# Security model. Two checkouts: `trusted`, the default branch, which is the only thing ever
+# executed; and `work`, which is reset to a contributor's branch and never run from. That
+# is the same split, for the same reason, as review-fixer.yml's sync step and
+# review-pipeline.yml's inherit step — this job holds WORKFLOW_PAT and can push to any
+# branch in the repository, so a PR's own copy of `scripts/` must not run in it. Fork PRs
+# are excluded: their branches are not ours to push to.
+
+on:
+  push:
+    branches: [main]
+
+permissions:
+  # Reads only. The push below authenticates with WORKFLOW_PAT, which is also what makes
+  # the resulting `synchronize` event start a review run automatically. GitHub documents
+  # a PR update made with GITHUB_TOKEN as approval-required; without automatic publication
+  # the merge-gate status would wait for a human to approve the run on the new SHA.
+  contents: read
+  pull-requests: read
+  actions: read
+
+concurrency:
+  # One run at a time per base branch. Two runs would race each other's pushes, and the
+  # loser's merge would be built on a head that no longer exists. Not cancel-in-progress:
+  # cancelling mid-push is the one moment worth not interrupting.
+  group: sync-open-prs-${{ github.ref }}
+  cancel-in-progress: false
+
+jobs:
+  sync:
+    name: Re-merge the base into PRs the driver can unblock
+    runs-on: ubuntu-latest
+    timeout-minutes: 30
+    steps:
+      # Same reasoning as review-entry.yml's equivalent check: until WORKFLOW_PAT exists
+      # this can do nothing, and every step that touches the API fails with an unhelpful
+      # error. Say so once and stand down — a repository mid-setup should not show a wall
+      # of red on every push to its default branch.
+      - name: Check the token is configured
+        id: configured
+        env:
+          WORKFLOW_PAT: ${{ secrets.WORKFLOW_PAT }}
+        run: |
+          set -euo pipefail
+          if [ -z "${WORKFLOW_PAT}" ]; then
+            echo "configured=false" >> "$GITHUB_OUTPUT"
+            echo "::notice::WORKFLOW_PAT is not set; open PRs are not resynced with ${GITHUB_REF_NAME}"
+          else
+            echo "configured=true" >> "$GITHUB_OUTPUT"
+          fi
+
+      # The trusted checkout. The merge driver, its registration helper and the sync script
+      # are all executed from here and from nowhere else.
+      - name: Check out the base branch
+        if: steps.configured.outputs.configured == 'true'
+        uses: actions/checkout@v4
+        with:
+          path: trusted
+          ref: ${{ github.event.repository.default_branch }}
+
+      # The work tree. Reset to each PR's head in turn, never executed from. Full depth
+      # deliberately: a branch further behind than a shallow fetch would get a merge base
+      # that is not the real one.
+      - name: Check out a work tree for the PR branches
+        if: steps.configured.outputs.configured == 'true'
+        uses: actions/checkout@v4
+        with:
+          path: work
+          fetch-depth: 0
+          ref: ${{ github.event.repository.default_branch }}
+          token: ${{ secrets.WORKFLOW_PAT }}
+
+      - name: Re-merge the base into every PR the driver can unblock
+        id: resync
+        if: steps.configured.outputs.configured == 'true'
+        env:
+          GH_TOKEN: ${{ secrets.WORKFLOW_PAT }}
+          REPO: ${{ github.repository }}
+          BASE_REF: ${{ github.event.repository.default_branch }}
+          # review-pipeline.yml resets the cycle counter on a commit not authored this way,
+          # reading it as a human answering the blockers. A resync is not that.
+          AGENT_COMMIT_EMAIL: 'ci@reasonable-answer.local'
+          AGENT_COMMIT_NAME: 'reasonable-answer agent'
+        run: |
+          set -euo pipefail
+
+          TRUSTED="${GITHUB_WORKSPACE}/trusted"
+          WORK="${GITHUB_WORKSPACE}/work"
+
+          # Open, same-repo, non-draft PRs targeting the branch that just moved. Forks are
+          # excluded because their branches are not ours to push to; drafts because a draft
+          # is not waiting on the merge button. `env.REPO` rather than string interpolation
+          # keeps a repository name out of the jq program text.
+          # Captured rather than piped straight into `mapfile`: a failure inside a process
+          # substitution is invisible to `set -e`, and an empty list is exactly what a
+          # rejected token produces. "Nothing to do" and "could not ask" must not look the
+          # same in the log.
+          if ! LISTED="$(gh api --paginate -X GET "repos/${REPO}/pulls" \
+                          -f state=open -f base="${BASE_REF}" -f per_page=100 \
+                          --jq '.[]
+                                | select(.draft == false)
+                                | select(.head.repo.full_name == env.REPO)
+                                | "\(.number) \(.head.ref)"')"; then
+            echo "::warning::could not list the open PRs targeting ${BASE_REF}; nothing was resynced"
+            exit 0
+          fi
+          mapfile -t CANDIDATES < <(printf '%s\n' "${LISTED}")
+
+          # How many review runs are still open on a branch. A run in flight will do this
+          # sync itself if it needs one — gather detects the drift and the fixer performs
+          # the merge with the same driver — and pushing underneath it is not merely
+          # redundant: the fixer re-reads the remote head before pushing and discards a
+          # whole cycle's fixes if the branch moved. So wait it out rather than race it.
+          #
+          # An unanswerable question counts as "in flight". The cost of being wrong that way
+          # is a PR resynced on the next push to ${BASE_REF} instead of this one; the cost
+          # of the other way is a discarded review cycle.
+          inflight() {
+            local answer
+            if ! answer="$(gh api -X GET "repos/${REPO}/actions/workflows/review-entry.yml/runs" \
+                            -f branch="$1" -f per_page=20 \
+                            --jq '[.workflow_runs[] | select(.status != "completed")] | length' 2>&1)"; then
+              echo "::warning::could not tell whether a review run is in flight on $1: ${answer}" >&2
+              echo 1
+              return
+            fi
+            echo "${answer}"
+          }
+
+          # One deadline for the whole loop, not per PR: waiting is worth a few minutes in
+          # total, never a multiple of however many PRs happen to be open.
+          WAIT_DEADLINE=$(( $(date +%s) + 600 ))
+          SYNCED=0
+
+          for entry in "${CANDIDATES[@]}"; do
+            [ -n "${entry}" ] || continue
+            NUM="${entry%% *}"
+            REF="${entry#* }"
+
+            while [ "$(date +%s)" -lt "${WAIT_DEADLINE}" ] && [ "$(inflight "${REF}")" -gt 0 ]; do
+              echo "#${NUM} (${REF}): a review run is in flight; waiting for it"
+              sleep 30
+            done
+            if [ "$(inflight "${REF}")" -gt 0 ]; then
+              echo "::warning::#${NUM} (${REF}) still has a review run in flight; leaving the sync to that run"
+              continue
+            fi
+
+            # Never fatal for the rest of the loop. One PR the script refuses to touch is
+            # one PR left exactly as it already was; the others still deserve their sync.
+            if ! OUT="$("${TRUSTED}/scripts/sync_pr_with_base.sh" "${TRUSTED}" "${WORK}" "${BASE_REF}" "${REF}" 2>&1)"; then
+              printf '%s\n' "${OUT}"
+              echo "::warning::could not resync #${NUM} (${REF}); it keeps the state it already had"
+              continue
+            fi
+            printf '%s\n' "${OUT}"
+
+            STATE="$(printf '%s\n' "${OUT}" | sed -n 's/^state=//p' | tail -1)"
+            echo "#${NUM} (${REF}): ${STATE:-unknown}"
+            if [ "${STATE}" = "synced" ]; then
+              SYNCED=$((SYNCED + 1))
+            fi
+          done
+
+          echo "Resynced ${SYNCED} PR(s) that only the decisions merge driver could unblock."
