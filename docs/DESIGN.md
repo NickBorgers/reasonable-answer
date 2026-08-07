@@ -49,7 +49,7 @@ token, so active-parameter counts do not reduce this):
 | `mistral-large-3` | 675B/A41B | ~340GB | yes — writer + logic (dropped from completeness, D-completeness-pool-noise) |
 | `nemotron-3-ultra` | 550B/A55B | ~275GB | yes — writer (D-provider-retry) |
 | `deepseek-v4-flash` | 284B/A13B | ~145GB | yes — writer |
-| `minimax-m3` | 230B/A10B | ~115GB | yes — logic, evidence |
+| `minimax-m3` | 230B/A10B | ~115GB | no — loads, but retired: unfit on both its lenses across three audits (D-minimax-retirement) |
 | `gemma4-small` | 26B-A4B q8 | ~28GB | yes — orchestrator |
 | `gemma4` | 31B dense | ~16GB | yes — evidence, completeness |
 

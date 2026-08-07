@@ -99,9 +99,11 @@ def test_the_completeness_pool_excludes_the_unfit_critic(path: Path) -> None:
     2.61 material issues invented per sound control, spot-check confirmed — so it is not
     in that pool on either shipped roster.
 
-    It is deliberately still a writer and a logic critic: its logic verdict is `marginal`
-    and that call waits on the post-fixture-repair re-audition. Asserting that here is
-    what keeps this from being read as "drop the model", which is a different change.
+    It is deliberately still a writer and a logic critic: the re-audition that call
+    waited on (2026-08-07) graded it `fit` on logic — 0.94 sensitivity, 0.08 invented
+    per control — and D-minimax-retirement moved it to position 1 of that pool.
+    Asserting that here is what keeps this from being read as "drop the model", which
+    is a different change.
     """
     roster = Config.load(path).roster
     completeness = roster.critics_for(Lens.COMPLETENESS)
@@ -137,6 +139,37 @@ def test_no_writer_sits_in_the_completeness_pool(path: Path) -> None:
     """
     roster = Config.load(path).roster
     assert not set(roster.critics_for(Lens.COMPLETENESS)) & set(roster.writers)
+
+
+@pytest.mark.parametrize("path", [DEFAULT_ROSTER, DEPLOYMENT_ROSTER])
+def test_minimax_m3_is_retired_from_every_critic_pool(path: Path) -> None:
+    """D-minimax-retirement. Three audits (2026-08-02..07) agreed and worsened: on
+    logic 1.12 invented material issues per sound control with obvious-tier
+    sensitivity at 0.33, on evidence 1.52 invented with sensitivity 0.58, measured
+    under the `json_schema` mode a run pins it to. A spot check attributed the noise
+    to the model (it flags a clause while its own quoted span carries the adjacent
+    qualifier that resolves the complaint), so a critic that cannot return an honest
+    clean leaves both pools. It was critic-only, so it leaves the roster entirely.
+    """
+    roster = Config.load(path).roster
+    for lens in Lens:
+        assert "minimax-m3" not in roster.critics_for(lens)
+    assert "minimax-m3" not in roster.writers
+
+
+@pytest.mark.parametrize("path", [DEFAULT_ROSTER, DEPLOYMENT_ROSTER])
+def test_the_logic_pool_leads_with_the_audited_fit_critic(path: Path) -> None:
+    """D-minimax-retirement, ordering half — same rule as D-completeness-pool-noise:
+    the pass acts on position 1's silence, so the lens's only measured `fit`
+    (`mistral-large-3`, 0.94 sensitivity / 0.08 invented per control) leads and the
+    `marginal` `glm-5.2` (1.00 sensitivity / 0.75 invented) backs it. On rounds
+    mistral-large-3 authors, exclusion thins the pool to glm-5.2 alone — accepted as
+    the cost of fit-first; the evidence ordering below makes the same trade the other
+    way (no `fit` exists there, so the higher-sensitivity marginal leads).
+    """
+    roster = Config.load(path).roster
+    assert roster.critics_for(Lens.LOGIC) == ["mistral-large-3", "glm-5.2"]
+    assert roster.critics_for(Lens.EVIDENCE) == ["glm-5.2", "gemma4"]
 
 
 def test_the_two_rosters_name_the_same_models(
