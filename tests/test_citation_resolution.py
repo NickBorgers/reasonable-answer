@@ -38,6 +38,7 @@ EXCLUDE = {
     "tests/test_merge_decisions.py",
     "tests/test_ci_inherit_classifier.py",
     "tests/test_ci_fixer_decisions_driver.py",
+    "tests/test_ci_base_moved_resync.py",
 }
 
 # A decision slug: `D-` then lowercase words. Does not match the `D-<slug>` prose placeholder
