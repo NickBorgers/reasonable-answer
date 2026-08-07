@@ -45,6 +45,11 @@ review findings the way `D<n>` ids are.
 | QP11 | **Evidence-base freshness is checked mechanically and is never blocking.** See the marker line above and [§3](#3-refreshing-the-evidence-base). | this file | — |
 | QP12 | **Principles-as-spec drift is blocking, in both directions.** Behavior governed by QP1–QP10 changing without this file and `decisions.md` moving too — or a principle here weakening with no new fetchable evidence in the diff — is the `quality` reviewer's row-12 analogue. See [§4](#4-retiring-or-weakening-a-principle). | this file + every surface above | — |
 
+**Application — addressed blockers in finalize comments (D-addressed-blockers-visible).** Addressed
+and unaddressed blocker ids are derived mechanically from the same structured reviewer and fixer
+artifacts under QP8. The added verdict field changes how the finalize comment classifies findings for
+display, not the GO/NO-GO boundary; no LLM prose or ordinal judgment enters either classification.
+
 **Application — resumed-agent stall bounds (D-resume-stall-guard).** The resumed fixer remains under
 the unchanged outer agent timeout, while a 3-minute first-output deadline and a 10-minute
 between-output deadline add earlier bounds for silent attempts. Both idle deadlines route to the

@@ -92,6 +92,11 @@ test("absent reviewer directory -> NO-GO pipeline_error, does not crash (issue #
   assert.match(r.verdict.reasons.join("\n"), /no reviewer artifacts/i);
   assert.match(r.verdict.reasons.join("\n"), /skipped/i);
   assert.deepEqual(r.verdict.unaddressed_blocker_ids, []);
+  // This verdict is built inline in judge.mjs, not by aggregate(), so aggregate's own
+  // coverage of the field does not reach it. The finalize comment reads both id sets
+  // unconditionally (D-addressed-blockers-visible), and this is the path taken when the pipeline is already
+  // broken — the last one that should acquire a second, unrelated failure.
+  assert.deepEqual(r.verdict.addressed_blocker_ids, []);
   // finalize.yml branches on these step outputs, so they must be populated.
   assert.match(r.ghOutput, /verdict=NO-GO/);
   assert.match(r.ghOutput, /category=pipeline_error/);
@@ -136,4 +141,7 @@ test("an expected role that produced no artifact -> NO-GO pipeline_error", () =>
   assert.equal(r.verdict.verdict, "NO-GO");
   assert.equal(r.verdict.category, "pipeline_error");
   assert.match(r.verdict.reasons.join("\n"), /security/);
+  // The third construction site: judge.mjs returns checkExpectedRoles()'s object verbatim.
+  assert.deepEqual(r.verdict.addressed_blocker_ids, []);
+  assert.deepEqual(r.verdict.unaddressed_blocker_ids, []);
 });

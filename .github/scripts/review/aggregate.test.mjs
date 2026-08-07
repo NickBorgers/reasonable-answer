@@ -362,3 +362,62 @@ test("all-abstain carries category=pipeline_error", () => {
   );
   assert.equal(v.category, "pipeline_error");
 });
+
+// ───────────────── what the finalize comment renders from ─────────────────
+//
+// The verdict is also the comment's source of truth for *which* blockers still stand. It
+// used to carry only the unaddressed ids, so a GO — where that list is empty by
+// construction — left the renderer no way to tell a fixed blocker from an open one, and it
+// printed both under one "Blocking issues" heading on an approved PR
+// (D-addressed-blockers-visible). The credited set has to travel with the verdict, not be
+// recomputed beside it, or the comment and the gate can disagree.
+
+test("a GO carries the ids the fixer was credited with", () => {
+  const v = aggregate(
+    [reviewer("security", "request_changes", [blocker("sec-1")])],
+    { input_sha: SHA_A, new_sha: SHA_B, addressed: ["security/sec-1"], skipped: [] }
+  );
+  assert.equal(v.verdict, "GO");
+  assert.deepEqual(v.addressed_blocker_ids, ["security/sec-1"]);
+  assert.deepEqual(v.unaddressed_blocker_ids, []);
+});
+
+test("a mixed cycle reports both sets, disjointly", () => {
+  const v = aggregate(
+    [
+      reviewer("security", "request_changes", [blocker("sec-1")]),
+      reviewer("design", "request_changes", [blocker("issue-1")]),
+    ],
+    { input_sha: SHA_A, new_sha: SHA_B, addressed: ["design/issue-1"], skipped: [] }
+  );
+  assert.equal(v.verdict, "NO-GO");
+  assert.deepEqual(v.unaddressed_blocker_ids, ["security/sec-1"]);
+  assert.deepEqual(v.addressed_blocker_ids, ["design/issue-1"]);
+});
+
+test("claimed-but-unpushed fixes are credited to nobody", () => {
+  // Same rule the verdict already applies: nothing landed, so nothing is cleared — and the
+  // comment must not show those blockers as fixed either.
+  const v = aggregate(
+    [reviewer("security", "request_changes", [blocker("sec-1")])],
+    { input_sha: SHA_A, new_sha: SHA_A, addressed: ["security/sec-1"], skipped: [] }
+  );
+  assert.equal(v.verdict, "NO-GO");
+  assert.deepEqual(v.addressed_blocker_ids, []);
+});
+
+test("every failure path still defines the field", () => {
+  // The renderer reads it unconditionally; an undefined field on a pipeline_error path
+  // would make the one comment written when things are already broken the one that breaks.
+  for (const v of [
+    aggregate([], noFix),
+    aggregate([reviewer("security", "approve")], null),
+    aggregate([reviewer("security", "approve")], { input_sha: SHA_B, new_sha: SHA_B }),
+    aggregate(
+      [reviewer("security", "approve"), reviewer("design", "approve", [], { sha: SHA_B })],
+      noFix
+    ),
+  ]) {
+    assert.deepEqual(v.addressed_blocker_ids, []);
+  }
+});

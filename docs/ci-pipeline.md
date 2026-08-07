@@ -205,6 +205,25 @@ the three had landed. The finalize comment now says so explicitly, because "the 
 claimed fixes but pushed nothing" and "the fixer did nothing" send an operator to two
 different places.
 
+The credited set travels **with the verdict**, as `addressed_blocker_ids`, alongside
+`unaddressed_blocker_ids` (D-addressed-blockers-visible). That is what lets the finalize comment separate a
+blocker the fixer closed from one that still stands, and it means the comment and the merge
+gate are reading the same decision rather than two recomputations of it. Both fields are
+present on every verdict, because the renderer reads them unconditionally and the one comment
+written when things are already broken must not be the one that breaks. A verdict is built in
+exactly three places, and all three carry both: `aggregate()`, the inline no-reviewer-artifacts
+verdict in `judge.mjs`, and `checkExpectedRoles()` in `expected-roles.mjs` — the last two being
+fail-closed `pipeline_error` paths, where both sets are empty because neither ever reached
+aggregation.
+
+The comment renders the two sets under separate headings — *still outstanding*, and *raised
+this cycle, fixed by the fixer* — and the per-reviewer table counts what is outstanding,
+with what was fixed named beside it (`0 (2 fixed)`). One undifferentiated **Blocking
+issues** list was the previous behaviour, and on a GO it read as a merge gate that had
+passed a PR with open blockers: the only trace of the fixer's work was a count inside a *Why*
+bullet. Nothing is hidden — a fixed blocker is still shown, with what the reviewer said,
+because the record of what was raised is the point.
+
 A reviewer only publishes its artifact under the name the judge consumes **if it
 validated**, and the judge separately requires every role the classifier selected to be
 present. Both halves are needed. Without the first, an artifact that had just failed
