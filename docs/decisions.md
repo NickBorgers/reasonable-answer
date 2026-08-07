@@ -4302,7 +4302,8 @@ differing content, or any parse ambiguity — falls through to exactly what an u
 have done (`git merge-file`'s own diff3 merge, conflict markers and all). The driver is registered at
 every place this repository actually runs a merge of this kind: `review-fixer.yml`'s two sync-merge call
 sites, `review-pipeline.yml`'s merge-tree recreation step (D-inherit-whole-range), and
-`.devcontainer/setup.sh` for a human resolving the same conflict locally.
+`sync-open-prs.yml`'s base-moved resync (D-base-moved-resync), plus `.devcontainer/setup.sh` for a
+human resolving the same conflict locally.
 
 The recognized shape is exact: appended text must be one or more complete `## D-<slug> — …` sections,
 nothing else, with at least one blank line separating the last one from the tail marker. Any prose
@@ -4819,25 +4820,19 @@ change is additive: a new field on the verdict artifact, which nothing outside t
 
 ## D-repair-diagnostics — a rejected critique says which class it failed, without quoting itself
 
-**The problem.** Six lens failures in production over 2026-08-01 → 08-04 (19 runs) shared one
-signature: `triage._require_quote` rejected a span and the `critic_repair_retries` budget ran out.
-They spanned three critics (glm-5.2, minimax-m3, gemma4) and all three lenses, with every alias
-pinned to `json_schema` on every boot — so not one weak model, and not an extraction-mode problem.
-149 first-attempt violations were logged in the same window, of which ~96% were repaired.
-
-Why that could not be diagnosed further: the repair loop logs only `exc.__class__.__name__`
+**The problem.** When `triage._require_quote` rejects a span until the
+`critic_repair_retries` budget runs out, the repair loop logs only `exc.__class__.__name__`
 (RA-016 — see the audit/privacy bullet in [architecture.md](./architecture.md)), and
 `critique_once` records only the **final** failure. So the logs cannot distinguish the two
-hypotheses that matter, which have different fixes:
+hypotheses that motivate different follow-up investigations:
 
-* the critic **re-emits the same rejected span** each attempt — the repair carried no usable
-  correction, and the fix is to the repair turn;
-* the critic emits a **different span** each attempt — it is searching and cannot find a valid
-  anchor at all, and the fix is to the prompt or the category contract (D-absence-anchor's
-  territory).
+* the critic may **re-emit the same normalized rejected span** each attempt, which would be
+  consistent with a repair turn that did not produce a different candidate;
+* the critic may emit a **different normalized span** each attempt, which would be consistent with
+  changing candidates without finding a valid anchor.
 
 Nothing in a run's stored evidence separates them either: `LensResult.failure_reason` is the same
-content-free sentence.
+bounded sentence and does not include the rejected span.
 
 **The decision.** A rejection carries bounded diagnostics, and the repair loop logs them.
 `triage.ViolationCode` names the class (`category_out_of_scope`, `locus_absent`, `span_empty`,
@@ -4847,9 +4842,11 @@ index), and `fingerprint()` — the first 8 hex of a SHA-256 over the **normaliz
 `llm._diagnostics_suffix` renders whatever a validator offers, duck-typed exactly as `repair_hint`
 already is, because `triage` is LLM-free and must not import the client to say so.
 
-The fingerprint is what makes the loop legible: identical across attempts means a re-roll,
-different means a search. It folds what `_normalize` folds, so a critic that merely retypes its
-span still reads as a re-roll rather than looking like progress.
+The fingerprint makes that observable without quoting the rejected span: identical fingerprints
+show that the normalized rejected span was identical across attempts, while different fingerprints
+show that it changed. Those patterns support the two investigations above without establishing why
+the critic produced them. The fingerprint folds what `_normalize` folds, so typographic retyping
+does not look like a different candidate.
 
 **What this deliberately does not do.** The rejected span itself never enters `str(exc)`. That is
 not incidental: the message becomes `LensResult.failure_reason`, which is persisted into the
@@ -4864,6 +4861,88 @@ budget, fail-closed lens failure and every controller rule are untouched.
 fails the whole review once the budget is gone, and no subset of issues is salvaged. Untrusted text
 still reaches no generator as instruction; the diagnostics travel to a log, not to a prompt.
 
+## D-base-moved-resync — the merge driver runs when the base moves, not only when a cycle does
+
+**The problem.** D-decisions-merge-driver is correct, and it does resolve the collision it was built
+for. PR #158's own three-way inputs — merge base `75e7f1a` and base tip `bfa6277`, both on `main`,
+against its head `8c236c7` on `refs/pull/158/head` — conflict under `git merge-file` and merge
+cleanly under `scripts/merge_decisions.py`. It nonetheless did not resolve that PR. Every call site
+the decision added — `review-fixer.yml`'s two sync steps and `review-pipeline.yml`'s inherit
+recreation — is reachable only from a review cycle, and PR #158 had no cycle left: its last panel
+finished at 03:00 UTC on 2026-08-04, `bfa6277` landed on `main` at 04:00:50, and auto-merge was
+enabled eight seconds later. Nothing in the pipeline runs on "the base branch moved", so the driver
+was never invoked. The PR sat conflicted for three days and was freed by a hand merge in the GitHub
+web editor (`aade6d3`, the head of `refs/pull/158/head`) — the exact gesture the decision exists to
+abolish, on the exact shape it recognizes.
+
+Repository contents alone cannot cover this gap. [Git defines a custom merge driver's command in
+`$GIT_DIR/config` or `$HOME/.gitconfig`, not in
+`.gitattributes`](https://git-scm.com/docs/gitattributes#_defining_a_custom_merge_driver), which is
+why every registration in this codebase is a `git config` call in a checkout. PR #158 supplies the
+repository-specific observation: the unconfigured merge stayed conflicted while the registered
+driver resolved the same three-way inputs. A PR whose sole obstacle is this collision therefore
+stays blocked until a configured checkout performs the merge.
+
+**The decision.** A new workflow, `sync-open-prs.yml`, fires on push to the base branch and re-merges
+the base into open PRs — but only where the driver is what makes the merge succeed. Per PR it runs
+the merge twice through `scripts/sync_pr_with_base.sh`: once with no driver registered as the
+unconfigured baseline, and if that conflicts, once with the trusted driver
+registered. It pushes only when the first conflicts and the second is clean. Everything else is a
+state the PR was already in and keeps: `none` (already contains the base tip), `plain` (merges
+without the driver, so nothing here is what unblocks it), `conflicts` (a shape the driver declines — an
+edited section, an edited Open-items list, a same-slug collision — left for the review cycle's
+agentic resolution or a human, exactly as before), `moved` (the branch changed under the merge).
+
+**Why not re-merge every PR that is behind.** The reviewed SHA is the key for dedup, the cycle
+counter, the artifact names and the merge-gate status. Pushing a merge no one needed churns all of
+them, on every PR, on every push to `main`. The narrow rule also states the benefit exactly: this
+workflow adds nothing GitHub could have done itself.
+
+**Why a push, and why with `WORKFLOW_PAT`.** The merge has to reach the branch for auto-merge to see
+a mergeable PR, and the new head needs the merge-gate status republished on it or auto-merge simply
+waits on a check that can never arrive. [GitHub documents that a PR `synchronize` event caused by
+`GITHUB_TOKEN` creates a workflow run in an approval-required state, while a personal access token
+allows it to run automatically](https://docs.github.com/en/actions/how-tos/write-workflows/choose-when-workflows-run/trigger-a-workflow#triggering-a-workflow-from-a-workflow).
+The PAT is therefore what republishes the gate without a human approval step. That run does not cost
+a cycle: a base-resync merge is precisely what D-inherit-whole-range's classifier inherits through,
+and because both this workflow and that classifier register the same trusted driver, a
+driver-resolved merge recreates tree-identically there too.
+
+The merge is authored as `AGENT_COMMIT_EMAIL`. `review-pipeline.yml` resets the cycle counter to 1 on
+any commit not authored that way, reading it as a human who answered the blockers; a resync is nobody
+answering anything, and billing it as a human intervention would hand a capped PR a fresh budget of
+agent cycles for a merge no one wrote.
+
+**Racing the fixer.** The fixer re-reads the remote head before pushing and discards a whole cycle's
+fixes if the branch moved, so a push landing underneath it is not merely redundant. A review run in
+flight also does not need help: gather detects the drift and the fixer performs the same merge with
+the same driver. So the workflow waits for an in-flight run on that branch rather than racing it,
+under one 10-minute deadline for the whole loop, and skips the PR if the run outlasts it — the next
+push to the base branch retries. `sync_pr_with_base.sh` carries the matching backstop, refusing to
+push when the remote head is no longer the SHA it merged from.
+
+**Trust boundary.** Two checkouts: `trusted`, the base branch, checked out with no token and the only
+thing ever executed; and `work`, which holds the credential that can push and is reset to a
+contributor's branch, never run from. This is the same split, for the same reason, as the sync and
+inherit steps — a PR's own `scripts/merge_decisions.py` must not run in a job that can push to any
+branch in the repository. The workflow has no manual-dispatch entry point, and both checkouts plus
+`BASE_REF` are pinned to `github.event.repository.default_branch`; an event-selected ref must never
+decide which code runs with `WORKFLOW_PAT`. Fork PRs are excluded outright: their branches are not
+ours to push to.
+Nothing here fails the workflow for a PR it cannot help, because not syncing is the pre-decision
+baseline and strands nobody, while a red X on `main` for a PR the script declined to touch is noise
+on every push. The one exception is a driver-routed path that comes back merged while still carrying
+conflict markers: pushing that would put markers into a normative spec file under a commit message
+claiming a clean sync, so it stops instead.
+
+**Invariants.** None of the six tabulated pipeline-core safety invariants is in reach — none
+constrains how a model's context is built, and no model is involved here at all. The one gate this
+touches is D-inherit-whole-range's, and only by feeding it more of the input it already handles: the
+classifier itself, its tree-identity test and its fail-closed direction are unchanged, and a merge
+this workflow could not make cleanly is never pushed for it to classify. QP7's capped-loop
+requirement is preserved at the new entry point — the in-flight wait is bounded by a single deadline
+shared across the whole loop, and the commit authorship keeps `MAX_CYCLES` from being reset by a
+machine merge.
 ## Open items for a future round
 
 - A third completeness critic, chosen by measurement (D-completeness-pool-noise). The pool is down

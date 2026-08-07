@@ -302,9 +302,7 @@ def test_a_category_out_of_scope_offers_no_hint():
 
 
 def test_a_rejection_names_its_class_so_a_log_can_tell_them_apart():
-    """`LensValidationError` alone is all a production log could say, and the three
-    classes imply different things about the critic — a misread brief, an invented
-    structural reference, a quoting slip."""
+    """`LensValidationError` alone cannot distinguish the four rejection classes."""
     misquote = issue(Category.UNCITED_CLAIM, Severity.MAJOR).model_copy(
         update={"claim_span": "a claim the report never makes"}
     )
@@ -322,6 +320,15 @@ def test_a_rejection_names_its_class_so_a_log_can_tell_them_apart():
     with pytest.raises(LensValidationError) as exc:
         validate_issue(Lens.EVIDENCE, invented, STRUCTURE)
     assert exc.value.code is ViolationCode.LOCUS_ABSENT
+
+    empty = issue(Category.UNCITED_CLAIM, Severity.MAJOR).model_copy(
+        update={"claim_span": "*"}
+    )
+    with pytest.raises(LensValidationError) as exc:
+        validate_issue(Lens.EVIDENCE, empty, STRUCTURE)
+    assert exc.value.code is ViolationCode.SPAN_EMPTY
+    assert exc.value.diagnostics()["field"] == "claim_span"
+    assert exc.value.diagnostics()["locus"] == "S1.P1"
 
 
 def test_the_span_fingerprint_separates_a_re_roll_from_a_search():

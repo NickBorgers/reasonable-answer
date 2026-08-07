@@ -18,6 +18,7 @@ than reproducing that archaeology.
 | `ci-image.yml` | changes to `.github/ci/**`, manual | `ubuntu-latest` | builds the agent image and verifies every tool inside it runs |
 | `resolve-issue.yml` | issue opened/reopened/unlabeled, `/autoresolve` comment | `[self-hosted, homelab]` | an agent implements the issue and opens a PR |
 | `review-entry.yml` → `review-pipeline.yml` | PR events, `/review` | mixed | authorize → gather → reviewers → judge → finalize |
+| `sync-open-prs.yml` | push to `main` | `ubuntu-latest` | re-merges `main` into open PRs that only the `docs/decisions.md` merge driver can unblock (D-base-moved-resync) |
 
 ## PR validation is secret-free, on purpose
 
@@ -431,6 +432,27 @@ rather than an environment variable: paths are contributor-controlled, and the a
 environment is assembled from an `--env-file`, where a newline in a path would inject
 arbitrary variables.
 
+**The driver also runs when the base moves, outside any cycle (D-base-moved-resync).** All
+three registrations above sit inside a review cycle, so a PR that has already been cleared
+has nothing left to run them: it just goes conflicted when `main` moves and waits for a
+human. [Git defines the custom merge-driver command in checkout-local config, not in
+`.gitattributes`](https://git-scm.com/docs/gitattributes#_defining_a_custom_merge_driver),
+so repository contents alone cannot install that command into an unconfigured merge.
+`sync-open-prs.yml` fires on push to `main` and closes that gap, running
+`scripts/sync_pr_with_base.sh` per open same-repo, non-draft PR. It merges twice — once with
+no driver registered, the unconfigured baseline, and if that conflicts, once with the
+trusted driver — and pushes only when the first conflicts and the second is
+clean. A PR that is merely behind is left alone: nothing here is what unblocks it, and
+pushing would churn the SHA dedup, the cycle counter and the artifact names are keyed on.
+The push uses `WORKFLOW_PAT`, because [GitHub documents that a PR `synchronize` event caused
+by `GITHUB_TOKEN` creates an approval-required run, while a personal access token lets it
+run automatically](https://docs.github.com/en/actions/how-tos/write-workflows/choose-when-workflows-run/trigger-a-workflow#triggering-a-workflow-from-a-workflow);
+without that automatic run the merge-gate status would not be republished on the new head. The
+merge is authored as `AGENT_COMMIT_EMAIL` so it does not read as a human answering the
+blockers and reset the cycle counter. A review run already in flight on the branch is waited
+for rather than raced — it performs the same merge itself, and the fixer discards a whole
+cycle's fixes if it finds the branch moved under it.
+
 **The sync still runs when the panel was guarded off (D-unguarded-sync).** Every reviewer guard refusing
 normally means the fixer does not run either, because `fix` was gated on `record-cycle`
 having written a cycle. That left the D-fixer-merges-not-rebases sync unreachable on any PR whose guards refuse for
@@ -456,7 +478,11 @@ The consequence is worth stating plainly: this does **not** rescue a PR that alr
 conflicts with its base. Such a PR has no computable merge ref, so GitHub fires no
 `pull_request` event, PR Validation never runs, every guard refuses, and the sync-only pass
 it reaches then hits conflicts and blocks. Clearing a true conflict still takes a human
-merging the base in by hand (as #54 and #56 did). What D-unguarded-sync fixes is the strictly larger,
+merging the base in by hand (as #54 and #56 did) — with one exception, added later:
+`sync-open-prs.yml` clears the `docs/decisions.md` append-only shape without a
+`pull_request` event at all, because it is triggered by the push to `main` rather than by
+anything happening on the PR (D-base-moved-resync). Every other conflict shape reads exactly
+as this paragraph says. What D-unguarded-sync fixes is the strictly larger,
 non-conflicting case: a behind-the-base PR whose panel was guarded off for any reason gets
 its sync, becomes mergeable, earns its `pull_request` event, gets validated, and becomes
 reachable by a panel — see the residual below for why that is "reachable" and not "reviewed".
