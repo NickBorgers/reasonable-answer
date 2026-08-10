@@ -88,16 +88,22 @@ def resolve_token(env_var: str, token_file: str | Path | None) -> str:
 
 
 class QueryBudget:
-    """Process-wide query counter. Thread-safe: critics and writers run concurrently."""
+    """Process-wide query counter. Thread-safe: critics and writers run concurrently.
 
-    def __init__(self, limit: int) -> None:
+    `limit=None` counts without ever refusing (D-unbounded-evidence). The counter still
+    runs, because how many queries a run actually spent is worth knowing even when
+    nothing was going to stop it — but a query cap is a spend control, and this system
+    would rather pay for a search than reason from an unverifiable citation.
+    """
+
+    def __init__(self, limit: int | None) -> None:
         self._limit = limit
         self._used = 0
         self._lock = threading.Lock()
 
     def take(self) -> bool:
         with self._lock:
-            if self._used >= self._limit:
+            if self._limit is not None and self._used >= self._limit:
                 return False
             self._used += 1
             return True
@@ -108,13 +114,13 @@ class QueryBudget:
             return self._used
 
     @property
-    def limit(self) -> int:
+    def limit(self) -> int | None:
         return self._limit
 
     @property
     def exhausted(self) -> bool:
         with self._lock:
-            return self._used >= self._limit
+            return self._limit is not None and self._used >= self._limit
 
 
 class BraveSearch:
@@ -286,8 +292,9 @@ def make_tool_handler(
         if on_results is not None:
             on_results(results)
         log.info(
-            "search returned %d results (query %d chars, %d/%d budget used)",
-            len(results), len(query), client.budget.used, client.budget.limit,
+            "search returned %d results (query %d chars, %d/%s budget used)",
+            len(results), len(query), client.budget.used,
+            "unbounded" if client.budget.limit is None else client.budget.limit,
         )
         return prompts.search_results_block(query, results)
 

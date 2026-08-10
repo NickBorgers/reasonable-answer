@@ -722,6 +722,60 @@ def test_fetched_pages_are_fenced_as_untrusted():
     assert "Body text." in block
 
 
+def test_every_cited_source_is_listed_however_large_the_bibliography():
+    """The defect D-unbounded-evidence removes: a citation absent from this block is one
+    the critic can only judge on its face, and a bibliography that outgrew the old fetch
+    cap went missing silently — which supplied `fabricated_citation` faster than any
+    writer could retire it. Listing is not negotiable; showing the text is."""
+    sources = [
+        FetchedSource(url=f"https://example.org/{i}", title=f"T{i}", text="x" * 5_000)
+        for i in range(23)  # the largest bibliography observed in production
+    ]
+
+    block = prompts.fetched_sources_block(sources, char_budget=20_000)
+
+    for i in range(23):
+        assert f"https://example.org/{i}" in block, f"citation {i} vanished from the block"
+
+
+def test_a_source_past_the_char_budget_is_withheld_not_omitted_or_failed():
+    """Three ways to render it, only one of them true. Omitted invites judgement on its
+    face; shown as a failed fetch invites a fabrication finding against a page we hold;
+    shown as registry-confirmed claims a corroboration nobody made."""
+    first = FetchedSource(url="https://example.org/first", title="A", text="y" * 30_000)
+    second = FetchedSource(url="https://example.org/second", title="B", text="z" * 30_000)
+
+    block = prompts.fetched_sources_block([first, second], char_budget=30_000)
+
+    assert "y" * 100 in block  # the first body is shown whole
+    assert "z" * 100 not in block  # the second's text is not
+    assert "https://example.org/second" in block  # but the source still appears
+    assert "FETCHED, TEXT WITHHELD" in block
+    assert "raise nothing about that source rather than inferring against it" in block
+
+
+def test_the_first_body_is_shown_however_small_the_budget():
+    """A bodyless sources block would tell the evidence lens nothing it could check,
+    which is worse than an over-budget context — the same call `_support_manifest`
+    makes for its own first page."""
+    big = FetchedSource(url="https://example.org/a", title="A", text="q" * 50_000)
+
+    block = prompts.fetched_sources_block([big], char_budget=1_000)
+
+    assert "q" * 100 in block
+
+
+def test_the_first_body_is_shown_after_an_unreadable_source():
+    failed = FetchedSource(url="https://example.org/blocked", status=403, error="HTTP 403")
+    body = FetchedSource(url="https://example.org/readable", title="A", text="q" * 50_000)
+
+    block = prompts.fetched_sources_block([failed, body], char_budget=1_000)
+
+    assert "BLOCKED" in block
+    assert "q" * 100 in block
+    assert block.count("FETCHED, TEXT WITHHELD") == 1  # instruction legend only
+
+
 def test_a_failed_fetch_is_not_presented_as_evidence_of_fabrication():
     block = prompts.fetched_sources_block(
         [FetchedSource(url="https://example.org/a", status=403, error="HTTP 403")]
@@ -899,6 +953,33 @@ def test_evidence_lens_sees_the_fetched_pages(tmp_path, identities, config):
     assert "https://example.org/a" in client.calls[-1].user
 
 
+def test_evidence_lens_uses_the_configured_source_character_budget(
+    tmp_path, identities, config
+):
+    from reasonable_answer.graph import _critique_one
+
+    class _TwoBodies:
+        def fetch_all(self, urls):
+            return [
+                FetchedSource(url=urls[0], text="a" * 800),
+                FetchedSource(url=urls[1], text="b" * 800),
+            ]
+
+    config = config.model_copy(
+        update={
+            "search": config.search.model_copy(update={"source_char_budget": 1_000})
+        }
+    )
+    rt, client = _runtime(tmp_path, identities, config, fetcher=_TwoBodies())
+    _critique_one(
+        rt, Lens.EVIDENCE, "evidence-spec", "q?", REPORT, "h" * 64, "vendor-a/model-a", attempt=1
+    )
+
+    assert "a" * 100 in client.calls[-1].user
+    assert "b" * 100 not in client.calls[-1].user
+    assert "FETCHED, TEXT WITHHELD" in client.calls[-1].user
+
+
 def test_verification_off_leaves_the_evidence_prompt_unchanged(
     tmp_path, identities, config
 ):
@@ -1035,7 +1116,8 @@ def test_fetch_failure_reasons_are_redacted_to_their_class(tmp_path, identities,
 @pytest.mark.parametrize(
     "kwargs",
     [
-        {"max_sources": 0},  # verification silently checks nothing
+        {"max_source_urls": 0},  # verification silently checks nothing
+        {"source_char_budget": 0},  # the critic is shown no page text at all
         {"fetch_timeout_seconds": 0},  # every fetch fails instantly
         {"fetch_max_bytes": 0},  # every page reads as empty
         {"fetch_max_chars": 0},  # the critic is shown no page text

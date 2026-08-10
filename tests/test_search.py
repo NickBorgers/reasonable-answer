@@ -14,6 +14,7 @@ import urllib.request
 from io import BytesIO
 
 import pytest
+from pydantic import ValidationError
 
 from reasonable_answer import prompts, search
 from reasonable_answer.config import Config, ProxyConfig, SearchConfig
@@ -74,6 +75,19 @@ def test_budget_stops_at_the_limit():
     assert budget.take() and budget.take()
     assert not budget.take()
     assert budget.exhausted and budget.used == 2
+
+
+def test_an_unbounded_budget_counts_without_ever_refusing():
+    """`None` is the default since D-unbounded-evidence. The counter still runs — how many
+    queries a run spent is worth knowing even when nothing was going to stop it — but a
+    query cap is a spend control, and starving retrieval is what leaves citations
+    unverifiable."""
+    budget = QueryBudget(None)
+
+    assert all(budget.take() for _ in range(500))
+    assert not budget.exhausted
+    assert budget.used == 500
+    assert budget.limit is None
 
 
 def test_budget_is_thread_safe():
@@ -415,6 +429,26 @@ def test_capable_writers_get_a_searcher(tmp_path, monkeypatch):
     searcher = _build_searcher(config, _Client())
     assert isinstance(searcher, BraveSearch)
     assert searcher.budget.limit == 7
+
+
+def test_capable_writers_get_the_default_unbounded_query_budget(tmp_path, monkeypatch):
+    from reasonable_answer.graph import _build_searcher
+
+    monkeypatch.setenv("BRAVE_SEARCH_API_KEY", "tok")
+    config = _config(tmp_path, enabled=True)
+
+    class _Client:
+        def probe_tool_calling(self, alias):
+            return True
+
+    searcher = _build_searcher(config, _Client())
+    assert searcher.budget.limit is None
+
+
+def test_the_removed_max_sources_key_fails_closed():
+    """D-unbounded-evidence removed the old spend cap rather than aliasing it."""
+    with pytest.raises(ValidationError):
+        SearchConfig(max_sources=12)
 
 
 def test_disabled_search_builds_no_searcher(tmp_path):

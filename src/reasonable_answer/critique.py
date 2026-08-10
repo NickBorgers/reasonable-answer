@@ -45,6 +45,7 @@ def critique_once(
     require_verbatim_spans: bool = True,
     attempt: int = 1,
     current_date: str | None = None,
+    source_char_budget: int | None = None,
 ) -> LensResult:
     """Run one lens in a fresh context and return an audit-side `LensResult`.
 
@@ -80,7 +81,14 @@ def critique_once(
         output = client.structured(
             alias,
             system=prompts.CRITIC_SYSTEM,
-            user=prompts.critic_user(lens, question, rendered, sources, current_date=current_date),
+            user=prompts.critic_user(
+                lens,
+                question,
+                rendered,
+                sources,
+                current_date=current_date,
+                source_char_budget=source_char_budget,
+            ),
             schema=CritiqueOutput,
             max_tokens=CRITIC_MAX_TOKENS,
             # Validated *inside* the call so a quoting slip is repaired against the

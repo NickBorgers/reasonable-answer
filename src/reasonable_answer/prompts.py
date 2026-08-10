@@ -503,6 +503,7 @@ def critic_user(
     sources: list | None = None,
     *,
     current_date: str | None = None,
+    source_char_budget: int | None = None,
 ) -> str:
     categories = [c for c in LENS_CATEGORIES[lens]]
     # With the cited pages in hand, two categories stop being judgements about
@@ -536,7 +537,7 @@ def critic_user(
         f"for you, however tempting:\n{table}\n\n"
         f"QUESTION THE REPORT ANSWERS\n{DATA_FENCE}\n{question}\n{DATA_END}\n\n"
         f"REPORT UNDER REVIEW\n{DATA_FENCE}\n{rendered_report}\n{DATA_END}\n\n"
-        f"{fetched_sources_block(sources) if sources else ''}"
+        f"{fetched_sources_block(sources, source_char_budget) if sources else ''}"
         "Each paragraph is prefixed with its locus marker [S<section>.P<paragraph>]. For "
         "every issue you raise:\n"
         "- `locus` must be the section and paragraph numbers of an EXISTING marker.\n"
@@ -566,22 +567,48 @@ def critic_user(
     )
 
 
-def fetched_sources_block(sources: list) -> str:
+def fetched_sources_block(sources: list, char_budget: int | None = None) -> str:
     """The pages the report cites, fetched and fenced.
 
     Third-party web content in a critic's context, same as it is in a writer's — and a
     page has more room to address the reader than a search snippet does, so the note is
     repeated here rather than relying on the one at the top of the prompt.
 
-    Three entry shapes, because there are three genuinely different things to say: here
-    is the page, here is proof the source *exists* but not its text, and here is a
-    failure. Blurring the second into either of the others is what this block exists to
-    prevent — read as the first it invites `misrepresented_source` against an abstract,
-    read as the third it leaves a real paywalled journal looking fabricated (D-existence-vs-body).
+    Four entry shapes, because there are four genuinely different things to say: here is
+    the page, here is the page but its text is withheld, here is proof the source
+    *exists* but not its text, and here is a failure. Blurring them is what this block
+    exists to prevent — a withheld or unread body read as a failure leaves a real
+    paywalled journal looking fabricated, and read as a page invites
+    `misrepresented_source` against an abstract (D-existence-vs-body).
+
+    **Every cited source appears, always** (D-unbounded-evidence). `char_budget` bounds
+    only how much page *text* is shown, never which citations are listed: a citation
+    missing from this block is one the critic can only judge on its face, and a
+    bibliography that outgrew a fetch cap used to go missing silently — which supplied
+    `fabricated_citation` findings faster than any writer could retire them. The first
+    body is shown whole regardless, so the block is never bodyless.
     """
     entries = []
+    spent = 0
     for i, s in enumerate(sources, 1):
+        withheld = (
+            s.ok
+            and char_budget is not None
+            and spent > 0
+            and spent + len(s.text) > char_budget
+        )
+        if withheld:
+            # Retrieved, and deliberately not shown. Stated as its own fact: calling it a
+            # failed fetch would invite a fabrication finding against a page we hold, and
+            # calling it registry-confirmed would claim a corroboration nobody made.
+            entries.append(
+                f"[{i}] {s.url}\nFETCHED, TEXT WITHHELD: this page was retrieved and read "
+                f"successfully. Its text is not shown here so that this review stays "
+                f"legible. The source exists and is reachable."
+            )
+            continue
         if s.ok:
+            spent += len(s.text)
             head = f"[{i}] {s.url}"
             if s.title:
                 head += f"\nPage title: {s.title}"
@@ -621,6 +648,10 @@ def fetched_sources_block(sources: list) -> str:
         "- `BLOCKED` in particular says nothing at all about whether the source exists. "
         "Reputable paywalled journals and newspapers refuse automated clients as a "
         "matter of course.\n"
+        "- `FETCHED, TEXT WITHHELD` means the page WAS retrieved and read. It is not a "
+        "failure and not an unverified citation: existence and reachability are "
+        "established. You cannot check what the report attributes to it, so raise "
+        "nothing about that source rather than inferring against it.\n"
         "- `CONFIRMED TO EXIST` means a bibliographic registry holds the record: the "
         "source is real and only its body was unreadable. Where an abstract is shown, it "
         "is a summary the authors wrote, not the source's text — a claim's absence from "

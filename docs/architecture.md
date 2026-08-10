@@ -273,9 +273,10 @@ flowchart LR
 `search.read_sources` adds `read_source`, whose allowlist is `reading.ReadSession` — the URLs that
 writer call's own searches returned, and nothing else. Both tools are driven by one
 `(name, arguments) -> text` handler assembled in `graph._retrieval_kwargs`, which is where the
-composition lives so `search` and `reading` need not import each other. Budgets are whole-run
-(`read_budget` calls, `read_char_budget` characters) plus a per-page `read_max_chars`; bytes off
-the wire are bounded already by `fetch_max_bytes`.
+composition lives so `search` and `reading` need not import each other. The optional whole-run
+`read_budget` call cap is unbounded by default; `read_char_budget` remains a mandatory whole-run
+character bound and `read_max_chars` a per-page bound. Bytes off the wire are bounded already by
+`fetch_max_bytes`.
 
 `search.support_manifest` then adds a separate structured pass asking the same writer for
 `citation_id -> url -> locator -> support_span -> claim`, one entry per claim resting on a page it

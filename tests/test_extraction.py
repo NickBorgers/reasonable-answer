@@ -262,18 +262,31 @@ def test_the_call_ceiling_is_derived_from_the_run_s_own_shape(config):
     from reasonable_answer.graph import _extraction_call_ceiling
 
     assert _extraction_call_ceiling(config) == (
-        config.search.max_sources * config.budgets.hard_cap
+        config.search.max_source_urls * config.budgets.hard_cap
     )
 
+    # An unbounded `read_budget` (the default since D-unbounded-evidence) contributes no
+    # derivable term, so the ceiling stays the citation one rather than becoming infinite.
     with_reading = config.model_copy(
         update={
             "search": config.search.model_copy(
-                update={"enabled": True, "read_sources": True}
+                update={"enabled": True, "read_sources": True, "read_budget": None}
             )
         }
     )
     assert _extraction_call_ceiling(with_reading) == (
-        config.search.max_sources * config.budgets.hard_cap + config.search.read_budget
+        config.search.max_source_urls * config.budgets.hard_cap
+    )
+
+    with_bounded_reading = config.model_copy(
+        update={
+            "search": config.search.model_copy(
+                update={"enabled": True, "read_sources": True, "read_budget": 24}
+            )
+        }
+    )
+    assert _extraction_call_ceiling(with_bounded_reading) == (
+        config.search.max_source_urls * config.budgets.hard_cap + 24
     )
 
     pinned = config.model_copy(

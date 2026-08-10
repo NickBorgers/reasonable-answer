@@ -99,19 +99,28 @@ search:
   api_key_env: BRAVE_SEARCH_API_KEY
   token_file: brave.token
   max_results: 5
-  # Whole-run cap. The free tier allows 2,000 queries/month, so a 60-query run is
-  # roughly 33 runs a month before it starts costing money.
-  query_budget: 60
+  # Unbounded (D-unbounded-evidence). A query cap is a spend control and nothing else,
+  # and this deployment would rather buy a search than reason from a citation it could
+  # not check. Set an integer here to respect a provider quota — the free Brave tier is
+  # 2,000 queries/month, which a 60-query cap stretched to roughly 33 runs.
+  # query_budget: 60
+  # Bounds the agentic loop's TERMINATION, not its spend: a writer handed a tool that
+  # has stopped working will keep calling it until the rounds are gone. Stays.
   max_tool_rounds: 6
   # The free tier is 1 request/second; requests are throttled to stay under it.
   min_interval_seconds: 1.1
 
-  # Attempt addressable, deduplicated cited URLs up to `max_sources` and hand successful
-  # bodies to the evidence critic, so `misrepresented_source` and `fabricated_citation`
-  # stop being judgements about plausibility for those entries and become checkable
-  # against the page. Unaddressable and over-cap entries remain unchecked. Independent
-  # of `enabled` — a report with real citations can be verified whether or not we
-  # retrieved them.
+  # Attempt EVERY addressable, deduplicated cited URL and hand successful bodies to the
+  # evidence critic, so `misrepresented_source` and `fabricated_citation` stop being
+  # judgements about plausibility and become checkable against the page. Only
+  # unaddressable entries remain unchecked. Independent of `enabled` — a report with real
+  # citations can be verified whether or not we retrieved them.
+  #
+  # "Every" is load-bearing (D-unbounded-evidence). The old `max_sources: 12` truncated
+  # the URL list, and a citation the fetcher never saw carried no outcome, never appeared
+  # in the critic's sources block, and was judged on its face. run-6611dbb6b02f grew from
+  # 8 citations to 23 while only 12 were ever checked, and the resulting supply of
+  # unverifiable citations outran every fix: 8 rounds, terminal needs_human_review.
   #
   # This fetches URLs a model chose. That is SSRF exposure by construction and is
   # constrained at the network layer, not here — and that boundary is a deployment
@@ -121,7 +130,19 @@ search:
   # When it is on, an "on its face" fabricated_citation judgement stops being a
   # model-prior guess (and a blocking one) and becomes a checkable fact.
   verify_sources: false
-  max_sources: 12
+  # Anti-pathological only — it must never bind on a real bibliography (23 is the largest
+  # seen). The Sources list is untrusted model output and every entry is an egress, so
+  # this bounds a bug, not a bill.
+  max_source_urls: 200
+  # Page text shown to ONE evidence critic for one artifact. An efficacy bound, not a
+  # spend one: every body in a single context is the lost-in-the-middle problem
+  # (docs/isolation.md principle #6), and these critics are not large models. Sources past
+  # it are still listed, as "FETCHED, TEXT WITHHELD" — listed is the point; omitted is
+  # what caused the loop. INTERIM: it disappears once the evidence critic reads each
+  # source in its own sub-context.
+  source_char_budget: 60000
+  # Per-fetch SAFETY bounds, not cost: an unbounded read of a model-chosen URL is a
+  # liability whatever it costs. These stay.
   fetch_timeout_seconds: 15.0
   fetch_max_bytes: 400000
   fetch_max_chars: 6000
@@ -138,7 +159,9 @@ search:
   # (docs/ssrf-egress-isolation.md). Hence OFF in the shipped roster, like verification.
   #
   # read_sources: false
-  # read_budget: 24            # whole-run reads
+  # read_budget: null          # whole-run reads; null (the default) is unbounded —
+  #                            # read_char_budget below is the bound that matters, and it
+  #                            # is a correctness one (D-unbounded-evidence)
   # read_max_chars: 6000       # page text shown per read; raising it above
   #                            # fetch_max_chars widens the writer's view only, never
   #                            # the evidence lens's or mechanical adjudication's
@@ -234,7 +257,7 @@ search:
 #   # Needs FIRECRAWL_API_KEY. Enabled with no key, or with no provider named, is fatal
 #   # at startup rather than a tier that spends its budget on 401s and calls them
 #   # coverage. `max_calls_per_run` unset means the structural ceiling
-#   # (search.max_sources * budgets.hard_cap): a guard against a fetch loop, not a
+#   # (search.max_source_urls * budgets.hard_cap): a guard against a fetch loop, not a
 #   # spending limit — the per-run cache already resolves each URL once however many
 #   # rounds and critics re-verify it.
 #   extraction:

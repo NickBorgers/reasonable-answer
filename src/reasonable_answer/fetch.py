@@ -454,9 +454,12 @@ class SourceCoverage:
     not_addressable: int = 0
     #: Addressable, and a fetch outcome was recorded against it.
     attempted: int = 0
-    #: Addressable but never offered to the fetcher — past `search.max_sources` for this
-    #: artifact, or cited in a draft whose evidence lens never got that far. Distinct
-    #: from `not_addressable`: this one *could* have been checked.
+    #: Addressable but never offered to the fetcher — past `search.max_source_urls` for
+    #: this artifact, or cited in a draft whose evidence lens never got that far. Distinct
+    #: from `not_addressable`: this one *could* have been checked. Since
+    #: D-unbounded-evidence the first cause should never fire on a real bibliography: a
+    #: non-zero count here means the anti-pathological ceiling bound, which is a bug
+    #: signal, not a budgeting outcome.
     not_attempted: int = 0
     #: Entries whose cited source body was read. This belongs to the entry disposition
     #: partition; several entries may be backed by the same body.

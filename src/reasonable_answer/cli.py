@@ -215,7 +215,9 @@ def doctor(
             )
             raise typer.Exit(code=1)
         console.print(
-            f"[green]web search: ready ({config.search.query_budget} queries/run)[/green]"
+            f"[green]web search: ready ("
+            f"{'unbounded' if config.search.query_budget is None else config.search.query_budget}"
+            f" queries/run)[/green]"
         )
 
 

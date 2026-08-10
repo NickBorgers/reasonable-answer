@@ -203,9 +203,12 @@ it — each one, again, a guard against a known LLM failure mode:
 - **Search and source verification.** Writers can be given a real web-search tool, so cited URLs
   are ones a search actually returned rather than remembered (LLM memory is where fabricated
   citations come from). With the full feature set enabled, the system also attempts the
-  addressable, deduplicated citation URLs up to `search.max_sources` and hands successful bodies
-  to the evidence lens. Entries without a fetchable URL and entries beyond that cap remain
-  unchecked. For attempted pages this turns "does this source say that?" from a plausibility
+  addressable, deduplicated citation URLs up to the anti-pathological
+  `search.max_source_urls` ceiling (D-unbounded-evidence), and hands successful bodies to the
+  evidence lens. Entries without a fetchable URL and addressable entries beyond that ceiling remain
+  unchecked and are recorded as not attempted.
+  Page text in any one critic context is bounded by `search.source_char_budget`, an efficacy limit;
+  a source past it is still listed, marked fetched with its text withheld. For attempted pages this turns "does this source say that?" from a plausibility
   guess into a check against the page — the same per-claim-against-fetched-text move
   that [FActScore](https://arxiv.org/abs/2305.14251) (Min et al. 2023) uses to score long-form
   factuality. (The shipped config leaves that last switch off only because fetching model-chosen
@@ -218,8 +221,9 @@ it — each one, again, a guard against a known LLM failure mode:
 - **Reading the page, not just the snippet.** Search fixes *where* a citation came from; it does
   not fix what the writer knew when it chose the claim, because a result is a title, a URL and one
   line. `search.read_sources` gives writers a `read_source` tool bounded to URLs their own search
-  returned in the same call, so a claim can rest on text they read — with per-run caps on pages
-  (`search.read_budget`) and on characters (`search.read_char_budget`, `search.read_max_chars`).
+  returned in the same call, so a claim can rest on text they read — with an optional per-run call
+  cap (`search.read_budget`) and mandatory character bounds (`search.read_char_budget`,
+  `search.read_max_chars`). Calls are unbounded by default; characters are not.
   Page bodies are third-party text, so they arrive fenced as untrusted data like every other input.
 - **Recording where the support actually is.** `search.support_manifest` then asks the writer, in a
   separate pass, to name `citation id -> URL -> locator -> verbatim span -> claim` for each cited

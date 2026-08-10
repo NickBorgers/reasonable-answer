@@ -200,8 +200,9 @@ def test_the_partitions_sum_to_the_number_of_entries():
 
 
 def test_an_addressable_entry_nobody_fetched_is_reported_as_unattempted():
-    """Distinct from unaddressable: this one *could* have been checked — the run ran out
-    of `search.max_sources` before it, or the lens never got that far."""
+    """Distinct from unaddressable: this one *could* have been checked — the lens never
+    got that far, or the anti-pathological `search.max_source_urls` ceiling bound, which
+    since D-unbounded-evidence is a bug signal rather than a budgeting outcome."""
     observed = fetch.coverage(REPORT, {})
     assert observed.addressable == 4
     assert observed.not_attempted == 4
