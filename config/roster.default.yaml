@@ -31,7 +31,7 @@ proxy:
   api_key_fallback: fake-key
 
 # Identical to config/roster.yaml's lineup — see the note above. The per-alias
-# reasoning (why glm-5.2 is critic-only, why minimax-m3 is never first) is documented
+# reasoning (why glm-5.2 is critic-only, why minimax-m3 is retired) is documented
 # there rather than duplicated here, since duplicated prose is what actually drifts.
 roster:
   writers:
@@ -43,12 +43,10 @@ roster:
 
   critics:
     logic:
-      - glm-5.2
-      - minimax-m3
       - mistral-large-3
+      - glm-5.2
     evidence:
       - glm-5.2
-      - minimax-m3
       - gemma4
     completeness:
       - gemma4

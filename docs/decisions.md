@@ -4075,8 +4075,9 @@ That asymmetry is the whole of this decision, and it is not the obvious symmetri
   free read would mean either handing the gate a client (forbidden) or threading a probed map into
   it from `build_runtime`, which would move the probes *ahead* of the gate, so a roster with a known
   `unfit` critic would start spending before being refused.
-- **A non-deterministic prober would silently disarm enforcement.** `config/roster.yaml` documents
-  `minimax-m3` as probing non-deterministically across `json_schema`, `json_object` and `prompt`.
+- **A non-deterministic prober would silently disarm enforcement.** The roster in force when this
+  decision landed documented `minimax-m3` as probing non-deterministically across `json_schema`,
+  `json_object` and `prompt`.
   If the free read dropped a mode-mismatched entry, that model's `unfit` verdict would stop blocking
   on most boots — not because anything was re-measured, but because the probe landed elsewhere. The
   gate blocks only on a *positive* `unfit`, so every invalidation is a step toward not blocking.
@@ -4302,7 +4303,8 @@ differing content, or any parse ambiguity — falls through to exactly what an u
 have done (`git merge-file`'s own diff3 merge, conflict markers and all). The driver is registered at
 every place this repository actually runs a merge of this kind: `review-fixer.yml`'s two sync-merge call
 sites, `review-pipeline.yml`'s merge-tree recreation step (D-inherit-whole-range), and
-`.devcontainer/setup.sh` for a human resolving the same conflict locally.
+`sync-open-prs.yml`'s base-moved resync (D-base-moved-resync), plus `.devcontainer/setup.sh` for a
+human resolving the same conflict locally.
 
 The recognized shape is exact: appended text must be one or more complete `## D-<slug> — …` sections,
 nothing else, with at least one blank line separating the last one from the tail marker. Any prose
@@ -4817,6 +4819,253 @@ Absent field, absent artifact, or unreadable JSON all render everything as outst
 untouched, and the aggregation tests that pin the GO/NO-GO boundary are unchanged. The one contract
 change is additive: a new field on the verdict artifact, which nothing outside the renderer reads.
 
+## D-minimax-retirement — a critic unfit on every lens it holds leaves the roster
+
+**The measurement.** The public source record is
+[PR #162](https://github.com/NickBorgers/reasonable-answer/pull/162), whose body records the audit
+dates, extraction modes, metrics, call counts, and per-issue spot-check result stated here. Three
+audits agreed, and the trend worsened as the measurement got more honest. On 2026-08-02 (first run
+on the reshaped corpus, prompt-mode extraction) `minimax-m3`
+graded `unfit` on logic and `marginal` on evidence. After the control-defect sweep
+(D-control-defect-sweep) and probe parity (D-audition-probe-parity) — so on corrected controls,
+under the `json_schema` mode a run actually pins the model to — it graded `unfit` on evidence with
+`marginal` logic. On 2026-08-07, against the 22-fixture corpus: **`unfit` on both.** Logic: 1.12
+invented material issues per sound control, obvious-tier sensitivity 0.33. Evidence: 1.52
+invented, sensitivity 0.58. Every other rostered critic improved or held as the corpus was
+repaired; this one worsened.
+
+**Why the noise is the model's.** The 30-call spot check behind D-control-defect-sweep read every
+issue this model filed against the artifact it was filed on. Nine of its twelve material findings
+on sound controls shared one mechanism: the critic flags a clause while its own quoted
+`related_span` contains the adjacent qualifier — same sentence or paragraph — that resolves the
+complaint. That is not a corpus defect and no fixture edit can fix it. A critic that cannot
+return an honest clean does not converge a run: every invented material issue blocks acceptance
+and burns a revision round, and at position 2 inside `review.depth: 2` it read every draft.
+
+**The decision.** `minimax-m3` leaves both critic pools. It was critic-only, so it leaves the
+roster. Both pools keep two families: logic is `[mistral-large-3, glm-5.2]` (Mistral + Zhipu),
+evidence is `[glm-5.2, gemma4]` (Zhipu + Google), so `validate_roster_health`'s strong-`accepted`
+requirement holds on every lens.
+
+**Ordering, by the D-completeness-pool-noise rule — the pass acts on position 1's silence.**
+Logic leads with its only measured `fit`, `mistral-large-3` (0.94 sensitivity, 0.08 invented per
+control), with `marginal` `glm-5.2` (1.00 sensitivity, 0.75 invented) behind it. The cost is
+stated rather than hidden: mistral also writes, so on rounds it authors, exclusion thins the
+logic pool to `glm-5.2` alone. Evidence has no `fit` to lead with — both survivors are marginal —
+so the higher-sensitivity model (`glm-5.2`, 0.92 against `gemma4`'s 0.50) takes position 1,
+because a position-1 *miss* is the failure the run acts on when everything else is equal-noise.
+
+**What this deliberately does not do.** It does not swap in a replacement candidate for the
+evidence lens, which is now the roster's thinnest (two marginals, one of them at 0.50
+sensitivity). Auditioning a candidate is a paid measurement against the full corpus and belongs
+to its own decision; it is recorded as the open item below. It also does not touch thresholds:
+every number above cleared or failed the existing gates without adjustment, which is what the
+gates were rebuilt to do.
+
+## D-base-moved-resync — the merge driver runs when the base moves, not only when a cycle does
+
+**The problem.** D-decisions-merge-driver is correct, and it does resolve the collision it was built
+for. PR #158's own three-way inputs — merge base `75e7f1a` and base tip `bfa6277`, both on `main`,
+against its head `8c236c7` on `refs/pull/158/head` — conflict under `git merge-file` and merge
+cleanly under `scripts/merge_decisions.py`. It nonetheless did not resolve that PR. Every call site
+the decision added — `review-fixer.yml`'s two sync steps and `review-pipeline.yml`'s inherit
+recreation — is reachable only from a review cycle, and PR #158 had no cycle left: its last panel
+finished at 03:00 UTC on 2026-08-04, `bfa6277` landed on `main` at 04:00:50, and auto-merge was
+enabled eight seconds later. Nothing in the pipeline runs on "the base branch moved", so the driver
+was never invoked. The PR sat conflicted for three days and was freed by a hand merge in the GitHub
+web editor (`aade6d3`, the head of `refs/pull/158/head`) — the exact gesture the decision exists to
+abolish, on the exact shape it recognizes.
+
+Repository contents alone cannot cover this gap. [Git defines a custom merge driver's command in
+`$GIT_DIR/config` or `$HOME/.gitconfig`, not in
+`.gitattributes`](https://git-scm.com/docs/gitattributes#_defining_a_custom_merge_driver), which is
+why every registration in this codebase is a `git config` call in a checkout. PR #158 supplies the
+repository-specific observation: the unconfigured merge stayed conflicted while the registered
+driver resolved the same three-way inputs. A PR whose sole obstacle is this collision therefore
+stays blocked until a configured checkout performs the merge.
+
+**The decision.** A new workflow, `sync-open-prs.yml`, fires on push to the base branch and re-merges
+the base into open PRs — but only where the driver is what makes the merge succeed. Per PR it runs
+the merge twice through `scripts/sync_pr_with_base.sh`: once with no driver registered as the
+unconfigured baseline, and if that conflicts, once with the trusted driver
+registered. It pushes only when the first conflicts and the second is clean. Everything else is a
+state the PR was already in and keeps: `none` (already contains the base tip), `plain` (merges
+without the driver, so nothing here is what unblocks it), `conflicts` (a shape the driver declines — an
+edited section, an edited Open-items list, a same-slug collision — left for the review cycle's
+agentic resolution or a human, exactly as before), `moved` (the branch changed under the merge).
+
+**Why not re-merge every PR that is behind.** The reviewed SHA is the key for dedup, the cycle
+counter, the artifact names and the merge-gate status. Pushing a merge no one needed churns all of
+them, on every PR, on every push to `main`. The narrow rule also states the benefit exactly: this
+workflow adds nothing GitHub could have done itself.
+
+**Why a push, and why with `WORKFLOW_PAT`.** The merge has to reach the branch for auto-merge to see
+a mergeable PR, and the new head needs the merge-gate status republished on it or auto-merge simply
+waits on a check that can never arrive. [GitHub documents that a PR `synchronize` event caused by
+`GITHUB_TOKEN` creates a workflow run in an approval-required state, while a personal access token
+allows it to run automatically](https://docs.github.com/en/actions/how-tos/write-workflows/choose-when-workflows-run/trigger-a-workflow#triggering-a-workflow-from-a-workflow).
+The PAT is therefore what republishes the gate without a human approval step. That run does not cost
+a cycle: a base-resync merge is precisely what D-inherit-whole-range's classifier inherits through,
+and because both this workflow and that classifier register the same trusted driver, a
+driver-resolved merge recreates tree-identically there too.
+
+The merge is authored as `AGENT_COMMIT_EMAIL`. `review-pipeline.yml` resets the cycle counter to 1 on
+any commit not authored that way, reading it as a human who answered the blockers; a resync is nobody
+answering anything, and billing it as a human intervention would hand a capped PR a fresh budget of
+agent cycles for a merge no one wrote.
+
+**Racing the fixer.** The fixer re-reads the remote head before pushing and discards a whole cycle's
+fixes if the branch moved, so a push landing underneath it is not merely redundant. A review run in
+flight also does not need help: gather detects the drift and the fixer performs the same merge with
+the same driver. So the workflow waits for an in-flight run on that branch rather than racing it,
+under one 10-minute deadline for the whole loop, and skips the PR if the run outlasts it — the next
+push to the base branch retries. `sync_pr_with_base.sh` carries the matching backstop, refusing to
+push when the remote head is no longer the SHA it merged from.
+
+**Trust boundary.** Two checkouts: `trusted`, the base branch, checked out with no token and the only
+thing ever executed; and `work`, which holds the credential that can push and is reset to a
+contributor's branch, never run from. This is the same split, for the same reason, as the sync and
+inherit steps — a PR's own `scripts/merge_decisions.py` must not run in a job that can push to any
+branch in the repository. The workflow has no manual-dispatch entry point, and both checkouts plus
+`BASE_REF` are pinned to `github.event.repository.default_branch`; an event-selected ref must never
+decide which code runs with `WORKFLOW_PAT`. Fork PRs are excluded outright: their branches are not
+ours to push to.
+Nothing here fails the workflow for a PR it cannot help, because not syncing is the pre-decision
+baseline and strands nobody, while a red X on `main` for a PR the script declined to touch is noise
+on every push. The one exception is a driver-routed path that comes back merged while still carrying
+conflict markers: pushing that would put markers into a normative spec file under a commit message
+claiming a clean sync, so it stops instead.
+
+**Invariants.** None of the six tabulated pipeline-core safety invariants is in reach — none
+constrains how a model's context is built, and no model is involved here at all. The one gate this
+touches is D-inherit-whole-range's, and only by feeding it more of the input it already handles: the
+classifier itself, its tree-identity test and its fail-closed direction are unchanged, and a merge
+this workflow could not make cleanly is never pushed for it to classify. QP7's capped-loop
+requirement is preserved at the new entry point — the in-flight wait is bounded by a single deadline
+shared across the whole loop, and the commit authorship keeps `MAX_CYCLES` from being reset by a
+machine merge.
+
+## D-inherit-reviewed-anchor — the inherit check measures from the commit a panel read, not from the commit a cycle was recorded on
+
+Found by reading PR #162's run 31190337154 on 2026-08-07 (issue #163), which reported "there is no
+new content to read" over three files of fixes that had just been written to answer its own
+blockers.
+
+**The problem.** D-inherit-whole-range's two tests are sound; what they measured *from* was not.
+Both anchored on `steps.prior.outputs.cycle_sha` — the SHA the cycle counter was last recorded on.
+That is not the SHA a panel read. `review-finalize.yml` stamps `review/cycle` and `review/verdict`
+on `post_fix_sha`, which is the fixer's own push whenever the fixer pushed, and it does so for a
+good reason: the fixer claims that SHA so no second panel reviews the fix
+(D-fixer-merges-not-rebases), which makes this run the only one that will ever stamp it. So a
+successful fix moves the cycle marker onto a commit no reviewer has read, and the next run's
+gather resolves `PRIOR_CYCLE_SHA` to **the head it is classifying**.
+
+Both tests then pass on nothing:
+
+- `git rev-list "$SHA..$SHA" "^origin/main"` is empty, so the whole-range walk counts zero
+  unreviewed commits.
+- `git merge-tree --write-tree "$SHA" "${SHA}^2"` reproduces `${SHA}^{tree}` by construction —
+  `${SHA}^2` is already merged into `$SHA`, so merging it again is a no-op.
+
+The observed run's own log states it plainly: `pure merge-from-main since
+b1fbd60a5359cd8b496be4f78ab1733fc5112acb`, where `b1fbd60` *is* the reviewed SHA. Measured against
+the head the panel actually read, the same recreation refuses:
+
+```
+git merge-tree --write-tree b849671 bd352e9   → c6e6ed859a8a…
+git rev-parse b1fbd60^{tree}                  → d73953d75152…
+git diff c6e6ed8 d73953d --name-only          → docs/decisions.md, docs/quality-principles.md, pt.log
+```
+
+Net effect: a fixer push not followed by a further commit could never be re-reviewed, so the
+review → fix → re-review loop was broken at its last step. It failed in both directions, the same
+pair D-inherit-whole-range names: the observed one re-stamps a stale NO-GO over real fixes; the
+unobserved one re-stamps a **GO** over anything recorded onto a prior cycle — the merge-gate
+bypass, resurfaced through the cycle-recording seam rather than through the head's shape.
+
+**Decision.** Anchor both tests on the commit the inherited verdict was published *for*.
+`review-finalize.yml` writes a third per-SHA status alongside the two it already writes. The original
+form was `review/reviewed-sha`, on `post_fix_sha`, whose description was `reviewed_sha`; the inherit
+step read it off `PRIOR_CYCLE_SHA` and ran the range walk and merge-tree recreation from that anchor.
+D-atomic-verdict-anchor supersedes the separate-status pairing: the same anchor now lives in the
+description of `review/verdict-anchor`, with its verdict in that status object's state.
+
+Everything else is unchanged: `/review` still outranks the whole path, an empty prior still reviews,
+a recreation that conflicts still reviews, a recorded cycle with no verdict still reviews, and the
+recreation still registers the trusted `docs/decisions.md` merge driver from the `main` checkout
+(D-decisions-merge-driver). The mechanics of D-inherit-whole-range are kept verbatim; only their
+origin moves.
+
+**Why not "the SHA the newest `review/verdict` status sits on",** which is what issue #163 proposed.
+It resolves to the same fixer push, because finalize stamps the verdict there too — the status says
+where the verdict was *recorded*, and the missing fact was which commit it was *about*. No existing
+status carried that, so the fix is a new one rather than a different read of an old one.
+
+**Two guards the new anchor needs.**
+
+- *An unverifiable anchor is not an anchor.* A cycle recorded by a `main` older than this decision
+  carries no `review/verdict-anchor`, and the two things it could mean — "the panel read this commit"
+  and "the fixer pushed this commit" — are the inherit decision and its exact inverse. So an absent
+  or malformed anchor (anything but a 40-hex object id) reviews normally. The cost is one full read
+  for PRs mid-flight across this change, after which their next finalize writes the status and they
+  inherit as before; the alternative is guessing, in a step whose wrong answer is a merge-gate
+  bypass.
+- *The anchor may equal the head.* When it does, the panel read this exact commit and nothing has
+  been pushed since: there is no range to walk and no merge to recreate. That case now says so and
+  inherits, rather than falling through to shape tests that would pass vacuously for a merge head
+  and refuse a non-merge one for no reason connected to what was read. The triggers are real if
+  uncommon: `review-entry.yml` fires on `reopened` and `ready_for_review` as well as `synchronize`,
+  and `cleanup-claim` releases the dedup claim on every path, so an unchanged head can be entered
+  again after its verdict was published. The verdict guard still applies: nothing to inherit still
+  means review normally. Note the difference from the bug this fixes: the head compares against
+  *itself* only when the anchor genuinely names it, never because the anchor drifted onto it.
+
+The ancestry guard also moves above the head-shape tests. An anchor that a force-push removed from
+history makes every test below it meaningless rather than merely false, so it is answered first.
+
+**Tests.** `tests/test_ci_inherit_classifier.py` extracts the step and drives it under `bash`
+against throwaway repositories, offline. Added: the observed PR #162 shape — a fixer merge carrying
+content, recorded on the cycle it fixed — must review, and the same input with the anchor pointed
+back at the cycle-recorded SHA must inherit, so the test fails on a revert of the anchor and on
+nothing else; the same content one commit further along, under a later clean resync, where test 1
+passes and only the recreation refuses; the unchanged-head case inherits, and does not inherit
+without a verdict; absent and malformed anchors review.
+
+**Invariants.** None of the six pipeline-core safety invariants is in reach: no model's context is
+built here and no model runs. The gate this touches is D-inherit-whole-range's own, in the
+strengthening direction — the set of pushes that can inherit shrinks to those measured against a
+commit a panel actually read, plus the head-equals-anchor case that reads nothing new by
+construction. QP7 and QP8's citations of that gate stand as written; QP8's "deterministic
+whole-range/tree-identity gate" is now deterministic in its origin as well as its tests.
+
+## D-atomic-verdict-anchor — inherit one verdict/anchor object, never a paired latest value
+
+**Finding.** D-inherit-reviewed-anchor originally published the inherited verdict and its reviewed
+SHA in two commit statuses, `review/verdict` and `review/reviewed-sha`, then selected the newest of
+each context independently. That is not a transaction. The post-push claim race deliberately permits
+a second pipeline to reach the same fixer SHA, and `/review` and `synchronize` runs do not share one
+concurrency group. If two such runs finalize with different verdicts or reviewed SHAs, their API
+writes can interleave so the newest status in each context forms a pair no run published. The inherit
+classifier would then be deterministic over false provenance: one run's verdict attached to another
+run's anchor.
+
+**Decision.** The trust input is one `review/verdict-anchor` commit status on `post_fix_sha`. Its
+description is `reviewed_sha`; its state encodes the verdict (`success` = GO, `failure` = NO-GO).
+The inherit classifier selects the newest object in that context once and derives both facts from
+that object. Missing, malformed, pending, or error states review normally. `review/verdict` remains
+for human-readable compatibility, but it is not consulted by inheritance. This supersedes only
+D-inherit-reviewed-anchor's separate-status pairing; its reviewed-SHA origin, ancestry guard,
+unchanged-head case, whole-range walk, and tree-identity recreation are unchanged.
+
+**Tests.** `tests/test_ci_inherit_classifier.py` verifies that finalize writes both facts into the
+combined status and models interleaved finalizers by exposing a display GO beside an atomic NO-GO
+for the same head. Gather inherits NO-GO from the combined object and never queries the display
+status as a second trust input.
+
+**Invariants.** None of the six pipeline-core model invariants changes. This strengthens the CI
+merge gate described by QP7 and QP8: the classifier still uses only bounded status fields and git
+plumbing, but the provenance tuple it consumes is now atomic rather than assembled across races.
+
 ## D-repair-diagnostics — a rejected critique says which class it failed, without quoting itself
 
 **The problem.** Six lens failures in production over 2026-08-01 → 08-04 (19 runs) shared one
@@ -4865,6 +5114,10 @@ fails the whole review once the budget is gone, and no subset of issues is salva
 still reaches no generator as instruction; the diagnostics travel to a log, not to a prompt.
 
 ## Open items for a future round
+
+- Audition a replacement evidence-lens candidate (D-minimax-retirement). The lens now runs two
+  `marginal` critics, and `gemma4`'s 0.50 sensitivity sits below the warn line; the roster needs a
+  third family measured against the full corpus before `review.depth` can ever rise.
 
 - A third completeness critic, chosen by measurement (D-completeness-pool-noise). The pool is down
   to two families, which is enough for a strong `accepted` but leaves no spare for a rule 8 top-up:

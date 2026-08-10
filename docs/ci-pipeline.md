@@ -18,6 +18,7 @@ than reproducing that archaeology.
 | `ci-image.yml` | changes to `.github/ci/**`, manual | `ubuntu-latest` | builds the agent image and verifies every tool inside it runs |
 | `resolve-issue.yml` | issue opened/reopened/unlabeled, `/autoresolve` comment | `[self-hosted, homelab]` | an agent implements the issue and opens a PR |
 | `review-entry.yml` → `review-pipeline.yml` | PR events, `/review` | mixed | authorize → gather → reviewers → judge → finalize |
+| `sync-open-prs.yml` | push to `main` | `ubuntu-latest` | re-merges `main` into open PRs that only the `docs/decisions.md` merge driver can unblock (D-base-moved-resync) |
 
 ## PR validation is secret-free, on purpose
 
@@ -63,7 +64,8 @@ review-entry            authorize · fork-reject · resolve SHA · prior-GO chec
        │                non-agentic, clean-merge-only sync pass when the panel was guarded
        │                off and the branch is behind the base (D-unguarded-sync)
        ├─ judge         deterministic, from main, contents: read
-       └─ finalize      labels · summary comment · merge gate
+       └─ finalize      labels · summary comment · merge gate · review/cycle +
+                        review/verdict + review/verdict-anchor on the post-fix SHA
 ```
 
 Roles run on different model families deliberately. This project's own design argues that
@@ -285,6 +287,25 @@ it holds `contents: read`, so it could not push if it tried.
   deterministically through a trusted merge driver run from `main`, not a judgement call, so
   a merge that shape resolved does re-create cleanly and can still inherit — see "Syncing
   with the base branch" below and D-decisions-merge-driver.
+
+  **"The last reviewed SHA" is the commit a panel read, not the commit the cycle counter
+  was recorded on (D-inherit-reviewed-anchor).** Those two differ exactly when the fixer
+  pushed: `review/cycle` and `review/verdict` land on the fixer's push, because the fixer
+  claims that SHA and no other run will ever stamp it. Anchoring on it compared the head
+  with *itself* — an empty range, and a `merge-tree` of a head against its own
+  already-merged second parent, which reproduces that head's tree by construction — so
+  every fixer push that was not followed by another commit inherited its own pre-fix
+  verdict, and the review → fix → re-review loop could not close. `review-finalize.yml`
+  therefore writes a third status, `review/verdict-anchor`, whose state carries the verdict
+  (`success` = GO, `failure` = NO-GO) and whose description is the commit the verdict is
+  *about*; both tests measure from there and inherit the verdict from that same object
+  (D-atomic-verdict-anchor). `review/verdict` remains a display/compatibility status, never a
+  separately paired trust input. A cycle carrying no such anchor — one recorded before this
+  existed — is reviewed rather than guessed at, and an
+  anchor that *is* the head inherits directly, since nothing has been pushed since the
+  commit the panel read. That last case is reachable because `review-entry.yml` also fires
+  on `reopened` and `ready_for_review`, and `cleanup-claim` releases the dedup claim on
+  every path, so an unchanged head can be entered again after its verdict was published.
 - **A fixer-authored commit has no per-author exemption from the merge-from-base rule.** A clean,
   tree-identical base resync is inherited; a conflict-resolved merge is reviewed under
   D-inherit-whole-range. A prior version of this rule (PR #65, responding to PR #49) refused
@@ -431,6 +452,27 @@ rather than an environment variable: paths are contributor-controlled, and the a
 environment is assembled from an `--env-file`, where a newline in a path would inject
 arbitrary variables.
 
+**The driver also runs when the base moves, outside any cycle (D-base-moved-resync).** All
+three registrations above sit inside a review cycle, so a PR that has already been cleared
+has nothing left to run them: it just goes conflicted when `main` moves and waits for a
+human. [Git defines the custom merge-driver command in checkout-local config, not in
+`.gitattributes`](https://git-scm.com/docs/gitattributes#_defining_a_custom_merge_driver),
+so repository contents alone cannot install that command into an unconfigured merge.
+`sync-open-prs.yml` fires on push to `main` and closes that gap, running
+`scripts/sync_pr_with_base.sh` per open same-repo, non-draft PR. It merges twice — once with
+no driver registered, the unconfigured baseline, and if that conflicts, once with the
+trusted driver — and pushes only when the first conflicts and the second is
+clean. A PR that is merely behind is left alone: nothing here is what unblocks it, and
+pushing would churn the SHA dedup, the cycle counter and the artifact names are keyed on.
+The push uses `WORKFLOW_PAT`, because [GitHub documents that a PR `synchronize` event caused
+by `GITHUB_TOKEN` creates an approval-required run, while a personal access token lets it
+run automatically](https://docs.github.com/en/actions/how-tos/write-workflows/choose-when-workflows-run/trigger-a-workflow#triggering-a-workflow-from-a-workflow);
+without that automatic run the merge-gate status would not be republished on the new head. The
+merge is authored as `AGENT_COMMIT_EMAIL` so it does not read as a human answering the
+blockers and reset the cycle counter. A review run already in flight on the branch is waited
+for rather than raced — it performs the same merge itself, and the fixer discards a whole
+cycle's fixes if it finds the branch moved under it.
+
 **The sync still runs when the panel was guarded off (D-unguarded-sync).** Every reviewer guard refusing
 normally means the fixer does not run either, because `fix` was gated on `record-cycle`
 having written a cycle. That left the D-fixer-merges-not-rebases sync unreachable on any PR whose guards refuse for
@@ -456,7 +498,11 @@ The consequence is worth stating plainly: this does **not** rescue a PR that alr
 conflicts with its base. Such a PR has no computable merge ref, so GitHub fires no
 `pull_request` event, PR Validation never runs, every guard refuses, and the sync-only pass
 it reaches then hits conflicts and blocks. Clearing a true conflict still takes a human
-merging the base in by hand (as #54 and #56 did). What D-unguarded-sync fixes is the strictly larger,
+merging the base in by hand (as #54 and #56 did) — with one exception, added later:
+`sync-open-prs.yml` clears the `docs/decisions.md` append-only shape without a
+`pull_request` event at all, because it is triggered by the push to `main` rather than by
+anything happening on the PR (D-base-moved-resync). Every other conflict shape reads exactly
+as this paragraph says. What D-unguarded-sync fixes is the strictly larger,
 non-conflicting case: a behind-the-base PR whose panel was guarded off for any reason gets
 its sync, becomes mergeable, earns its `pull_request` event, gets validated, and becomes
 reachable by a panel — see the residual below for why that is "reachable" and not "reviewed".
@@ -471,7 +517,7 @@ deadlock moved one commit forward. So `sync_only` suppresses the claim, and the 
 gets the panel the pass itself could not run.
 
 **And it is not passed to finalize as `post_fix_sha`.** That input is where `review/cycle`,
-`review/verdict`, and the merge gate land, and stamping them on the pushed SHA is only safe
+`review/verdict`, `review/verdict-anchor`, and the merge gate land, and stamping them on the pushed SHA is only safe
 because the fixer's claim means no other run will ever write them there. Suppressing the claim
 removes that guarantee, so a sync-only successor would reach its own panel pre-stamped with a
 cycle it never spent — and at cycle 2 would arrive already capped, before the panel it was
@@ -690,6 +736,14 @@ Because the event is suppressed, nothing else will ever publish `review/cycle`,
 same run, taking `post_fix_sha` as an explicit input rather than defaulting to the pre-fix
 `reviewed_sha`. Writing the merge gate on the wrong SHA would leave the PR's actual head
 permanently ungated, which is exactly the failure this stamping exists to prevent.
+
+The same run also writes `review/verdict-anchor` there: its state carries the verdict and its
+description names `reviewed_sha` — the commit that verdict is *about*, which on this path is
+the fixer push's parent rather than the fixer push. Keeping both facts in one status is
+load-bearing because concurrent finalizers can otherwise interleave separate writes into a
+verdict/anchor pair no run produced. `review/verdict` remains for display and compatibility;
+inheritance trusts only the combined object (D-inherit-reviewed-anchor,
+D-atomic-verdict-anchor).
 `cleanup-claim` (bottom of `review-pipeline.yml`) advances `review/pipeline` to a terminal
 state on both the reviewed SHA and the post-fix SHA for the same reason: a claim this run
 makes and never revisits would otherwise leak `pending` forever and block every future
