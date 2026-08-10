@@ -26,6 +26,7 @@ from reasonable_answer.llm import (
     LLMClient,
     MalformedOutputError,
     ModelCallError,
+    _diagnostics_suffix,
     _message_dict,
     _Reply,
     _tool_calls,
@@ -514,6 +515,21 @@ def test_a_validator_rejection_is_repaired_with_its_hint(client):
     repair_prompt = seen[1]["messages"][-1]["content"]
     assert "value is not verbatim" in repair_prompt
     assert "COPY THIS EXACTLY" in repair_prompt
+
+
+def test_a_validators_diagnostics_reach_the_log_and_nothing_else_does():
+    """Duck-typed like `repair_hint`, for the same reason: `triage` is LLM-free and must
+    not import this module. A validator with nothing to say leaves the line unchanged."""
+
+    class _Rejected(ValueError):
+        def diagnostics(self, _fingerprint_key: bytes) -> dict[str, str]:
+            return {"code": "span_not_verbatim", "locus": "S5.P1", "span": "1a2b3c4d"}
+
+    suffix = _diagnostics_suffix(_Rejected("rejected"), fingerprint_key=b"k" * 32)
+
+    assert suffix == " [code=span_not_verbatim locus=S5.P1 span=1a2b3c4d]"
+    # A plain pydantic failure offers none, and must not change the line at all.
+    assert _diagnostics_suffix(ValueError("boom"), fingerprint_key=b"k" * 32) == ""
 
 
 def test_a_validator_that_never_passes_fails_closed(client):

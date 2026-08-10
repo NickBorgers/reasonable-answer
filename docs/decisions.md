@@ -5066,6 +5066,73 @@ status as a second trust input.
 merge gate described by QP7 and QP8: the classifier still uses only bounded status fields and git
 plumbing, but the provenance tuple it consumes is now atomic rather than assembled across races.
 
+## D-repair-diagnostics — a rejected critique says which class it failed, without quoting itself
+
+**The problem.** When `triage._require_quote` rejects a span until the
+`critic_repair_retries` budget runs out, the repair loop logs only `exc.__class__.__name__`
+(RA-016 — see the audit/privacy bullet in [architecture.md](./architecture.md)), and
+`critique_once` records only the **final** failure. So the logs cannot distinguish the two
+hypotheses that motivate different follow-up investigations:
+
+* the critic may **re-emit the same normalized rejected span** each attempt, which would be
+  consistent with a repair turn that did not produce a different candidate;
+* the critic may emit a **different normalized span** each attempt, which would be consistent with
+  changing candidates without finding a valid anchor.
+
+Nothing in a run's stored evidence separates them either: `LensResult.failure_reason` is the same
+bounded sentence and does not include the rejected span.
+
+**The decision.** A rejection carries bounded diagnostics, and the repair loop logs them.
+`triage.ViolationCode` names the class (`category_out_of_scope`, `locus_absent`, `span_empty`,
+`span_not_verbatim`); `LensValidationError` additionally carries the field, the locus, which issue
+of how many failed (attached by `critique.critique_once`, which is the only caller that knows the
+index), and `fingerprint()` — 8 hex from a keyed hash over the **normalized** rejected span. The key
+is fresh for each `LLMClient.structured()` call and reused only across that call's repair attempts.
+`llm._diagnostics_suffix` renders whatever a validator offers, duck-typed exactly as `repair_hint`
+already is, because `triage` is LLM-free and must not import the client to say so.
+
+The fingerprint makes that observable without quoting the rejected span: identical fingerprints
+show that the normalized rejected span was identical across attempts, while different fingerprints
+show that it changed. Those patterns support the two investigations above without establishing why
+the critic produced them. The fingerprint folds what `_normalize` folds, so typographic retyping
+does not look like a different candidate. The call-local key means the same hidden span does not
+produce a reusable identifier in another structured call.
+
+**What this deliberately does not do.** The rejected span itself never enters `str(exc)`. That is
+not incidental: the message becomes `LensResult.failure_reason`, which is persisted into the
+critique event and logged at WARNING, both outside the 0700 `runs/<id>/` tree. The span continues
+to travel in `repair_hint()`, which stays inside the run. A test pins the message, the diagnostics
+and the hint against the span text, so the property cannot regress into a leak.
+
+This changes what a failure *reports*, never what the pipeline *decides*: validation, the repair
+budget, fail-closed lens failure and every controller rule are untouched.
+
+**Invariants.** None of the six is in reach. Fail-closed lenses is the nearest — a rejection still
+fails the whole review once the budget is gone, and no subset of issues is salvaged. Untrusted text
+still reaches no generator as instruction; the diagnostics travel to a log, not to a prompt.
+
+## D-repair-diagnostic-keying — span correlation is limited to one repair loop
+
+**The finding.** An unkeyed truncated SHA-256 was content-derived even though it did not quote the
+content. Anyone able to read container stdout could hash candidate phrases offline, test whether a
+private report span had been rejected, and correlate the same hidden span across calls or runs.
+That exceeded RA-016's least-privilege boundary for stdout.
+
+**The decision.** `LLMClient.structured()` generates a fresh 32-byte secret before its repair loop.
+`LensValidationError.fingerprint()` uses keyed BLAKE2s over the normalized rejected span and emits
+only 8 hex characters. The same key is used for every attempt in that one structured call, so
+identical candidates remain observable as re-rolls there; a new call gets a new key, so the value
+cannot serve as a stable guessed-text verifier or cross-call correlation identifier. The key and
+the rejected span are never logged.
+
+The final content-free `LensValidationError` message still becomes `LensResult.failure_reason` and
+is logged at WARNING after repair exhaustion. This decision does not generalize that property to
+arbitrary validator messages; RA-016 relies on the triage error's message construction keeping the
+rejected span out of that path.
+
+**Invariants.** Validation, fail-closed lens handling, repair budgets, prompts and controller rules
+are unchanged. This tightens only the audit-privacy scope of the diagnostic identifier.
+
 ## Open items for a future round
 
 - Audition a replacement evidence-lens candidate (D-minimax-retirement). The lens now runs two

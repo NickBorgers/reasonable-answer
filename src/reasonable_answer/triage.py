@@ -15,7 +15,9 @@ never mixed into the counts (controller rule 2 re-critiques instead).
 
 from __future__ import annotations
 
+import hashlib
 import re
+from enum import Enum
 
 from .report import Structure
 from .schemas import (
@@ -45,6 +47,22 @@ from .taxonomy import (
 REPAIR_HINT_MAX_CHARS = 1200
 
 
+class ViolationCode(str, Enum):
+    """Why a lens validation failed, as a label bounded enough to log.
+
+    The classes differ in what they imply about the critic: a category out of scope is a
+    reading failure, an absent locus is an invented structural reference, and a span that
+    is not verbatim is a quoting slip. The message names the field and the locus but is
+    deliberately content-free, so without these a production log can only say
+    `LensValidationError` and cannot tell the three apart.
+    """
+
+    CATEGORY_OUT_OF_SCOPE = "category_out_of_scope"
+    LOCUS_ABSENT = "locus_absent"
+    SPAN_EMPTY = "span_empty"
+    SPAN_NOT_VERBATIM = "span_not_verbatim"
+
+
 class LensValidationError(ValueError):
     """An issue violated the closed schema for its lens. Fails the whole lens.
 
@@ -54,17 +72,80 @@ class LensValidationError(ValueError):
     information than it had the first time, and re-rolls the same failure. Whoever is
     retrying the call reads `repair_hint()` and hands the source text back, which is
     what turns a retry into a repair.
+
+    The rejected text itself is held privately and never reaches `str(self)`. That is
+    load-bearing rather than incidental: `critique.critique_once` puts the final message
+    into `LensResult.failure_reason`, which the graph persists into the critique event,
+    and the same message is logged at WARNING — both outside the 0700 run tree (RA-016).
+    `fingerprint()` is what a log gets instead, keyed to one repair loop so the value
+    cannot be correlated across calls or tested against guessed report text.
     """
 
-    def __init__(self, message: str, *, hint: str = "") -> None:
+    def __init__(
+        self,
+        message: str,
+        *,
+        code: ViolationCode,
+        hint: str = "",
+        field: str = "",
+        locus: object = None,
+        rejected: str = "",
+    ) -> None:
         super().__init__(message)
         self._hint = hint
+        self._rejected = rejected
+        self.code = code
+        self.field = field
+        self.locus = locus
+        #: Position of the offending issue in the response, filled in by the caller that
+        #: iterates them — `validate_issue` sees one issue and cannot know its index.
+        self.issue_index: int | None = None
+        self.issue_count: int | None = None
 
     def repair_hint(self) -> str:
         """The correction guidance, or "" when this violation has nothing concrete to
         offer (a category out of scope for the lens is a reading failure, not a
         recoverable slip)."""
         return self._hint
+
+    def at_issue(self, index: int, *, of: int) -> None:
+        """Record which issue of how many this violation came from."""
+        self.issue_index = index
+        self.issue_count = of
+
+    def fingerprint(self, key: bytes) -> str:
+        """Call-local 8-hex identity of the rejected text, or "" when there is none.
+
+        A keyed hash of the *normalized* span, so attempts in one repair loop can be
+        compared without exporting a dictionary-testable or cross-call identifier. It
+        exists to answer the one question the failure message cannot: across repair
+        attempts, did the critic re-emit the same rejected span — a re-roll, which means
+        the repair carried no usable correction — or move to a different one, which means
+        it is searching and cannot find a valid anchor at all. Those have different fixes,
+        and nothing in the current logs distinguishes them.
+        """
+        if not self._rejected:
+            return ""
+        return hashlib.blake2s(
+            _normalize(self._rejected).encode("utf-8"), key=key, digest_size=4
+        ).hexdigest()
+
+    def diagnostics(self, fingerprint_key: bytes) -> dict[str, str]:
+        """Bounded, content-free fields describing this rejection, for a log line.
+
+        Every value is a closed-enum label, a structural reference, an integer or a
+        hash — never report text, never model-authored prose (RA-016).
+        """
+        fields: dict[str, str] = {"code": self.code.value}
+        if self.field:
+            fields["field"] = self.field
+        if self.locus is not None:
+            fields["locus"] = str(self.locus)
+        if self.issue_index is not None:
+            fields["issue"] = f"{self.issue_index}/{self.issue_count}"
+        if self._rejected:
+            fields["span"] = self.fingerprint(fingerprint_key)
+        return fields
 
 
 def _quote_hint(field: str, scope: str, source_text: str) -> str:
@@ -144,11 +225,16 @@ def validate_issue(
     """Fail-closed validation. Anything off-schema fails the lens, never a silent drop."""
     if issue.category not in LENS_CATEGORIES[lens]:
         raise LensValidationError(
-            f"category '{issue.category.value}' is out of scope for lens '{lens.value}'"
+            f"category '{issue.category.value}' is out of scope for lens '{lens.value}'",
+            code=ViolationCode.CATEGORY_OUT_OF_SCOPE,
+            field="category",
         )
     if not structure.contains(issue.locus):
         raise LensValidationError(
             f"locus {issue.locus} does not exist in the artifact under review",
+            code=ViolationCode.LOCUS_ABSENT,
+            field="locus",
+            locus=issue.locus,
             # The markers are already in the prompt, but a critic that invented one has
             # demonstrably not read them off the artifact; listing the real ones is the
             # difference between a re-roll and a correction.
@@ -189,12 +275,19 @@ def _require_quote(span: str, source_text: str, field: str, locus, scope: str) -
         # empty string is a substring of everything — an issue anchored to nothing.
         raise LensValidationError(
             f"{field} at {locus} contains no quotable text",
+            code=ViolationCode.SPAN_EMPTY,
             hint=_quote_hint(field, scope, source_text),
+            field=field,
+            locus=locus,
         )
     if needle not in _normalize(source_text):
         raise LensValidationError(
             f"{field} at {locus} is not a verbatim quote from the {scope}",
+            code=ViolationCode.SPAN_NOT_VERBATIM,
             hint=_quote_hint(field, scope, source_text),
+            field=field,
+            locus=locus,
+            rejected=span,
         )
 
 

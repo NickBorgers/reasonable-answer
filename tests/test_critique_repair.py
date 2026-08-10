@@ -122,6 +122,24 @@ def test_one_bad_issue_still_fails_the_whole_lens():
     assert result.issues == []
 
 
+def test_a_rejection_names_which_issue_of_how_many_failed():
+    """A critic stuck on one bad span and a critic whose whole response is unanchored
+    both surface as one `LensValidationError`. Which issue failed, out of how many, is
+    the difference — and `validate_issue` sees one issue and cannot know it."""
+    seq = iter([[_issue(VERBATIM), _issue(VERBATIM), _issue(INVENTED)]])
+    client = FakeClient(
+        identities={"critic": "vendor-x/critic"},
+        critique_fn=lambda _a, _u: CritiqueOutput(issues=next(seq)),
+        report_fn=lambda _n: REPORT,
+        critic_repair_retries=0,
+    )
+
+    result = _run(client)
+
+    assert result.failed
+    assert client.validation_errors[0].diagnostics(b"k" * 32)["issue"] == "2/3"
+
+
 def test_a_typographic_quote_is_not_a_misquote():
     """The report carries a curly apostrophe; a model retyping the span emits a straight
     one. That difference is invisible to a reader and must not fail a lens."""
