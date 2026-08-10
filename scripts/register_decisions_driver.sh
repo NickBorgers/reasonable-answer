@@ -82,24 +82,24 @@ if ! cmp -s "${smoke}/result" "${smoke}/expected"; then
 fi
 
 # The shape D-decisions-merge-regions added, and the one the driver spends most of its life
-# on: one side appends a section while the other revises an existing one in place and touches
-# the Open-items tail. Under the original whole-file rule this declined, so a driver that had
-# silently regressed to that rule would still pass the append-only case above. This is the
-# case that catches it.
+# on: both sides append at the same anchor while one also revises an existing section in place
+# and touches the Open-items tail. Plain git cannot order the two insertions, while the original
+# whole-file rule declines because one side is not append-only. A driver silently regressed to
+# that rule would still pass the append-only case above; this is the case that catches it.
 region_ours="${head}${ours_section}${tail}"
-region_theirs="${head/Body./Body, revised in place.}${tail/- nothing/- nothing, and one more}"
+region_theirs="${head/Body./Body, revised in place.}${theirs_section}${tail/- nothing/- nothing, and one more}"
 printf '%s' "${region_ours}" > "${smoke}/region-result"
 printf '%s' "${region_theirs}" > "${smoke}/region-theirs"
 printf '%s%s' "${head}" "${tail}" > "${smoke}/region-base"
+printf '%s%s%s' "${head/Body./Body, revised in place.}" "${ours_section}${theirs_section}" \
+  "${tail/- nothing/- nothing, and one more}" > "${smoke}/region-expected"
 if ! python3 "${DRIVER}" "${smoke}/region-base" "${smoke}/region-result" "${smoke}/region-theirs" \
      >/dev/null 2>&1; then
   warn "\`python3 ${DRIVER}\` declined an append on one side against an unrelated edit on the other"
   exit 0
 fi
-if ! grep -q 'D-smoke-ours' "${smoke}/region-result" \
-   || ! grep -q 'Body, revised in place.' "${smoke}/region-result" \
-   || ! grep -q -- '- nothing, and one more' "${smoke}/region-result"; then
-  warn "\`python3 ${DRIVER}\` merged an append against an unrelated edit but dropped one side's change"
+if ! cmp -s "${smoke}/region-result" "${smoke}/region-expected"; then
+  warn "\`python3 ${DRIVER}\` did not produce the expected regional merge and insertion order"
   exit 0
 fi
 

@@ -4283,6 +4283,11 @@ change are filed separately and are not touched here.
 
 ## D-decisions-merge-driver — a merge driver resolves the common append-only collision, not a file split
 
+> Superseded in part by **D-decisions-merge-regions**, which restates the recognized shape as a
+> rule about the colliding region rather than the whole file. The mechanism, the
+> registration-is-conditional argument and the file-split rejection below stand unchanged; the
+> original whole-file precondition does not.
+
 **The problem.** Every new decision is appended immediately before `## Open items for a future round`
 (D-decision-slugs). Almost every PR here is agent-authored (docs/ci-pipeline.md's "Syncing with the
 base branch": "Almost every PR here is agent-authored, so when the base moves there is no human in
@@ -4297,19 +4302,22 @@ gated resolution path rather than treating it as exceptional.
 
 **The decision.** A repo-local git merge driver (`scripts/merge_decisions.py`, registered by
 `.gitattributes` and `git config merge.decisions-append.driver`) special-cases the "both sides purely
-appended sections before the tail marker" shape and merges it automatically. Anything else — an edit to
-an existing section, an edit to the Open-items section itself, a genuine same-slug collision with
-differing content, or any parse ambiguity — falls through to exactly what an unconfigured merge would
-have done (`git merge-file`'s own diff3 merge, conflict markers and all). The driver is registered at
+appended sections before the tail marker" shape and merges it automatically. Under this original
+rule, anything else — an edit to an existing section, an edit to the Open-items section itself, a
+genuine same-slug collision with differing content, or any parse ambiguity — falls through to exactly
+what an unconfigured merge would have done (`git merge-file`'s own diff3 merge, conflict markers and
+all). D-decisions-merge-regions now merges the first two cases region-wise when the shared core and
+tail merge cleanly; the same-slug and ambiguity cases still decline. The driver is registered at
 every place this repository actually runs a merge of this kind: `review-fixer.yml`'s two sync-merge call
 sites, `review-pipeline.yml`'s merge-tree recreation step (D-inherit-whole-range), and
 `sync-open-prs.yml`'s base-moved resync (D-base-moved-resync), plus `.devcontainer/setup.sh` for a
 human resolving the same conflict locally.
 
-The recognized shape is exact: appended text must be one or more complete `## D-<slug> — …` sections,
-nothing else, with at least one blank line separating the last one from the tail marker. Any prose
-that isn't itself a decision section, a stray non-decision heading, or a section running straight
-into the marker with no blank line at all makes the driver decline, not merge something malformed.
+Under the original rule, superseded by D-decisions-merge-regions, the recognized whole-file shape
+was exact: appended text had to be one or more complete `## D-<slug> — …` sections, nothing else,
+with at least one blank line separating the last one from the tail marker. The regional rule keeps
+the fail-closed requirements for added sections and parse ambiguity while allowing unrelated prose
+edits inside shared sections and the Open-items tail to be merged by `git merge-file`.
 
 **Registration is conditional, because a broken driver is worse than none.** "Falls through to what
 an unconfigured merge would have done" is a property of the driver's *decisions*, not of its
@@ -5075,24 +5083,23 @@ untouched — when the ambiguity it resolves is local: two insertions anchored o
 which a three-way merge has no way to order. Any unrelated clean change elsewhere in a 5,000-line
 registry therefore disarmed the driver for a collision it played no part in.
 
-That is not an edge case, it is the normal case. Measured over `main`: of the 33 slug-era commits
-to this file, **4** satisfy the precondition as a merge side; both sides must satisfy it, so the
-joint rate is about 1%. Of the 9 commits since the driver merged, 1 did. Three shapes account for
-the failures, and every one of them is behaviour this repository *prescribes*:
+The repository's own rules and history produce three shapes that the whole-file precondition rejects,
+and every one is behaviour this repository *prescribes*:
 
 * **An existing section revised in place.** "Decisions are superseded in place, never deleted", so a
   supersession landing on the base while a branch appends is routine. It is also what a decision
   that corrects a stale cross-reference does — `D-minimax-retirement` rewrote one sentence inside an
-  older decision, and that alone disqualified `main` as a side for every open PR. 21 of the 33 do.
+  older decision ([commit 122360a](https://github.com/NickBorgers/reasonable-answer/commit/122360a6b13fbf168bdbce8fd595df5d6092fe54)).
 * **An Open-items bullet.** A decision that closes or opens an item edits the section this file uses
-  as its tail marker. 10 of the 33 do.
+  as its tail marker.
 * **A new section that is not last.** A branch that hand-resolved an earlier collision ends up with
   its own section placed *above* the one it merged in, so its delta is an insert rather than an
-  append — permanently, for every later merge. 13 of the 33 are inserts.
+  append — permanently, for every later merge.
 
-PR #161 hit all three at once. `sync-open-prs.yml` ran on every push to `main`, executed the driver,
-and logged `state=conflicts` each time, while `git merge-file` on the same three inputs conflicted
-*only* in the two append regions.
+[PR #161](https://github.com/NickBorgers/reasonable-answer/pull/161) records a concrete branch shape
+combining all three: a non-last added section on the PR side, plus shared-section and Open-items edits
+alongside added sections on the base side. The unresolved ambiguity was the ordering of the added
+sections, not the independent edits elsewhere in the file.
 
 **The decision.** State the rule regionally. The driver splits each side's head at every `## `
 heading, peels off the sections that side **added**, three-way merges everything that remains — the

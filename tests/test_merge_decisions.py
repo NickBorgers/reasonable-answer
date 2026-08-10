@@ -100,6 +100,28 @@ def test_duplicate_slug_within_one_sides_suffix_abstains() -> None:
     assert merge_decisions.try_fast_path(BASE, ours, theirs) is None
 
 
+def test_duplicate_heading_line_in_base_abstains() -> None:
+    base = (
+        "# Decisions\n\n"
+        "## Notes\n\nfirst note.\n\n"
+        "## Notes\n\nsecond note.\n\n"
+        "## D-alpha — first\n\nbody alpha.\n\n"
+        + TAIL
+    )
+    ours = base.replace(TAIL, "## D-bravo — second\n\nbody bravo.\n\n" + TAIL)
+    theirs = base.replace(TAIL, "## D-charlie — third\n\nbody charlie.\n\n" + TAIL)
+    assert merge_decisions.try_fast_path(base, ours, theirs) is None
+
+
+def test_duplicate_heading_line_within_one_sides_added_sections_abstains() -> None:
+    ours = BASE.replace(
+        TAIL,
+        "## Weird\n\nfirst body.\n\n## Weird\n\nsecond body.\n\n" + TAIL,
+    )
+    theirs = BASE.replace(TAIL, "## D-charlie — third\n\nbody charlie.\n\n" + TAIL)
+    assert merge_decisions.try_fast_path(BASE, ours, theirs) is None
+
+
 def test_section_with_empty_body_abstains() -> None:
     ours = BASE.replace(TAIL, "## D-bravo — second\n\n" + TAIL)
     theirs = BASE.replace(TAIL, "## D-charlie — third\n\nbody charlie.\n\n" + TAIL)

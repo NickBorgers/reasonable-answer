@@ -507,10 +507,13 @@ conflicts with its base. Such a PR has no computable merge ref, so GitHub fires 
 `pull_request` event, PR Validation never runs, every guard refuses, and the sync-only pass
 it reaches then hits conflicts and blocks. Clearing a true conflict still takes a human
 merging the base in by hand (as #54 and #56 did) — with one exception, added later:
-`sync-open-prs.yml` clears the `docs/decisions.md` append-only shape without a
-`pull_request` event at all, because it is triggered by the push to `main` rather than by
-anything happening on the PR (D-base-moved-resync). Every other conflict shape reads exactly
-as this paragraph says. What D-unguarded-sync fixes is the strictly larger,
+`sync-open-prs.yml` clears regional `docs/decisions.md` collisions without a `pull_request`
+event at all, because it is triggered by the push to `main` rather than by anything happening
+on the PR (D-base-moved-resync, D-decisions-merge-regions). The trusted driver orders independently
+added decision sections when the shared sections and Open-items tail merge cleanly, including a
+non-last addition or an unrelated in-place edit on either side. Deleted or renamed sections,
+duplicate slugs, new non-decision headings, parse ambiguity, and real conflicts inside shared
+sections or the tail remain manual. What D-unguarded-sync fixes is the strictly larger,
 non-conflicting case: a behind-the-base PR whose panel was guarded off for any reason gets
 its sync, becomes mergeable, earns its `pull_request` event, gets validated, and becomes
 reachable by a panel — see the residual below for why that is "reachable" and not "reviewed".

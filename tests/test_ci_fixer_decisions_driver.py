@@ -298,6 +298,37 @@ def test_register_declines_a_driver_that_merges_nothing(bench: Bench) -> None:
     assert _configured_driver(bench.clone) is None
 
 
+def test_register_declines_a_driver_that_regressed_to_the_whole_file_rule(bench: Bench) -> None:
+    """The regional smoke case must distinguish the new rule from the old append-only one."""
+    bench.sabotage_driver(
+        "#!/usr/bin/env python3\n"
+        "import re, subprocess, sys\n"
+        "from pathlib import Path\n"
+        "marker = re.compile(r'^## Open items for a future round\\s*$', re.MULTILINE)\n"
+        "def split(text):\n"
+        "    match = marker.search(text)\n"
+        "    return text[:match.start()], text[match.start():]\n"
+        "base_path, ours_path, theirs_path = map(Path, sys.argv[1:4])\n"
+        "base, ours, theirs = base_path.read_text(), ours_path.read_text(), theirs_path.read_text()\n"
+        "base_head, base_tail = split(base)\n"
+        "ours_head, ours_tail = split(ours)\n"
+        "theirs_head, theirs_tail = split(theirs)\n"
+        "if ours_tail == base_tail == theirs_tail and ours_head.startswith(base_head) "
+        "and theirs_head.startswith(base_head):\n"
+        "    ours_path.write_text(base_head + ours_head[len(base_head):] "
+        "+ theirs_head[len(base_head):] + base_tail)\n"
+        "    sys.exit(0)\n"
+        "sys.exit(subprocess.run(['git', 'merge-file', str(ours_path), str(base_path), "
+        "str(theirs_path)]).returncode)\n"
+    )
+
+    result = _register(bench.trusted, bench.clone)
+
+    assert result.returncode == 0
+    assert "not registered" in result.stdout
+    assert _configured_driver(bench.clone) is None
+
+
 def test_register_declines_a_driver_that_swallows_a_real_conflict(bench: Bench) -> None:
     """The other half of the contract: declining a shape must still produce markers."""
     bench.sabotage_driver(
