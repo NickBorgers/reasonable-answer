@@ -594,7 +594,7 @@ def fetched_sources_block(sources: list, char_budget: int | None = None) -> str:
         withheld = (
             s.ok
             and char_budget is not None
-            and bool(entries)
+            and spent > 0
             and spent + len(s.text) > char_budget
         )
         if withheld:

@@ -765,6 +765,17 @@ def test_the_first_body_is_shown_however_small_the_budget():
     assert "q" * 100 in block
 
 
+def test_the_first_body_is_shown_after_an_unreadable_source():
+    failed = FetchedSource(url="https://example.org/blocked", status=403, error="HTTP 403")
+    body = FetchedSource(url="https://example.org/readable", title="A", text="q" * 50_000)
+
+    block = prompts.fetched_sources_block([failed, body], char_budget=1_000)
+
+    assert "BLOCKED" in block
+    assert "q" * 100 in block
+    assert block.count("FETCHED, TEXT WITHHELD") == 1  # instruction legend only
+
+
 def test_a_failed_fetch_is_not_presented_as_evidence_of_fabrication():
     block = prompts.fetched_sources_block(
         [FetchedSource(url="https://example.org/a", status=403, error="HTTP 403")]
@@ -940,6 +951,33 @@ def test_evidence_lens_sees_the_fetched_pages(tmp_path, identities, config):
     for marker in _SOURCE_MARKERS:
         assert marker in client.calls[-1].user
     assert "https://example.org/a" in client.calls[-1].user
+
+
+def test_evidence_lens_uses_the_configured_source_character_budget(
+    tmp_path, identities, config
+):
+    from reasonable_answer.graph import _critique_one
+
+    class _TwoBodies:
+        def fetch_all(self, urls):
+            return [
+                FetchedSource(url=urls[0], text="a" * 800),
+                FetchedSource(url=urls[1], text="b" * 800),
+            ]
+
+    config = config.model_copy(
+        update={
+            "search": config.search.model_copy(update={"source_char_budget": 1_000})
+        }
+    )
+    rt, client = _runtime(tmp_path, identities, config, fetcher=_TwoBodies())
+    _critique_one(
+        rt, Lens.EVIDENCE, "evidence-spec", "q?", REPORT, "h" * 64, "vendor-a/model-a", attempt=1
+    )
+
+    assert "a" * 100 in client.calls[-1].user
+    assert "b" * 100 not in client.calls[-1].user
+    assert "FETCHED, TEXT WITHHELD" in client.calls[-1].user
 
 
 def test_verification_off_leaves_the_evidence_prompt_unchanged(

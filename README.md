@@ -357,13 +357,18 @@ actually returned rather than ones the model remembered. Credential: `$BRAVE_SEA
 gitignored `brave.token` for local work. Startup fails closed if the key is missing *or* if any
 writer cannot emit tool calls — that writer would still be told to produce a `## Sources` section
 and would fill it from memory, and no downstream check can tell a remembered citation from a
-retrieved one. Each run carries a query budget (default 60) because the free tier is 2,000
-queries/month; when it runs out the writer is told so explicitly rather than being handed silence.
+retrieved one. Queries are counted across the run but unbounded by default; set
+`search.query_budget` only when a deployment needs an explicit call cap. When a configured cap runs
+out, the writer is told so explicitly rather than being handed silence.
 
 **Source verification (optional, off by default).** Set `search.verify_sources: true` and
-addressable cited URLs, deduplicated and capped by `search.max_sources`, are fetched and handed to
-the **evidence lens only**, as untrusted data. Unaddressable entries and addressable entries beyond
-the cap remain unchecked. For attempted pages, this turns `fabricated_citation` and
+addressable cited URLs are deduplicated and attempted up to the anti-pathological
+`search.max_source_urls` ceiling, then handed to the **evidence lens only** as untrusted data.
+Unaddressable entries and addressable entries beyond the ceiling remain unchecked and are recorded
+as not attempted. The ceiling prevents pathological model output from causing unbounded egress; it
+is not a spend budget and should not bind on an ordinary bibliography. Page text in the critic
+context is separately bounded by `search.source_char_budget`; every attempted source remains listed,
+with later bodies marked `FETCHED, TEXT WITHHELD` when necessary. For attempted pages, this turns `fabricated_citation` and
 `misrepresented_source` from judgements about plausibility into checks against the page. A cited URL
 that returns a definitive not-found — HTTP 404 or 410 Gone — is treated as a
 `fabricated_citation`, because that status establishes the URL does not resolve rather than that it
@@ -380,9 +385,10 @@ page to *check* a claim; it does not let it read one to *make* one. Set `search.
 (which requires `search.enabled`) and writers also get a `read_source` tool, so a claim can be
 attached to text the writer actually read rather than to a one-line search snippet. A writer may
 open only a URL a `web_search` result **in that same writer call** returned — there is no
-arbitrary-URL reader, and a refused URL never reaches the network or costs budget. Three bounds
-apply per run: `search.read_budget` pages (default 24), `search.read_char_budget` characters of page
-text in total (default 200,000), and `search.read_max_chars` per page (default 6,000). Raising
+arbitrary-URL reader, and a refused URL never reaches the network or costs budget. Calls are counted
+but unbounded by default; optional `search.read_budget` adds a whole-run call cap. Two character
+bounds always apply: `search.read_char_budget` characters of page text in total (default 200,000),
+and `search.read_max_chars` per page (default 6,000). Raising
 `read_max_chars` above `fetch_max_chars` widens what the *writer* sees and nothing else — the
 evidence lens and mechanical dispute adjudication stay clipped to `fetch_max_chars`. Reading
 egresses through the same fetch boundary `verify_sources` uses, so the same network-layer caveat

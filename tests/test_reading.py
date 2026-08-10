@@ -219,10 +219,13 @@ def test_unbounded_calls_still_respect_the_character_budget():
     unbounded reader must not become an unbounded prompt."""
     budget = reading.ReadBudget(max_calls=None, max_chars=1_000)
 
+    assert not budget.exhausted
     assert all(budget.take_call() for _ in range(500))
+    assert not budget.exhausted
     assert budget.take_chars(600) == 600
     assert budget.take_chars(600) == 400  # partial grant: the character bound still bites
     assert budget.take_chars(600) == 0
+    assert budget.exhausted
 
 
 def test_the_budget_is_thread_safe():
@@ -463,6 +466,15 @@ def test_reading_on_builds_a_reader_with_the_configured_budget(tmp_path):
 
     assert reader.budget.max_calls == 9
     assert reader.budget.max_chars == 1_234
+
+
+def test_reading_on_forwards_the_default_unbounded_call_budget(tmp_path):
+    from reasonable_answer.graph import _build_reader
+
+    config = _config(tmp_path, enabled=True, read_sources=True)
+    reader = _build_reader(config, fetcher=object())
+
+    assert reader.budget.max_calls is None
 
 
 # ------------------------------------------- the cap each consumer of the cache sees

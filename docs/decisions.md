@@ -5220,33 +5220,22 @@ table, which still meet inside the core merge.
 
 ## D-unbounded-evidence — a citation the fetcher never saw is worse than an expensive one
 
-**The problem.** `run-6611dbb6b02f` ran the full eight rounds and terminated `needs_human_review`
-with `lenses_failed = 0` on every round — nothing failed, it simply never converged. The evidence
-lens raised 44 of the run's 54 issues and cleared once in eight rounds, and the audit shows why.
-
 `fetch.extract_source_urls(report_text, limit=search.max_sources)` truncated the cited-URL list at
 12. A citation past that never became a `FetchedSource`, so it carried no `SourceOutcome`, never
 appeared in `prompts.fetched_sources_block`, and reached the evidence critic as a claim citing `[18]`
 with no corresponding entry anywhere in its context. Judging such a citation "on its face" is exactly
 what `fabricated_citation` licenses. The loop closes there: the evidence lens raises `uncited_claim`,
-the writer adds citations, the bibliography passes the cap, the unverifiable surface grows, and the
-next round has more to complain about than the last.
-
-| round | cited | fetched | never checked |
-|---|---|---|---|
-| 1 | 8 | 8 | 0 |
-| 4 | 15 | 12 | 3 |
-| 6 | 17 | 12 | 5 |
-| 8 | 23 | 12 | 11 |
-
-Material count across the eight rounds: 9, 5, 6, 5, 3, 4, 8, 4. Not converging — oscillating, with
-a supply of new defects that each fix replenished.
+the writer adds citations, the bibliography passes the cap, and the unverifiable surface grows.
+The defect follows directly from the code path: every addressable citation omitted by the spend cap
+is absent from the evidence critic's fetched-source context.
 
 **The decision.** A cap that exists only to bound spend comes out. `search.max_sources` (12),
 `search.query_budget` (60/run) and `search.read_budget` (24 calls/run) were all spend controls;
-`query_budget` and `read_budget` now default to `None`, meaning unbounded, and the URL truncation is
-gone. Every addressable cited URL is fetched, so every citation carries a real outcome and none is
-silently absent from the critic's view. That absence, not the count, was the defect.
+`query_budget` and `read_budget` now default to `None`, meaning unbounded, and the spend-driven URL
+truncation is replaced by an anti-pathological ceiling. Every addressable cited URL up to
+`search.max_source_urls` is attempted, so every citation inside that ceiling carries a real outcome
+and none is silently absent from the critic's view. Entries beyond it are recorded as not attempted.
+That silent absence, not the count, was the defect.
 
 The round `budgets.hard_cap` stays. It is a forcing function — a run that cannot answer in eight
 rounds should stop and say so — and it is the one bound here that was never about money.
@@ -5256,16 +5245,16 @@ justified by cost:
 
 * `search.max_source_urls` (200) is anti-pathological. The `## Sources` list is untrusted model
   output and every entry is an egress (docs/ssrf-egress-isolation.md), so a report that emits ten
-  thousand URLs must not become ten thousand fetches. It must never bind on a real bibliography —
-  the largest observed is 23 — and a non-zero `not_attempted` in the coverage stats is now a bug
-  signal rather than a budgeting outcome. It bounds a bug, not a bill, in the manner of
+  thousand URLs must not become ten thousand fetches. It must not bind on an ordinary bibliography,
+  and a non-zero `not_attempted` in the coverage stats is a bug signal rather than a budgeting
+  outcome. It bounds a bug, not a bill, in the manner of
   `sources.extraction.max_calls_per_run`.
 * `search.source_char_budget` (60,000) bounds how much page *text* one evidence context holds. That
   is an efficacy limit and is the repository's own position: principle #6 in
   [isolation.md](./isolation.md) cites Liu et al. 2023 on lost-in-the-middle, `ReadBudget` already
   makes the same argument for writers ("a correctness property here rather than a cost one"), and
-  the evidence pool is not made of large models. At 23 sources × `fetch_max_chars` a single context
-  would carry ~138k characters.
+  the evidence pool is not made of large models. At the anti-pathological ceiling, even the default
+  per-page extraction cap would produce a context far beyond the configured 60,000-character bound.
 
 **Listed is not the same as shown.** A source past the character budget still appears, through a
 fourth entry shape in `fetched_sources_block`: `FETCHED, TEXT WITHHELD`, stating that the page was

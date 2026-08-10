@@ -102,7 +102,7 @@ class ReadBudget:
             return self._used_chars
 
     @property
-    def max_calls(self) -> int:
+    def max_calls(self) -> int | None:
         return self._max_calls
 
     @property
@@ -114,7 +114,8 @@ class ReadBudget:
         """Either counter spent. Checked *before* a call is taken, so a read never
         starts against a character budget that cannot pay for its result."""
         with self._lock:
-            return self._used_calls >= self._max_calls or self._used_chars >= self._max_chars
+            calls_spent = self._max_calls is not None and self._used_calls >= self._max_calls
+            return calls_spent or self._used_chars >= self._max_chars
 
 
 class ReadSession:
@@ -325,11 +326,11 @@ def make_tool_handler(
         # outlives a content purge. The outcome is a closed vocabulary and the lengths
         # are numbers, which is enough to debug the tool.
         log.info(
-            "read_source -> %s (url %d chars, %d/%d reads, %d/%d chars used)",
+            "read_source -> %s (url %d chars, %d/%s reads, %d/%d chars used)",
             result.outcome.value,
             len(url),
             reader.budget.used_calls,
-            reader.budget.max_calls,
+            "unbounded" if reader.budget.max_calls is None else reader.budget.max_calls,
             reader.budget.used_chars,
             reader.budget.max_chars,
         )
