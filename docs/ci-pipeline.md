@@ -283,10 +283,10 @@ it holds `contents: read`, so it could not push if it tried.
   underneath it: content, then `git merge origin/main`, inherited the prior verdict with no
   reviewer reading a line. The tree test is what a hand-resolved conflict cannot pass, and
   it is deliberately fail-closed — a merge that cannot be re-created cleanly is reviewed.
-  One conflict shape is an exception: `docs/decisions.md`'s append-only collision resolves
+  One conflict shape is an exception: `docs/decisions.md`'s insertion-point collision resolves
   deterministically through a trusted merge driver run from `main`, not a judgement call, so
   a merge that shape resolved does re-create cleanly and can still inherit — see "Syncing
-  with the base branch" below and D-decisions-merge-driver.
+  with the base branch" below, D-decisions-merge-driver and D-decisions-merge-regions.
 
   **"The last reviewed SHA" is the commit a panel read, not the commit the cycle counter
   was recorded on (D-inherit-reviewed-anchor).** Those two differ exactly when the fixer
@@ -425,16 +425,24 @@ paragraph used to promise — a resolution is a judgement nobody has checked, an
 one place arbitrary content can sit inside a correctly-shaped merge.
 
 **One conflict shape resolves deterministically enough to still inherit
-(D-decisions-merge-driver).** `docs/decisions.md`'s append-only collision — two PRs each
-adding a decision immediately before the same tail marker, nothing else touched — is common
-enough to carry its own merge driver (`scripts/merge_decisions.py`), registered from the
-trusted `main` checkout in both this sync step and the inherit step's own recreation, never
-from the PR under review. Because both sides run the identical trusted, deterministic
-function on the same inputs, a merge that shape resolves still recreates tree-identical and
-still inherits. A `docs/decisions.md` conflict of any other shape — an edited existing
-section, an edited Open-items list, a genuine same-slug collision — still falls through to a
-hand resolution nobody has checked, and is reviewed exactly as before; every other file's
-conflicts are unaffected.
+(D-decisions-merge-driver, D-decisions-merge-regions).** `docs/decisions.md`'s insertion-point
+collision — two PRs each adding a decision at the same anchor, which a three-way merge has no
+way to order — is common enough to carry its own merge driver
+(`scripts/merge_decisions.py`), registered from the trusted `main` checkout in both this sync
+step and the inherit step's own recreation, never from the PR under review. Because both sides
+run the identical trusted, deterministic function on the same inputs, a merge that shape
+resolves still recreates tree-identical and still inherits.
+
+The driver reasons about the colliding *region*, not the whole file (D-decisions-merge-regions):
+it peels off the sections each side added, three-way merges the sections they share and the
+Open-items tail separately with `git merge-file`, and reassembles. So a decision revised in
+place, an Open-items bullet, or a new section that is not the last one — all of which the
+original whole-file rule treated as disqualifying, and which between them accounted for 29 of
+the 33 slug-era commits to the file — no longer disarm it. What still falls through to a hand
+resolution nobody has checked, and is reviewed exactly as before: a deleted section or a
+rewritten heading, a new heading that is not decision-shaped, a slug named on both sides, and
+any genuine disagreement inside a shared section or the tail. Every other file's conflicts are
+unaffected.
 
 The driver is registered by `scripts/register_decisions_driver.sh`, which smoke-tests it
 first and registers nothing if that fails. This is not belt-and-braces: a merge driver whose

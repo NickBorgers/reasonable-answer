@@ -81,6 +81,28 @@ if ! cmp -s "${smoke}/result" "${smoke}/expected"; then
   exit 0
 fi
 
+# The shape D-decisions-merge-regions added, and the one the driver spends most of its life
+# on: one side appends a section while the other revises an existing one in place and touches
+# the Open-items tail. Under the original whole-file rule this declined, so a driver that had
+# silently regressed to that rule would still pass the append-only case above. This is the
+# case that catches it.
+region_ours="${head}${ours_section}${tail}"
+region_theirs="${head/Body./Body, revised in place.}${tail/- nothing/- nothing, and one more}"
+printf '%s' "${region_ours}" > "${smoke}/region-result"
+printf '%s' "${region_theirs}" > "${smoke}/region-theirs"
+printf '%s%s' "${head}" "${tail}" > "${smoke}/region-base"
+if ! python3 "${DRIVER}" "${smoke}/region-base" "${smoke}/region-result" "${smoke}/region-theirs" \
+     >/dev/null 2>&1; then
+  warn "\`python3 ${DRIVER}\` declined an append on one side against an unrelated edit on the other"
+  exit 0
+fi
+if ! grep -q 'D-smoke-ours' "${smoke}/region-result" \
+   || ! grep -q 'Body, revised in place.' "${smoke}/region-result" \
+   || ! grep -q -- '- nothing, and one more' "${smoke}/region-result"; then
+  warn "\`python3 ${DRIVER}\` merged an append against an unrelated edit but dropped one side's change"
+  exit 0
+fi
+
 # The other half of the contract: a shape the driver declines must still come back as a
 # real conflict. If the fallback to `git merge-file` were broken, the driver would report
 # success on input it never merged — the same silent-drop failure, one layer in.
