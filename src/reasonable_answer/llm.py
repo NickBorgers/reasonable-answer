@@ -17,6 +17,7 @@ import json
 import logging
 import random
 import re
+import secrets
 import time
 import urllib.request
 from collections.abc import Callable
@@ -590,6 +591,7 @@ class LLMClient:
 
         attempt_user = f"{user}\n\n{instruction}"
         last_err = ""
+        diagnostic_key = secrets.token_bytes(32)
         for attempt in range(repair_retries + 1):
             completion = self.complete(
                 alias,
@@ -619,7 +621,7 @@ class LLMClient:
                     alias,
                     attempt + 1,
                     exc.__class__.__name__,
-                    _diagnostics_suffix(exc),
+                    _diagnostics_suffix(exc, fingerprint_key=diagnostic_key),
                 )
                 # Duck-typed rather than a shared base class: the validators that carry
                 # guidance live in `triage`, which is deliberately LLM-free and must not
@@ -636,7 +638,7 @@ class LLMClient:
         raise MalformedOutputError(f"{alias}: schema violation after repair: {last_err}")
 
 
-def _diagnostics_suffix(exc: Exception) -> str:
+def _diagnostics_suffix(exc: Exception, *, fingerprint_key: bytes) -> str:
     """Bounded detail a validator offers about its own rejection, rendered for a log.
 
     Duck-typed for the same reason `repair_hint` is: the validators that carry this live
@@ -651,7 +653,7 @@ def _diagnostics_suffix(exc: Exception) -> str:
     diagnostics = getattr(exc, "diagnostics", None)
     if not callable(diagnostics):
         return ""
-    fields = diagnostics()
+    fields = diagnostics(fingerprint_key)
     if not fields:
         return ""
     return " [" + " ".join(f"{key}={value}" for key, value in fields.items()) + "]"

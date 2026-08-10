@@ -522,14 +522,14 @@ def test_a_validators_diagnostics_reach_the_log_and_nothing_else_does():
     not import this module. A validator with nothing to say leaves the line unchanged."""
 
     class _Rejected(ValueError):
-        def diagnostics(self) -> dict[str, str]:
+        def diagnostics(self, _fingerprint_key: bytes) -> dict[str, str]:
             return {"code": "span_not_verbatim", "locus": "S5.P1", "span": "1a2b3c4d"}
 
-    suffix = _diagnostics_suffix(_Rejected("rejected"))
+    suffix = _diagnostics_suffix(_Rejected("rejected"), fingerprint_key=b"k" * 32)
 
     assert suffix == " [code=span_not_verbatim locus=S5.P1 span=1a2b3c4d]"
     # A plain pydantic failure offers none, and must not change the line at all.
-    assert _diagnostics_suffix(ValueError("boom")) == ""
+    assert _diagnostics_suffix(ValueError("boom"), fingerprint_key=b"k" * 32) == ""
 
 
 def test_a_validator_that_never_passes_fails_closed(client):

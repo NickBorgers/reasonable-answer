@@ -14,6 +14,7 @@ The wait is asserted, never served: `sleep` and `jitter` are injected, exactly a
 from __future__ import annotations
 
 import logging
+import re
 from types import SimpleNamespace
 
 import pytest
@@ -26,6 +27,7 @@ from reasonable_answer.llm import (
     ModelCallError,
     PermanentCallError,
 )
+from reasonable_answer.triage import LensValidationError, ViolationCode
 
 
 def make_client(tmp_path, **budget_overrides) -> tuple[LLMClient, list[float]]:
@@ -316,4 +318,42 @@ def test_a_schema_violation_never_logs_the_rejected_content_at_info(tmp_path, ca
     assert "schema violation" in caplog.text
     assert "ValueError" in caplog.text
     # ...but the content the validator quoted never left the run.
+    assert secret not in caplog.text
+
+
+def test_span_fingerprints_are_stable_only_within_one_repair_loop(
+    tmp_path, caplog, monkeypatch
+):
+    """The log can identify a re-roll within one call without exporting a stable
+    verifier for guessed report text or a correlation identifier across calls."""
+    secret = "PRIVATE-CLAIM-SPAN-fluoridation-reduces-decay-by-25pct"
+    keys = iter([b"a" * 32, b"b" * 32])
+    monkeypatch.setattr("reasonable_answer.llm.secrets.token_bytes", lambda _size: next(keys))
+    client, _ = make_client(tmp_path)
+    _install(client, _returning('{"verdict": "ok"}'))
+
+    def validate(_parsed):
+        raise LensValidationError(
+            "claim_span is not a verbatim quote",
+            code=ViolationCode.SPAN_NOT_VERBATIM,
+            field="claim_span",
+            rejected=secret,
+        )
+
+    with caplog.at_level(logging.INFO):
+        for _ in range(2):
+            with pytest.raises(MalformedOutputError):
+                client.structured(
+                    "writer-a",
+                    system="s",
+                    user="u",
+                    schema=_Verdict,
+                    repair_retries=1,
+                    validate=validate,
+                )
+
+    fingerprints = re.findall(r"span=([0-9a-f]{8})", caplog.text)
+    assert fingerprints[0] == fingerprints[1]
+    assert fingerprints[2] == fingerprints[3]
+    assert fingerprints[0] != fingerprints[2]
     assert secret not in caplog.text

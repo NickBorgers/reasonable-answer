@@ -362,9 +362,12 @@ carried no headings is accepted with a warning; the warning rides the run's exis
   full-directory removal stays the explicit human escape hatch, keeping the decision record longer.
   **Container stdout is outside that tree** and has none of its protections, so what a failure may
   say there is bounded separately: a validation rejection logs closed-enum labels, structural
-  references, counts and hashes only — never the rejected span, the source excerpt, or the
-  validator's message (D-repair-diagnostics). The span travels as an 8-hex hash of its *normalized*
-  text, which distinguishes one attempt's rejection from the next without quoting either.
+  references, counts and call-local keyed hashes only — never the rejected span or the source
+  excerpt (D-repair-diagnostics, D-repair-diagnostic-keying). A `LensValidationError` message is
+  content-free by construction but does reach stdout at WARNING when the repair budget is spent;
+  that boundary is why the rejected span stays out of the message. The keyed hash distinguishes
+  attempts within one repair loop without supporting guessed-text verification or correlation
+  across calls.
 
 ## Round sequence (one tick)
 

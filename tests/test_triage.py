@@ -309,8 +309,8 @@ def test_a_rejection_names_its_class_so_a_log_can_tell_them_apart():
     with pytest.raises(LensValidationError) as exc:
         validate_issue(Lens.EVIDENCE, misquote, STRUCTURE)
     assert exc.value.code is ViolationCode.SPAN_NOT_VERBATIM
-    assert exc.value.diagnostics()["field"] == "claim_span"
-    assert exc.value.diagnostics()["locus"] == "S1.P1"
+    assert exc.value.diagnostics(b"k" * 32)["field"] == "claim_span"
+    assert exc.value.diagnostics(b"k" * 32)["locus"] == "S1.P1"
 
     with pytest.raises(LensValidationError) as exc:
         validate_issue(Lens.COMPLETENESS, issue(Category.UNCITED_CLAIM, Severity.MAJOR), STRUCTURE)
@@ -327,8 +327,8 @@ def test_a_rejection_names_its_class_so_a_log_can_tell_them_apart():
     with pytest.raises(LensValidationError) as exc:
         validate_issue(Lens.EVIDENCE, empty, STRUCTURE)
     assert exc.value.code is ViolationCode.SPAN_EMPTY
-    assert exc.value.diagnostics()["field"] == "claim_span"
-    assert exc.value.diagnostics()["locus"] == "S1.P1"
+    assert exc.value.diagnostics(b"k" * 32)["field"] == "claim_span"
+    assert exc.value.diagnostics(b"k" * 32)["locus"] == "S1.P1"
 
 
 def test_the_span_fingerprint_separates_a_re_roll_from_a_search():
@@ -336,13 +336,15 @@ def test_the_span_fingerprint_separates_a_re_roll_from_a_search():
     critic re-emit the same rejected span, or a different one? Same normalized span ->
     same fingerprint; a genuinely different span -> a different one."""
 
-    def fingerprint_of(span: str) -> str:
+    key = b"k" * 32
+
+    def fingerprint_of(span: str, fingerprint_key: bytes = key) -> str:
         bad = issue(Category.UNCITED_CLAIM, Severity.MAJOR).model_copy(
             update={"claim_span": span}
         )
         with pytest.raises(LensValidationError) as exc:
             validate_issue(Lens.EVIDENCE, bad, STRUCTURE)
-        return exc.value.fingerprint()
+        return exc.value.fingerprint(fingerprint_key)
 
     repeated = fingerprint_of("a claim the report never makes")
     assert fingerprint_of("a claim the report never makes") == repeated
@@ -350,6 +352,7 @@ def test_the_span_fingerprint_separates_a_re_roll_from_a_search():
     # folds, so a re-roll that only retypes its span still reads as a re-roll.
     assert fingerprint_of("  A CLAIM   the report  never makes ") == repeated
     assert fingerprint_of("a different invention entirely") != repeated
+    assert fingerprint_of("a claim the report never makes", b"z" * 32) != repeated
     assert len(repeated) == 8
 
 
@@ -366,7 +369,7 @@ def test_a_rejected_span_never_reaches_the_error_message():
         validate_issue(Lens.EVIDENCE, bad, STRUCTURE)
 
     assert secret not in str(exc.value)
-    assert secret not in " ".join(exc.value.diagnostics().values())
+    assert secret not in " ".join(exc.value.diagnostics(b"k" * 32).values())
     # The hint hands back the *source* text the span should have come from, never the
     # rejected span itself — so there is no path from here to a log either.
     assert secret not in exc.value.repair_hint()

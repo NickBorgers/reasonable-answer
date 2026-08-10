@@ -77,7 +77,8 @@ class LensValidationError(ValueError):
     load-bearing rather than incidental: `critique.critique_once` puts the final message
     into `LensResult.failure_reason`, which the graph persists into the critique event,
     and the same message is logged at WARNING — both outside the 0700 run tree (RA-016).
-    `fingerprint()` is what a log gets instead.
+    `fingerprint()` is what a log gets instead, keyed to one repair loop so the value
+    cannot be correlated across calls or tested against guessed report text.
     """
 
     def __init__(
@@ -112,21 +113,24 @@ class LensValidationError(ValueError):
         self.issue_index = index
         self.issue_count = of
 
-    def fingerprint(self) -> str:
-        """Stable 8-hex identity of the rejected text, or "" when there is none.
+    def fingerprint(self, key: bytes) -> str:
+        """Call-local 8-hex identity of the rejected text, or "" when there is none.
 
-        A hash of the *normalized* span, so it is content-free and safe to log where the
-        span itself is not. It exists to answer the one question the failure message
-        cannot: across repair attempts, did the critic re-emit the same rejected span —
-        a re-roll, which means the repair carried no usable correction — or move to a
-        different one, which means it is searching and cannot find a valid anchor at all.
-        Those have different fixes, and nothing in the current logs distinguishes them.
+        A keyed hash of the *normalized* span, so attempts in one repair loop can be
+        compared without exporting a dictionary-testable or cross-call identifier. It
+        exists to answer the one question the failure message cannot: across repair
+        attempts, did the critic re-emit the same rejected span — a re-roll, which means
+        the repair carried no usable correction — or move to a different one, which means
+        it is searching and cannot find a valid anchor at all. Those have different fixes,
+        and nothing in the current logs distinguishes them.
         """
         if not self._rejected:
             return ""
-        return hashlib.sha256(_normalize(self._rejected).encode("utf-8")).hexdigest()[:8]
+        return hashlib.blake2s(
+            _normalize(self._rejected).encode("utf-8"), key=key, digest_size=4
+        ).hexdigest()
 
-    def diagnostics(self) -> dict[str, str]:
+    def diagnostics(self, fingerprint_key: bytes) -> dict[str, str]:
         """Bounded, content-free fields describing this rejection, for a log line.
 
         Every value is a closed-enum label, a structural reference, an integer or a
@@ -140,7 +144,7 @@ class LensValidationError(ValueError):
         if self.issue_index is not None:
             fields["issue"] = f"{self.issue_index}/{self.issue_count}"
         if self._rejected:
-            fields["span"] = self.fingerprint()
+            fields["span"] = self.fingerprint(fingerprint_key)
         return fields
 
 

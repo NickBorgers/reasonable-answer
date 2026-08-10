@@ -137,7 +137,7 @@ def test_a_rejection_names_which_issue_of_how_many_failed():
     result = _run(client)
 
     assert result.failed
-    assert client.validation_errors[0].diagnostics()["issue"] == "2/3"
+    assert client.validation_errors[0].diagnostics(b"k" * 32)["issue"] == "2/3"
 
 
 def test_a_typographic_quote_is_not_a_misquote():
