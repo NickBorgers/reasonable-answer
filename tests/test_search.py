@@ -76,6 +76,19 @@ def test_budget_stops_at_the_limit():
     assert budget.exhausted and budget.used == 2
 
 
+def test_an_unbounded_budget_counts_without_ever_refusing():
+    """`None` is the default since D-unbounded-evidence. The counter still runs — how many
+    queries a run spent is worth knowing even when nothing was going to stop it — but a
+    query cap is a spend control, and starving retrieval is what leaves citations
+    unverifiable."""
+    budget = QueryBudget(None)
+
+    assert all(budget.take() for _ in range(500))
+    assert not budget.exhausted
+    assert budget.used == 500
+    assert budget.limit is None
+
+
 def test_budget_is_thread_safe():
     import threading
 

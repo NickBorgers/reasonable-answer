@@ -213,6 +213,18 @@ def test_re_reading_the_same_page_in_one_call_is_free_and_identical():
     assert reader.budget.used_calls == 1
 
 
+def test_unbounded_calls_still_respect_the_character_budget():
+    """D-unbounded-evidence drops the call cap and keeps the character one, because they
+    bound different things: calls were spend, characters are context (principle #6). An
+    unbounded reader must not become an unbounded prompt."""
+    budget = reading.ReadBudget(max_calls=None, max_chars=1_000)
+
+    assert all(budget.take_call() for _ in range(500))
+    assert budget.take_chars(600) == 600
+    assert budget.take_chars(600) == 400  # partial grant: the character bound still bites
+    assert budget.take_chars(600) == 0
+
+
 def test_the_budget_is_thread_safe():
     import threading
 

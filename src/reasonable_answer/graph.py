@@ -262,8 +262,8 @@ def _build_reader(config: Config, fetcher) -> reading.SourceReader | None:
     if not config.search.read_sources or fetcher is None:
         return None
     log.info(
-        "writer source reads enabled: %d reads and %d characters for this run",
-        config.search.read_budget,
+        "writer source reads enabled: %s reads and %d characters for this run",
+        "unbounded" if config.search.read_budget is None else config.search.read_budget,
         config.search.read_char_budget,
     )
     return reading.SourceReader(
@@ -313,11 +313,13 @@ def _enabled_tiers(config: Config) -> set[str]:
 def _extraction_call_ceiling(config: Config) -> int:
     """The configured cap, or the structural one when none is set (D-paid-tier-page).
 
-    `max_sources * hard_cap` is the most distinct URLs a run could ever cite — every
-    citation replaced in every round. Writer reads may additionally resolve up to
-    `read_budget` candidate URLs (D-writer-resolver-budget). Derived rather than written
-    down so raising either structural budget cannot silently starve the tier at the old
-    number.
+    `max_source_urls * hard_cap` is the most distinct URLs a run could ever cite — every
+    citation replaced in every round. Writer reads may additionally resolve candidate
+    URLs (D-writer-resolver-budget); with `read_budget` unbounded (D-unbounded-evidence)
+    there is no number to add, so the derivation falls back to the configured cap alone
+    and an operator who wants this tier bounded sets `max_calls_per_run` explicitly.
+    Derived rather than written down so raising either structural budget cannot silently
+    starve the tier at the old number.
 
     This bounds a *bug*, not a bill. `SourceFetcher` caches per URL for the whole run, so
     three critics re-verifying one '## Sources' list across eight rounds cost one call per
@@ -326,8 +328,9 @@ def _extraction_call_ceiling(config: Config) -> int:
     configured = config.sources.extraction.max_calls_per_run
     if configured is not None:
         return configured
-    writer_reads = config.search.read_budget if config.search.read_sources else 0
-    return max(1, config.search.max_sources * config.budgets.hard_cap + writer_reads)
+    reads = config.search.read_budget if config.search.read_sources else 0
+    writer_reads = reads or 0
+    return max(1, config.search.max_source_urls * config.budgets.hard_cap + writer_reads)
 
 
 def _cache_max_chars(config: Config) -> int:
@@ -460,8 +463,8 @@ def _build_searcher(config: Config, client: LLMClient) -> search.BraveSearch | N
         )
 
     log.info(
-        "web search enabled: %d queries for this run, %d results per query",
-        config.search.query_budget,
+        "web search enabled: %s queries for this run, %d results per query",
+        "unbounded" if config.search.query_budget is None else config.search.query_budget,
         config.search.max_results,
     )
     return search.BraveSearch(
@@ -1226,7 +1229,15 @@ def _critique_one(
     if lens is Lens.EVIDENCE:
         by_url: dict[str, fetch.FetchedSource] = {}
         if rt.verify_sources:
-            urls = fetch.extract_source_urls(report_text, limit=rt.config.search.max_sources)
+            # Every cited URL, not a prefix of them (D-unbounded-evidence). The limit here
+            # is the anti-pathological ceiling and must never bind on a real bibliography:
+            # a citation the fetcher never sees carries no `SourceOutcome`, so it cannot
+            # appear in `fetched_sources_block` at all, and the evidence critic judges it
+            # on its face — which is how a 12-source cap turned a growing bibliography
+            # into a self-sustaining supply of `fabricated_citation`.
+            urls = fetch.extract_source_urls(
+                report_text, limit=rt.config.search.max_source_urls
+            )
             sources = rt.fetcher.fetch_all(urls) if urls else None
             if sources:
                 # `FetchedSource.url` is the URL that was *asked for*, preserved by the
@@ -1286,6 +1297,7 @@ def _critique_one(
         require_verbatim_spans=rt.config.require_verbatim_spans,
         attempt=attempt,
         current_date=run_date,
+        source_char_budget=rt.config.search.source_char_budget,
     )
 
     # A cited URL that a definitive not-found (404/410) does not resolve is a

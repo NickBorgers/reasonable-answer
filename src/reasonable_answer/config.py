@@ -173,9 +173,12 @@ class SearchConfig(BaseModel):
     #: local dev convenience; gitignored via *.token. Env var wins when both exist.
     token_file: str | None = "brave.token"
     max_results: int = Field(default=5, ge=1, le=20)
-    #: whole-run cap. The free Brave tier is 2,000 queries/month, and an agentic loop
-    #: across writers and revisions will spend that without one.
-    query_budget: int = Field(default=60, ge=1, le=5000)
+    #: Whole-run query cap, or `None` for unbounded — the default (D-unbounded-evidence).
+    #: A query budget is a *spend* control and nothing else, and starving retrieval to save
+    #: queries is one of the ways a run arrives at citations it cannot support. Set an
+    #: integer only where a provider quota genuinely must not be exceeded: the free Brave
+    #: tier is 2,000 queries/month, so a contributor running on it wants a number here.
+    query_budget: int | None = Field(default=None, ge=1, le=100_000)
     #: how many times one writer call may go round the search loop before it is made
     #: to answer with what it has.
     max_tool_rounds: int = Field(default=6, ge=1, le=20)
@@ -187,7 +190,30 @@ class SearchConfig(BaseModel):
     #: judgements about plausibility. Independent of `enabled`: a report with real
     #: citations can be verified whether or not this system retrieved them.
     verify_sources: bool = False
-    max_sources: int = Field(default=12, ge=1, le=50)
+    #: Anti-pathological ceiling on how many cited URLs one artifact may put through the
+    #: fetcher. **Not** a spend control (D-unbounded-evidence): it must never bind on a real
+    #: bibliography — the largest observed in production is 23 — and it exists only because
+    #: the '## Sources' list is untrusted model output and every entry is an egress
+    #: (docs/ssrf-egress-isolation.md). It bounds a bug, not a bill, in the manner of
+    #: `sources.extraction.max_calls_per_run`.
+    #:
+    #: Its predecessor `max_sources` (12) was a spend control, and truncating the URL list
+    #: is what caused the loop this decision removes: a citation the fetcher never saw
+    #: carried no `SourceOutcome`, never reached the evidence critic, and was judged on its
+    #: face. The rename is deliberate — a config still setting `max_sources` fails closed at
+    #: load rather than silently keeping the old cap.
+    max_source_urls: int = Field(default=200, ge=1, le=2_000)
+    #: Characters of fetched page text the evidence critic is shown for one artifact. An
+    #: **efficacy** bound, never a spend one: a single context holding every body is the
+    #: lost-in-the-middle problem principle #6 exists to avoid (docs/isolation.md, Liu et
+    #: al. 2023), and the evidence pool is not made of large models. Sources past it are
+    #: still listed — as existence-confirmed carrying their fetch outcome, never omitted,
+    #: because omission is the failure this whole decision is about.
+    #:
+    #: INTERIM. The follow-up to D-unbounded-evidence gives the evidence critic a
+    #: per-source sub-context, after which every body is read without any two of them
+    #: sharing a context and this bound has nothing left to do.
+    source_char_budget: int = Field(default=60_000, ge=1_000, le=2_000_000)
     fetch_timeout_seconds: float = Field(default=15.0, gt=0, le=120)
     #: bytes read off the wire per page
     fetch_max_bytes: int = Field(default=400_000, ge=1_000, le=10_000_000)
@@ -201,10 +227,12 @@ class SearchConfig(BaseModel):
     #: `verify_sources` uses, so the same network-layer caveat applies
     #: (docs/ssrf-egress-isolation.md). Off by default like every retrieval affordance.
     read_sources: bool = False
-    #: Whole-run cap on `read_source` calls. Sized well above `max_sources` because a
-    #: writer reads candidates, not only the sources it ends up citing, and every round
-    #: draws on the same pool.
-    read_budget: int = Field(default=24, ge=1, le=2_000)
+    #: Whole-run cap on `read_source` calls, or `None` for unbounded — the default
+    #: (D-unbounded-evidence). A call cap is a spend control; what actually needs bounding
+    #: is the text a writer accumulates, and `read_char_budget` below already does that on
+    #: correctness grounds. A writer reads candidates, not only the sources it ends up
+    #: citing, and every round draws on the same pool, so a call cap bit early and often.
+    read_budget: int | None = Field(default=None, ge=1, le=100_000)
     #: Characters of page text shown to the writer per read. Raising this above
     #: `fetch_max_chars` enlarges the shared fetch cache and nothing else: verification
     #: is handed a `fetch.CappedFetcher` clipped back to `fetch_max_chars`, so what the
@@ -366,9 +394,10 @@ class ExtractionTierConfig(BaseModel):
     token_file: str | None = "firecrawl.token"
     #: Rendering a page in a real browser is slower than fetching one.
     timeout_seconds: float = Field(default=45.0, gt=0, le=180)
-    #: None means the structural ceiling: `search.max_sources * budgets.hard_cap`, the
+    #: None means the structural ceiling: `search.max_source_urls * budgets.hard_cap`, the
     #: most distinct URLs a run could ever cite, plus `search.read_budget` when writer
-    #: reading is on because candidate reads share the resolver. Derived rather than
+    #: reading is on and bounded (unbounded reads add nothing derivable, so set this
+    #: explicitly if the tier must be capped). Derived rather than
     #: guessed so raising either budget does not silently starve the tier. This is a guard
     #: against a fetch loop, not a spending limit — the per-run cache already means a URL
     #: is resolved once however many rounds and critics re-verify it.

@@ -274,9 +274,12 @@ merely tidiness — the writer authors the manifest, so a manifest that fed acce
 writer grading its own review.
 
 **Fetched source pages (D-source-verification)** are the same class, one step further: with
-`search.verify_sources: true` the *full text* of an attempted, addressable cited page within
-`search.max_sources` can enter a **critic's** context; unaddressable and over-cap entries remain
-unchecked. A page has far more room to address its reader than a search snippet does. Three things
+`search.verify_sources: true` the *full text* of an attempted, addressable cited page can enter a
+**critic's** context. **Every** addressable citation is attempted (D-unbounded-evidence) — only
+unaddressable entries remain unchecked, because a citation the fetcher never saw carries no outcome,
+cannot appear in the sources block, and is then judged on its face. How much page *text* one context
+holds is bounded separately by `search.source_char_budget`, on principle #6 grounds rather than
+cost; sources past it are still listed, marked as fetched with their text withheld. A page has far more room to address its reader than a search snippet does. Three things
 bound it:
 
 - **Evidence lens only.** Logic and completeness never receive page text. They cannot raise a

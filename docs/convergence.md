@@ -148,8 +148,8 @@ hallucination rates of 17–33%, against vendor claims of being hallucination-fr
 which enables retrieval only (D-run-date-grounding): verification fetches model-chosen URLs, and the egress
 boundary that makes that safe is a deployment concern outside this repo
 (docs/ssrf-egress-isolation.md).** With `search.verify_sources: true`, addressable cited pages are
-deduplicated and fetched up to `search.max_sources`, then handed to the **evidence lens only** as
-untrusted data; unaddressable and over-cap entries remain unchecked.
+deduplicated and **all** fetched (D-unbounded-evidence), then handed to the **evidence lens only**
+as untrusted data; only unaddressable entries remain unchecked.
 Two categories change character:
 
 | category | verification off | verification on |
