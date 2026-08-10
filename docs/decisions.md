@@ -5284,7 +5284,86 @@ audit trail for one stated reason: the *writer* authors the manifest, so it "has
 review". A non-author sub-reader does not carry that defect, which is what makes the follow-up
 tractable on existing machinery.
 
+## D-writer-failure-class — a failed writer attempt records what kind of failure it was
+
+**The finding.** `generate_failed` recorded a free-text `reason` and nothing else. The string
+embeds the alias and the provider's own words, so it is effectively unique per attempt and cannot
+be grouped: the record can say *that* writers failed, never *how often* they failed a given way.
+Its two sibling events already do better — `support_manifest_failed` and `dispute_pass_failed` both
+carry `error_type`.
+
+The cost of the gap was a wrong diagnosis. `nemotron-3-ultra` was read off run logs as a broken
+model — unparsed tool-call markup on two rounds, a tool loop ending without prose, a timeout — and
+a roster retirement was proposed on that basis. Measured directly on 2026-08-10, the model
+completes a production-shaped tool loop cleanly on two of its four OpenRouter upstreams (Venice
+4/4; DeepInfra 3/3, each via the `_answer_now` nudge) and fails on the other two (Together 4/4
+unparsed markup; BaseTen 1/1). `deepseek-v4-flash` splits the same way across twenty upstreams —
+GMICloud, Fireworks and OpenInference 3/3 clean, StreamLake 0/6. The defect was which upstream
+OpenRouter happened to route each call to, re-rolled per call. Nothing in the run record could have
+distinguished that from a bad model, because every failure was one unquotable sentence.
+
+**The decision.** `ModelCallError` carries a `failure_class`: a short, stable token naming how the
+call failed, set at each raise site in `llm.py` and defaulting to `call_failed`. `graph._generate`
+writes it onto every `generate_failed` event beside the existing `author` and `reason`. The classes
+are `unparsed_tool_markup`, `tool_loop_no_answer`, `tool_loop_no_end`, `empty_completion`,
+`identity_mismatch`, `http_<status>`, `timeout`, `connection`, `call_failed`, and — raised nowhere
+in `llm.py`, because the call *succeeded* — `empty_report` for a model that answered with
+whitespace.
+
+Two properties are deliberate. Classification reads the exception type and the SDK's status code,
+never the message text, for the same reason `_permanent` does: a provider's wording is not an
+interface. And an exhausted retry budget reports its *cause's* class rather than a class of its
+own, because what a reader needs is which defect the budget was spent on — three unparsed tool-call
+blocks and three timeouts are the same event today and want opposite fixes, one a provider to
+re-pin and one a moment to wait out. The message still says the budget was exhausted.
+
+**What this deliberately does not do.** It changes nothing the pipeline decides: the retry budgets,
+the writer rotation, the fail-closed paths and every controller rule are byte-identical. It adds a
+field to one event. In particular it does **not** retire `nemotron-3-ultra`, and it does not make
+`probe_tool_calling` stricter — that probe is a one-shot ping while production runs a multi-round
+loop, so it does under-measure, but tightening it to the loop shape would fail a run closed at
+startup on a model that is sound once its upstream is pinned, which is answering a routing problem
+with a roster ban. Reconsider when the per-class counts this decision creates say something the
+provider pin does not already explain.
+
+Pinning the upstream is the other half and is deliberately not in this repo. `config/roster.yaml`'s
+`proxy:` block carries a `base_url` and no way to name a serving endpoint, and it should stay that
+way: which upstream answers is a deployment fact, of the kind `docs/deployment-profile.md` records.
+It is filed as `NickBorgers/host-config-as-code#46`, which holds the measurement tables above and
+the LiteLLM `provider.order` patch.
+
+**Invariants.** None of the six is in reach. Author exclusion, the blind orchestrator, fail-closed
+lenses, severity floors, termination and the untrusted-text boundary are all untouched; the added
+field is derived from an exception type, never from model-authored text, and it reaches the run
+record rather than any prompt.
+
 ## Open items for a future round
+
+- A third **logic**-lens family, and the candidate to audition for it (D-writer-failure-class
+  surfaced the survey; the gap itself is the fit-first cost stated in D-minimax-retirement). The
+  lens is `roster_limited` on every round `mistral-large-3` authors, and no unrostered candidate on
+  the proxy can close it: `llama-4-scout` returned 0 issues on all 6 evidence calls of
+  run-d5934276fafd, `qwen3.7-max`'s weights are closed, and `deepseek-v4-pro` and `kimi-k3` are
+  excluded by the ~450GB arithmetic. The survey found one that fits — `qwen/qwen3.5-397b-a17b`,
+  397B/A17B, Apache 2.0, ~200GB at 4-bit, and a **new family**, which is the whole point. It has to
+  be served by the proxy before it can be measured (`ra audition` has no candidate flag; `--alias`
+  only filters slots built from the rostered pools), so the sequence is: add the alias upstream,
+  roster it in a scratch config, `ra audition --lens logic`, then roster on the verdict. Worth
+  auditioning on `evidence` in the same session, which is the open item above. Also surveyed and
+  worth recording: `nvidia/nemotron-3-super-120b-a12b` (120B/A12B, open weights *and* training
+  data, post-trained for tool calling, ~35GB at 4-bit) as a cheap tool-competent writer, in
+  `nemotron`'s existing family; and `moonshotai/kimi-k2.6`, a genuinely new family excluded by the
+  same arithmetic as `kimi-k3` at ~594GB.
+
+- Whether critic aliases need the upstream pin that writers now have
+  (D-writer-failure-class, docs/deployment-profile.md). Critics run through the same per-request
+  routing, and `glm-5.2` alone has 32 OpenRouter endpoints spanning fp4 and fp8 — so every audition
+  verdict on record was measured across an unknown mix of hosts. That is a **hypothesis, not a
+  finding**: no critic-side measurement was taken, and the writer evidence is about a tool loop
+  critics never run. It is worth testing because the roster already documents an unexplained symptom
+  of the right shape — `minimax-m3` probing non-deterministically across `json_schema`,
+  `json_object` and `prompt` (D-audition-probe-parity). The test is a re-audition under pinned
+  hosts, which is also what the two roster open items above need anyway.
 
 - Audition a replacement evidence-lens candidate (D-minimax-retirement). The lens now runs two
   `marginal` critics, and `gemma4`'s 0.50 sensitivity sits below the warn line; the roster needs a

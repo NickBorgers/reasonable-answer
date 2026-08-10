@@ -24,7 +24,7 @@ from collections.abc import Callable
 from dataclasses import dataclass
 from typing import Any, TypeVar
 
-from openai import OpenAI
+from openai import APIConnectionError, APITimeoutError, OpenAI
 from pydantic import BaseModel, ValidationError
 
 from .config import Budgets, Config, ConfigError
@@ -68,7 +68,18 @@ def _unparsed_tool_call(content: str) -> bool:
 
 
 class ModelCallError(RuntimeError):
-    """Transport/API failure — retryable within budget."""
+    """Transport/API failure — retryable within budget.
+
+    `failure_class` is a short, stable token naming *how* the call failed, carried
+    so a caller can record it as a countable field instead of matching on the
+    message text. `graph._generate` writes it onto every `generate_failed` event;
+    without it, "this model keeps failing" is an anecdote nobody can check, and a
+    provider-level defect is indistinguishable from a model-level one.
+    """
+
+    def __init__(self, message: str, *, failure_class: str = "call_failed") -> None:
+        super().__init__(message)
+        self.failure_class = failure_class
 
 
 class PermanentCallError(ModelCallError):
@@ -82,6 +93,9 @@ class PermanentCallError(ModelCallError):
     try again.
     """
 
+    def __init__(self, message: str, *, failure_class: str = "permanent") -> None:
+        super().__init__(message, failure_class=failure_class)
+
 
 #: HTTP statuses where the fault is in the request, not the moment. 408 (timeout) and
 #: 429 (rate limit) are deliberately absent — those are exactly what backoff is for,
@@ -93,13 +107,38 @@ _PERMANENT_STATUSES = frozenset({400, 401, 403, 404, 413, 422})
 _MAX_RETRY_AFTER_SECONDS = 120.0
 
 
-def _permanent(exc: Exception) -> bool:
-    """Is this failure final? Read the status code the SDK carries, never the message."""
+def _status_of(exc: Exception) -> int | None:
+    """The HTTP status the SDK carries, wherever it hung it. Never read the message."""
     status = getattr(exc, "status_code", None)
     if status is None:
         response = getattr(exc, "response", None)
         status = getattr(response, "status_code", None)
-    return isinstance(status, int) and status in _PERMANENT_STATUSES
+    return status if isinstance(status, int) else None
+
+
+def _permanent(exc: Exception) -> bool:
+    """Is this failure final? Read the status code the SDK carries, never the message."""
+    return _status_of(exc) in _PERMANENT_STATUSES
+
+
+def _failure_class(exc: Exception) -> str:
+    """A short, stable token naming how `exc` failed.
+
+    Errors this module raised already carry one; a transport exception from the SDK
+    does not, so it is classified here — by exception type and status code, never by
+    message text, for the same reason `_permanent` reads the status.
+    """
+    carried = getattr(exc, "failure_class", None)
+    if isinstance(carried, str) and carried:
+        return carried
+    if isinstance(exc, APITimeoutError):
+        return "timeout"
+    if isinstance(exc, APIConnectionError):
+        return "connection"
+    status = _status_of(exc)
+    if status is not None:
+        return f"http_{status}"
+    return "call_failed"
 
 
 def _retry_after(exc: Exception) -> float | None:
@@ -371,7 +410,10 @@ class LLMClient:
                     completion_tokens += reply.completion_tokens
                     text = (reply.message.get("content") or "").strip()
                 if not text:
-                    raise ModelCallError(f"{alias}: tool loop ended without an answer")
+                    raise ModelCallError(
+                        f"{alias}: tool loop ended without an answer",
+                        failure_class="tool_loop_no_answer",
+                    )
                 return Completion(
                     text=text,
                     model_reported=reply.reported,
@@ -393,7 +435,9 @@ class LLMClient:
                         ),
                     }
                 )
-        raise ModelCallError(f"{alias}: tool loop did not terminate")  # pragma: no cover
+        raise ModelCallError(  # pragma: no cover
+            f"{alias}: tool loop did not terminate", failure_class="tool_loop_no_end"
+        )
 
     #: The one instruction sent when a model ends its tool loop without prose. Kept
     #: free of any run material — it says nothing about the question, the draft, or the
@@ -453,7 +497,9 @@ class LLMClient:
                     # Spending the rest of the budget re-sending a request the provider
                     # has already judged malformed just delays the caller's rotation to
                     # a model that might work.
-                    raise PermanentCallError(f"{alias}: {exc}") from exc
+                    raise PermanentCallError(
+                        f"{alias}: {exc}", failure_class=f"http_{_status_of(exc)}"
+                    ) from exc
                 continue
             usage = resp.usage
             reported = getattr(resp, "model", None) or alias
@@ -463,7 +509,8 @@ class LLMClient:
             # counting — is false. Fail closed rather than believe the alias map.
             if not _identity_matches(reported, alias, self._identities.get(alias)):
                 raise ModelCallError(
-                    f"identity mismatch: alias '{alias}' was served by '{reported}'"
+                    f"identity mismatch: alias '{alias}' was served by '{reported}'",
+                    failure_class="identity_mismatch",
                 )
             message = _message_dict(resp.choices[0].message)
             # A 200 carrying neither prose nor a tool call is a failed call that
@@ -472,7 +519,9 @@ class LLMClient:
             # retried on the same budget as a transport error rather than returned.
             content = (message.get("content") or "").strip()
             if not content and not _tool_calls(message):
-                last = ModelCallError(f"{alias}: empty completion")
+                last = ModelCallError(
+                    f"{alias}: empty completion", failure_class="empty_completion"
+                )
                 log.warning("call to %s returned empty content (attempt %d)", alias, attempt + 1)
                 continue
             # The same failure wearing prose's clothes: the model emitted its tool call
@@ -482,7 +531,10 @@ class LLMClient:
             # the same budget — and if the retries do not shake it loose, the writer
             # rotation in `graph._generate` moves to a different model.
             if not _tool_calls(message) and _unparsed_tool_call(content):
-                last = ModelCallError(f"{alias}: emitted unparsed tool-call markup as content")
+                last = ModelCallError(
+                    f"{alias}: emitted unparsed tool-call markup as content",
+                    failure_class="unparsed_tool_markup",
+                )
                 log.warning(
                     "call to %s returned unparsed tool-call markup (attempt %d)",
                     alias,
@@ -500,7 +552,14 @@ class LLMClient:
         # timeout classification — `web.refine.RefinementService`'s orphan-linger
         # logic — can distinguish a provider-level timeout from any other transport
         # failure without this module needing to know that policy exists.
-        raise ModelCallError(f"{alias}: exhausted call retries ({last})") from last
+        # The class is the *cause's* class, not "exhausted": what a reader needs from
+        # a run that spent its budget is which defect it spent it on — three unparsed
+        # tool-call blocks and three timeouts are the same event today and want
+        # different fixes. The message still says the budget was exhausted.
+        raise ModelCallError(
+            f"{alias}: exhausted call retries ({last})",
+            failure_class=_failure_class(last) if last else "exhausted_retries",
+        ) from last
 
     def probe_tool_calling(self, alias: str) -> bool:
         """Can `alias` actually emit a tool call? Probed once, like structured output.

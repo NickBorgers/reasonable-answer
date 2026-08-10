@@ -268,6 +268,96 @@ def test_a_transient_status_is_retried(tmp_path, status):
     assert calls["n"] == 3
 
 
+# --------------------------------------------------------------- failure class
+
+
+def test_an_empty_completion_names_its_class(tmp_path):
+    """D-writer-failure-class: the token, not the message, is what a caller counts."""
+    calls = {"n": 0}
+
+    def create(**kwargs):
+        calls["n"] += 1
+        return SimpleNamespace(
+            model=kwargs["model"],
+            usage=SimpleNamespace(prompt_tokens=1, completion_tokens=0),
+            choices=[SimpleNamespace(message={"role": "assistant", "content": "  "})],
+        )
+
+    client, _ = make_client(tmp_path, retry_backoff_seconds=0.0)
+    _install(client, create)
+
+    with pytest.raises(ModelCallError) as caught:
+        client.complete("writer-a", system="s", user="u")
+
+    assert caught.value.failure_class == "empty_completion"
+
+
+def test_an_exhausted_budget_carries_the_cause_class_not_its_own(tmp_path):
+    """What a reader needs from a run that spent its budget is which defect it spent it
+    on. Three unparsed tool-call blocks and three timeouts are the same event today and
+    want different fixes — one is a provider to re-pin, the other a moment to wait out.
+    """
+    calls = {"n": 0}
+
+    def create(**kwargs):
+        calls["n"] += 1
+        return SimpleNamespace(
+            model=kwargs["model"],
+            usage=SimpleNamespace(prompt_tokens=1, completion_tokens=1),
+            choices=[
+                SimpleNamespace(
+                    message={"role": "assistant", "content": "<｜tool▁calls▁begin｜>x<｜tool▁call▁end｜>"}
+                )
+            ],
+        )
+
+    client, _ = make_client(tmp_path, retry_backoff_seconds=0.0)
+    _install(client, create)
+
+    with pytest.raises(ModelCallError, match="exhausted call retries") as caught:
+        client.complete("writer-a", system="s", user="u")
+
+    assert calls["n"] == 3
+    assert caught.value.failure_class == "unparsed_tool_markup"
+
+
+def test_a_transport_failure_is_classified_by_status_never_by_message(tmp_path):
+    """The same rule `_permanent` follows. A provider's wording is not an interface."""
+    client, _ = make_client(tmp_path, retry_backoff_seconds=0.0)
+    create, _ = _raising(_with_status(503))
+    _install(client, create)
+
+    with pytest.raises(ModelCallError) as caught:
+        client.complete("writer-a", system="s", user="u")
+
+    assert caught.value.failure_class == "http_503"
+
+
+def test_a_statusless_transport_failure_falls_back_rather_than_guessing(tmp_path):
+    """A bare exception carrying nothing to read gets the generic token, not a class
+    inferred from its text."""
+    client, _ = make_client(tmp_path, retry_backoff_seconds=0.0)
+    create, _ = _raising(_Boom("connection reset by peer"))
+    _install(client, create)
+
+    with pytest.raises(ModelCallError) as caught:
+        client.complete("writer-a", system="s", user="u")
+
+    assert caught.value.failure_class == "call_failed"
+
+
+@pytest.mark.parametrize("status", [400, 401, 403, 404, 413, 422])
+def test_a_permanent_failure_names_the_status_that_made_it_final(tmp_path, status):
+    client, _ = make_client(tmp_path)
+    create, _ = _raising(_with_status(status))
+    _install(client, create)
+
+    with pytest.raises(PermanentCallError) as caught:
+        client.complete("writer-a", system="s", user="u")
+
+    assert caught.value.failure_class == f"http_{status}"
+
+
 # ------------------------------------------------------ audit privacy (RA-016)
 
 

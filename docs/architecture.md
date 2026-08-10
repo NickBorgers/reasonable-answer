@@ -343,7 +343,11 @@ carried no headings is accepted with a warning; the warning rides the run's exis
   empty: an agentic loop that ends on a tool call gets exactly one further toolless round asking for
   prose, and raises if that is empty too, so no caller can mistake a stalled loop for a model that
   wrote nothing. A tool whose own budget is spent is withdrawn from subsequent rounds rather than
-  offered for rounds it cannot serve.
+  offered for rounds it cannot serve. Every `ModelCallError` carries a `failure_class` — a stable
+  token naming *how* the call failed, read from the exception type and status code and never from
+  the provider's wording — and each failed writer attempt records it on `generate_failed` beside
+  the free-text `reason` (D-writer-failure-class). Grouping by that token is what separates a bad
+  model from a bad serving endpoint, which the alias alone cannot express.
 - **Submission backpressure (RC-007):** concurrency bounds token *spend* but not how many runs may
   pile up, so submission is also bounded. `RunWorker.submit()` refuses with **HTTP 429** once the
   queue's waiting depth reaches `max_queue_depth`, and a fixed-window `submit_rate_max` /

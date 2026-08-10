@@ -724,15 +724,28 @@ def _generate(state: State, rt: Runtime) -> dict:
             )
         except ModelCallError as exc:
             last_failure = f"generator {alias} failed: {exc}"
+            failure_class = getattr(exc, "failure_class", "call_failed")
         else:
             if reply.text.strip():
                 completion = reply
                 rotation += offset
                 break
             last_failure = f"generator {alias} returned an empty report"
+            # Not a `ModelCallError`: the call succeeded and the model answered with
+            # whitespace, which is a different defect from any `llm` raises.
+            failure_class = "empty_report"
         # Recorded per attempt: a run that silently changed authors mid-draft is
         # unauditable, and the roster's weak models are only visible from here.
-        rt.store.event("generate_failed", author=rt.identities[alias], reason=last_failure)
+        # `failure_class` is what makes them *countable*: `reason` carries the alias
+        # and the provider's own words, so it is unique per attempt and cannot be
+        # grouped. Without a stable token, "this writer keeps failing" stays an
+        # impression — which is how a routing defect was once read as a broken model.
+        rt.store.event(
+            "generate_failed",
+            author=rt.identities[alias],
+            reason=last_failure,
+            failure_class=failure_class,
+        )
         log.warning("writer attempt %d/%d: %s", offset + 1, attempts, last_failure)
 
     if completion is None:
