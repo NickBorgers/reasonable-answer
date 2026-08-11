@@ -165,11 +165,40 @@ def test_references_nested_under_grouping_bullets_are_still_the_entries():
     assert fetch.entry_url(entries[2]) == "https://example.org/c"
 
 
-def test_a_bibliography_with_no_urls_at_all_is_still_counted_line_by_line():
+def test_a_mixed_nested_bibliography_keeps_an_unaddressable_reference():
+    report = (
+        "# T\n\n## Sources\n\n"
+        "- Smith, J. (2019). Title. Publisher.\n"
+        "  - Available at: https://example.org/a\n"
+        "- Jones, K. (2020). Book, no online edition.\n"
+        "- Nakamura (2021). Title.\n"
+        "  - Available at: https://example.org/c\n"
+    )
+    observed = fetch.coverage(report)
+    assert observed.cited == 3
+    assert observed.addressable == 2
+    assert observed.not_addressable == 1
+
+
+def test_a_flat_bibliography_with_no_urls_is_counted_line_by_line():
     """The fallback in `_entry_indent`: with no addressed marker to anchor on, the
     shallowest marker of any kind is the entry depth, so a wholly unaddressable
     bibliography reports every entry it has rather than none."""
     report = "# T\n\n## Sources\n\n[1] Smith, J. (2019). Publisher.\n[2] Jones, K. (2020). Publisher.\n"
+    observed = fetch.coverage(report)
+    assert observed.cited == 2
+    assert observed.not_addressable == 2
+
+
+def test_url_free_grouped_markers_use_the_shallowest_depth():
+    report = (
+        "# T\n\n## Sources\n\n"
+        "- Books:\n"
+        "  - Smith, J. (2019). Publisher.\n"
+        "  - Jones, K. (2020). Publisher.\n"
+        "- Reports:\n"
+        "  - Nakamura (2021). Publisher.\n"
+    )
     observed = fetch.coverage(report)
     assert observed.cited == 2
     assert observed.not_addressable == 2

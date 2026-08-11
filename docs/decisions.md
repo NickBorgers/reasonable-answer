@@ -5328,16 +5328,10 @@ record rather than any prompt.
 ## D-bibliography-entry-nesting — indentation says which bibliography lines are references
 
 **The finding.** `fetch.source_entries` split the `## Sources` section on any line opening with a
-list marker at up to three spaces of indentation. Writers routinely emit an *annotated*
-bibliography — the citation, then an indented sub-bullet of commentary — and that sub-bullet is
-marked, so it was read as a second entry. It carries no URL, so it landed in `not_addressable`, and
-every real citation acquired a phantom unaddressable twin.
-
-The result is visible in the shipped label. In run-a624c5099f9a (build 259c9c7) `addressable` was
-exactly half of `cited` in all nine rounds — 22/11, 28/14, 36/18, 40/20 — and the artifact a reader
-sees reported *18 not independently checked* for a bibliography with essentially nothing unchecked:
-`not_attempted` was 0 in every round, because D-unbounded-evidence had already removed the ceiling
-that used to leave citations unfetched.
+list marker at up to three spaces of indentation. In an annotated bibliography — the citation, then
+an indented sub-bullet of commentary — that marked sub-bullet was read as a second entry. When the
+annotation carried no URL, it landed in `not_addressable` and gave the real citation a phantom
+unaddressable twin.
 
 `source_entries` was conservative in the direction that understates coverage, which is the safe
 direction and is why this was a reporting defect rather than an overstatement. But a 2x error is
@@ -5355,10 +5349,12 @@ the reported case, and they differ on the converse shape — references nested u
 references into their headings, shrinking the denominator: three references under two headings would
 report as two cited and two addressable, which reads as a *fully* verified bibliography. Understating
 coverage is survivable; overstating the fraction is the exact failure D-observed-source-coverage
-exists to prevent, so the anchor is chosen to avoid it. Marker lines shallower than the entry depth
-are grouping headings and are dropped, as text before the first entry already was. A section whose
-markers carry no URL anywhere falls back to the shallowest marker of any kind, so a wholly
-unaddressable bibliography still reports every entry it has.
+exists to prevent. A marker shallower than the entry depth is dropped as a grouping heading only
+when the next non-blank line is a deeper marker carrying a URL. Otherwise it remains an entry, so a
+standalone URL-less reference cannot disappear from the denominator. A section whose markers carry
+no URL anywhere falls back to the shallowest marker depth; deeper markers then fold into those
+entries, so this fallback preserves a conservative unaddressable count but does not claim to recover
+every nested reference from a URL-free grouped list.
 
 The marker pattern's `\s{0,3}` bound is replaced by a captured indent of any width, with tabs
 expanded, because a bound on depth cannot express a comparison between depths. Nothing routes on
@@ -5366,10 +5362,11 @@ this pattern: it is only ever used to count.
 
 **Still a heuristic.** This is a guess at model-written markdown and remains one — the observed
 count is reported as an observation and never as a completeness claim. What changes is that the
-guess is now pinned against the shapes writers actually produce: flat `[n]`, `-`/`*`/`+`, `1.`/`1)`,
+guess is now pinned against explicit fixtures for flat `[n]`, `-`/`*`/`+`, `1.`/`1)`,
 wrapped continuations, the annotated two-line form, a tab-indented annotation, grouped references,
-and a bibliography with no URLs at all each have a fixture in `tests/test_source_coverage.py`,
-because this heuristic is load-bearing for a published number.
+a mixed grouped bibliography with an unaddressable reference, and flat and grouped bibliographies
+with no URLs each have a fixture in `tests/test_source_coverage.py`, because this heuristic is
+load-bearing for a published number.
 
 **Invariants.** None of the six is in reach. The count feeds `fetch.coverage`, which is observation
 only: no controller rule reads it, no `OrchestratorView` field carries it, and it mints no defect,

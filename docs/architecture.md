@@ -246,7 +246,9 @@ That same section is the **denominator** of a run's source-verification coverage
 `fetch.coverage` tallies them against the outcomes the evidence lens's fetches produced. The split
 is by list marker, at one indent depth per section — the shallowest that carries a URL — so an
 annotation indented under a reference folds into it rather than counting as a second, unaddressable
-entry, while references nested under grouping bullets still count one apiece
+entry, while references nested under grouping bullets still count one apiece. A shallower marker is
+dropped as a grouping heading only when the next non-blank line is a deeper URL-bearing marker;
+otherwise it remains in the denominator so a URL-less reference cannot disappear
 (D-bibliography-entry-nesting). The tally
 is written into checkpointed state under the artifact's hash in `_critique_one`, read back in
 `_finalize` for the draft actually shipped — which on a non-accepted terminal need not be the last

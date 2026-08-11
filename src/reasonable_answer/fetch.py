@@ -377,11 +377,23 @@ def _entry_indent(lines: list[str], marker_indents: dict[int, int]) -> int:
     The shallowest marker depth that carries an address, because that is the level a
     writer puts *references* on: an annotation is indented under the reference it
     describes, and a grouping bullet (`- Peer-reviewed:`) sits above one and carries no
-    URL of its own. Falling back to the shallowest marker of any kind keeps a
-    bibliography with no URLs at all counted line by line rather than collapsed.
+    URL of its own. Falling back to the shallowest marker of any kind keeps a URL-free
+    bibliography represented conservatively, although nested markers at deeper levels
+    cannot be distinguished from annotations and fold into those entries.
     """
     addressed = [indent for index, indent in marker_indents.items() if _URL.search(lines[index])]
     return min(addressed) if addressed else min(marker_indents.values())
+
+
+def _is_grouping_heading(index: int, lines: list[str], marker_indents: dict[int, int]) -> bool:
+    """Whether a shallower marker immediately introduces a URL-bearing entry."""
+    indent = marker_indents[index]
+    for next_index in range(index + 1, len(lines)):
+        if not lines[next_index].strip():
+            continue
+        next_indent = marker_indents.get(next_index)
+        return next_indent is not None and next_indent > indent and _URL.search(lines[next_index]) is not None
+    return False
 
 
 def source_entries(report: str) -> list[str]:
@@ -398,12 +410,14 @@ def source_entries(report: str) -> list[str]:
     lines carry a list marker (`- `, `* `, `[1]`, `1.`, `1)`) is split on the markers
     sitting at the entry depth (`_entry_indent`); a marker indented *deeper* than that is
     an annotation of the reference above it and folds into it exactly as an unmarked
-    continuation line does (D-bibliography-entry-nesting), one indented *shallower* is a
-    grouping heading and is dropped, and text before the first entry is section prose
-    rather than an entry. A section with no marker anywhere falls back to one entry per
-    non-blank line, which is the other shape writers produce. Neither shape can be
-    recognised with certainty, which is why what this feeds is reported as an observed
-    count and never as a completeness claim.
+    continuation line does (D-bibliography-entry-nesting). A shallower marker is dropped
+    only when the next non-blank line proves it introduces a deeper URL-bearing entry;
+    otherwise it remains an entry so an unaddressable reference cannot disappear from the
+    denominator. Text before the first entry is section prose rather than an entry. A
+    section with no marker anywhere falls back to one entry per non-blank line, which is
+    the other shape writers produce. Neither shape can be recognised with certainty,
+    which is why what this feeds is reported as an observed count and never as a
+    completeness claim.
     """
     lines = sources_section(report).splitlines()
     marker_indents = _marker_indents(lines)
@@ -420,7 +434,9 @@ def source_entries(report: str) -> list[str]:
         if indent == depth:
             entries.append(stripped)
         elif indent is not None and indent < depth:
-            continue
+            if _is_grouping_heading(index, lines, marker_indents):
+                continue
+            entries.append(stripped)
         elif entries:
             entries[-1] = f"{entries[-1]} {stripped}"
     return entries
