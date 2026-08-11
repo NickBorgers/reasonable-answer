@@ -11,6 +11,7 @@ from fakes import FakeClient
 
 from reasonable_answer.config import Budgets, Config, ConfigError
 from reasonable_answer.graph import _lens_results, run
+from reasonable_answer.llm import ModelCallError
 from reasonable_answer.schemas import CritiqueOutput, RawIssue, StructuralRef
 from reasonable_answer.taxonomy import Category, Lens, Severity
 
@@ -679,6 +680,62 @@ def test_writer_attempts_bounds_the_retry_of_a_single_eligible_writer(identities
     assert len(failures) == config.budgets.writer_attempts == 3
     # One wait per retry, never before the first attempt.
     assert client.writer_backoffs == [1, 2]
+
+
+class RaisingWriterClient(FakeClient):
+    """A proxy where generation raises the error a named class of defect produces."""
+
+    error: Exception | None = None
+
+    def complete(self, alias, *, system, user, **kwargs):
+        if self.error is not None and "YOUR DIMENSION" not in user:
+            raise self.error
+        return super().complete(alias, system=system, user=user, **kwargs)
+
+
+def test_a_failed_writer_attempt_records_which_defect_it_failed_on(identities, config):
+    """D-writer-failure-class. `reason` names the alias and quotes the provider, so it
+    is unique per attempt and cannot be grouped; counting "how often did this writer
+    emit unparsed tool-call markup" needs a stable token.
+
+    This is not hypothetical. Eight consecutive `nemotron-3-ultra` tool loops were read
+    off a run as a broken model, and the defect was the upstream provider OpenRouter
+    happened to route each call to — a distinction `reason` alone could not carry, and
+    that a per-class count against a pinned provider makes plain.
+    """
+    client = RaisingWriterClient(
+        identities=identities,
+        critique_fn=clean,
+        report_fn=lambda n: REPORT,
+    )
+    client.error = ModelCallError(
+        "writer-a: emitted unparsed tool-call markup as content",
+        failure_class="unparsed_tool_markup",
+    )
+
+    final = run(config, question="Is it so?", client=client)
+
+    assert final["fatal"]
+    failures = [e for e in events_of(final) if e["kind"] == "generate_failed"]
+    assert failures, "a writer that raised must still be recorded"
+    assert {e["failure_class"] for e in failures} == {"unparsed_tool_markup"}
+
+
+def test_a_writer_that_answers_with_whitespace_is_its_own_failure_class(identities, config):
+    """Distinct from anything `llm` raises: the call succeeded and the model answered.
+    Folding it into the transport classes would hide the one defect no retry budget or
+    provider pin can fix."""
+    client = FlakyWriterClient(
+        identities=identities,
+        critique_fn=always_material,
+        report_fn=lambda n: f"{REPORT}\nRevision {n}.\n",
+    )
+    client.empty_generations = {2}
+
+    final = run(config, question="Is it so?", seed=REPORT, client=client)
+
+    failures = [e for e in events_of(final) if e["kind"] == "generate_failed"]
+    assert [e["failure_class"] for e in failures] == ["empty_report"]
 def test_seed_warnings_from_ingest_reach_the_final_record(identities, config):
     """Ingest runs at the edge, so anything it noticed about the seed has to be carried
     into the run to be visible at all — the run page and final.json read `warnings`."""

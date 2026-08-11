@@ -190,13 +190,18 @@ def test_a_loop_that_never_produces_prose_raises_rather_than_returning_nothing(c
     `ModelCallError` instead of surfacing as a successful empty report (D-provider-retry)."""
     _scripted(client, [_tool_message(), _tool_message(), _tool_message()])
 
-    with pytest.raises(ModelCallError, match="ended without an answer"):
+    with pytest.raises(ModelCallError, match="ended without an answer") as caught:
         client.complete(
             "writer-a", system="s", user="u",
             tools=[{"type": "function", "function": {"name": "web_search"}}],
             tool_handler=lambda n, a: "r",
             max_tool_rounds=1,
         )
+
+    # D-writer-failure-class: distinct from `unparsed_tool_markup`, because the fixes
+    # differ — this model called tools and then had nothing to say, which the nudge
+    # already tried to rescue; markup means the tool call never parsed at all.
+    assert caught.value.failure_class == "tool_loop_no_answer"
 
 
 def test_a_tool_whose_budget_is_spent_is_withdrawn_mid_loop(client):

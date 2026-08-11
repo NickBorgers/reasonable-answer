@@ -103,6 +103,11 @@ critic when `mistral-large-3` authored the report, so that lens cannot supply th
 required for strong acceptance on those rounds. Fit-first ordering applies QP8's deterministic
 audition verdicts and measured sensitivity to roster position; no LLM prose grades the roster.
 
+**Application — writer failure classes (D-writer-failure-class).** Recording a `failure_class` on
+each failed attempt makes repeated failure modes countable without interpreting provider prose.
+The token is derived from an exception type and status code, so no LLM assessment enters it, and it
+reaches the audit trail rather than any control decision under QP1.
+
 **Application — writer source reads (D-writer-source-reads,
 D-support-normalized-text).** Writer-read page bodies are production evidence, not critique: QP5
 requires them to enter the writer context as fenced untrusted data, and no page instruction or
