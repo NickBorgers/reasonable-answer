@@ -82,6 +82,99 @@ def test_plain_numbered_list_entries_are_split():
     assert fetch.entry_url(entries[1]) == "https://example.org/b"
 
 
+def test_a_flat_bullet_list_is_one_entry_per_bullet():
+    """The fourth shape writers actually produce, alongside `[n]`, `1.` and `1)`."""
+    report = (
+        "# T\n\n## Sources\n\n"
+        "- Smith 2019. https://example.org/a\n"
+        "* Jones 2020. https://example.org/b\n"
+        "+ Nakamura 2021. https://example.org/c\n"
+    )
+    assert len(fetch.source_entries(report)) == 3
+
+
+# The shape issue #168 was filed against: every reference carries an indented
+# sub-bullet of commentary, which `\s{0,3}` read as a second, URL-less entry — so the
+# bibliography counted double and exactly half of it reported as unaddressable.
+ANNOTATED = """# T
+
+A claim [1], another [2], and a third [3].
+
+## Sources
+
+[1] Luccioni, A. S., et al. (2023). "Power Hungry Processing." https://example.org/a
+   - Estimates energy use per query and discusses data centre intensity.
+[2] IEA (2024). Electricity 2024. https://example.org/b
+   - Projects data centre demand to 2026.
+[3] Smith, J. (2019). A book with no URL at all. Publisher.
+   - Background monograph; no online edition.
+"""
+
+
+def test_an_annotation_indented_under_a_reference_is_not_a_second_entry():
+    entries = fetch.source_entries(ANNOTATED)
+    assert len(entries) == 3
+    assert fetch.entry_url(entries[0]) == "https://example.org/a"
+    assert fetch.entry_url(entries[2]) is None
+    assert "Estimates energy use" in entries[0]
+
+
+def test_an_annotated_bibliography_reports_only_its_real_unaddressable_entry():
+    """The number the label ships: one reference here carries no URL, and the count of
+    unchecked entries must be that one — not one per annotation
+    (D-bibliography-entry-nesting, D-observed-source-coverage)."""
+    observed = fetch.coverage(
+        ANNOTATED,
+        {
+            "https://example.org/a": FetchedSource(url="https://example.org/a", text="body"),
+            "https://example.org/b": FetchedSource(url="https://example.org/b", text="body"),
+        },
+    )
+    assert observed.cited == 3
+    assert observed.addressable == 2
+    assert observed.not_addressable == 1
+    assert observed.not_independently_checked == 1
+
+
+def test_a_tab_indented_annotation_folds_the_same_way():
+    report = (
+        "# T\n\n## Sources\n\n"
+        "- Smith 2019. https://example.org/a\n"
+        "\t- Annotated in a tab-indented sub-bullet.\n"
+        "- Jones 2020. https://example.org/b\n"
+    )
+    assert len(fetch.source_entries(report)) == 2
+
+
+def test_references_nested_under_grouping_bullets_are_still_the_entries():
+    """The converse of the annotation case, and the reason the entry depth is anchored
+    at the shallowest marker that carries an address rather than at column 0: here the
+    outermost bullets are headings and the references sit under them. Collapsing three
+    references into two group bullets would understate the denominator, which reads as
+    *more* of the bibliography verified than actually was."""
+    report = (
+        "# T\n\n## Sources\n\n"
+        "- Peer-reviewed:\n"
+        "  - Smith 2019. https://example.org/a\n"
+        "  - Jones 2020. https://example.org/b\n"
+        "- Institutional:\n"
+        "  - IEA 2024. https://example.org/c\n"
+    )
+    entries = fetch.source_entries(report)
+    assert len(entries) == 3
+    assert fetch.entry_url(entries[2]) == "https://example.org/c"
+
+
+def test_a_bibliography_with_no_urls_at_all_is_still_counted_line_by_line():
+    """The fallback in `_entry_indent`: with no addressed marker to anchor on, the
+    shallowest marker of any kind is the entry depth, so a wholly unaddressable
+    bibliography reports every entry it has rather than none."""
+    report = "# T\n\n## Sources\n\n[1] Smith, J. (2019). Publisher.\n[2] Jones, K. (2020). Publisher.\n"
+    observed = fetch.coverage(report)
+    assert observed.cited == 2
+    assert observed.not_addressable == 2
+
+
 def test_no_sources_section_means_nothing_cited():
     assert fetch.source_entries("# T\n\nJust prose.\n") == []
     assert fetch.coverage("# T\n\nJust prose.\n").cited == 0

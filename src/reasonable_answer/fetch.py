@@ -67,8 +67,10 @@ _URL = re.compile(r"https?://[^\s<>\"'\)\]]+")
 
 #: The line shapes a bibliography entry actually starts with in model-written markdown:
 #: a bullet, a bracketed number, or an ordered-list number. Used only to *count* entries
-#: (`source_entries`) — nothing routes on it.
-_ENTRY_START = re.compile(r"^\s{0,3}(?:[-*+]\s+|\[\d+\]\s*|\(?\d+[.)]\s+)")
+#: (`source_entries`) — nothing routes on it. The leading indent is captured rather than
+#: bounded, because indentation is what separates a reference from the annotation
+#: beneath it (D-bibliography-entry-nesting); a marker at any depth is still a marker.
+_ENTRY_START = re.compile(r"^([ \t]*)(?:[-*+]\s+|\[\d+\]\s*|\(?\d+[.)]\s+)")
 
 
 @dataclass(frozen=True)
@@ -355,6 +357,33 @@ def extract_source_urls(report: str, limit: int = 20) -> list[str]:
     return seen
 
 
+def _marker_indents(lines: list[str]) -> dict[int, int]:
+    """Indent width per line that opens with a list marker, keyed by line index.
+
+    Tabs are expanded so that a tab-indented annotation and a space-indented one compare
+    the same way; nothing here depends on the exact width, only on the ordering.
+    """
+    indents: dict[int, int] = {}
+    for index, line in enumerate(lines):
+        match = _ENTRY_START.match(line)
+        if match:
+            indents[index] = len(match.group(1).expandtabs(4))
+    return indents
+
+
+def _entry_indent(lines: list[str], marker_indents: dict[int, int]) -> int:
+    """The indent depth at which the entries themselves sit.
+
+    The shallowest marker depth that carries an address, because that is the level a
+    writer puts *references* on: an annotation is indented under the reference it
+    describes, and a grouping bullet (`- Peer-reviewed:`) sits above one and carries no
+    URL of its own. Falling back to the shallowest marker of any kind keeps a
+    bibliography with no URLs at all counted line by line rather than collapsed.
+    """
+    addressed = [indent for index, indent in marker_indents.items() if _URL.search(lines[index])]
+    return min(addressed) if addressed else min(marker_indents.values())
+
+
 def source_entries(report: str) -> list[str]:
     """The bibliography *entries* in the '## Sources' section, one string each.
 
@@ -366,26 +395,35 @@ def source_entries(report: str) -> list[str]:
 
     Entry splitting is a heuristic over model-written markdown, and is deliberately
     conservative in the direction that *understates* coverage. A section any of whose
-    lines carry a list marker (`- `, `* `, `[1]`, `1.`, `1)`) is split on those markers,
-    with unmarked lines folded into the entry above as continuations and text before the
-    first marker treated as section prose rather than an entry. A section with no marker
-    anywhere falls back to one entry per non-blank line, which is the other shape writers
-    produce. Neither shape can be recognised with certainty, which is why what this feeds
-    is reported as an observed count and never as a completeness claim.
+    lines carry a list marker (`- `, `* `, `[1]`, `1.`, `1)`) is split on the markers
+    sitting at the entry depth (`_entry_indent`); a marker indented *deeper* than that is
+    an annotation of the reference above it and folds into it exactly as an unmarked
+    continuation line does (D-bibliography-entry-nesting), one indented *shallower* is a
+    grouping heading and is dropped, and text before the first entry is section prose
+    rather than an entry. A section with no marker anywhere falls back to one entry per
+    non-blank line, which is the other shape writers produce. Neither shape can be
+    recognised with certainty, which is why what this feeds is reported as an observed
+    count and never as a completeness claim.
     """
     lines = sources_section(report).splitlines()
-    if any(_ENTRY_START.match(line) for line in lines):
-        entries: list[str] = []
-        for line in lines:
-            stripped = line.strip()
-            if not stripped:
-                continue
-            if _ENTRY_START.match(line):
-                entries.append(stripped)
-            elif entries:
-                entries[-1] = f"{entries[-1]} {stripped}"
-        return entries
-    return [line.strip() for line in lines if line.strip()]
+    marker_indents = _marker_indents(lines)
+    if not marker_indents:
+        return [line.strip() for line in lines if line.strip()]
+
+    depth = _entry_indent(lines, marker_indents)
+    entries: list[str] = []
+    for index, line in enumerate(lines):
+        stripped = line.strip()
+        if not stripped:
+            continue
+        indent = marker_indents.get(index)
+        if indent == depth:
+            entries.append(stripped)
+        elif indent is not None and indent < depth:
+            continue
+        elif entries:
+            entries[-1] = f"{entries[-1]} {stripped}"
+    return entries
 
 
 def entry_url(entry: str) -> str | None:
