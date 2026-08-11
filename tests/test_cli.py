@@ -126,6 +126,93 @@ def test_doctor_says_so_when_enforcement_is_on_with_nothing_measured(doctor_conf
     assert "cannot block anything" in result.stdout.replace("\n", " ")
 
 
+def test_doctor_reports_unreachable_rather_than_crashing_on_a_structured_output_probe(
+    doctor_config, monkeypatch
+):
+    """D-probe-capability-evidence. `doctor` is the tool reached for when the proxy is
+    misbehaving — exactly when a probe is likely to hit an availability failure. It
+    must degrade, not die: the table still renders (every other alias, and this one's
+    other columns), a distinct marker shows where the probe could not complete, a
+    warning names the alias, and the exit code says "could not fully verify" rather
+    than either a clean pass or the crash a raw `ConfigError` used to produce."""
+    client = FakeClient(
+        identities=IDENTITIES,
+        critique_fn=lambda *_: CritiqueOutput(issues=[]),
+        report_fn=lambda _: "",
+    )
+    client.unprobeable.add("writer-a")
+    monkeypatch.setattr(cli, "LLMClient", lambda _config: client)
+
+    result = runner.invoke(cli.app, ["doctor", "--config", str(doctor_config)])
+
+    assert result.exit_code == 2, result.stdout
+    assert "unreachable" in result.stdout
+    assert "could not probe structured-output mode" in result.stdout.replace("\n", " ")
+    assert "writer-a" in result.stdout
+    # The rest of the table still rendered — a bad probe on one alias must not blank
+    # out what was learned about every other one.
+    assert "writer-b" in result.stdout
+    assert "logic-spec" in result.stdout
+
+
+def test_doctor_reports_unreachable_rather_than_crashing_on_a_tool_calling_probe(
+    doctor_config, monkeypatch
+):
+    """The tool-calling probe has the identical shape and the identical fix."""
+    data = yaml.safe_load(doctor_config.read_text())
+    data["search"] = {"enabled": True}
+    doctor_config.write_text(yaml.safe_dump(data))
+    monkeypatch.setenv("BRAVE_SEARCH_API_KEY", "test-token")
+
+    client = FakeClient(
+        identities=IDENTITIES,
+        critique_fn=lambda *_: CritiqueOutput(issues=[]),
+        report_fn=lambda _: "",
+    )
+    client.tool_unprobeable.add("writer-a")
+    monkeypatch.setattr(cli, "LLMClient", lambda _config: client)
+
+    result = runner.invoke(cli.app, ["doctor", "--config", str(doctor_config)])
+
+    # The extra "tool calls" column narrows the table enough that rich may truncate
+    # the "unreachable" cell with an ellipsis rather than assert on the literal word
+    # there — the warning and the web-search line below the table are not truncated
+    # and are the load-bearing proof this degraded rather than crashing.
+    assert result.exit_code == 2, result.stdout
+    assert "could not probe tool-calling for ['writer-a']" in result.stdout.replace("\n", " ")
+    assert "could not verify tool-calling" in result.stdout.replace("\n", " ")
+    assert "writer-a" in result.stdout
+    # The other writer's probe succeeded and must still be reported as such, not
+    # dragged down by the one that could not be reached.
+    assert "yes" in result.stdout.lower()
+
+
+def test_doctor_still_fails_closed_on_a_writer_genuinely_unable_to_call_a_tool(
+    doctor_config, monkeypatch
+):
+    """Capability evidence — the model answered and simply never called the tool — is
+    unaffected by the availability-failure fix: this is still a definite finding and
+    still exits differently (1) from "could not verify" (2)."""
+    data = yaml.safe_load(doctor_config.read_text())
+    data["search"] = {"enabled": True}
+    doctor_config.write_text(yaml.safe_dump(data))
+    monkeypatch.setenv("BRAVE_SEARCH_API_KEY", "test-token")
+
+    client = FakeClient(
+        identities=IDENTITIES,
+        critique_fn=lambda *_: CritiqueOutput(issues=[]),
+        report_fn=lambda _: "",
+        tool_capable={"writer-a": False},
+    )
+    monkeypatch.setattr(cli, "LLMClient", lambda _config: client)
+
+    result = runner.invoke(cli.app, ["doctor", "--config", str(doctor_config)])
+
+    assert result.exit_code == 1, result.stdout
+    assert "cannot emit tool calls" in result.stdout
+    assert "writer-a" in result.stdout
+
+
 def test_doctor_warns_rather_than_claiming_health_when_a_lens_is_thin(tmp_path, monkeypatch):
     """One eligible non-author critic is legal but degrades acceptance, so doctor has
     to say so — a silent pass here would misrepresent what `accepted` will mean."""

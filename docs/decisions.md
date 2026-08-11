@@ -5371,20 +5371,36 @@ Classification reads the exception type and the `failure_class`/status code carr
 message text — the same rule `_permanent` and `_failure_class` already follow, for the same reason: a
 provider's wording is not an interface.
 
-**What this deliberately does not do.** It does not change the shape of either probe's ladder, its
-caching, or any caller — `build_runtime`, `ra doctor`, `ra audition`, `ra audition-refine`, and
-`_build_searcher` all already treat a `ConfigError` from a probe as fail-closed, so an availability
-failure now surfaces through the same path a genuine incapability always used. It does not retry the
-probe itself beyond what `_create`'s own budget already provides — a probe that fails on availability
-grounds is meant to be re-run (a fresh `ra doctor` or a restarted `build_runtime`), not looped inside
-the failing attempt. It does not re-measure or invalidate any audition verdict already on disk; a
-verdict cached under a probed mode from before this fix is unaffected until the alias is re-probed.
+**What this deliberately does not do.** It does not change the shape of either probe's ladder or its
+caching. It does not retry the probe itself beyond what `_create`'s own budget already provides — a
+probe that fails on availability grounds is meant to be re-run (a fresh `ra doctor` or a restarted
+`build_runtime`), not looped inside the failing attempt. It does not re-measure or invalidate any
+audition verdict already on disk; a verdict cached under a probed mode from before this fix is
+unaffected until the alias is re-probed.
+
+**Fail closed where it costs something; report where the job is diagnosis.** `build_runtime`
+(`ra run`, `serve`) and `ra audition`/`ra audition-refine` are unchanged: an availability failure
+during their probe raises, uncaught, all the way to the same `ConfigError` fail-closed path a
+genuine incapability already used — right, because each is about to spend money on a run or a
+measurement whose extraction regime would be silently wrong if the probe had degraded instead.
+`ra doctor` is different in kind, not degree: it is the tool an operator reaches for *when the proxy
+is misbehaving*, which is exactly the moment a probe is likely to hit a 429 or a timeout rather than
+settle a capability question, and it spends nothing — it exists only to report. Before this decision
+it had no `try/except` around either probe at all, so this fix would otherwise have turned every
+transient failure doctor's own purpose exists to surface into an uncaught Python traceback, at
+precisely the moment an operator needs the rest of the table. So `ra doctor` alone catches the
+`ConfigError` per alias, renders a marker distinct from a real mode and from a definite `NO`
+("unreachable"), keeps printing every other alias and the roster-health warnings, and exits `2` —
+distinct from a clean `0` and from the `1` a *definite* capability finding (a writer confirmed unable
+to call a tool) still produces — so a scripted health check can tell "fully verified" apart from
+"could not fully verify" apart from "found a real problem".
 
 **Invariants.** None of the six is in reach. Author exclusion, the blind orchestrator, severity
 floors and termination are untouched. Fail-closed lenses are arguably strengthened, not weakened: a
-capability probe that could not be completed now fails closed loudly instead of silently degrading.
-The untrusted-text boundary is untouched — classification reads exception types and status codes,
-never provider-authored text, exactly as `_failure_class` already did.
+capability probe that could not be completed now fails closed loudly instead of silently degrading,
+everywhere except the one diagnostic command whose entire purpose is to report rather than spend or
+gate. The untrusted-text boundary is untouched — classification reads exception types and status
+codes, never provider-authored text, exactly as `_failure_class` already did.
 
 ## Open items for a future round
 

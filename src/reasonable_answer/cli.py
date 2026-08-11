@@ -150,6 +150,18 @@ def doctor(
     if config.search.enabled:
         table.add_column("tool calls")
     modes: dict[str, str] = {}
+    tool_capable: dict[str, bool] = {}
+    # `doctor` is the tool an operator reaches for *when the proxy is misbehaving* —
+    # exactly when a probe is likely to hit an availability failure rather than settle
+    # a capability question. Unlike `run`/`serve`/`audition`, which spend money on a
+    # run whose extraction regime would be wrong if it silently degraded, `doctor`
+    # spends nothing and exists only to report — dying on the condition it exists to
+    # diagnose would make it useless at the moment it is most needed
+    # (D-probe-capability-evidence). So a `ConfigError` from either probe here is
+    # caught per alias, shown as a marker distinct from a real mode and from `NO`,
+    # and the rest of the table and the roster-health warnings still print.
+    unreachable_modes: list[str] = []
+    unreachable_tools: list[str] = []
     for alias in config.roster.all_aliases:
         roles_ = []
         if alias in config.roster.writers:
@@ -159,20 +171,49 @@ def doctor(
                 roles_.append(lens)
         if alias == config.roster.orchestrator_alias:
             roles_.append("orchestrator")
-        mode = client.probe_structured_output(alias)
-        modes[alias] = mode
-        row = [alias, identities[alias], ", ".join(roles_), mode, _audition_cell(config, identities, alias)]
+        try:
+            mode = client.probe_structured_output(alias)
+        except ConfigError:
+            unreachable_modes.append(alias)
+            mode_cell: str = "[yellow]unreachable[/yellow]"
+        else:
+            modes[alias] = mode
+            mode_cell = mode
+        row = [
+            alias,
+            identities[alias],
+            ", ".join(roles_),
+            mode_cell,
+            _audition_cell(config, identities, alias),
+        ]
         if config.search.enabled:
             # Only writers hold the tool today, so a critic's inability to call one
             # is information, not a problem.
             if alias not in config.roster.writers:
                 row.append("[dim]n/a[/dim]")
-            elif client.probe_tool_calling(alias):
-                row.append("[green]yes[/green]")
             else:
-                row.append("[red]NO[/red]")
+                try:
+                    capable = client.probe_tool_calling(alias)
+                except ConfigError:
+                    unreachable_tools.append(alias)
+                    row.append("[yellow]unreachable[/yellow]")
+                else:
+                    tool_capable[alias] = capable
+                    row.append("[green]yes[/green]" if capable else "[red]NO[/red]")
         table.add_row(*row)
     console.print(table)
+    if unreachable_modes:
+        console.print(
+            f"[yellow]warning:[/yellow] could not probe structured-output mode for "
+            f"{unreachable_modes} — the proxy/provider was unavailable during the probe "
+            f"(not a capability finding). Rerun `ra doctor` once it recovers"
+        )
+    if unreachable_tools:
+        console.print(
+            f"[yellow]warning:[/yellow] could not probe tool-calling for {unreachable_tools} "
+            f"— the proxy/provider was unavailable during the probe (not a capability "
+            f"finding). Rerun `ra doctor` once it recovers"
+        )
 
     warnings = validate_roster_health(config, identities)
     warnings += _audition_warnings(config, identities, modes)
@@ -207,18 +248,37 @@ def doctor(
         except search.SearchConfigError as exc:
             console.print(f"[red]web search: {exc}[/red]")
             raise typer.Exit(code=1) from exc
-        blind = [a for a in config.roster.writers if not client.probe_tool_calling(a)]
+        # Read from the probes the roster table already took, rather than re-probing:
+        # a writer whose probe raised is not in `tool_capable` at all, so it must be
+        # named separately from one the probe positively found incapable of the tool.
+        blind = [a for a in config.roster.writers if tool_capable.get(a) is False]
+        unverified = [a for a in config.roster.writers if a in unreachable_tools]
         if blind:
             console.print(
                 f"[red]web search: writers cannot emit tool calls: {blind} — a run "
                 f"would fail closed at startup[/red]"
             )
             raise typer.Exit(code=1)
+        if unverified:
+            console.print(
+                f"[yellow]web search: could not verify tool-calling for {unverified} — "
+                f"the proxy/provider was unavailable during the probe, so whether a run "
+                f"would succeed or fail closed at startup is unknown. Rerun `ra doctor` "
+                f"once it recovers[/yellow]"
+            )
+            raise typer.Exit(code=2)
         console.print(
             f"[green]web search: ready ("
             f"{'unbounded' if config.search.query_budget is None else config.search.query_budget}"
             f" queries/run)[/green]"
         )
+
+    if unreachable_modes or unreachable_tools:
+        # Distinct from a clean 0 (fully verified) and from the definite-problem 1s
+        # above: the diagnostic completed and printed everything it could, but could
+        # not fully verify the roster, which a health-check caller should be able to
+        # tell apart from either.
+        raise typer.Exit(code=2)
 
 
 @app.command()

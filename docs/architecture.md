@@ -354,7 +354,13 @@ carried no headings is accepted with a warning; the warning rides the run's exis
   everything else, including `http_429`, a timeout, a 5xx, or a rejected credential
   (`http_401`/`403`/`404`/`413`), is an availability fact about the moment and aborts the probe with
   a `ConfigError` instead of silently pinning the alias to a weaker mode or marking it tool-incapable
-  for the rest of the process (D-probe-capability-evidence).
+  for the rest of the process (D-probe-capability-evidence). `ra run`/`serve`/`ra audition`/
+  `ra audition-refine` let that `ConfigError` propagate to their existing fail-closed exit, since each
+  is about to spend on a run or measurement the probe result governs. `ra doctor` is the one
+  exception: it spends nothing and is the tool reached for when the proxy is already misbehaving, so
+  it catches the `ConfigError` per alias, prints an `unreachable` marker distinct from a real mode and
+  from a definite `NO`, keeps rendering the rest of the roster table and its warnings, and exits `2` —
+  distinct from a clean pass and from the `1` a definite capability finding still produces.
 - **Submission backpressure (RC-007):** concurrency bounds token *spend* but not how many runs may
   pile up, so submission is also bounded. `RunWorker.submit()` refuses with **HTTP 429** once the
   queue's waiting depth reaches `max_queue_depth`, and a fixed-window `submit_rate_max` /

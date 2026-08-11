@@ -103,6 +103,10 @@ class FakeClient:
     generations: int = 0
     #: alias -> can it emit tool calls; absent means yes
     tool_capable: dict[str, bool] = field(default_factory=dict)
+    #: aliases whose tool-calling probe cannot complete at all — an availability
+    #: failure, not a capability finding. Mirrors `unprobeable` for the
+    #: structured-output probe (D-probe-capability-evidence).
+    tool_unprobeable: set[str] = field(default_factory=set)
     #: every tool-result string the fake handed back to a "model"
     tool_results: list[str] = field(default_factory=list)
     #: every validation rejection the repair loop saw, in order — what the real client
@@ -159,6 +163,8 @@ class FakeClient:
         return self.modes.get(alias, "json_schema")
 
     def probe_tool_calling(self, alias: str) -> bool:
+        if alias in self.tool_unprobeable:
+            raise ConfigError(f"fail closed: alias '{alias}' tool-calling probe could not be completed")
         return self.tool_capable.get(alias, True)
 
     def tool_capable_for(self, alias: str) -> bool:
