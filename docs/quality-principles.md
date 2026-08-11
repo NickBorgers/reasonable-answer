@@ -103,18 +103,10 @@ critic when `mistral-large-3` authored the report, so that lens cannot supply th
 required for strong acceptance on those rounds. Fit-first ordering applies QP8's deterministic
 audition verdicts and measured sensitivity to roster position; no LLM prose grades the roster.
 
-**Application — failure classes and the serving host (D-writer-failure-class).** QP2 keys family on
-the model *name* precisely so two checkpoints of one base model cannot look independent by being
-served differently. The same reasoning has an untested converse this decision surfaces: one alias
-served by different *hosts* is not reliably one witness either, because a host that mangles tool
-calls or a quantization that degrades the model changes what the alias actually does. Measurement
-found that for writers — the same alias completing a tool loop 4/4 on one upstream and 0/4 on
-another — and the deployment answer is to pin the host (deployment-profile.md), not to re-key the
-family, since the family rule is about correlated *errors* and this is about capability. Recording a
-`failure_class` on each failed attempt is what makes the distinction checkable from a run record;
-the token is derived from an exception type and status code, so no LLM assessment enters it, and it
-reaches the audit trail rather than any control decision under QP1. Whether critic auditions
-inherited the same host variance is recorded as an open item, unmeasured and explicitly not claimed.
+**Application — writer failure classes (D-writer-failure-class).** Recording a `failure_class` on
+each failed attempt makes repeated failure modes countable without interpreting provider prose.
+The token is derived from an exception type and status code, so no LLM assessment enters it, and it
+reaches the audit trail rather than any control decision under QP1.
 
 **Application — writer source reads (D-writer-source-reads,
 D-support-normalized-text).** Writer-read page bodies are production evidence, not critique: QP5

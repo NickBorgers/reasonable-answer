@@ -5292,15 +5292,10 @@ be grouped: the record can say *that* writers failed, never *how often* they fai
 Its two sibling events already do better — `support_manifest_failed` and `dispute_pass_failed` both
 carry `error_type`.
 
-The cost of the gap was a wrong diagnosis. `nemotron-3-ultra` was read off run logs as a broken
-model — unparsed tool-call markup on two rounds, a tool loop ending without prose, a timeout — and
-a roster retirement was proposed on that basis. Measured directly on 2026-08-10, the model
-completes a production-shaped tool loop cleanly on two of its four OpenRouter upstreams (Venice
-4/4; DeepInfra 3/3, each via the `_answer_now` nudge) and fails on the other two (Together 4/4
-unparsed markup; BaseTen 1/1). `deepseek-v4-flash` splits the same way across twenty upstreams —
-GMICloud, Fireworks and OpenInference 3/3 clean, StreamLake 0/6. The defect was which upstream
-OpenRouter happened to route each call to, re-rolled per call. Nothing in the run record could have
-distinguished that from a bad model, because every failure was one unquotable sentence.
+The gap also prevents a grounded diagnosis: repeated timeouts, status-bearing provider failures,
+empty completions and malformed tool output collapse into unrelated sentences. Nothing in the run
+record can distinguish those failure modes without parsing wording that this repository does not
+treat as an interface.
 
 **The decision.** `ModelCallError` carries a `failure_class`: a short, stable token naming how the
 call failed, set at each raise site in `llm.py` and defaulting to `call_failed`. `graph._generate`
@@ -5314,23 +5309,16 @@ Two properties are deliberate. Classification reads the exception type and the S
 never the message text, for the same reason `_permanent` does: a provider's wording is not an
 interface. And an exhausted retry budget reports its *cause's* class rather than a class of its
 own, because what a reader needs is which defect the budget was spent on — three unparsed tool-call
-blocks and three timeouts are the same event today and want opposite fixes, one a provider to
-re-pin and one a moment to wait out. The message still says the budget was exhausted.
+blocks and three timeouts are the same event today but materially different observations. The
+message still says the budget was exhausted.
 
 **What this deliberately does not do.** It changes nothing the pipeline decides: the retry budgets,
 the writer rotation, the fail-closed paths and every controller rule are byte-identical. It adds a
 field to one event. In particular it does **not** retire `nemotron-3-ultra`, and it does not make
 `probe_tool_calling` stricter — that probe is a one-shot ping while production runs a multi-round
-loop, so it does under-measure, but tightening it to the loop shape would fail a run closed at
-startup on a model that is sound once its upstream is pinned, which is answering a routing problem
-with a roster ban. Reconsider when the per-class counts this decision creates say something the
-provider pin does not already explain.
-
-Pinning the upstream is the other half and is deliberately not in this repo. `config/roster.yaml`'s
-`proxy:` block carries a `base_url` and no way to name a serving endpoint, and it should stay that
-way: which upstream answers is a deployment fact, of the kind `docs/deployment-profile.md` records.
-It is filed as `NickBorgers/host-config-as-code#46`, which holds the measurement tables above and
-the LiteLLM `provider.order` patch.
+loop. It does not change the roster, the deployment configuration or any probe; those require their
+own evidence and decision. Reconsider them only when the per-class counts this decision creates
+support a separate change.
 
 **Invariants.** None of the six is in reach. Author exclusion, the blind orchestrator, fail-closed
 lenses, severity floors, termination and the untrusted-text boundary are all untouched; the added
@@ -5354,16 +5342,6 @@ record rather than any prompt.
   data, post-trained for tool calling, ~35GB at 4-bit) as a cheap tool-competent writer, in
   `nemotron`'s existing family; and `moonshotai/kimi-k2.6`, a genuinely new family excluded by the
   same arithmetic as `kimi-k3` at ~594GB.
-
-- Whether critic aliases need the upstream pin that writers now have
-  (D-writer-failure-class, docs/deployment-profile.md). Critics run through the same per-request
-  routing, and `glm-5.2` alone has 32 OpenRouter endpoints spanning fp4 and fp8 — so every audition
-  verdict on record was measured across an unknown mix of hosts. That is a **hypothesis, not a
-  finding**: no critic-side measurement was taken, and the writer evidence is about a tool loop
-  critics never run. It is worth testing because the roster already documents an unexplained symptom
-  of the right shape — `minimax-m3` probing non-deterministically across `json_schema`,
-  `json_object` and `prompt` (D-audition-probe-parity). The test is a re-audition under pinned
-  hosts, which is also what the two roster open items above need anyway.
 
 - Audition a replacement evidence-lens candidate (D-minimax-retirement). The lens now runs two
   `marginal` critics, and `gemma4`'s 0.50 sensitivity sits below the warn line; the roster needs a

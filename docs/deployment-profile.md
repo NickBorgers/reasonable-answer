@@ -85,10 +85,9 @@ again before every send.
 
 ### What the proxy must not do
 
-Three requirements on the LiteLLM configuration itself. None is checkable from this repository —
-the application can only detect the first, after the fact, and pay for it. All are failure modes RA
-guards against in code (RA-017, and the `_unparsed_tool_call` net in `llm.py`); see D-provider-retry
-and D-writer-failure-class.
+Two requirements on the LiteLLM configuration itself. Neither is checkable from this repository —
+the application can only detect the first, after the fact, and pay for it. Both are failure modes RA
+guards against in code (RA-017, and the `_unparsed_tool_call` net in `llm.py`); see D-provider-retry.
 
 **No fallback routing on any alias the roster names.** A LiteLLM fallback that quietly serves
 `gemma4` from `meta-llama/llama-4-scout` breaks every downstream identity claim at once: author
@@ -104,27 +103,6 @@ raw markup back as message *content*, where it reads as a successful prose answe
 a guard (`_unparsed_tool_call`) that catches this and retries — a final answer that is nothing but a
 tool-call block is exactly what it is built for — but the guard is a net, not a fix, and every catch
 spends an attempt from the call budget.
-
-**The serving upstream must be pinned, not left to a router.** This deployment reaches open-weight
-models through OpenRouter, which chooses an upstream host per request and may choose a different one
-on the next call to the same alias. Those hosts are not interchangeable for the thing RA asks of a
-writer. Measured on 2026-08-10 over a production-shaped tool loop: `nemotron-3-ultra` completed 4/4
-on Venice and 0/4 on Together, which returned unparsed tool-call markup every time;
-`deepseek-v4-flash` completed 3/3 on each of GMICloud, Fireworks and OpenInference and 0/6 on
-StreamLake. Every one of those hosts advertises tool support. Unpinned, an alias is a lottery over
-them, and the previous requirement — parsing configured for the served model — cannot be satisfied
-for a model whose server is not decided until the request is made.
-
-So each roster alias routed through OpenRouter names an explicit `provider.order` with
-`allow_fallbacks: false`. Exhausting an ordered list of known-good hosts surfaces a 429 or 503,
-which RA retries with backoff and then routes around by rotating writers; falling back to a host
-that emits unparsable markup produces a *corrupt draft that reads as success*, which nothing
-downstream catches. A retryable error is the better failure. `mistral-large-3` has a single upstream
-and needs no pin; `gemma4-small` is local Ollama.
-
-This is the deployment half of D-writer-failure-class, whose `failure_class` token is what makes the
-distinction between a bad model and a bad host countable from a run record at all. The configuration
-lives in `NickBorgers/host-config-as-code`, not here.
 
 ## Source verification is on in production
 

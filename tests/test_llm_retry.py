@@ -17,7 +17,9 @@ import logging
 import re
 from types import SimpleNamespace
 
+import httpx
 import pytest
+from openai import APIConnectionError, APITimeoutError
 from pydantic import BaseModel
 
 from reasonable_answer.config import Budgets, Config, ProxyConfig, Roster
@@ -344,6 +346,39 @@ def test_a_statusless_transport_failure_falls_back_rather_than_guessing(tmp_path
         client.complete("writer-a", system="s", user="u")
 
     assert caught.value.failure_class == "call_failed"
+
+
+@pytest.mark.parametrize(
+    ("error_type", "failure_class"),
+    [(APITimeoutError, "timeout"), (APIConnectionError, "connection")],
+)
+def test_an_sdk_transport_failure_is_classified_by_type(tmp_path, error_type, failure_class):
+    client, _ = make_client(tmp_path, retry_backoff_seconds=0.0)
+    request = httpx.Request("POST", "https://provider.invalid/v1/chat/completions")
+    create, _ = _raising(error_type(request=request))
+    _install(client, create)
+
+    with pytest.raises(ModelCallError) as caught:
+        client.complete("writer-a", system="s", user="u")
+
+    assert caught.value.failure_class == failure_class
+
+
+def test_an_identity_mismatch_names_its_class(tmp_path):
+    def create(**kwargs):
+        return SimpleNamespace(
+            model="some-other-model",
+            usage=SimpleNamespace(prompt_tokens=1, completion_tokens=1),
+            choices=[SimpleNamespace(message={"role": "assistant", "content": "OK"})],
+        )
+
+    client, _ = make_client(tmp_path)
+    _install(client, create)
+
+    with pytest.raises(ModelCallError, match="identity mismatch") as caught:
+        client.complete("writer-a", system="s", user="u")
+
+    assert caught.value.failure_class == "identity_mismatch"
 
 
 @pytest.mark.parametrize("status", [400, 401, 403, 404, 413, 422])
