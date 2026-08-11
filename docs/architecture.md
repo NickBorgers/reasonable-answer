@@ -347,7 +347,14 @@ carried no headings is accepted with a warning; the warning rides the run's exis
   token naming *how* the call failed, read from the exception type and status code and never from
   the provider's wording — and each failed writer attempt records it on `generate_failed` beside
   the free-text `reason` (D-writer-failure-class). Grouping by that token makes repeated failure
-  modes countable without treating volatile provider prose as an interface.
+  modes countable without treating volatile provider prose as an interface. The two capability
+  probes (`probe_structured_output`, `probe_tool_calling`) apply the same read to their own
+  fail-closed ladders: only `MalformedOutputError` or a `PermanentCallError` whose `failure_class` is
+  `http_400`/`http_422` counts as evidence that the alias lacks the capability being probed —
+  everything else, including `http_429`, a timeout, a 5xx, or a rejected credential
+  (`http_401`/`403`/`404`/`413`), is an availability fact about the moment and aborts the probe with
+  a `ConfigError` instead of silently pinning the alias to a weaker mode or marking it tool-incapable
+  for the rest of the process (D-probe-capability-evidence).
 - **Submission backpressure (RC-007):** concurrency bounds token *spend* but not how many runs may
   pile up, so submission is also bounded. `RunWorker.submit()` refuses with **HTTP 429** once the
   queue's waiting depth reaches `max_queue_depth`, and a fixed-window `submit_rate_max` /

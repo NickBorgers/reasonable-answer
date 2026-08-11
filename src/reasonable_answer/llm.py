@@ -288,7 +288,24 @@ class LLMClient:
     # ---------------------------------------------------------------- capability
 
     def probe_structured_output(self, alias: str) -> str:
-        """Pin `alias` to the strongest structured-output mode it actually supports."""
+        """Pin `alias` to the strongest structured-output mode it actually supports.
+
+        Only *capability* evidence demotes to the next mode: `MalformedOutputError`
+        (the model answered, but not inside the closed schema) or a
+        `PermanentCallError` whose `failure_class` is `http_400`/`http_422` — how a
+        provider says "I do not support this `response_format`" (that request shape
+        is exactly what changes between modes). Everything else — `http_429`, a
+        timeout, a connection failure, any 5xx, and a rejected credential
+        (`http_401`/`403`/`404`/`413`) — is an *availability* fact about the moment,
+        not a capability fact about the alias, and `_create` has already retried it
+        within `budgets.call_retries` before giving up. Demoting on it would silently
+        pin the alias to a weaker mode for the rest of the process on nothing more
+        than a bad moment on the wire: `ra doctor` did exactly that to
+        `nemotron-3-ultra` on 2026-08-11, pinned to `json_object` after three
+        DeepInfra 429s during the `json_schema` probe (D-probe-capability-evidence).
+        So an availability failure aborts the probe by raising, rather than falling
+        through to a weaker mode under a false "unsupported" verdict.
+        """
         if alias in self._modes:
             return self._modes[alias]
 
@@ -306,9 +323,26 @@ class LLMClient:
                     max_tokens=3000,
                     repair_retries=0,
                 )
-            except Exception as exc:
+            except MalformedOutputError as exc:
                 log.debug("alias %s does not support mode %s: %s", alias, mode, exc)
                 continue
+            except PermanentCallError as exc:
+                if exc.failure_class in ("http_400", "http_422"):
+                    log.debug("alias %s does not support mode %s: %s", alias, mode, exc)
+                    continue
+                raise ConfigError(
+                    f"fail closed: probe of alias '{alias}' for mode '{mode}' could "
+                    f"not be completed ({exc}); its structured-output mode is "
+                    f"unknown, not unsupported — retry once the proxy/provider "
+                    f"recovers"
+                ) from exc
+            except Exception as exc:
+                raise ConfigError(
+                    f"fail closed: probe of alias '{alias}' for mode '{mode}' could "
+                    f"not be completed ({exc}); its structured-output mode is "
+                    f"unknown, not unsupported — retry once the proxy/provider "
+                    f"recovers"
+                ) from exc
             self._modes[alias] = mode
             return mode
         raise ConfigError(
@@ -569,6 +603,15 @@ class LLMClient:
         never happens is the failure mode this exists to catch: the writer prompt
         still demands a '## Sources' section, so an un-searched draft comes back
         with invented citations that look exactly like verified ones.
+
+        Only capability evidence marks the alias incapable: the call succeeds and the
+        model simply never calls the tool (below — no exception at all), or a
+        `PermanentCallError` whose `failure_class` is `http_400`/`http_422` — the
+        provider rejected the `tools` parameter's shape outright. Every other failure
+        — `http_429`, a timeout, a connection failure, any 5xx, a rejected credential
+        — is an availability fact, not a capability one, and used to be swallowed the
+        same way `probe_structured_output` swallowed one (D-probe-capability-evidence):
+        raise instead of silently pinning the alias tool-incapable for the process.
         """
         if alias in self._tool_capable:
             return self._tool_capable[alias]
@@ -599,10 +642,22 @@ class LLMClient:
                     "tools": [probe],
                 },
             )
+        except PermanentCallError as exc:
+            if exc.failure_class in ("http_400", "http_422"):
+                log.debug("alias %s failed the tool-calling probe: %s", alias, exc)
+                self._tool_capable[alias] = False
+                return False
+            raise ConfigError(
+                f"fail closed: probe of alias '{alias}' for tool-calling could not be "
+                f"completed ({exc}); its tool-calling capability is unknown, not "
+                f"absent — retry once the proxy/provider recovers"
+            ) from exc
         except Exception as exc:
-            log.debug("alias %s failed the tool-calling probe: %s", alias, exc)
-            self._tool_capable[alias] = False
-            return False
+            raise ConfigError(
+                f"fail closed: probe of alias '{alias}' for tool-calling could not be "
+                f"completed ({exc}); its tool-calling capability is unknown, not "
+                f"absent — retry once the proxy/provider recovers"
+            ) from exc
         capable = bool(_tool_calls(reply.message))
         self._tool_capable[alias] = capable
         return capable

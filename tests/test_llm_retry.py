@@ -22,7 +22,7 @@ import pytest
 from openai import APIConnectionError, APITimeoutError
 from pydantic import BaseModel
 
-from reasonable_answer.config import Budgets, Config, ProxyConfig, Roster
+from reasonable_answer.config import Budgets, Config, ConfigError, ProxyConfig, Roster
 from reasonable_answer.llm import (
     LLMClient,
     MalformedOutputError,
@@ -391,6 +391,98 @@ def test_a_permanent_failure_names_the_status_that_made_it_final(tmp_path, statu
         client.complete("writer-a", system="s", user="u")
 
     assert caught.value.failure_class == f"http_{status}"
+
+
+# ------------------------------------- probe: capability vs availability (D-probe-capability-evidence)
+
+
+def test_a_429_exhausting_the_budget_during_the_json_schema_probe_raises(tmp_path):
+    """The live observation: `ra doctor` pinned `nemotron-3-ultra` to `json_object` on
+    2026-08-11 after DeepInfra returned HTTP 429 three times during the `json_schema`
+    probe. A 429 is an availability fact about the moment, not a capability fact about
+    the alias — the probe must abort rather than silently fall through to a weaker
+    mode."""
+    client, _ = make_client(tmp_path, retry_backoff_seconds=0.0)
+    create, calls = _raising(_with_status(429))
+    _install(client, create)
+
+    with pytest.raises(ConfigError, match="structured-output mode is unknown"):
+        client.probe_structured_output("writer-a")
+
+    assert calls["n"] == 3  # the call budget was spent before the probe gave up
+    assert "writer-a" not in client._modes
+
+
+def test_a_400_during_the_json_schema_probe_demotes_to_json_object(tmp_path):
+    """`http_400` is how a provider says "I do not support this `response_format`" —
+    genuine capability evidence, unlike a bare transient failure."""
+
+    def create(**kwargs):
+        response_format = kwargs.get("response_format") or {}
+        if response_format.get("type") == "json_schema":
+            raise _with_status(400)
+        return SimpleNamespace(
+            model=kwargs["model"],
+            usage=SimpleNamespace(prompt_tokens=1, completion_tokens=1),
+            choices=[SimpleNamespace(message={"role": "assistant", "content": '{"ok": true}'})],
+        )
+
+    client, _ = make_client(tmp_path)
+    _install(client, create)
+
+    mode = client.probe_structured_output("writer-a")
+
+    assert mode == "json_object"
+    assert client._modes["writer-a"] == "json_object"
+
+
+def test_a_malformed_output_demotes_to_the_next_mode(tmp_path):
+    """The model answers, but not inside the closed schema — capability evidence."""
+
+    def create(**kwargs):
+        response_format = kwargs.get("response_format") or {}
+        content = "not json" if response_format.get("type") == "json_schema" else '{"ok": true}'
+        return SimpleNamespace(
+            model=kwargs["model"],
+            usage=SimpleNamespace(prompt_tokens=1, completion_tokens=1),
+            choices=[SimpleNamespace(message={"role": "assistant", "content": content})],
+        )
+
+    client, _ = make_client(tmp_path)
+    _install(client, create)
+
+    mode = client.probe_structured_output("writer-a")
+
+    assert mode == "json_object"
+
+
+def test_a_401_during_the_probe_raises_rather_than_demoting(tmp_path):
+    """A rejected credential says nothing about `response_format` support and must not
+    be read as capability evidence."""
+    client, _ = make_client(tmp_path)
+    create, calls = _raising(_with_status(401))
+    _install(client, create)
+
+    with pytest.raises(ConfigError, match="structured-output mode is unknown"):
+        client.probe_structured_output("writer-a")
+
+    assert calls["n"] == 1  # permanent failures are never retried
+    assert "writer-a" not in client._modes
+
+
+def test_a_genuinely_incapable_alias_still_fails_closed_after_all_three_modes(tmp_path):
+    """The pre-existing fail-closed path survives: when every mode is genuinely
+    rejected on capability grounds, the probe still exhausts the ladder and raises the
+    'cannot produce parseable structured output' `ConfigError` — not the new
+    'could not be completed' one, which means something different."""
+    client, _ = make_client(tmp_path)
+    create, calls = _raising(_with_status(400))
+    _install(client, create)
+
+    with pytest.raises(ConfigError, match="cannot produce parseable structured output"):
+        client.probe_structured_output("writer-a")
+
+    assert calls["n"] == 3  # one attempt per mode, each rejected on capability grounds
 
 
 # ------------------------------------------------------ audit privacy (RA-016)

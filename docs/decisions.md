@@ -5325,6 +5325,67 @@ lenses, severity floors, termination and the untrusted-text boundary are all unt
 field is derived from an exception type, never from model-authored text, and it reaches the run
 record rather than any prompt.
 
+## D-probe-capability-evidence — a probe that cannot complete does not get to say the alias is incapable
+
+**The finding.** `LLMClient.probe_structured_output` walked `MODES = ("json_schema", "json_object",
+"prompt")` strongest-first and caught bare `Exception` around each attempt: any failure at all —
+schema violation, malformed JSON, a 429, a timeout, a 500 — read as "this alias does not support this
+mode", and fell through to the next, weaker one. `probe_tool_calling` had the identical shape: any
+exception from the probe call was read as "this alias cannot call a tool" and cached `False`.
+
+Both probes conflate two different kinds of fact. Whether a model can produce `json_schema`-shaped
+output, or emit a tool call, is a *capability* fact about the alias — stable across calls, worth
+caching for the process. Whether a single request got a 429, timed out, or hit a 5xx is an
+*availability* fact about that moment on the wire — exactly what `_create`'s own backoff already
+exists to ride out, and already has, by the time either probe's `except` block runs. Treating the
+second as the first is how `ra doctor` pinned `nemotron-3-ultra` to `json_object` on 2026-08-11,
+after DeepInfra returned HTTP 429 three times during the `json_schema` probe: the model supports
+`json_schema` fine, and the pin was wrong for the rest of the process. Because
+`structured_output_mode` is part of the audition cache identity (D-audition-probe-parity), the same
+mechanism can invalidate a cached audition verdict, or measure a critic under a weaker extraction
+mode than it deserves, on nothing more than a bad moment during the probe. It also supplies a
+plausible mechanism for a symptom D-writer-failure-class recorded without explaining: the roster
+documented `minimax-m3` as probing non-deterministically across `json_schema`, `json_object` and
+`prompt`. This decision does not claim that was the only cause — nobody measured minimax-m3's probe
+failures at the time — only that transient-failure misclassification during a probe is a mechanism
+that produces exactly that symptom.
+
+**The decision.** Both probes now distinguish capability evidence from availability failure, and only
+demote or mark incapable on the former:
+
+- **Capability evidence** — `MalformedOutputError` (the model answered, but not inside the closed
+  schema) demotes `probe_structured_output` to the next mode. A `PermanentCallError` whose
+  `failure_class` is `http_400` or `http_422` demotes either probe: that is how a provider says "I do
+  not support this request shape" — the `response_format` for the structured-output probe, the
+  `tools` parameter for the tool-calling probe.
+- **Availability failure** — everything else, notably `http_429`, `timeout`, `connection`, and any
+  5xx (all of which `_create` has already retried within `budgets.call_retries` before giving up), and
+  also a rejected credential (`http_401`/`403`/`404`/`413`, which says the request was refused, not
+  that the mode or the tool is unsupported) — aborts the probe by raising a `ConfigError` distinct in
+  wording from the pre-existing "cannot produce parseable structured output" message, which means a
+  different thing: every mode was genuinely tried and rejected. The new message says the probe could
+  not be completed and the alias's capability is therefore unknown, not absent, so an operator reads
+  "the proxy was rate-limited, retry" rather than trusting a silently degraded pin.
+
+Classification reads the exception type and the `failure_class`/status code carried on it, never the
+message text — the same rule `_permanent` and `_failure_class` already follow, for the same reason: a
+provider's wording is not an interface.
+
+**What this deliberately does not do.** It does not change the shape of either probe's ladder, its
+caching, or any caller — `build_runtime`, `ra doctor`, `ra audition`, `ra audition-refine`, and
+`_build_searcher` all already treat a `ConfigError` from a probe as fail-closed, so an availability
+failure now surfaces through the same path a genuine incapability always used. It does not retry the
+probe itself beyond what `_create`'s own budget already provides — a probe that fails on availability
+grounds is meant to be re-run (a fresh `ra doctor` or a restarted `build_runtime`), not looped inside
+the failing attempt. It does not re-measure or invalidate any audition verdict already on disk; a
+verdict cached under a probed mode from before this fix is unaffected until the alias is re-probed.
+
+**Invariants.** None of the six is in reach. Author exclusion, the blind orchestrator, severity
+floors and termination are untouched. Fail-closed lenses are arguably strengthened, not weakened: a
+capability probe that could not be completed now fails closed loudly instead of silently degrading.
+The untrusted-text boundary is untouched — classification reads exception types and status codes,
+never provider-authored text, exactly as `_failure_class` already did.
+
 ## Open items for a future round
 
 - A third **logic**-lens family, and the candidate to audition for it (D-writer-failure-class

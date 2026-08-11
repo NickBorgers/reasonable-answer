@@ -20,12 +20,13 @@ from types import SimpleNamespace
 import pytest
 from pydantic import BaseModel
 
-from reasonable_answer.config import Budgets, Config, ProxyConfig, Roster
+from reasonable_answer.config import Budgets, Config, ConfigError, ProxyConfig, Roster
 from reasonable_answer.llm import (
     Completion,
     LLMClient,
     MalformedOutputError,
     ModelCallError,
+    PermanentCallError,
     _diagnostics_suffix,
     _message_dict,
     _Reply,
@@ -284,12 +285,45 @@ def test_probe_rejects_a_model_that_accepts_tools_and_never_calls_one(client):
     assert client.probe_tool_calling("writer-a") is False
 
 
-def test_probe_treats_an_error_as_incapable(client):
+def test_probe_raises_on_an_availability_failure_rather_than_calling_it_incapable(client):
+    """D-probe-capability-evidence. A transient failure (here a bare `ModelCallError`,
+    the shape `_create` raises after exhausting retries on a 429/timeout/5xx) says
+    nothing about whether the model can call a tool — it says the moment was bad. The
+    old behaviour pinned the alias tool-incapable for the rest of the process on
+    exactly this; it must now abort the probe instead."""
+
     def boom(alias, kwargs):
         raise ModelCallError("proxy exploded")
 
     client._create = boom  # type: ignore[method-assign]
+    with pytest.raises(ConfigError, match="tool-calling capability is unknown"):
+        client.probe_tool_calling("writer-a")
+    assert "writer-a" not in client._tool_capable
+
+
+def test_probe_treats_a_rejected_request_shape_as_incapable(client):
+    """A `PermanentCallError` with `http_400`/`http_422` is the provider saying it does
+    not support the `tools` parameter as sent — genuine capability evidence, unlike a
+    bare transient failure."""
+
+    def boom(alias, kwargs):
+        raise PermanentCallError("bad request", failure_class="http_400")
+
+    client._create = boom  # type: ignore[method-assign]
     assert client.probe_tool_calling("writer-a") is False
+    assert client.tool_capable("writer-a") is False
+
+
+def test_probe_raises_on_a_rejected_credential_rather_than_calling_it_incapable(client):
+    """`http_401`/`403`/`404`/`413` say the credential or the route is wrong, not that
+    the model lacks tool support — must raise, not demote to incapable."""
+
+    def boom(alias, kwargs):
+        raise PermanentCallError("unauthorized", failure_class="http_401")
+
+    client._create = boom  # type: ignore[method-assign]
+    with pytest.raises(ConfigError, match="tool-calling capability is unknown"):
+        client.probe_tool_calling("writer-a")
 
 
 def test_probe_result_is_cached(client):
