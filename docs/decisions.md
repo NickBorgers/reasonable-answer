@@ -5478,7 +5478,8 @@ codes, never provider-authored text, exactly as `_failure_class` already did.
   non-empty transcript exists, so the first hang on any given session is still paid for once. Whether
   a transcript can be told apart from one `claude --continue` wedges on, without loading it, is an
   open question; the current answer is to make the attempt cheap rather than to predict it.
-- Verdict instability near the audition threshold (docs/model-evaluation.md). The 2026-08-10/11
+- Verdict instability near the audition threshold
+  ([operator record](./model-evaluation-record-2026-08-10.md)). The 2026-08-10/11
   logic-lens audition measured `claude-haiku-4-5` at 2.04 invented material issues per sound
   control on one run and 1.04 on a re-run of the identical corpus — roughly a 2x swing against the
   `max_control_material_rate: 1.00` ceiling, at the default `audition.repetitions: 3` (24 control

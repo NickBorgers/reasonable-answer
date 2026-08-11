@@ -199,6 +199,9 @@ and the docs reviewer blocks on the first.
   candidate model into a roster slot: screening its upstream hosts before trusting a verdict,
   reading `schema_failures` first, interpreting a verdict (including run-to-run instability near a
   threshold), and the two `scripts/` tools that make the screening and the spot-check possible.
+- **[model-evaluation-record-2026-08-10.md](./model-evaluation-record-2026-08-10.md)** — the public
+  operator record behind that procedure's empirical claims: corpus identity, repetitions and call
+  counts, measured logic-lens metrics, host probes, schema incidents, and the manual spot-check.
 - **[decisions.md](./decisions.md)** — design decisions, the Codex review, and how each of the
   20 findings was resolved.
 - **[question-refinement.md](./question-refinement.md)** — the edge-side, ambient

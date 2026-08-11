@@ -46,9 +46,9 @@ what produced one of the three infrastructure bugs below.
    measuring. An audition run against an unpinned multi-host router is not a measurement of the
    model; it is a measurement of whichever hosts the router happened to route to that run.
 4. **Add the candidate to a scratch roster.** `ra audition` has no candidate flag — `--alias` only
-   *filters* the slots built from `audition.assignments`, which reads `config/roster.yaml`'s
-   `writers`/`critics` pools. A candidate must be added to the relevant pool in a **scratch copy**
-   of the roster file, never the committed one, with `$RA_CONFIG` pointed at the copy
+   *filters* the slots built from `audition.assignments`, which reads the roster's critic pool for
+   each lens. A candidate must be added to the target lens's critic pool in a **scratch copy** of
+   the roster file, never the committed one, with `$RA_CONFIG` pointed at the copy
    (`config.py`'s `Config.load` honors `$RA_CONFIG` first, ahead of the checkout's default
    search path).
 5. **Run the audition**, filtered to the one lens and one alias under test:
@@ -83,7 +83,9 @@ sound control is `max_control_material_rate: 1.00`.
 
 ### Verdict instability near the threshold
 
-A single-run verdict landing close to a threshold is not settled. `claude-haiku-4-5` measured
+A single-run verdict landing close to a threshold is not settled. The
+[2026-08-10/11 operator record](./model-evaluation-record-2026-08-10.md) reports that
+`claude-haiku-4-5` measured
 **2.04** invented material issues per sound control on one run and **1.04** on a re-run of the
 identical corpus, with low schema-failure rates both times — roughly a 2x run-to-run swing
 against a `1.00` ceiling, at the default `audition.repetitions: 3` (24 control runs total for one
@@ -100,9 +102,11 @@ rather than the models. Check that instinct against the evidence before acting o
 [`scripts/dump_control_issues.py`](https://github.com/NickBorgers/reasonable-answer/blob/main/scripts/dump_control_issues.py),
 which prints every material issue a critic filed against a sound control — `claim_span`,
 `related_span`, and rationale — the same spot-check protocol D-minimax-retirement and
-D-completeness-pool-noise used before retiring a critic. Reading 22 such issues from the
-2026-08-10/11 audition found they are near-misses in a specific, reproducible shape: the critic
-flags a hedge whose resolving qualifier sits in the adjacent clause, frequently quoted in the
+D-completeness-pool-noise used before retiring a critic. The
+[operator record](./model-evaluation-record-2026-08-10.md#manual-control-issue-review) records the
+method and outcome of reading 22 such issues from the 2026-08-10/11 audition: they are near-misses
+in a specific, reproducible shape, where the critic flags a hedge whose resolving qualifier sits
+in the adjacent clause, frequently quoted in the
 critic's *own* `related_span`. Exactly one of the 22 was arguably a fair complaint. The decisive
 argument here is structural, not a matter of reading each issue and forming an opinion:
 `mistral-large-3` scores `0.08` on the **identical** corpus under the **same** rubric, so the
@@ -132,9 +136,11 @@ caveat above) — do not move the goalposts.
 
 ## Measured logic-lens results (2026-08-10/11)
 
-Eight candidates across five labs and both weight classes were auditioned against the logic lens
+Seven candidates across five labs and both weight classes were auditioned against the logic lens
 under the shipped fixture corpus and the shipped `max_control_material_rate: 1.00` ceiling. Rate
-is mean invented material issues per sound control; lower is better.
+is mean invented material issues per sound control; lower is better. Corpus identity, call counts,
+and the recorded metrics are in the
+[2026-08-10/11 operator record](./model-evaluation-record-2026-08-10.md).
 
 | model | rate | verdict |
 |---|---|---|
@@ -148,8 +154,9 @@ is mean invented material issues per sound control; lower is better.
 
 Only `mistral-large-3` cleared the bar, and by a wide margin — the next-best candidate,
 `glm-5.2`, invents nearly ten times as many material issues per control. Every failing candidate
-had perfect recall, so the audition is not measuring whether these models can find planted
-defects; it is measuring whether they can stay quiet on prose that has none.
+with gradable judgement metrics had perfect recall, so the audition is not measuring whether
+these models can find planted defects; it is measuring whether they can stay quiet on prose that
+has none.
 
 ## The three infrastructure bugs
 
@@ -157,6 +164,7 @@ Each of these first presented as an adverse model-quality verdict. None of them 
 
 ### 1. A multi-host router silently changed which upstream served the request
 
+The [host-probe record](./model-evaluation-record-2026-08-10.md#upstream-host-probes) reports that
 `nemotron-3-ultra` appeared to fail nearly every writer call. The alias routes through
 OpenRouter, which re-rolls the upstream host per request rather than pinning one. Screened with
 [`scripts/host_probe.py`](https://github.com/NickBorgers/reasonable-answer/blob/main/scripts/host_probe.py)
@@ -169,7 +177,9 @@ not in application code — `LLMClient` has no notion of upstream host, by desig
 
 ### 2. A forced-tool-call fallback delivered the right payload under the wrong key
 
-`claude-sonnet-5` graded `unfit` on a 50% schema-failure rate. The root cause was in the proxy:
+The [schema-failure incident record](./model-evaluation-record-2026-08-10.md#schema-failure-incidents)
+reports that `claude-sonnet-5` graded `unfit` on a 50% schema-failure rate. The root cause was in
+the proxy:
 LiteLLM synthesized a forced tool call for Anthropic and unwrapped it buggily, delivering the
 correct structured payload nested under a junk envelope key (`$PARAMETER_NAME`, `json_value`,
 `parameters`, `$FUNCTION_NAME` were all observed) that strict validation rejected wholesale. The
@@ -216,7 +226,8 @@ concrete cost of skipping it.
   schema can pass on a channel that still breaks the audition's actual schema shape. A
   tool-calling loop tests an affordance critics never use — critics never hold tools. This
   evaluation wrongly excluded a good host (Chutes) from a tool-loop survey, then re-measured it
-  properly on the critique path, where it was 0/6 failures.
+  properly on the critique path, where it was 0/6 failures
+  ([operator record](./model-evaluation-record-2026-08-10.md#upstream-host-probes)).
 - **Do not run auditions concurrently, or alongside other proxy load.** A 429 raised inside a
   critique call becomes `LensResult(failed=True)`, indistinguishable from any other schema
   failure, and counts against the model exactly as a real failure would.
