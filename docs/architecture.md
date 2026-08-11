@@ -347,7 +347,20 @@ carried no headings is accepted with a warning; the warning rides the run's exis
   token naming *how* the call failed, read from the exception type and status code and never from
   the provider's wording — and each failed writer attempt records it on `generate_failed` beside
   the free-text `reason` (D-writer-failure-class). Grouping by that token makes repeated failure
-  modes countable without treating volatile provider prose as an interface.
+  modes countable without treating volatile provider prose as an interface. The two capability
+  probes (`probe_structured_output`, `probe_tool_calling`) require observed model behaviour before
+  recording a capability verdict: malformed structured output may demote to the next mode, and a
+  successful tool probe with no tool call marks the alias incapable. Every call exception, including
+  `http_400`/`http_422`, leaves capability unknown because a broad status cannot identify which
+  request field was rejected; the probe raises `ProbeIncomplete` instead of silently pinning the
+  alias to a weaker mode or marking it tool-incapable for the rest of the process
+  (D-probe-capability-evidence). `ra run`/`serve`/`ra audition`/`ra audition-refine` let that
+  `ConfigError` subtype propagate to their existing fail-closed exit, since each
+  is about to spend on a run or measurement the probe result governs. `ra doctor` is the one
+  exception: it spends nothing and is the tool reached for when the proxy is already misbehaving, so
+  it catches `ProbeIncomplete` per alias, prints an `unreachable` marker distinct from a real mode and
+  from a definite `NO`, keeps rendering the rest of the roster table and its warnings, and exits `2` —
+  distinct from a clean pass and from the `1` a definite capability finding still produces.
 - **Submission backpressure (RC-007):** concurrency bounds token *spend* but not how many runs may
   pile up, so submission is also bounded. `RunWorker.submit()` refuses with **HTTP 429** once the
   queue's waiting depth reaches `max_queue_depth`, and a fixed-window `submit_rate_max` /
