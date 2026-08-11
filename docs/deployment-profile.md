@@ -85,9 +85,10 @@ again before every send.
 
 ### What the proxy must not do
 
-Two requirements on the LiteLLM configuration itself. Neither is checkable from this repository —
-the application can only detect the first, after the fact, and pay for it. Both are failure modes RA
-guards against in code (RA-017, and the `_unparsed_tool_call` net in `llm.py`); see D-provider-retry.
+Three requirements on the LiteLLM configuration itself. None is fully checkable from this
+repository — the application can only detect the first, after the fact, and pay for it. All three
+are failure modes RA guards against in code (RA-017, the `_unparsed_tool_call` net in `llm.py`, and
+`_dereference` in `llm.py`); see D-provider-retry and D-dereferenced-schema.
 
 **No fallback routing on any alias the roster names.** A LiteLLM fallback that quietly serves
 `gemma4` from `meta-llama/llama-4-scout` breaks every downstream identity claim at once: author
@@ -103,6 +104,22 @@ raw markup back as message *content*, where it reads as a successful prose answe
 a guard (`_unparsed_tool_call`) that catches this and retries — a final answer that is nothing but a
 tool-call block is exactly what it is built for — but the guard is a net, not a fix, and every catch
 spends an attempt from the call budget.
+
+**A schema carrying `$defs`/`$ref` must not be silently downgraded to a synthesized tool call.**
+Anthropic's native structured-output API rejects `$ref` outright; a LiteLLM proxy that meets one
+anyway falls back to a forced tool call and then unwraps its arguments under a junk envelope key
+(`json_value`, `parameter`, `json`, ...) that strict validation rejects wholesale — see
+D-dereferenced-schema for the 3/3-vs-3/3 measurement against `claude-sonnet-5`. Two independent
+halves close this. The application now dereferences every schema before it is sent — `_dereference`
+in `llm.py` inlines every `$ref` and drops `$defs`, so no request this application makes carries one
+regardless of what the proxy would have done with it. Separately, the proxy's own
+native-structured-output capability flag for the affected alias is registered via
+`sitecustomize.py` and is already fixed on the deployment side, tracked in
+`NickBorgers/host-config-as-code#48`. A production instance wants both: the application fix protects
+every proxy configuration, including one that has not yet picked up the flag change; the flag fixes
+the proxy's behaviour for the one request this repository does not construct — `ra doctor`'s probe
+schema (`{"ok": boolean}`, no nested model, therefore no `$ref`), which is exactly why the capability
+flag being wrong here was invisible to every startup check until it was measured in production.
 
 ## Source verification is on in production
 

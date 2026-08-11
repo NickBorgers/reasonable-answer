@@ -5399,8 +5399,90 @@ everywhere except the one diagnostic command whose entire purpose is to report r
 gate. The untrusted-text boundary is untouched — classification reads exception types and status
 codes, never provider-authored text, exactly as `_failure_class` already did.
 
+## D-dereferenced-schema — inline every `$ref` before a schema reaches a request or a prompt
+
+**The finding.** `LLMClient.structured()` built its `response_format` (and its prompt-mode
+instruction) straight from `schema.model_json_schema()`. Pydantic emits `$defs` + `$ref` for any
+nested model or enum, and `CritiqueOutput` has both — `RawIssue`, `Category`, `Severity` and
+`StructuralRef` all sit behind a `$ref` two or three levels deep. Anthropic's native
+structured-output API does not accept `$ref` at all. When LiteLLM sees a schema it cannot pass
+natively, it falls back to synthesizing a forced tool call and then unwraps the tool arguments
+buggily: the payload arrives correct but nested one level too deep, under a junk envelope key, so
+strict `extra_forbidden` validation rejects the whole response. Observed envelope keys across
+calls: `json_value`, `parameter`, `json`, `parameters`, `$PARAMETER_NAME`, `$parameter_value`,
+`$FUNCTION_NAME` — the last two are un-substituted LiteLLM template variables, not this
+application's output (upstream `litellm#8898`, closed not-planned).
+
+Measured against the live proxy, `claude-sonnet-5`, same prompt, 3 trials each: schema **with**
+`$defs`/`$ref` produced top-level keys `['json_value']`, `['parameter']`, `['json']` — 3/3 mangled.
+Schema **dereferenced** — every `$ref` inlined, `$defs` dropped — produced `['issues']`, `['issues']`,
+`['issues']` — 3/3 correct. This cost a real audition: `claude-sonnet-5` graded `unfit` on a 50%
+schema-failure rate that was entirely this bug, and `claude-haiku-4-5`'s verdict was measured over a
+channel failing roughly 7% of the time.
+
+The startup probe did not catch this before it reached production measurement. `probe_structured_output`
+(D-probe-capability-evidence) pins an alias to `json_schema` using `_Probe`, a trivial `{"ok": boolean}`
+schema with no nested model and therefore no `$ref` — it passes natively regardless of this bug, so the
+probe reports `json_schema` as supported and the failure only shows up once a real schema like
+`CritiqueOutput` is sent. That gap — the probe's own schema not being representative of what it is
+probing for — is real and is tracked as an open item below; this decision does not close it.
+
+**The decision.** A module-level `_dereference(schema)` in `llm.py` inlines every `$ref` against
+`$defs` and drops `$defs`, and `structured()` calls it once, immediately after
+`schema.model_json_schema()`, before the result reaches either `_response_format`/`_strictify` or
+`_schema_instruction` — so both the native request and the prompt-mode instruction see the same
+self-contained form. A `prompt`-mode model previously had to follow `$ref` indirection by eye to
+answer correctly; it no longer has to.
+
+The helper is pure and total over dicts, lists and scalars, and preserves everything else about the
+schema: `enum` lists, `minLength`/`maxLength`, `title`, nullable/optional unions expressed as
+`anyOf`, and a `$ref` node's own sibling keys (pydantic emits a `description` override this way; the
+override wins over the same key on the resolved target). `_strictify` is unchanged and runs on the
+dereferenced result exactly as it ran on the raw one.
+
+**The recursion guard.** No schema in this repository is recursive today — nothing self-references
+through `$defs`, since a critique or defect graph never contains itself. A naive inliner is a
+landmine for the day one does: `_dereference` tracks the `$defs` names currently being resolved on
+the current path (not a global visited set, since two sibling fields legitimately sharing the same
+`$defs` entry — every `RawIssue.locus` reusing `StructuralRef`, every list item reusing `RawIssue`
+itself — is ordinary and must not trip it) and raises `ValueError` the moment a name recurs into
+itself, naming the cycle. It fails loudly and immediately, not by hanging or by truncating at an
+arbitrary depth. A `$ref` to an undefined `$defs` entry, or a `$ref` in a form other than
+`#/$defs/<name>` (nothing pydantic emits does this, but the helper does not assume it), raises the
+same way rather than passing through unresolved.
+
+**What this deliberately does not do.** It does not touch the probe that measured this alias as
+capable while broken — the gap above is real, is a `probe_structured_output` shortcoming rather than
+a `_dereference` one, and needs its own evidence (a probe schema shaped like a real one, not `_Probe`)
+to fix without becoming a second, larger request on every startup. It does not change `_strictify`'s
+own `$defs`/`definitions` branch, which stays reachable and tested directly
+(`tests/test_report_store_llm.py::test_strictify_closes_every_object`) against a raw, non-dereferenced
+schema — nothing requires every caller of `_strictify` to have dereferenced first. It does not change
+behaviour for a provider that already accepts `$ref` — OpenAI, and the OpenRouter-served open models —
+because a dereferenced schema is semantically identical to the one it replaces; the test suite asserts
+that directly (a hand-rolled JSON-Schema-subset checker confirms a payload validating against the
+original model still validates against the dereferenced schema, across `json_schema`, `json_object`
+and `prompt` modes) rather than assuming it.
+
+**Invariants.** None of the six is in reach. Author exclusion, the blind orchestrator, severity floors
+and termination are untouched. Fail-closed lenses are unaffected — this changes what a schema looks
+like on the wire, not when a lens is retried or abandoned. The untrusted-text boundary is untouched:
+`_dereference` operates on a schema this application generated from its own pydantic models, never on
+model-authored or provider-authored text.
+
 ## Open items for a future round
 
+- Making `probe_structured_output` measure against a schema shaped like a real one, not `_Probe`'s
+  trivial `{"ok": boolean}` (D-dereferenced-schema). The probe's own schema has no nested model and
+  therefore no `$ref`, so it passed natively on `claude-sonnet-5` even while every real schema this
+  application sends — `CritiqueOutput` among them — was being mangled by the proxy's `$ref` fallback;
+  the alias was pinned `json_schema`-capable on evidence that could not have detected the defect that
+  was actually there. `_dereference` closes the application-side half regardless, but the probe
+  gap is a distinct shortcoming: a capability probe that cannot see the shape of failure a real call
+  can hit is measuring the wrong thing, and the next schema-shaped defect in a LiteLLM fallback path
+  would be equally invisible to it. Needs its own evidence (what makes a probe schema "representative"
+  without turning every startup into a second `CritiqueOutput`-sized request) before it is a decision
+  rather than a guess.
 - A third **logic**-lens family, and the candidate to audition for it (D-writer-failure-class
   surfaced the survey; the gap itself is the fit-first cost stated in D-minimax-retirement). The
   lens is `roster_limited` on every round `mistral-large-3` authors, and no unrostered candidate on
