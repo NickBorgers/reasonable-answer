@@ -242,6 +242,19 @@ def test_repeated_use_of_the_same_defs_entry_is_not_mistaken_for_a_cycle():
     assert deref["properties"]["b"] == {"type": "string"}
 
 
+def test_ref_sibling_keys_override_the_resolved_defs_entry():
+    schema = {
+        "$ref": "#/$defs/Leaf",
+        "description": "field-specific description",
+        "$defs": {"Leaf": {"type": "string", "description": "shared description"}},
+    }
+
+    assert _dereference(schema) == {
+        "type": "string",
+        "description": "field-specific description",
+    }
+
+
 # ------------------------------------------------------- wired into `structured()`
 
 

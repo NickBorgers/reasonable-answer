@@ -105,21 +105,17 @@ a guard (`_unparsed_tool_call`) that catches this and retries — a final answer
 tool-call block is exactly what it is built for — but the guard is a net, not a fix, and every catch
 spends an attempt from the call budget.
 
-**A schema carrying `$defs`/`$ref` must not be silently downgraded to a synthesized tool call.**
-Anthropic's native structured-output API rejects `$ref` outright; a LiteLLM proxy that meets one
-anyway falls back to a forced tool call and then unwraps its arguments under a junk envelope key
-(`json_value`, `parameter`, `json`, ...) that strict validation rejects wholesale — see
-D-dereferenced-schema for the 3/3-vs-3/3 measurement against `claude-sonnet-5`. Two independent
-halves close this. The application now dereferences every schema before it is sent — `_dereference`
-in `llm.py` inlines every `$ref` and drops `$defs`, so no request this application makes carries one
-regardless of what the proxy would have done with it. Separately, the proxy's own
-native-structured-output capability flag for the affected alias is registered via
-`sitecustomize.py` and is already fixed on the deployment side, tracked in
-`NickBorgers/host-config-as-code#48`. A production instance wants both: the application fix protects
-every proxy configuration, including one that has not yet picked up the flag change; the flag fixes
-the proxy's behaviour for the one request this repository does not construct — `ra doctor`'s probe
-schema (`{"ok": boolean}`, no nested model, therefore no `$ref`), which is exactly why the capability
-flag being wrong here was invisible to every startup check until it was measured in production.
+**A schema carrying `$defs`/`$ref` must not depend on proxy fallback behavior.** Upstream
+[LiteLLM issue #8898](https://github.com/BerriAI/litellm/issues/8898) documents an Anthropic request
+being converted to a forced tool call whose JSON is nested under varying envelope keys. Strict
+validation in this application rejects such an envelope wholesale. The application therefore
+dereferences every schema before it is sent: `_dereference` in `llm.py` inlines every `$ref` and
+drops `$defs`, so requests constructed by `LLMClient.structured()` carry a self-contained schema
+regardless of how the proxy handles reference-bearing input. Keep the proxy's native structured-
+output capability metadata accurate as a separate deployment responsibility; the application-side
+transformation is not permission to misdeclare an alias's capabilities. The startup probe uses a
+trivial `{"ok": boolean}` schema with no nested model and no `$ref`, so it cannot verify reference
+handling on the schemas used by real critique calls; see D-dereferenced-schema.
 
 ## Source verification is on in production
 
