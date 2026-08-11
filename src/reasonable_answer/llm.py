@@ -97,6 +97,10 @@ class PermanentCallError(ModelCallError):
         super().__init__(message, failure_class=failure_class)
 
 
+class ProbeIncomplete(ConfigError):
+    """The probe did not establish whether the alias has the capability."""
+
+
 #: HTTP statuses where the fault is in the request, not the moment. 408 (timeout) and
 #: 429 (rate limit) are deliberately absent — those are exactly what backoff is for,
 #: and so is every 5xx.
@@ -288,7 +292,22 @@ class LLMClient:
     # ---------------------------------------------------------------- capability
 
     def probe_structured_output(self, alias: str) -> str:
-        """Pin `alias` to the strongest structured-output mode it actually supports."""
+        """Pin `alias` to the strongest structured-output mode it actually supports.
+
+        Only observed output is capability evidence: `MalformedOutputError` means the
+        model answered, but not inside the closed schema, so the probe may try the next
+        mode. A call exception cannot identify which request field caused a provider
+        rejection, even when its status is `http_400`/`http_422`; it therefore leaves
+        the mode unknown. Retryable call failures have already spent `_create`'s
+        `budgets.call_retries` before reaching this boundary. Demoting on any call
+        failure would silently
+        pin the alias to a weaker mode for the rest of the process on nothing more
+        than a bad moment on the wire: `ra doctor` did exactly that to
+        `nemotron-3-ultra` on 2026-08-11, pinned to `json_object` after three
+        DeepInfra 429s during the `json_schema` probe (D-probe-capability-evidence).
+        So an incomplete probe raises rather than falling through to a weaker mode
+        under a false "unsupported" verdict.
+        """
         if alias in self._modes:
             return self._modes[alias]
 
@@ -306,9 +325,15 @@ class LLMClient:
                     max_tokens=3000,
                     repair_retries=0,
                 )
-            except Exception as exc:
+            except MalformedOutputError as exc:
                 log.debug("alias %s does not support mode %s: %s", alias, mode, exc)
                 continue
+            except Exception as exc:
+                raise ProbeIncomplete(
+                    f"fail closed: probe of alias '{alias}' for mode '{mode}' could "
+                    f"not be completed ({exc}); its structured-output mode is "
+                    f"unknown, not unsupported — resolve the call failure and retry"
+                ) from exc
             self._modes[alias] = mode
             return mode
         raise ConfigError(
@@ -569,6 +594,13 @@ class LLMClient:
         never happens is the failure mode this exists to catch: the writer prompt
         still demands a '## Sources' section, so an un-searched draft comes back
         with invented citations that look exactly like verified ones.
+
+        Only observed behaviour marks the alias incapable: the call succeeds and the
+        model simply never calls the tool (below — no exception at all). A call
+        exception cannot identify whether a provider rejected `tools` or some unrelated
+        part of the request, even when its status is `http_400`/`http_422`; it leaves
+        capability unknown. Raise instead of silently pinning the alias tool-incapable
+        for the process (D-probe-capability-evidence).
         """
         if alias in self._tool_capable:
             return self._tool_capable[alias]
@@ -600,9 +632,11 @@ class LLMClient:
                 },
             )
         except Exception as exc:
-            log.debug("alias %s failed the tool-calling probe: %s", alias, exc)
-            self._tool_capable[alias] = False
-            return False
+            raise ProbeIncomplete(
+                f"fail closed: probe of alias '{alias}' for tool-calling could not be "
+                f"completed ({exc}); its tool-calling capability is unknown, not "
+                f"absent — resolve the call failure and retry"
+            ) from exc
         capable = bool(_tool_calls(reply.message))
         self._tool_capable[alias] = capable
         return capable
