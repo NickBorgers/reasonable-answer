@@ -1360,15 +1360,19 @@ class ScriptedClient:
         self.budgets = Budgets(critic_repair_retries=critic_repair_retries)
 
     def structured(self, alias, system, user, schema, max_tokens=0, validate=None,
-                   repair_retries=None):
+                   repair_retries=None, repair_prompt=None):
         def produce(attempt_user):
             self.prompts.append((system, attempt_user))
             return CritiqueOutput(issues=self.respond(alias, attempt_user))
 
         # The audition harness must exercise the *production* validation path, which now
         # runs inside the call — a stub that skipped it would grade a critic on issues a
-        # real run would have rejected.
-        return structured_with_repair(alias, user, produce, validate, repair_retries)
+        # real run would have rejected. `repair_prompt` rides along for the same reason:
+        # the harness measures the critic production runs, repair wording included
+        # (D-repair-turn-context).
+        return structured_with_repair(
+            alias, user, produce, validate, repair_retries, None, repair_prompt
+        )
 
 
 def test_run_assignment_measures_both_directions_offline():
@@ -1458,7 +1462,7 @@ def test_failed_lens_counts_as_schema_failure_not_as_silence():
         budgets = Budgets(critic_repair_retries=0)
 
         def structured(self, alias, system, user, schema, max_tokens=0, validate=None,
-                       repair_retries=None):
+                       repair_retries=None, repair_prompt=None):
             # An out-of-scope category fails the lens closed in triage — and keeps
             # failing it, because no repair can turn an evidence category into a logic
             # one. `structured_with_repair` is what runs that validation, exactly as the

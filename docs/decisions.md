@@ -5325,6 +5325,80 @@ lenses, severity floors, termination and the untrusted-text boundary are all unt
 field is derived from an exception type, never from model-authored text, and it reaches the run
 record rather than any prompt.
 
+## D-repair-turn-context — a critic is shown the field it got wrong, fenced as the validator's
+
+**The measurement.** D-repair-diagnostics existed to answer one question the logs could not: across
+repair attempts, does a critic re-emit the same rejected span, or move to a different one? Those have
+different fixes. `run-a624c5099f9a` answered it.
+
+```
+00:52:22  gemma4 attempt 1: code=span_not_verbatim locus=S12.P1 issue=0/1 span=d2ae3c08
+00:57:34  gemma4 attempt 2: code=span_not_verbatim locus=S12.P1 issue=0/1 span=d2ae3c08
+00:57:43  gemma4 attempt 3: code=span_not_verbatim locus=S5.P1  issue=0/1 span=557f6710
+00:57:43  lens completeness failed
+```
+
+Attempt 2 re-emitted the **same keyed fingerprint over the same normalized span at the same locus**,
+after being handed the paragraph it had misquoted. That is a re-roll, not a repair. Attempt 3 then
+abandoned the issue and anchored a different one somewhere else, which also failed. A second case in
+the same run is sharper still: `glm-5.2` attempt 1 failed `span_not_verbatim`, attempt 2 failed
+`category_out_of_scope` — the re-ask fixed the span and broke something unrelated, which is what
+re-authoring a whole review rather than editing one field predicts.
+
+The cause is in `llm.structured`: each repair attempt was a fresh single-turn prompt — system, the
+original user turn, the schema instruction, the error string. The rejected JSON was discarded. The
+critic was told the rule it had broken and shown the source text, but never the field it actually
+emitted, so it had to re-derive the entire review from a prompt materially identical to the one that
+had just failed.
+
+**The decision.** The repair turn carries the rejected field value back, fenced as data and
+attributed to the validator — *"a candidate issue was rejected"*, never *"your previous response"* —
+together with the existing source-text guidance, and an instruction to change only what was rejected.
+Only the offending field travels, never the whole issue array: the smallest anchor that can be
+corrected, already bounded by `MAX_SPAN`.
+
+**Critic-specific by construction.** `structured()` gains an optional `repair_prompt` composer and
+`critique_once` is the only caller that passes one. Writer disputes, the arbiter, the blind
+orchestrator, question refinement and the refine audition all keep the previous wording byte for
+byte. That is not tidiness: `web.refine` hashes its own prompt surface into its cache key, so a
+shared edit would silently invalidate stored suggestions, and the orchestrator's guarantee that no
+content can reach it is easiest to keep true by not touching its path at all. No `rejected` value
+exists on any of those paths regardless — only `triage.LensValidationError` carries one.
+
+**Isolation.** This is the one bounded exception to the fresh-context rule, and it is recorded as
+such in the drift table, the critic's NEVER row, and the repair bullet in
+[isolation.md](./isolation.md), plus the rule-2 narrative in [convergence.md](./convergence.md). The
+argument is in the QP application note in [quality-principles.md](./quality-principles.md) and is
+deliberately narrow: Huang et al. 2024 is about self-correction *without external feedback* and a
+mechanical validator is external feedback; Chen, Su & Chiang 2026 supports the unattributed framing
+for localized verifiable errors; Panickssery et al. 2024 self-preference is bounded by a closed
+output schema and a verdict the critic cannot overrule. What is claimed is a bounded same-task
+exception — **not** that relabeling restores independence.
+
+**RA-016 is unchanged.** `rejected_text()` is read only by the repair path, which stays inside the
+run. It is deliberately absent from `diagnostics()` and from `str(exc)`, because those reach stdout
+and `LensResult.failure_reason`, which live outside the 0700 run tree. A log still gets only
+`fingerprint()`; the text goes back to the model that emitted it and nowhere else. The value is also
+scrubbed of the fence markers before it is embedded, so a span carrying `<<<END DATA>>>` cannot close
+the block early and have its remainder read as instruction.
+
+**Deliberately not done, on the evidence.** Two mechanisms proposed alongside this one are dropped
+because the run refutes them. Aggregating every violation into one round would buy nothing: every
+failing response carried `issue=0/1`, `1/2` or `5/7`, so exhaustion by multi-defect responses is not
+what is happening. Windowing the artifact-scope hint has no evidence either: all eleven verbatim
+failures were `claim_span` against a paragraph, and not one was `related_span` against the artifact.
+Both stay unbuilt until something measured asks for them.
+
+**Still open.** All eleven `span_not_verbatim` failures in that run were at `.P1` — the first
+paragraph of a section, across six sections and three critics, with none at P2 or later. That
+clustering is unexplained and this decision does not address it.
+
+**Invariants.** Fail-closed lens validation is unchanged: a rejection still fails the whole review
+once the budget is spent, and no subset of issues is salvaged. Author exclusion, the blind
+orchestrator, severity floors and termination are untouched. The untrusted-text boundary is unchanged
+in kind and narrowed in one respect — the returned value is scrubbed of fence markers, which the
+report text entering the same prompt still is not.
+
 ## Open items for a future round
 
 - A third **logic**-lens family, and the candidate to audition for it (D-writer-failure-class

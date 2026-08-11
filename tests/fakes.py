@@ -32,6 +32,7 @@ def structured_with_repair(
     validate: Callable[[Any], None] | None,
     repair_retries: int | None,
     record: Callable[[Exception], None] | None = None,
+    repair_prompt: Callable[..., str] | None = None,
 ) -> Any:
     """Mirror `LLMClient.structured`'s repair loop for a test double.
 
@@ -63,13 +64,20 @@ def structured_with_repair(
                 break
             # The re-ask carries the rejection and whatever guidance the error offers,
             # exactly as the real client composes it — a double that re-sent the
-            # original prompt would make a repair look like a re-roll.
-            hint = getattr(exc, "repair_hint", None)
-            guidance = hint() if callable(hint) else ""
-            attempt_user = (
-                f"{user}\n\nYour previous response was rejected by the schema "
-                f"validator:\n{last_err}\n{guidance}"
-            )
+            # original prompt would make a repair look like a re-roll. A caller with its
+            # own composer (the critic path, D-repair-turn-context) gets that composer
+            # here too, or the double would test wording production never sends.
+            if repair_prompt is not None:
+                attempt_user = repair_prompt(
+                    user=user, instruction="", error=last_err, exc=exc
+                )
+            else:
+                hint = getattr(exc, "repair_hint", None)
+                guidance = hint() if callable(hint) else ""
+                attempt_user = (
+                    f"{user}\n\nYour previous response was rejected by the schema "
+                    f"validator:\n{last_err}\n{guidance}"
+                )
     raise MalformedOutputError(f"{alias}: schema violation after repair: {last_err}")
 
 
@@ -205,6 +213,7 @@ class FakeClient:
         schema: type,
         validate: Callable[[Any], None] | None = None,
         repair_retries: int | None = None,
+        repair_prompt: Callable[..., str] | None = None,
         **kwargs: Any,
     ):
         def produce(attempt_user: str):
@@ -217,7 +226,7 @@ class FakeClient:
                     else "clean",
                 )
             if schema is CritiqueOutput:
-                return self.critique_fn(alias, user)
+                return self.critique_fn(alias, attempt_user)
             if schema is WriterDisputes:
                 if self.dispute_fn is None:
                     return WriterDisputes(disputes=[])
@@ -233,7 +242,13 @@ class FakeClient:
             raise AssertionError(f"unexpected schema {schema}")
 
         return structured_with_repair(
-            alias, user, produce, validate, repair_retries, self.validation_errors.append
+            alias,
+            user,
+            produce,
+            validate,
+            repair_retries,
+            self.validation_errors.append,
+            repair_prompt,
         )
 
 

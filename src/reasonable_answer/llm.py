@@ -622,6 +622,7 @@ class LLMClient:
         repair_retries: int | None = None,
         timeout: float | None = None,
         validate: Callable[[T], None] | None = None,
+        repair_prompt: Callable[..., str] | None = None,
     ) -> T:
         """A completion validated against a closed schema. Bounded repair, then raise.
 
@@ -639,6 +640,14 @@ class LLMClient:
         converge, and it is what aborted two production runs. If the raised error
         offers a `repair_hint()`, its text is handed to the model alongside the error,
         so the second attempt knows what the first got wrong.
+
+        `repair_prompt`, when given, composes the re-ask instead of the default wording —
+        called as `(user=, instruction=, error=, exc=)` and returning the whole next user
+        turn. It exists so the *critic* path can hand back the field it got wrong
+        (D-repair-turn-context) without changing the prompt any other caller sees: writer
+        disputes, the arbiter, the blind orchestrator and question refinement all keep the
+        default text byte for byte, and `web.refine` in particular hashes its prompt
+        surface, so a shared edit would silently invalidate its cache.
         """
         mode = mode or self.mode_for(alias)
         repair_retries = (
@@ -685,15 +694,20 @@ class LLMClient:
                 # Duck-typed rather than a shared base class: the validators that carry
                 # guidance live in `triage`, which is deliberately LLM-free and must not
                 # import this module to say so.
-                hint = getattr(exc, "repair_hint", None)
-                guidance = hint() if callable(hint) else ""
-                attempt_user = (
-                    f"{user}\n\n{instruction}\n\n"
-                    f"Your previous response was rejected by the schema validator:\n"
-                    f"{last_err}\n"
-                    f"{guidance}\n"
-                    f"Return corrected JSON only. No prose, no code fence."
-                )
+                if repair_prompt is not None:
+                    attempt_user = repair_prompt(
+                        user=user, instruction=instruction, error=last_err, exc=exc
+                    )
+                else:
+                    hint = getattr(exc, "repair_hint", None)
+                    guidance = hint() if callable(hint) else ""
+                    attempt_user = (
+                        f"{user}\n\n{instruction}\n\n"
+                        f"Your previous response was rejected by the schema validator:\n"
+                        f"{last_err}\n"
+                        f"{guidance}\n"
+                        f"Return corrected JSON only. No prose, no code fence."
+                    )
         raise MalformedOutputError(f"{alias}: schema violation after repair: {last_err}")
 
 

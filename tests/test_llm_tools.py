@@ -522,6 +522,50 @@ def test_a_validator_rejection_is_repaired_with_its_hint(client):
     assert "COPY THIS EXACTLY" in repair_prompt
 
 
+def test_only_a_caller_that_asks_gets_the_critic_repair_wording(client):
+    """D-repair-turn-context is critic-specific on purpose. `structured()` also serves
+    writer disputes, the arbiter, the blind orchestrator, question refinement and the
+    refine audition — and `web.refine` hashes its prompt surface into its cache key, so a
+    shared edit would silently invalidate stored suggestions."""
+
+    class _Rejected(ValueError):
+        def repair_hint(self) -> str:
+            return "COPY THIS EXACTLY: the cited paragraph"
+
+        def rejected_text(self) -> str:
+            return "SUBMITTED-SPAN"
+
+    def validate(parsed: _Echo) -> None:
+        if parsed.value != "good":
+            raise _Rejected("value is not verbatim")
+
+    seen: list[dict] = []
+    _sdk_scripted(client, ['{"value": "bad"}', '{"value": "good"}'], record=seen)
+    client.structured(
+        "writer-a", system="s", user="u", schema=_Echo, repair_retries=1, validate=validate
+    )
+    default_repair = seen[1]["messages"][-1]["content"]
+
+    # The default path is unchanged: it names the rule and hands back guidance, and it
+    # does NOT echo the submitted value even when the error is willing to offer one.
+    assert "Your previous response was rejected by the schema validator" in default_repair
+    assert "SUBMITTED-SPAN" not in default_repair
+
+    seen2: list[dict] = []
+    _sdk_scripted(client, ['{"value": "bad"}', '{"value": "good"}'], record=seen2)
+    client.structured(
+        "writer-a",
+        system="s",
+        user="u",
+        schema=_Echo,
+        repair_retries=1,
+        validate=validate,
+        repair_prompt=lambda **kw: f"CUSTOM {kw['exc'].rejected_text()}",
+    )
+
+    assert seen2[1]["messages"][-1]["content"] == "CUSTOM SUBMITTED-SPAN"
+
+
 def test_a_validators_diagnostics_reach_the_log_and_nothing_else_does():
     """Duck-typed like `repair_hint`, for the same reason: `triage` is LLM-free and must
     not import this module. A validator with nothing to say leaves the line unchanged."""

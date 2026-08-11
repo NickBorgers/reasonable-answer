@@ -66,6 +66,24 @@ def critique_once(
     rendered = report_mod.render_with_loci(report_text)
     structure = report_mod.parse(report_text)
 
+    def repair_turn(*, user: str, instruction: str, error: str, exc: Exception) -> str:
+        """Compose the critic's re-ask (D-repair-turn-context).
+
+        The duck-typing is deliberate and lives here rather than in `llm`: `triage` is
+        LLM-free and must not import the client, and the client must not import `triage`
+        to name these. `critique` already depends on both, so it is the one place that can
+        read the error and hand plain strings to `prompts`.
+        """
+        hint = getattr(exc, "repair_hint", None)
+        rejected = getattr(exc, "rejected_text", None)
+        return prompts.critic_repair_turn(
+            user=user,
+            instruction=instruction,
+            error=error,
+            guidance=hint() if callable(hint) else "",
+            rejected=rejected() if callable(rejected) else "",
+        )
+
     def validate(output: CritiqueOutput) -> None:
         for index, issue in enumerate(output.issues):
             try:
@@ -98,6 +116,7 @@ def critique_once(
             # still fails the whole lens — nothing is silently dropped.
             repair_retries=client.budgets.critic_repair_retries,
             validate=validate,
+            repair_prompt=repair_turn,
         )
     except (ModelCallError, MalformedOutputError, ValidationError) as exc:
         reason = str(exc)[:400]

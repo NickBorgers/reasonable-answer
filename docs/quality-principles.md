@@ -89,6 +89,27 @@ boundary is unchanged. The audition measures the added category through its exis
 metrics, deterministic verdict, and rubric-identity invalidation under QP8; no LLM grades prose into
 a control decision.
 
+**Application — the in-call repair turn (D-repair-turn-context).** Handing a critic back the field
+value it just submitted puts its own earlier output into its own context, which the drift table in
+[isolation.md](./isolation.md) names as a **primary** vector and which QP4 is otherwise the strongest
+argument against. Three things bound it, and the register's own evidence is what shapes the design:
+
+* QP4 rests on Huang et al. 2024, whose result is that self-correction degrades **without external
+  feedback**. A deterministic validator naming a field, a locus and a violated constraint is
+  external feedback; the citation does not reach this case.
+* Chen, Su & Chiang 2026 measures relabeling a model's own output *as external input* raising
+  correction rates by 23–93 points. The rejected value is therefore fenced and attributed to the
+  validator, never as "your previous response" — the self-attributed framing is the one that
+  measurement penalizes.
+* Panickssery et al. 2024 self-preference is bounded by the channel rather than by the prompt: the
+  validator's verdict is mechanical, the critic has no way to overrule it, and the output remains a
+  closed schema that still fails the lens closed once the budget is gone.
+
+QP5's traffic boundary is untouched — nothing new crosses to a *generator*, and the returned value
+is the critic's own bounded field travelling back to the same call. QP6 is untouched: there is no
+peer, no transcript and no debate. The claim being made is narrow and should stay narrow — that a
+bounded same-task repair exception is warranted, not that relabeling restores independence.
+
 **Application — measured completeness eligibility (D-completeness-pool-noise).** Removing an
 auditioned-unfit critic from one lens leaves completeness with Google and Zhipu witnesses. That is
 still cross-family under QP2 and can supply the two clean families required for strong acceptance,

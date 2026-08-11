@@ -440,7 +440,8 @@ lenses one of whose reviews failed — see [Review depth](#what-lenses_failed-co
 
 A lens only reaches rule 2 once the critic has already been given
 `budgets.critic_repair_retries` chances to correct itself *within its own call*, shown
-what its rejected field should have quoted (see `docs/isolation.md`). Rule 2 is the
+what its rejected field should have quoted and what it actually submitted
+(D-repair-turn-context; see `docs/isolation.md`). Rule 2 is the
 expensive fallback — it discards every issue in the response and re-asks a different
 model — so it must not be the first response to a fixable quoting slip. When the pool of
 eligible critics is exhausted, successive attempts rotate through it rather than re-asking

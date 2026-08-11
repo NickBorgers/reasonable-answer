@@ -108,6 +108,17 @@ class LensValidationError(ValueError):
         recoverable slip)."""
         return self._hint
 
+    def rejected_text(self) -> str:
+        """The field value that failed, or "" when the violation has no quotable value.
+
+        Read only by the *repair* path, which stays inside the run (D-repair-turn-context).
+        It is deliberately not on `diagnostics()` and never in `str(self)`: those go to
+        stdout and to `LensResult.failure_reason`, which live outside the 0700 run tree
+        (RA-016). A log gets `fingerprint()`; only the model that emitted this text gets
+        the text back.
+        """
+        return self._rejected
+
     def at_issue(self, index: int, *, of: int) -> None:
         """Record which issue of how many this violation came from."""
         self.issue_index = index
