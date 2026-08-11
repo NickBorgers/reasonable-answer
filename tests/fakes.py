@@ -15,7 +15,7 @@ from typing import Any
 from pydantic import ValidationError
 
 from reasonable_answer.config import Budgets, ConfigError
-from reasonable_answer.llm import Completion, MalformedOutputError
+from reasonable_answer.llm import Completion, MalformedOutputError, ProbeIncomplete
 from reasonable_answer.schemas import (
     ArbiterVerdict,
     CritiqueOutput,
@@ -96,6 +96,9 @@ class FakeClient:
     #: aliases whose structured-output mode cannot be pinned. Mirrors the real
     #: client's fail-closed probe path without requiring a live proxy.
     unprobeable: set[str] = field(default_factory=set)
+    #: aliases that completed every structured-output attempt without producing a
+    #: parseable result. This is a definite capability verdict, not an incomplete probe.
+    structured_incapable: set[str] = field(default_factory=set)
     #: aliases `probe_structured_output` has been asked about, in order. Recorded so a
     #: test can assert a command probed *before* it spent (D-audition-probe-parity);
     #: memoised like the real client, so a repeat probe is one entry, not two.
@@ -147,6 +150,11 @@ class FakeClient:
 
     def probe_structured_output(self, alias: str) -> str:
         if alias in self.unprobeable:
+            raise ProbeIncomplete(
+                f"fail closed: probe of alias '{alias}' could not be completed; "
+                f"its structured-output mode is unknown"
+            )
+        if alias in self.structured_incapable:
             raise ConfigError(f"fail closed: alias '{alias}' cannot produce structured output")
         if alias not in self.probes:
             self.probes.append(alias)
@@ -164,7 +172,9 @@ class FakeClient:
 
     def probe_tool_calling(self, alias: str) -> bool:
         if alias in self.tool_unprobeable:
-            raise ConfigError(f"fail closed: alias '{alias}' tool-calling probe could not be completed")
+            raise ProbeIncomplete(
+                f"fail closed: alias '{alias}' tool-calling probe could not be completed"
+            )
         return self.tool_capable.get(alias, True)
 
     def tool_capable_for(self, alias: str) -> bool:

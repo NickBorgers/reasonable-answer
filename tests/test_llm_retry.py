@@ -28,6 +28,7 @@ from reasonable_answer.llm import (
     MalformedOutputError,
     ModelCallError,
     PermanentCallError,
+    ProbeIncomplete,
 )
 from reasonable_answer.triage import LensValidationError, ViolationCode
 
@@ -406,34 +407,24 @@ def test_a_429_exhausting_the_budget_during_the_json_schema_probe_raises(tmp_pat
     create, calls = _raising(_with_status(429))
     _install(client, create)
 
-    with pytest.raises(ConfigError, match="structured-output mode is unknown"):
+    with pytest.raises(ProbeIncomplete, match="structured-output mode is unknown"):
         client.probe_structured_output("writer-a")
 
     assert calls["n"] == 3  # the call budget was spent before the probe gave up
     assert "writer-a" not in client._modes
 
 
-def test_a_400_during_the_json_schema_probe_demotes_to_json_object(tmp_path):
-    """`http_400` is how a provider says "I do not support this `response_format`" —
-    genuine capability evidence, unlike a bare transient failure."""
-
-    def create(**kwargs):
-        response_format = kwargs.get("response_format") or {}
-        if response_format.get("type") == "json_schema":
-            raise _with_status(400)
-        return SimpleNamespace(
-            model=kwargs["model"],
-            usage=SimpleNamespace(prompt_tokens=1, completion_tokens=1),
-            choices=[SimpleNamespace(message={"role": "assistant", "content": '{"ok": true}'})],
-        )
-
+def test_a_400_during_the_json_schema_probe_leaves_capability_unknown(tmp_path):
+    """A broad status cannot identify which request field the provider rejected."""
     client, _ = make_client(tmp_path)
+    create, calls = _raising(_with_status(400))
     _install(client, create)
 
-    mode = client.probe_structured_output("writer-a")
+    with pytest.raises(ProbeIncomplete, match="structured-output mode is unknown"):
+        client.probe_structured_output("writer-a")
 
-    assert mode == "json_object"
-    assert client._modes["writer-a"] == "json_object"
+    assert calls["n"] == 1
+    assert "writer-a" not in client._modes
 
 
 def test_a_malformed_output_demotes_to_the_next_mode(tmp_path):
@@ -463,7 +454,7 @@ def test_a_401_during_the_probe_raises_rather_than_demoting(tmp_path):
     create, calls = _raising(_with_status(401))
     _install(client, create)
 
-    with pytest.raises(ConfigError, match="structured-output mode is unknown"):
+    with pytest.raises(ProbeIncomplete, match="structured-output mode is unknown"):
         client.probe_structured_output("writer-a")
 
     assert calls["n"] == 1  # permanent failures are never retried
@@ -475,14 +466,20 @@ def test_a_genuinely_incapable_alias_still_fails_closed_after_all_three_modes(tm
     rejected on capability grounds, the probe still exhausts the ladder and raises the
     'cannot produce parseable structured output' `ConfigError` — not the new
     'could not be completed' one, which means something different."""
+    def create(**kwargs):
+        return SimpleNamespace(
+            model=kwargs["model"],
+            usage=SimpleNamespace(prompt_tokens=1, completion_tokens=1),
+            choices=[SimpleNamespace(message={"role": "assistant", "content": "not json"})],
+        )
+
     client, _ = make_client(tmp_path)
-    create, calls = _raising(_with_status(400))
     _install(client, create)
 
     with pytest.raises(ConfigError, match="cannot produce parseable structured output"):
         client.probe_structured_output("writer-a")
 
-    assert calls["n"] == 3  # one attempt per mode, each rejected on capability grounds
+    assert "writer-a" not in client._modes
 
 
 # ------------------------------------------------------ audit privacy (RA-016)

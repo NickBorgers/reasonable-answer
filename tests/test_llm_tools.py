@@ -20,13 +20,14 @@ from types import SimpleNamespace
 import pytest
 from pydantic import BaseModel
 
-from reasonable_answer.config import Budgets, Config, ConfigError, ProxyConfig, Roster
+from reasonable_answer.config import Budgets, Config, ProxyConfig, Roster
 from reasonable_answer.llm import (
     Completion,
     LLMClient,
     MalformedOutputError,
     ModelCallError,
     PermanentCallError,
+    ProbeIncomplete,
     _diagnostics_suffix,
     _message_dict,
     _Reply,
@@ -296,22 +297,21 @@ def test_probe_raises_on_an_availability_failure_rather_than_calling_it_incapabl
         raise ModelCallError("proxy exploded")
 
     client._create = boom  # type: ignore[method-assign]
-    with pytest.raises(ConfigError, match="tool-calling capability is unknown"):
+    with pytest.raises(ProbeIncomplete, match="tool-calling capability is unknown"):
         client.probe_tool_calling("writer-a")
     assert "writer-a" not in client._tool_capable
 
 
-def test_probe_treats_a_rejected_request_shape_as_incapable(client):
-    """A `PermanentCallError` with `http_400`/`http_422` is the provider saying it does
-    not support the `tools` parameter as sent — genuine capability evidence, unlike a
-    bare transient failure."""
+def test_probe_treats_a_rejected_request_as_inconclusive(client):
+    """A broad status cannot identify whether the provider rejected `tools`."""
 
     def boom(alias, kwargs):
         raise PermanentCallError("bad request", failure_class="http_400")
 
     client._create = boom  # type: ignore[method-assign]
-    assert client.probe_tool_calling("writer-a") is False
-    assert client.tool_capable("writer-a") is False
+    with pytest.raises(ProbeIncomplete, match="tool-calling capability is unknown"):
+        client.probe_tool_calling("writer-a")
+    assert "writer-a" not in client._tool_capable
 
 
 def test_probe_raises_on_a_rejected_credential_rather_than_calling_it_incapable(client):
@@ -322,7 +322,7 @@ def test_probe_raises_on_a_rejected_credential_rather_than_calling_it_incapable(
         raise PermanentCallError("unauthorized", failure_class="http_401")
 
     client._create = boom  # type: ignore[method-assign]
-    with pytest.raises(ConfigError, match="tool-calling capability is unknown"):
+    with pytest.raises(ProbeIncomplete, match="tool-calling capability is unknown"):
         client.probe_tool_calling("writer-a")
 
 

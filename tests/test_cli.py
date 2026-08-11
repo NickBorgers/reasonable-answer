@@ -155,6 +155,26 @@ def test_doctor_reports_unreachable_rather_than_crashing_on_a_structured_output_
     assert "logic-spec" in result.stdout
 
 
+def test_doctor_does_not_report_a_definite_structured_output_failure_as_unreachable(
+    doctor_config, monkeypatch
+):
+    """A ladder-exhausted capability verdict remains a fail-closed `ConfigError`."""
+    client = FakeClient(
+        identities=IDENTITIES,
+        critique_fn=lambda *_: CritiqueOutput(issues=[]),
+        report_fn=lambda _: "",
+    )
+    client.structured_incapable.add("writer-a")
+    monkeypatch.setattr(cli, "LLMClient", lambda _config: client)
+
+    result = runner.invoke(cli.app, ["doctor", "--config", str(doctor_config)])
+
+    assert result.exit_code == 1
+    assert "unreachable" not in result.stdout
+    assert "without capability evidence" not in result.stdout
+    assert "cannot produce structured output" in str(result.exception)
+
+
 def test_doctor_reports_unreachable_rather_than_crashing_on_a_tool_calling_probe(
     doctor_config, monkeypatch
 ):

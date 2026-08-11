@@ -20,7 +20,7 @@ from .config import Config, ConfigError, validate_roster_health
 from .export import export_html, export_markdown
 from .graph import GracefulStop
 from .graph import run as run_graph
-from .llm import LLMClient
+from .llm import LLMClient, ProbeIncomplete
 from .store import CorruptRun, UnsafeRunId, expired_runs, read_run
 from .store import purge as purge_run
 from .taxonomy import Lens
@@ -173,7 +173,7 @@ def doctor(
             roles_.append("orchestrator")
         try:
             mode = client.probe_structured_output(alias)
-        except ConfigError:
+        except ProbeIncomplete:
             unreachable_modes.append(alias)
             mode_cell: str = "[yellow]unreachable[/yellow]"
         else:
@@ -194,7 +194,7 @@ def doctor(
             else:
                 try:
                     capable = client.probe_tool_calling(alias)
-                except ConfigError:
+                except ProbeIncomplete:
                     unreachable_tools.append(alias)
                     row.append("[yellow]unreachable[/yellow]")
                 else:
@@ -205,14 +205,14 @@ def doctor(
     if unreachable_modes:
         console.print(
             f"[yellow]warning:[/yellow] could not probe structured-output mode for "
-            f"{unreachable_modes} — the proxy/provider was unavailable during the probe "
-            f"(not a capability finding). Rerun `ra doctor` once it recovers"
+            f"{unreachable_modes} — the probe ended without capability evidence. "
+            f"Resolve the call failure and rerun `ra doctor`"
         )
     if unreachable_tools:
         console.print(
             f"[yellow]warning:[/yellow] could not probe tool-calling for {unreachable_tools} "
-            f"— the proxy/provider was unavailable during the probe (not a capability "
-            f"finding). Rerun `ra doctor` once it recovers"
+            f"— the probe ended without capability evidence. Resolve the call failure "
+            f"and rerun `ra doctor`"
         )
 
     warnings = validate_roster_health(config, identities)
