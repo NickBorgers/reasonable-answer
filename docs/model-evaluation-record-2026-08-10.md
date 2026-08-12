@@ -44,7 +44,8 @@ sample covers can be checked against a mapping rather than inferred from the ali
 | `claude-sonnet-5` | Anthropic | closed | not interpreted | not interpreted | 0.50 | void; not measurable |
 
 Distinct vendors with an interpretable verdict: Mistral AI, Z.ai, MiniMax, Alibaba, OpenAI,
-Anthropic — six. Four of the seven interpretable candidates are open-weight and three are closed.
+Anthropic — six. Of the six distinct candidates with an interpretable verdict, four are open-weight
+and two are closed. The table has seven interpretable runs because `claude-haiku-4-5` was run twice.
 
 The two haiku runs are the basis for the open methodology item in
 [decisions.md](./decisions.md): at 24 control calls per run, the point estimate moved from 2.04 to

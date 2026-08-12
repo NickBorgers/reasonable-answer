@@ -16,12 +16,13 @@ A vendor benchmark score or a leaderboard ranking says nothing about whether a m
 quiet on a sound control, and returning the closed `Issue[]` schema every call. `ra audition`
 measures exactly that, against fixtures salted with a known defect (or none) and rubric-scored
 mechanically (QP8: verdicts come from deterministic aggregation of structured findings, never an
-LLM grading prose). A model's general capability is not the scarce property here — every
-candidate measured in the 2026-08-10/11 logic-lens audition had **perfect recall**, 1.00
-sensitivity on the `obvious` tier. What is scarce is precision on hedged prose: whether the model
-manufactures a material issue out of a clause whose resolving qualifier sits in the next clause
-over. A survey of vendor claims cannot surface that; only running the model against the corpus
-this roster actually uses can.
+LLM grading prose). A model's general capability is not the scarce property here — every candidate
+with interpretable judgement metrics in the
+[2026-08-10/11 logic-lens audition](./model-evaluation-record-2026-08-10.md#recorded-slot-results)
+had **perfect recall**, 1.00 sensitivity on the `obvious` tier. What is scarce is precision on
+hedged prose: whether the model manufactures a material issue out of a clause whose resolving
+qualifier sits in the next clause over. A survey of vendor claims cannot surface that; only running
+the model against the corpus this roster actually uses can.
 
 ## The procedure, in order
 
@@ -181,9 +182,11 @@ Each of these first presented as an adverse model-quality verdict. None of them 
 
 ### 1. A multi-host router silently changed which upstream served the request
 
-The [host-probe record](./model-evaluation-record-2026-08-10.md#upstream-host-probes) reports that
-`nemotron-3-ultra` appeared to fail nearly every writer call. The alias routes through
-OpenRouter, which re-rolls the upstream host per request rather than pinning one. Screened with
+`nemotron-3-ultra` first appeared to fail nearly every writer call, prompting investigation of its
+multi-host route. The alias routes through OpenRouter, which re-rolls the upstream host per request
+rather than pinning one. The
+[host-probe record](./model-evaluation-record-2026-08-10.md#upstream-host-probes) then measured the
+real critic path with
 [`scripts/host_probe.py`](https://github.com/NickBorgers/reasonable-answer/blob/main/scripts/host_probe.py)
 against each candidate host individually: pinned to Venice, 4/4 clean; pinned to Together, 4/4
 unparsed tool-call markup (the `_unparsed_tool_call` failure mode
