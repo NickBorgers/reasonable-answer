@@ -38,7 +38,7 @@ from reasonable_answer import audition as aud
 from reasonable_answer.config import Config
 from reasonable_answer.critique import critique_once
 from reasonable_answer.llm import LLMClient
-from reasonable_answer.taxonomy import Lens
+from reasonable_answer.taxonomy import Lens, clamp_to_floor
 from reasonable_answer.triage import counts_for_convergence
 
 
@@ -90,6 +90,10 @@ def main(argv: list[str] | None = None) -> int:
                 hashlib.sha256(fixture.artifact.encode()).hexdigest(),
                 aud.AUDITION_AUTHOR,
                 sources=None,
+                # From the loaded config, not the parameter default: this must reproduce the
+                # same critique contract the audition it is explaining ran under
+                # (D-audition-rubric-identity).
+                require_verbatim_spans=config.require_verbatim_spans,
             )
             if result.failed:
                 print(f"\n### {fixture.id} rep{rep}: LENS FAILED — {result.failure_reason}", flush=True)
@@ -98,7 +102,17 @@ def main(argv: list[str] | None = None) -> int:
             total_material += len(material)
             print(f"\n### {fixture.id} rep{rep}: {len(material)} material", flush=True)
             for issue in material:
-                print(f"  [{issue.category.value}/{issue.severity.value}] locus={issue.locus}", flush=True)
+                # Print the CLAMPED severity, which is what made this issue material, and show
+                # the critic's proposal beside it when the two differ. Printing the proposal
+                # alone reads like a counting bug: an issue in a category floored at `major`
+                # that the critic filed as `minor` would print `[.../minor]` on a line this
+                # script counted as material — ambiguity in exactly the direction that matters
+                # when deciding whether control noise is the model's fault.
+                effective = clamp_to_floor(issue.category, issue.severity)
+                shown = effective.value
+                if effective is not issue.severity:
+                    shown = f"{effective.value} (filed {issue.severity.value})"
+                print(f"  [{issue.category.value}/{shown}] locus={issue.locus}", flush=True)
                 print(f"    claim_span:   {issue.claim_span!r}", flush=True)
                 if issue.related_span:
                     print(f"    related_span: {issue.related_span!r}", flush=True)

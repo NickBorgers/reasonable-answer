@@ -5485,8 +5485,10 @@ codes, never provider-authored text, exactly as `_failure_class` already did.
   `max_control_material_rate: 1.00` ceiling, at the default `audition.repetitions: 3` (24 control
   runs). Both runs graded `unfit` and the directional conclusion (no candidate came close to
   `mistral-large-3`'s 0.08) is unaffected, because that gap is an order of magnitude — but a
-  single-run verdict resting on a value between roughly 0.8 and 1.3 is not settled. Raising
-  `audition.repetitions` for a candidate that lands in that band, or reporting a confidence
-  interval alongside the point estimate, should precede any roster decision that rests on it. This
+  single-run verdict turning on a rate close enough to the ceiling that a swing of that magnitude
+  would cross it is not settled. Two repeated values are not a sampling analysis and no confidence
+  interval was computed, so no numeric band is claimed here. Raising `audition.repetitions` for
+  such a candidate, or reporting an interval alongside the point estimate, should precede any
+  roster decision that rests on it. This
   is recorded as an open item rather than a decision because no threshold or default changed here:
   doing either is a measurement-methodology question, not a documentation one.

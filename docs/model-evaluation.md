@@ -90,9 +90,15 @@ A single-run verdict landing close to a threshold is not settled. The
 identical corpus, with low schema-failure rates both times — roughly a 2x run-to-run swing
 against a `1.00` ceiling, at the default `audition.repetitions: 3` (24 control runs total for one
 slot). Both runs graded `unfit`, and that directional conclusion is not in question — the gap to
-`mistral-large-3`'s measured `0.08` is an order of magnitude, not a coin flip. But a verdict
-resting on a single value between roughly **0.8 and 1.3** should not be read as a stable number
-until it has been re-measured with a larger `repetitions`, or reported with a confidence interval.
+`mistral-large-3`'s measured `0.08` is an order of magnitude, not a coin flip.
+
+What that observation does **not** establish is a band. Two repeated values are not a sampling
+analysis, and no confidence interval was computed, so this page prescribes no numeric range within
+which a verdict must be re-measured. The operational rule it does support is weaker and stated as
+such: when a verdict turns on a rate close enough to `max_control_material_rate` that a swing of
+the observed magnitude would cross it, re-measure at a higher `repetitions` before letting that
+verdict decide a roster slot. How close is "close enough" is a judgement the operator makes with
+the actual numbers in front of them, not a threshold this page can supply.
 Treat that band as "measure again before deciding," not as "this candidate is marginal."
 
 ### The control corpus is sound, not miscalibrated
@@ -107,11 +113,22 @@ D-completeness-pool-noise used before retiring a critic. The
 method and outcome of reading 22 such issues from the 2026-08-10/11 audition: they are near-misses
 in a specific, reproducible shape, where the critic flags a hedge whose resolving qualifier sits
 in the adjacent clause, frequently quoted in the
-critic's *own* `related_span`. Exactly one of the 22 was arguably a fair complaint. The decisive
-argument here is structural, not a matter of reading each issue and forming an opinion:
-`mistral-large-3` scores `0.08` on the **identical** corpus under the **same** rubric, so the
-corpus cannot contain real defects that a competent critic would find. A cluster of marginal
-scores is evidence about the candidates, not about the fixtures.
+critic's *own* `related_span`. Exactly one of the 22 was arguably a fair complaint.
+
+A second argument runs alongside that reading and does not depend on agreeing with it:
+`mistral-large-3` scores `0.08` on the **identical** corpus under the **same** rubric. Whatever
+the controls contain, it is not something that compels a capable critic to file roughly one
+material issue per document — otherwise that score would be unreachable. So a cluster of scores
+just over the ceiling is evidence that discriminates *between candidates*, and the fixtures are
+the constant.
+
+State the limit of that argument too. It does not establish that the controls contain no real
+defect. A defect that `mistral-large-3` also misses would be invisible to both this comparison and
+the manual review, and D-control-soundness is explicit that control soundness is not mechanically
+checkable — it is a fetched-text review obligation, which is why the corpus carries the
+constraints it does. The claim supported here is comparative, not absolute: these scores are about
+the candidates. Concluding that the corpus is defect-free would need the separate evidence that
+decision describes.
 
 ### Fit-first ordering
 
@@ -136,7 +153,7 @@ caveat above) — do not move the goalposts.
 
 ## Measured logic-lens results (2026-08-10/11)
 
-Seven candidates across five labs and both weight classes were auditioned against the logic lens
+Seven candidates were auditioned against the logic lens
 under the shipped fixture corpus and the shipped `max_control_material_rate: 1.00` ceiling. Rate
 is mean invented material issues per sound control; lower is better. Corpus identity, call counts,
 and the recorded metrics are in the

@@ -28,16 +28,23 @@ Each row is one complete 42-call slot run unless noted. The haiku row records tw
 against the same corpus. `obvious sensitivity` is the recall gate for `tier: obvious` planted
 defects. The sonnet run produced too many schema failures for judgement metrics to be meaningful.
 
-| model | control material rate | obvious sensitivity | schema failure rate | verdict |
-|---|---:|---:|---:|---|
-| `mistral-large-3` | 0.08 | 1.00 | below gate | fit |
-| `glm-5.2` | 0.75 | 1.00 | below gate | marginal |
-| `minimax-m3` | 1.12 | 1.00 | below gate | unfit |
-| `qwen3.5-397b-a17b` | 1.21 | 1.00 | below gate | unfit |
-| `gpt-5.4-mini` | 1.22 | 1.00 | below gate | unfit |
-| `claude-haiku-4-5`, run 1 | 2.04 | 1.00 | below gate | unfit |
-| `claude-haiku-4-5`, run 2 | 1.04 | 1.00 | below gate | unfit |
-| `claude-sonnet-5` | not interpreted | not interpreted | 0.50 | void; not measurable |
+The `vendor` column records the organisation that published each model's weights or serves it as
+a hosted API. It is stated here so that any claim elsewhere about how many distinct vendors the
+sample covers can be checked against a mapping rather than inferred from the alias strings.
+
+| model | vendor | weights | control material rate | obvious sensitivity | schema failure rate | verdict |
+|---|---|---|---:|---:|---:|---|
+| `mistral-large-3` | Mistral AI | open | 0.08 | 1.00 | below gate | fit |
+| `glm-5.2` | Z.ai (Zhipu) | open | 0.75 | 1.00 | below gate | marginal |
+| `minimax-m3` | MiniMax | open | 1.12 | 1.00 | below gate | unfit |
+| `qwen3.5-397b-a17b` | Alibaba | open | 1.21 | 1.00 | below gate | unfit |
+| `gpt-5.4-mini` | OpenAI | closed | 1.22 | 1.00 | below gate | unfit |
+| `claude-haiku-4-5`, run 1 | Anthropic | closed | 2.04 | 1.00 | below gate | unfit |
+| `claude-haiku-4-5`, run 2 | Anthropic | closed | 1.04 | 1.00 | below gate | unfit |
+| `claude-sonnet-5` | Anthropic | closed | not interpreted | not interpreted | 0.50 | void; not measurable |
+
+Distinct vendors with an interpretable verdict: Mistral AI, Z.ai, MiniMax, Alibaba, OpenAI,
+Anthropic — six. Four of the seven interpretable candidates are open-weight and three are closed.
 
 The two haiku runs are the basis for the open methodology item in
 [decisions.md](./decisions.md): at 24 control calls per run, the point estimate moved from 2.04 to

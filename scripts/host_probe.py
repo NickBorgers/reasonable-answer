@@ -43,7 +43,7 @@ import sys
 from collections.abc import Callable
 
 from reasonable_answer import audition as aud
-from reasonable_answer.config import Config
+from reasonable_answer.config import Config, ConfigError
 from reasonable_answer.critique import critique_once
 from reasonable_answer.llm import LLMClient
 from reasonable_answer.taxonomy import Lens
@@ -104,14 +104,23 @@ def main(argv: list[str] | None = None) -> int:
 
     client = LLMClient(config)
     identity = client.resolve_identities([args.alias])[args.alias]
-    client.probe_structured_output(args.alias)
-    print(f"{args.alias} -> {identity}, mode={client.mode_for(args.alias)}", flush=True)
-
     real_create = client._create
     exit_code = 0
 
     for host in hosts:
+        # Pin BEFORE probing, not after. The probe is what pins the extraction mode for the
+        # whole process, and a mode chosen through the unpinned router is a mode some other
+        # host answered for — which would undercut the claim that each host is screened on
+        # its own path. Re-probing per host also means a host that cannot produce structured
+        # output at all is reported as such, rather than silently borrowing a neighbour's mode.
         client._create = _pin_provider(real_create, host)
+        client._modes.pop(args.alias, None)
+        try:
+            mode = client.probe_structured_output(args.alias)
+        except ConfigError as exc:
+            print(f"{host:14s} could not probe structured output: {str(exc)[:100]}", flush=True)
+            exit_code = 1
+            continue
         outcomes: collections.Counter = collections.Counter()
         for fixture in sample:
             for _ in range(args.repetitions):
@@ -125,6 +134,13 @@ def main(argv: list[str] | None = None) -> int:
                     hashlib.sha256(fixture.artifact.encode()).hexdigest(),
                     aud.AUDITION_AUTHOR,
                     sources=None,
+                    # Read from the loaded config rather than taking the parameter default,
+                    # so this screen exercises the same critique contract `run_assignment`
+                    # will. `require_verbatim_spans` is part of the audition cache identity
+                    # (D-audition-rubric-identity) precisely because it changes what counts
+                    # as a valid issue; a screen measuring the other regime would be
+                    # screening for a different thing than the audition it precedes.
+                    require_verbatim_spans=config.require_verbatim_spans,
                 )
                 if result.failed:
                     outcomes["FAILED: " + (result.failure_reason or "")[:60]] += 1
@@ -134,7 +150,9 @@ def main(argv: list[str] | None = None) -> int:
         failures = calls - outcomes["ok"]
         if failures:
             exit_code = 1
-        print(f"{host:20s} {failures}/{calls} failed  {dict(outcomes)}", flush=True)
+        # The mode is printed per host because it is per host: two hosts serving the same
+        # alias can pin to different extraction modes, and that alone is worth seeing.
+        print(f"{host:20s} mode={mode:12s} {failures}/{calls} failed  {dict(outcomes)}", flush=True)
 
     return exit_code
 
