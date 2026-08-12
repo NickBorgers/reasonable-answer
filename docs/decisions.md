@@ -5549,3 +5549,17 @@ model-authored or provider-authored text.
   non-empty transcript exists, so the first hang on any given session is still paid for once. Whether
   a transcript can be told apart from one `claude --continue` wedges on, without loading it, is an
   open question; the current answer is to make the attempt cheap rather than to predict it.
+- Verdict instability near the audition threshold
+  ([operator record](./model-evaluation-record-2026-08-10.md)). The 2026-08-10/11
+  logic-lens audition measured `claude-haiku-4-5` at 2.04 invented material issues per sound
+  control on one run and 1.04 on a re-run of the identical corpus — roughly a 2x swing against the
+  `max_control_material_rate: 1.00` ceiling, at the default `audition.repetitions: 3` (24 control
+  runs). Both runs graded `unfit` and the directional conclusion (no candidate came close to
+  `mistral-large-3`'s 0.08) is unaffected, because that gap is an order of magnitude — but a
+  single-run verdict turning on a rate close enough to the ceiling that a swing of that magnitude
+  would cross it is not settled. Two repeated values are not a sampling analysis and no confidence
+  interval was computed, so no numeric band is claimed here. Raising `audition.repetitions` for
+  such a candidate, or reporting an interval alongside the point estimate, should precede any
+  roster decision that rests on it. This
+  is recorded as an open item rather than a decision because no threshold or default changed here:
+  doing either is a measurement-methodology question, not a documentation one.

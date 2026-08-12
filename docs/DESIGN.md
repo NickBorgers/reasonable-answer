@@ -195,6 +195,13 @@ and the docs reviewer blocks on the first.
 - **[run-provenance.md](./run-provenance.md)** — which build produced a run (D-run-build-stamp):
   what is stamped where, and the recipe for bucketing runs before and after a given fix, which is
   how any claim that a change improved convergence has to be checked.
+- **[model-evaluation.md](./model-evaluation.md)** — the operator procedure for auditioning a
+  candidate model into a roster slot: screening its upstream hosts before trusting a verdict,
+  reading `schema_failures` first, interpreting a verdict (including run-to-run instability near a
+  threshold), and the two `scripts/` tools that make the screening and the spot-check possible.
+- **[model-evaluation-record-2026-08-10.md](./model-evaluation-record-2026-08-10.md)** — the public
+  operator record behind that procedure's empirical claims: corpus identity, repetitions and call
+  counts, measured logic-lens metrics, host probes, schema incidents, and the manual spot-check.
 - **[decisions.md](./decisions.md)** — design decisions, the Codex review, and how each of the
   20 findings was resolved.
 - **[question-refinement.md](./question-refinement.md)** — the edge-side, ambient
