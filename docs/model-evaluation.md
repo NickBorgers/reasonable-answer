@@ -154,7 +154,7 @@ caveat above) — do not move the goalposts.
 
 ## Measured logic-lens results (2026-08-10/11)
 
-Seven candidates were auditioned against the logic lens
+Eight candidates were auditioned against the logic lens
 under the shipped fixture corpus and the shipped `max_control_material_rate: 1.00` ceiling. Rate
 is mean invented material issues per sound control; lower is better. Corpus identity, call counts,
 and the recorded metrics are in the
@@ -167,6 +167,7 @@ and the recorded metrics are in the
 | `minimax-m3` | 1.12 | unfit |
 | `qwen3.5-397b-a17b` | 1.21 | unfit |
 | `gpt-5.4-mini` | 1.22 | unfit |
+| `gpt-5.6-luna` | 1.88 (measured at `repetitions: 6`) | unfit |
 | `claude-haiku-4-5` | 2.04, then 1.04 on re-run | unfit |
 | `claude-sonnet-5` | void — 50% schema failures caused by a proxy bug | not measurable at the time |
 

@@ -5472,30 +5472,70 @@ model-authored or provider-authored text.
   does not exercise the schema feature whose capability it would be used to establish. Choosing a
   representative probe schema without turning every startup into a second `CritiqueOutput`-sized
   request needs its own evidence before it is a decision rather than a guess.
-- A third **logic**-lens family, and the candidate to audition for it (D-writer-failure-class
-  surfaced the survey; the gap itself is the fit-first cost stated in D-minimax-retirement). The
-  lens is `roster_limited` on every round `mistral-large-3` authors, and no unrostered candidate on
-  the proxy can close it: `llama-4-scout` returned 0 issues on all 6 evidence calls of
-  run-d5934276fafd, `qwen3.7-max`'s weights are closed, and `deepseek-v4-pro` and `kimi-k3` are
-  excluded by the ~450GB arithmetic. The survey found one that fits — `qwen/qwen3.5-397b-a17b`,
-  397B/A17B, Apache 2.0, ~200GB at 4-bit, and a **new family**, which is the whole point. It has to
-  be served by the proxy before it can be measured (`ra audition` has no candidate flag; `--alias`
-  only filters slots built from the rostered pools), so the sequence is: add the alias upstream,
-  roster it in a scratch config, `ra audition --lens logic`, then roster on the verdict. Worth
-  auditioning on `evidence` in the same session, which is the open item above. Also surveyed and
-  worth recording: `nvidia/nemotron-3-super-120b-a12b` (120B/A12B, open weights *and* training
-  data, post-trained for tool calling, ~35GB at 4-bit) as a cheap tool-competent writer, in
-  `nemotron`'s existing family; and `moonshotai/kimi-k2.6`, a genuinely new family excluded by the
-  same arithmetic as `kimi-k3` at ~594GB.
+- Making `probe_tool_calling` measure the loop it licenses, not a one-shot `ping`
+  (D-writer-failure-class). The probe offers a single trivial `ping` tool and asks only whether
+  *any* tool call comes back. Production runs the multi-round agentic loop in `LLMClient.complete`
+  — tool call, tool result fed back as fenced untrusted text, then prose — bounded by
+  `search.max_tool_rounds`. So the probe licenses something strictly harder than it measures, which
+  is the same defect class as the `probe_structured_output` gap above, with the same consequence: a
+  capability the startup check has certified can still fail on the path that actually uses it. Not
+  hypothetical. `nemotron-3-ultra` passed the probe and then failed the real writer loop, returning
+  unparsed tool-call markup as message content (`_unparsed_tool_call`, the `unparsed_tool_markup`
+  failure class); it read as a broken model and a roster retirement was proposed on that basis. The
+  defect was upstream routing, not the model — the same alias was clean on one pinned OpenRouter
+  host and failed every call on another
+  ([operator record](./model-evaluation-record-2026-08-10.md#upstream-host-probes)) — and it was
+  fixed deployment-side by pinning `provider.order`.
+  That is also the tension, and it is why this is recorded rather than fixed: with `search.enabled`
+  a tool-incapable writer fails startup closed, so a loop-shaped probe would fail a whole run
+  closed on a model that is sound once its upstream is pinned — answering a routing problem with a
+  roster ban. D-writer-failure-class declined to tighten the probe for that reason and that
+  reasoning still holds. What a representative probe should exercise, and what it should cost every
+  startup, needs its own evidence before it is a decision rather than a guess.
+- A third **logic**-lens family — the search this item used to ask for has been run, and it
+  returned nothing (D-writer-failure-class surfaced the survey; the gap itself is the fit-first cost
+  stated in D-minimax-retirement). The 2026-08-10/11 audition measured eight candidates on the
+  logic lens against the shipped fixture corpus and the shipped `max_control_material_rate: 1.00`:
+  seven produced an interpretable verdict, spanning six vendors and both weight classes, and **none
+  of them was a second `fit`**. `qwen/qwen3.5-397b-a17b` — the candidate this item nominated, and
+  the one that fits every paper criterion at 397B/A17B, Apache 2.0, ~200GB at 4-bit and a genuinely
+  new family — was added to the proxy, provider-pinned, and graded `unfit` at 1.21 invented material
+  issues per sound control. The rates, the corpus identity and the one void run are in the
+  [operator record](./model-evaluation-record-2026-08-10.md#recorded-slot-results); the procedure,
+  including the three infrastructure bugs that cost a wasted round, is in
+  [model-evaluation.md](./model-evaluation.md). Extend that record rather than restarting the
+  survey.
+  Two consequences are worth stating plainly. First, the `roster_limited` warning on every round
+  `mistral-large-3` authors is a documented structural property of the currently purchasable pool,
+  not a gap awaiting a candidate hunt. Second, the scarce property is *precision*, not detection:
+  every failing candidate had 1.00 lens sensitivity and perfect `obvious`-tier recall, so a future
+  attempt cannot be a better search for a more capable model. Closing this needs a materially
+  different pool — weights that were not purchasable in 2026-08, or a self-hosted candidate outside
+  the ~450GB ceiling — or a materially different approach to the lens itself, such as a rubric that
+  scores precision on hedged prose differently. Either is its own decision, not a survey.
+  Still true from the original survey and worth keeping: `nvidia/nemotron-3-super-120b-a12b`
+  (120B/A12B, open weights *and* training data, post-trained for tool calling, ~35GB at 4-bit) as a
+  cheap tool-competent **writer**, in `nemotron`'s existing family; and `moonshotai/kimi-k2.6`, a
+  genuinely new family excluded by the same ~450GB arithmetic as `kimi-k3`, at ~594GB INT4. Also
+  unchanged: `llama-4-scout` returned 0 issues on all 6 evidence calls of run-d5934276fafd,
+  `qwen3.7-max`'s weights are closed, and `deepseek-v4-pro` and `kimi-k3` are excluded by the
+  arithmetic.
+  These are **logic-lens verdicts only**. A critic's noise rate is lens-specific, and this roster is
+  the proof: `mistral-large-3` is `fit` on logic and `unfit` on completeness
+  (D-completeness-pool-noise). Nothing measured here transfers to the two items below, neither of
+  which was measured in that session.
 
 - Audition a replacement evidence-lens candidate (D-minimax-retirement). The lens now runs two
   `marginal` critics, and `gemma4`'s 0.50 sensitivity sits below the warn line; the roster needs a
-  third family measured against the full corpus before `review.depth` can ever rise.
+  third family measured against the full corpus before `review.depth` can ever rise. Follow
+  [model-evaluation.md](./model-evaluation.md) for the procedure. No evidence-lens measurement
+  exists for any of the logic-lens candidates above, and their logic verdicts do not predict one.
 
 - A third completeness critic, chosen by measurement (D-completeness-pool-noise). The pool is down
   to two families, which is enough for a strong `accepted` but leaves no spare for a rule 8 top-up:
   a clean pass where one of the two reviews fails now ends at rule 11 `exhausted_unresolved`.
-  Restoring depth means auditioning a candidate on that lens first — the thing that went wrong here
+  Restoring depth means auditioning a candidate on that lens first, per
+  [model-evaluation.md](./model-evaluation.md) — the thing that went wrong here
   was a slot filled on corpus-decorrelation reasoning alone. Worth pairing with the question of
   whether a *non*-roster-limited lens that cannot be topped up deserves a gentler terminal status
   than a budget exhaustion; that is a controller change, so it is its own decision.
