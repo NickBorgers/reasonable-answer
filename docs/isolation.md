@@ -315,10 +315,10 @@ Mitigations, by boundary:
 - **Triage validates** every field against the schema before it becomes a defect-task or a
   count; an unknown category or invalid/over-length field **fails the entire lens** (fail-closed,
   RB-007) — nothing is silently dropped, so an adversarial critique can't collapse into a
-  fake-clean empty result. Validation runs *inside* the model call, on the same bounded
-  repair budget as a schema violation — `budgets.critic_repair_retries` governs both, and
-  is passed to the review call and to the lens loop alike. Validation runs *after* that
-  call returns rather than inside it, because a lens rejection is answered by a **patch
+  fake-clean empty result. The review call's structured-output/schema repairs and the
+  lens loop share the same bounded budget — `budgets.critic_repair_retries` is passed to
+  both. Lens validation runs *after* the review call returns, because a lens rejection is
+  answered by a **patch
   for the rejected field alone**, which needs a different response schema than the review
   did; the patch is merged mechanically into the review already in hand
   (D-repair-turn-context). The rejection is returned to the critic with the text it should

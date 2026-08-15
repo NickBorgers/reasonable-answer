@@ -336,6 +336,18 @@ def test_an_unparseable_locus_patch_is_dropped_rather_than_guessed_at(value):
     assert _run(client).failed
 
 
+@pytest.mark.parametrize("value", ["not-a-category", "omitted-counterargument"])
+def test_an_unparseable_category_patch_is_dropped_rather_than_guessed_at(value):
+    client = _client(
+        issues=[_issue(VERBATIM, category=Category.UNCITED_CLAIM)],
+        patches=[(0, value)],
+        field="category",
+        repairs=1,
+    )
+
+    assert _run(client).failed
+
+
 def test_an_empty_replacement_is_refused_by_the_schema_before_triage_sees_it():
     with pytest.raises(ValidationError):
         IssueRepair(issue_index=0, field="locus", replacement="")
