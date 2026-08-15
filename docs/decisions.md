@@ -5561,6 +5561,70 @@ orchestrator, severity floors and termination are untouched. The untrusted-text 
 in kind and narrowed in one respect — the returned value is scrubbed of fence markers, which the
 report text entering the same prompt still is not.
 
+## D-bibliography-entry-nesting — indentation says which bibliography lines are references
+
+**The finding.** `fetch.source_entries` split the `## Sources` section on any line opening with a
+list marker at up to three spaces of indentation. In an annotated bibliography — the citation, then
+an indented sub-bullet of commentary — that marked sub-bullet was read as a second entry. When the
+annotation carried no URL, it landed in `not_addressable` and gave the real citation a phantom
+unaddressable twin.
+
+`source_entries` was conservative in the direction that understates coverage, which is the safe
+direction and is why this was a reporting defect rather than an overstatement. But a 2x error is
+misleading rather than cautious, and it masked the metric's real job: now that every addressable
+citation is fetched, a non-zero `not_independently_checked` should mean *the writer cited something
+with no URL* — a genuine signal about the draft — and instead it was dominated by formatting noise.
+
+**The decision.** Indentation, which the parser already had and discarded, decides nesting. Entries
+sit at one depth per section; a marker line deeper than that depth is an annotation of the reference
+above it and folds into that entry exactly as an unmarked continuation line always has.
+
+That depth is the shallowest marker that is **not a grouping heading** — a label like
+`- Peer-reviewed:` that introduces references rather than being one, recognised by the colon it ends
+with and by carrying no address of its own.
+
+An earlier form of this decision anchored the depth on the shallowest marker *carrying a URL*
+instead. That looked equivalent and is not, and the difference is the whole of this amendment: in an
+annotated bibliography the URL frequently sits in the **annotation** rather than in the reference, so
+the anchor landed one level too deep and every reference above it became "shallower". Paired with a
+rule that dropped a shallower marker whenever a deeper URL-bearing line followed it, a reference like
+
+```
+- Smith, J. (2019). Title. Publisher.
+  - Available at: https://example.org/a
+```
+
+was discarded and its annotation became the entry. The count could still come out right by
+coincidence — three markers in, three entries out — while naming the wrong things, which is how it
+survived review the first time. A citation vanishing from the denominator reports *more* of the
+bibliography verified than was, and understating coverage is the only direction this heuristic is
+permitted to be wrong in.
+
+Recognising the heading by its own text rather than by what follows it also removes the lookahead
+entirely, and with it the end-of-section branch that had no way to be exercised. A section whose
+markers are all headings falls back to the shallowest marker depth, so a bibliography of nothing but
+labels is still represented
+
+The marker pattern's `\s{0,3}` bound is replaced by a captured indent of any width, with tabs
+expanded, because a bound on depth cannot express a comparison between depths. Nothing routes on
+this pattern: it is only ever used to count.
+
+**Still a heuristic.** This is a guess at model-written markdown and remains one — the observed
+count is reported as an observation and never as a completeness claim. What changes is that the
+guess is now pinned against explicit fixtures for flat `[n]`, `-`/`*`/`+`, `1.`/`1)`,
+wrapped continuations, the annotated two-line form, a tab-indented annotation, grouped references,
+a mixed grouped bibliography with an unaddressable reference, and flat and grouped bibliographies
+with no URLs each have a fixture in `tests/test_source_coverage.py`, because this heuristic is
+load-bearing for a published number.
+
+**Invariants.** None of the six is in reach. The count feeds `fetch.coverage`, which is observation
+only: no controller rule reads it, no `OrchestratorView` field carries it, and it mints no defect,
+so termination and the blind orchestrator are untouched. Author exclusion, fail-closed lens
+validation and severity floors are not in this path. The untrusted-text boundary is unchanged in
+kind and degree — the bibliography was already untrusted model output being counted, and it still
+reaches no generator as instruction. `extract_source_urls`, which decides what is actually fetched,
+is not touched at all; this changes the denominator a run reports, never the egress it performs.
+
 ## Open items for a future round
 
 - Making `probe_structured_output` measure against a schema shaped like a real one, not `_Probe`'s
@@ -5571,30 +5635,75 @@ report text entering the same prompt still is not.
   does not exercise the schema feature whose capability it would be used to establish. Choosing a
   representative probe schema without turning every startup into a second `CritiqueOutput`-sized
   request needs its own evidence before it is a decision rather than a guess.
-- A third **logic**-lens family, and the candidate to audition for it (D-writer-failure-class
-  surfaced the survey; the gap itself is the fit-first cost stated in D-minimax-retirement). The
-  lens is `roster_limited` on every round `mistral-large-3` authors, and no unrostered candidate on
-  the proxy can close it: `llama-4-scout` returned 0 issues on all 6 evidence calls of
-  run-d5934276fafd, `qwen3.7-max`'s weights are closed, and `deepseek-v4-pro` and `kimi-k3` are
-  excluded by the ~450GB arithmetic. The survey found one that fits — `qwen/qwen3.5-397b-a17b`,
-  397B/A17B, Apache 2.0, ~200GB at 4-bit, and a **new family**, which is the whole point. It has to
-  be served by the proxy before it can be measured (`ra audition` has no candidate flag; `--alias`
-  only filters slots built from the rostered pools), so the sequence is: add the alias upstream,
-  roster it in a scratch config, `ra audition --lens logic`, then roster on the verdict. Worth
-  auditioning on `evidence` in the same session, which is the open item above. Also surveyed and
-  worth recording: `nvidia/nemotron-3-super-120b-a12b` (120B/A12B, open weights *and* training
-  data, post-trained for tool calling, ~35GB at 4-bit) as a cheap tool-competent writer, in
-  `nemotron`'s existing family; and `moonshotai/kimi-k2.6`, a genuinely new family excluded by the
-  same arithmetic as `kimi-k3` at ~594GB.
+- Making `probe_tool_calling` measure the loop it licenses, not a one-shot `ping`
+  (D-writer-failure-class). The probe offers a single trivial `ping` tool and asks only whether
+  *any* tool call comes back. Production runs the multi-round agentic loop in `LLMClient.complete`
+  — tool call, tool result fed back as fenced untrusted text, then prose — bounded by
+  `search.max_tool_rounds`. So the probe licenses something strictly harder than it measures, which
+  is the same defect class as the `probe_structured_output` gap above, with the same consequence: a
+  capability the startup check has certified can still fail on the path that actually uses it. Not
+  hypothetical. `nemotron-3-ultra` passed the probe and then failed the real writer loop, returning
+  unparsed tool-call markup as message content (`_unparsed_tool_call`, the `unparsed_tool_markup`
+  failure class); it read as a broken model and a roster retirement was proposed on that basis. The
+  defect was upstream routing, not the model — the same alias was clean on one pinned OpenRouter
+  host and failed every call on another
+  ([operator record](./model-evaluation-record-2026-08-10.md#upstream-host-probes)) — and it was
+  fixed deployment-side by pinning `provider.order`.
+  That is also the tension, and it is why this is recorded rather than fixed: with `search.enabled`
+  a tool-incapable writer fails startup closed, so a loop-shaped probe would fail a whole run
+  closed on a model that is sound once its upstream is pinned — answering a routing problem with a
+  roster ban. D-writer-failure-class declined to tighten the probe for that reason and that
+  reasoning still holds. What a representative probe should exercise, and what it should cost every
+  startup, needs its own evidence before it is a decision rather than a guess.
+- A third **logic**-lens family — the search this item used to ask for has been run, and it
+  returned nothing (D-writer-failure-class surfaced the survey; the gap itself is the fit-first cost
+  stated in D-minimax-retirement). The 2026-08-10/11 audition measured eight candidates on the
+  logic lens against the shipped fixture corpus and the shipped `max_control_material_rate: 1.00`:
+  seven produced an interpretable verdict, spanning six vendors and both weight classes, and **none
+  of them was a second `fit`**. `qwen/qwen3.5-397b-a17b` — the candidate this item nominated, and
+  the one that fits every paper criterion at 397B/A17B, Apache 2.0, ~200GB at 4-bit and a genuinely
+  new family — was added to the proxy, provider-pinned, and graded `unfit` at 1.21 invented material
+  issues per sound control. The rates, the corpus identity and the one void run are in the
+  [operator record](./model-evaluation-record-2026-08-10.md#recorded-slot-results); the procedure,
+  including the three infrastructure bugs that cost a wasted round, is in
+  [model-evaluation.md](./model-evaluation.md). Extend that record rather than restarting the
+  survey.
+  Two things the survey does support, stated no more strongly than it earns. First, seven candidates
+  produced interpretable logic-lens verdicts and none of them was a second `fit`, so the
+  `roster_limited` warning on every round `mistral-large-3` authors is not a gap that this search
+  closed. That is a result about the seven models tried on the date they were tried; it is **not** a
+  claim that the sample exhausts what is purchasable, and a later search may well find a candidate
+  this one did not reach. Second, among those seven the failures were failures of *precision* rather
+  than of detection: each had 1.00 lens sensitivity and perfect `obvious`-tier recall. That is a
+  pattern worth knowing before the next attempt, not a reason to rule one out.
+
+  Two other routes are worth recording alongside a further search, not in place of it: a materially
+  different pool — weights that were not purchasable in 2026-08, or a self-hosted candidate outside
+  the ~450GB ceiling — or a materially different approach to the lens itself, such as a rubric that
+  scores precision on hedged prose differently. Each is its own decision.
+  Still true from the original survey and worth keeping: `nvidia/nemotron-3-super-120b-a12b`
+  (120B/A12B, open weights *and* training data, post-trained for tool calling, ~35GB at 4-bit) as a
+  cheap tool-competent **writer**, in `nemotron`'s existing family; and `moonshotai/kimi-k2.6`, a
+  genuinely new family excluded by the same ~450GB arithmetic as `kimi-k3`, at ~594GB INT4. Also
+  unchanged: `llama-4-scout` returned 0 issues on all 6 evidence calls of run-d5934276fafd,
+  `qwen3.7-max`'s weights are closed, and `deepseek-v4-pro` and `kimi-k3` are excluded by the
+  arithmetic.
+  These are **logic-lens verdicts only**. A critic's noise rate is lens-specific, and this roster is
+  the proof: `mistral-large-3` is `fit` on logic and `unfit` on completeness
+  (D-completeness-pool-noise). Nothing measured here transfers to the two items below, neither of
+  which was measured in that session.
 
 - Audition a replacement evidence-lens candidate (D-minimax-retirement). The lens now runs two
   `marginal` critics, and `gemma4`'s 0.50 sensitivity sits below the warn line; the roster needs a
-  third family measured against the full corpus before `review.depth` can ever rise.
+  third family measured against the full corpus before `review.depth` can ever rise. Follow
+  [model-evaluation.md](./model-evaluation.md) for the procedure. No evidence-lens measurement
+  exists for any of the logic-lens candidates above, and their logic verdicts do not predict one.
 
 - A third completeness critic, chosen by measurement (D-completeness-pool-noise). The pool is down
   to two families, which is enough for a strong `accepted` but leaves no spare for a rule 8 top-up:
   a clean pass where one of the two reviews fails now ends at rule 11 `exhausted_unresolved`.
-  Restoring depth means auditioning a candidate on that lens first — the thing that went wrong here
+  Restoring depth means auditioning a candidate on that lens first, per
+  [model-evaluation.md](./model-evaluation.md) — the thing that went wrong here
   was a slot filled on corpus-decorrelation reasoning alone. Worth pairing with the question of
   whether a *non*-roster-limited lens that cannot be topped up deserves a gentler terminal status
   than a budget exhaustion; that is a controller change, so it is its own decision.
