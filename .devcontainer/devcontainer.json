@@ -2,8 +2,23 @@
   "name": "reasonable-answer",
   "image": "mcr.microsoft.com/devcontainers/python:1-3.12-bookworm",
   "features": {
-    "ghcr.io/devcontainers/features/git:1": {}
+    "ghcr.io/devcontainers/features/git:1": {},
+    // PRs are mandatory here, so the container needs the same `gh` the host has.
+    "ghcr.io/devcontainers/features/github-cli:1": {}
   },
+  // Mount the checkout at its *host* path rather than the default /workspaces/<repo>.
+  // Claude Code keys per-project state (memory, sessions, plans) by the working-directory
+  // path, so a container that sees a different path sees an empty project. Aligning the
+  // two makes the host and container agents share one project identity.
+  "workspaceMount": "source=${localWorkspaceFolder},target=${localWorkspaceFolder},type=bind,consistency=cached",
+  "workspaceFolder": "${localWorkspaceFolder}",
+  "mounts": [
+    // ~/.claude carries the memory index, skills, hooks, settings and credentials.
+    // Harmless when absent: the bind just yields an empty directory.
+    "source=${localEnv:HOME}/.claude,target=/home/vscode/.claude,type=bind,consistency=cached",
+    // `gh` keeps its credentials in hosts.yml; without it the CLI is installed but signed out.
+    "source=${localEnv:HOME}/.config/gh,target=/home/vscode/.config/gh,type=bind,consistency=cached"
+  ],
   "postCreateCommand": "bash .devcontainer/setup.sh",
   "remoteEnv": {
     "UV_LINK_MODE": "copy",

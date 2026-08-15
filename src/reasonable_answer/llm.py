@@ -678,7 +678,12 @@ class LLMClient:
         repair_retries = (
             self._config.budgets.repair_retries if repair_retries is None else repair_retries
         )
-        json_schema = schema.model_json_schema()
+        # Dereferenced once, here, so both the native `response_format` (below, via
+        # `_strictify`) and the prompt-mode instruction see the self-contained form
+        # (D-dereferenced-schema). Anthropic's native structured-output API rejects
+        # `$ref`; a schema pydantic emits for any model with a nested model or enum —
+        # `CritiqueOutput` among them — carries one for every such field.
+        json_schema = _dereference(schema.model_json_schema())
         response_format = _response_format(mode, schema.__name__, json_schema)
         instruction = _schema_instruction(json_schema)
 
@@ -791,6 +796,60 @@ def _identity_matches(reported: str, alias: str, resolved: str | None) -> bool:
     if resolved:
         accepted.add(resolved.strip().casefold())
     return value in accepted
+
+
+def _dereference(schema: dict[str, Any]) -> dict[str, Any]:
+    """Inline every `$ref` against `$defs` and drop `$defs`. Pure and total: dicts,
+    lists, scalars pass through unchanged apart from the substitution.
+
+    Pydantic emits `$ref`/`$defs` for any nested model or enum, and Anthropic's native
+    structured-output API does not accept `$ref` at all: LiteLLM falls back to a
+    synthesized tool call and unwraps its arguments under a junk envelope key
+    (`json_value`, `parameter`, ...), which strict validation then rejects wholesale —
+    the payload is correct, just nested one level too deep (D-dereferenced-schema).
+    Dereferencing before the schema is used for anything makes every caller of
+    `model_json_schema()` in this module — `response_format`, via `_strictify`, and
+    the prompt-rendered instruction — see the same self-contained form, so a
+    `prompt`-mode model no longer has to resolve `$ref` indirection by eye either.
+
+    A `$ref` node may carry sibling keys (a field-level `description` override is the
+    only one pydantic emits); those win over the same key on the resolved target,
+    matching how `allOf`-wrapped refs are meant to compose.
+
+    No schema in this repository is recursive today, but a naive inliner is a
+    landmine waiting for one that becomes so: it raises `ValueError` on a `$ref`
+    cycle rather than looping forever or silently truncating. Cycle detection is a
+    path-sensitive "currently being resolved" stack, not a global visited set, so the
+    same `$defs` entry may legitimately appear twice in one schema (e.g. two sibling
+    fields sharing a type) without tripping the guard.
+    """
+    defs = schema.get("$defs", {})
+
+    def resolve(node: Any, resolving: tuple[str, ...]) -> Any:
+        if isinstance(node, list):
+            return [resolve(item, resolving) for item in node]
+        if not isinstance(node, dict):
+            return node
+        ref = node.get("$ref")
+        if ref is None:
+            return {key: resolve(value, resolving) for key, value in node.items() if key != "$defs"}
+        if not (isinstance(ref, str) and ref.startswith("#/$defs/")):
+            raise ValueError(f"cannot dereference $ref target: {ref!r}")
+        name = ref.removeprefix("#/$defs/")
+        if name in resolving:
+            cycle = " -> ".join((*resolving, name))
+            raise ValueError(f"recursive $ref cycle in JSON schema: {cycle}")
+        if name not in defs:
+            raise ValueError(f"$ref to undefined $defs entry: {name!r}")
+        resolved = resolve(defs[name], (*resolving, name))
+        overrides = {
+            key: resolve(value, resolving)
+            for key, value in node.items()
+            if key not in ("$ref", "$defs")
+        }
+        return {**resolved, **overrides} if overrides else resolved
+
+    return resolve(schema, ())
 
 
 def _response_format(mode: str, name: str, json_schema: dict[str, Any]) -> dict[str, Any] | None:
