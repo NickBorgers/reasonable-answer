@@ -5505,14 +5505,19 @@ model-authored or provider-authored text.
   including the three infrastructure bugs that cost a wasted round, is in
   [model-evaluation.md](./model-evaluation.md). Extend that record rather than restarting the
   survey.
-  Two consequences are worth stating plainly. First, the `roster_limited` warning on every round
-  `mistral-large-3` authors is a documented structural property of the currently purchasable pool,
-  not a gap awaiting a candidate hunt. Second, the scarce property is *precision*, not detection:
-  every failing candidate had 1.00 lens sensitivity and perfect `obvious`-tier recall, so a future
-  attempt cannot be a better search for a more capable model. Closing this needs a materially
+  Two things the survey does support, stated no more strongly than it earns. First, seven candidates
+  produced interpretable logic-lens verdicts and none of them was a second `fit`, so the
+  `roster_limited` warning on every round `mistral-large-3` authors is not a gap that this search
+  closed. That is a result about the seven models tried on the date they were tried; it is **not** a
+  claim that the sample exhausts what is purchasable, and a later search may well find a candidate
+  this one did not reach. Second, among those seven the failures were failures of *precision* rather
+  than of detection: each had 1.00 lens sensitivity and perfect `obvious`-tier recall. That is a
+  pattern worth knowing before the next attempt, not a reason to rule one out.
+
+  Two other routes are worth recording alongside a further search, not in place of it: a materially
   different pool — weights that were not purchasable in 2026-08, or a self-hosted candidate outside
   the ~450GB ceiling — or a materially different approach to the lens itself, such as a rubric that
-  scores precision on hedged prose differently. Either is its own decision, not a survey.
+  scores precision on hedged prose differently. Each is its own decision.
   Still true from the original survey and worth keeping: `nvidia/nemotron-3-super-120b-a12b`
   (120B/A12B, open weights *and* training data, post-trained for tool calling, ~35GB at 4-bit) as a
   cheap tool-competent **writer**, in `nemotron`'s existing family; and `moonshotai/kimi-k2.6`, a

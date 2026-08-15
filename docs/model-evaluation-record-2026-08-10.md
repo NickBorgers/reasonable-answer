@@ -56,8 +56,13 @@ The `gpt-5.6-luna` row carries its denominators here, because it is the only slo
 non-default repetitions: 84 attempted calls with 1 schema failure, well below the 0.2 gate, so the
 channel was clean; 48 successful sound-control runs carrying 90 material issues, giving the 1.88
 rate; and 33 of 35 successful planted-fixture reviews finding the plant, including 6 of 6 at the
-`obvious` tier. It is the most stable measurement in the set and sits far enough above the ceiling
-that the instability caveat below does not apply to it, so it was not re-measured.
+`obvious` tier. It rests on more calls than any other slot here — 48 sound-control runs against the
+24 a default run collects — but that is a larger sample, not a demonstrated stable one: no sampling
+analysis or confidence interval was computed for any slot in this set. The instability caveat below
+is therefore **not** established as inapplicable to it. The arithmetic matters, so it is written
+down: the repeat-run swing observed on `claude-haiku-4-5` was 2.04 → 1.04, and a swing of that
+proportion applied to 1.88 would cross the 1.00 ceiling. The `unfit` verdict is what was measured;
+whether it would survive a re-measurement is untested, and it was not re-measured.
 
 The two haiku runs are the basis for the open methodology item in
 [decisions.md](./decisions.md): at 24 control calls per run, the point estimate moved from 2.04 to
