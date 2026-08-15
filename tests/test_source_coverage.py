@@ -82,6 +82,166 @@ def test_plain_numbered_list_entries_are_split():
     assert fetch.entry_url(entries[1]) == "https://example.org/b"
 
 
+def test_a_flat_bullet_list_is_one_entry_per_bullet():
+    """The fourth shape writers actually produce, alongside `[n]`, `1.` and `1)`."""
+    report = (
+        "# T\n\n## Sources\n\n"
+        "- Smith 2019. https://example.org/a\n"
+        "* Jones 2020. https://example.org/b\n"
+        "+ Nakamura 2021. https://example.org/c\n"
+    )
+    assert len(fetch.source_entries(report)) == 3
+
+
+# The shape issue #168 was filed against: every reference carries an indented
+# sub-bullet of commentary, which `\s{0,3}` read as a second, URL-less entry — so the
+# bibliography counted double and exactly half of it reported as unaddressable.
+ANNOTATED = """# T
+
+A claim [1], another [2], and a third [3].
+
+## Sources
+
+[1] Luccioni, A. S., et al. (2023). "Power Hungry Processing." https://example.org/a
+   - Estimates energy use per query and discusses data centre intensity.
+[2] IEA (2024). Electricity 2024. https://example.org/b
+   - Projects data centre demand to 2026.
+[3] Smith, J. (2019). A book with no URL at all. Publisher.
+   - Background monograph; no online edition.
+"""
+
+
+def test_an_annotation_indented_under_a_reference_is_not_a_second_entry():
+    entries = fetch.source_entries(ANNOTATED)
+    assert len(entries) == 3
+    assert fetch.entry_url(entries[0]) == "https://example.org/a"
+    assert fetch.entry_url(entries[2]) is None
+    assert "Estimates energy use" in entries[0]
+
+
+def test_an_annotated_bibliography_reports_only_its_real_unaddressable_entry():
+    """The number the label ships: one reference here carries no URL, and the count of
+    unchecked entries must be that one — not one per annotation
+    (D-bibliography-entry-nesting, D-observed-source-coverage)."""
+    observed = fetch.coverage(
+        ANNOTATED,
+        {
+            "https://example.org/a": FetchedSource(url="https://example.org/a", text="body"),
+            "https://example.org/b": FetchedSource(url="https://example.org/b", text="body"),
+        },
+    )
+    assert observed.cited == 3
+    assert observed.addressable == 2
+    assert observed.not_addressable == 1
+    assert observed.not_independently_checked == 1
+
+
+def test_a_tab_indented_annotation_folds_the_same_way():
+    report = (
+        "# T\n\n## Sources\n\n"
+        "- Smith 2019. https://example.org/a\n"
+        "\t- Annotated in a tab-indented sub-bullet.\n"
+        "- Jones 2020. https://example.org/b\n"
+    )
+    assert len(fetch.source_entries(report)) == 2
+
+
+def test_references_nested_under_grouping_bullets_are_still_the_entries():
+    """The converse of the annotation case, and the reason the entry depth is anchored
+    at the shallowest marker that is not a grouping heading rather than at column 0: here
+    the outermost bullets are headings and the references sit under them. Collapsing three
+    references into two group bullets would understate the denominator, which reads as
+    *more* of the bibliography verified than actually was."""
+    report = (
+        "# T\n\n## Sources\n\n"
+        "- Peer-reviewed:\n"
+        "  - Smith 2019. https://example.org/a\n"
+        "  - Jones 2020. https://example.org/b\n"
+        "- Institutional:\n"
+        "  - IEA 2024. https://example.org/c\n"
+    )
+    entries = fetch.source_entries(report)
+    assert len(entries) == 3
+    assert fetch.entry_url(entries[2]) == "https://example.org/c"
+
+
+def test_a_url_less_reference_survives_an_annotation_that_carries_the_url():
+    """The safety property, stated as a case. Here the *only* addressed marker is the
+    annotation, so anchoring the entry depth on it made the reference above shallower —
+    and reading one indented URL as a grouping heading then deleted that reference from
+    the denominator. A vanished citation reports *more* of the bibliography verified than
+    was, which is the one direction this heuristic may not be wrong in."""
+    report = (
+        "# T\n\n## Sources\n\n"
+        "[1] Chandler, A. (1977). The Visible Hand. Harvard University Press.\n"
+        "   - See https://example.org/review for a summary.\n"
+    )
+    entries = fetch.source_entries(report)
+
+    assert len(entries) == 1, "the reference is the entry; its annotation folds into it"
+    assert entries[0].startswith("[1] Chandler"), "the reference, not the annotation"
+    # Addressable *through* its own annotation, which is where this bibliography puts
+    # the URL. What must not happen is the reference disappearing and the annotation
+    # standing in for it.
+    assert fetch.entry_url(entries[0]) == "https://example.org/review"
+
+
+def test_a_url_less_reference_beside_an_addressed_one_stays_an_entry():
+    """A reference with no URL sitting at the same depth as one that has a URL. It is a
+    citation the report stands on and cannot be checked, so it belongs in the denominator
+    — the earlier lookahead rule was what let markers like this be read as headings and
+    dropped."""
+    report = (
+        "# T\n\n## Sources\n\n"
+        "[1] Hughes, T. (1983). Networks of Power. https://example.org/a\n"
+        "- Chandler, A. (1977). The Visible Hand.\n"
+    )
+    observed = fetch.coverage(report)
+    assert observed.cited == 2
+    assert observed.not_addressable == 1
+
+
+def test_a_mixed_nested_bibliography_keeps_an_unaddressable_reference():
+    report = (
+        "# T\n\n## Sources\n\n"
+        "- Smith, J. (2019). Title. Publisher.\n"
+        "  - Available at: https://example.org/a\n"
+        "- Jones, K. (2020). Book, no online edition.\n"
+        "- Nakamura (2021). Title.\n"
+        "  - Available at: https://example.org/c\n"
+    )
+    observed = fetch.coverage(report)
+    assert observed.cited == 3
+    assert observed.addressable == 2
+    assert observed.not_addressable == 1
+
+
+def test_a_flat_bibliography_with_no_urls_is_counted_line_by_line():
+    """URL presence does not choose the entry depth, so a wholly unaddressable flat
+    bibliography still reports every non-heading marker as an entry rather than none."""
+    report = "# T\n\n## Sources\n\n[1] Smith, J. (2019). Publisher.\n[2] Jones, K. (2020). Publisher.\n"
+    observed = fetch.coverage(report)
+    assert observed.cited == 2
+    assert observed.not_addressable == 2
+
+
+def test_url_free_grouped_markers_use_the_shallowest_depth():
+    report = (
+        "# T\n\n## Sources\n\n"
+        "- Books:\n"
+        "  - Smith, J. (2019). Publisher.\n"
+        "  - Jones, K. (2020). Publisher.\n"
+        "- Reports:\n"
+        "  - Nakamura (2021). Publisher.\n"
+    )
+    observed = fetch.coverage(report)
+    # Three references under two labels. Counting the labels as the bibliography — which
+    # is what anchoring on the shallowest marker did when no URL appeared anywhere — both
+    # named the wrong things and undercounted them (D-bibliography-entry-nesting).
+    assert observed.cited == 3
+    assert observed.not_addressable == 3
+
+
 def test_no_sources_section_means_nothing_cited():
     assert fetch.source_entries("# T\n\nJust prose.\n") == []
     assert fetch.coverage("# T\n\nJust prose.\n").cited == 0

@@ -255,7 +255,13 @@ frame.
 
 That same section is the **denominator** of a run's source-verification coverage
 (D-observed-source-coverage). `fetch.source_entries` splits it into bibliography entries and
-`fetch.coverage` tallies them against the outcomes the evidence lens's fetches produced. The tally
+`fetch.coverage` tallies them against the outcomes the evidence lens's fetches produced. The split
+is by list marker, at one indent depth per section — the shallowest marker that is not a grouping
+heading — so an annotation indented under a reference folds into it rather than counting as a
+second, unaddressable entry, while references nested under grouping bullets still count one apiece.
+A shallower marker is dropped only when its own colon-terminated, URL-free label identifies it as a
+grouping heading; recognition does not inspect the lines that follow, so a URL-less reference at
+entry depth cannot disappear from the denominator (D-bibliography-entry-nesting). The tally
 is written into checkpointed state under the artifact's hash in `_critique_one`, read back in
 `_finalize` for the draft actually shipped — which on a non-accepted terminal need not be the last
 one written — and rendered by `export.py` on all three surfaces. Each of a lens's critics tallies
