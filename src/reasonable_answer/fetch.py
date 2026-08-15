@@ -420,13 +420,12 @@ def source_entries(report: str) -> list[str]:
     lines carry a list marker (`- `, `* `, `[1]`, `1.`, `1)`) is split on the markers
     sitting at the entry depth (`_entry_indent`); a marker indented *deeper* than that is
     an annotation of the reference above it and folds into it exactly as an unmarked
-    continuation line does (D-bibliography-entry-nesting). A shallower marker is dropped
-    only when the next non-blank line proves it introduces a deeper URL-bearing entry;
-    otherwise it remains an entry so an unaddressable reference cannot disappear from the
-    denominator. Text before the first entry is section prose rather than an entry. A
-    section with no marker anywhere falls back to one entry per non-blank line, which is
-    the other shape writers produce. Neither shape can be recognised with certainty,
-    which is why what this feeds is reported as an observed count and never as a
+    continuation line does (D-bibliography-entry-nesting). A shallower marker is a grouping
+    heading, recognised from its own colon-terminated, URL-free label rather than from the
+    lines that follow it, and is dropped. Text before the first entry is section prose rather
+    than an entry. A section with no marker anywhere falls back to one entry per non-blank
+    line, which is the other shape writers produce. Neither shape can be recognised with
+    certainty, which is why what this feeds is reported as an observed count and never as a
     completeness claim.
     """
     lines = sources_section(report).splitlines()
@@ -444,9 +443,7 @@ def source_entries(report: str) -> list[str]:
         if indent == depth:
             entries.append(stripped)
         elif indent is not None and indent < depth:
-            if _is_grouping_heading(line):
-                continue
-            entries.append(stripped)
+            continue
         elif entries:
             entries[-1] = f"{entries[-1]} {stripped}"
     return entries

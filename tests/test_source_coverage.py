@@ -148,8 +148,8 @@ def test_a_tab_indented_annotation_folds_the_same_way():
 
 def test_references_nested_under_grouping_bullets_are_still_the_entries():
     """The converse of the annotation case, and the reason the entry depth is anchored
-    at the shallowest marker that carries an address rather than at column 0: here the
-    outermost bullets are headings and the references sit under them. Collapsing three
+    at the shallowest marker that is not a grouping heading rather than at column 0: here
+    the outermost bullets are headings and the references sit under them. Collapsing three
     references into two group bullets would understate the denominator, which reads as
     *more* of the bibliography verified than actually was."""
     report = (
@@ -217,9 +217,8 @@ def test_a_mixed_nested_bibliography_keeps_an_unaddressable_reference():
 
 
 def test_a_flat_bibliography_with_no_urls_is_counted_line_by_line():
-    """The fallback in `_entry_indent`: with no addressed marker to anchor on, the
-    shallowest marker of any kind is the entry depth, so a wholly unaddressable
-    bibliography reports every entry it has rather than none."""
+    """URL presence does not choose the entry depth, so a wholly unaddressable flat
+    bibliography still reports every non-heading marker as an entry rather than none."""
     report = "# T\n\n## Sources\n\n[1] Smith, J. (2019). Publisher.\n[2] Jones, K. (2020). Publisher.\n"
     observed = fetch.coverage(report)
     assert observed.cited == 2
