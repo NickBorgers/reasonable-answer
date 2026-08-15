@@ -162,19 +162,24 @@ def _repair_until_valid(
                 raise MalformedOutputError(f"{alias}: schema violation after repair: {exc}") from exc
             hint = getattr(exc, "repair_hint", None)
             rejected = getattr(exc, "rejected_text", None)
-            repairs = client.structured(
-                alias,
-                system=prompts.CRITIC_SYSTEM,
-                user=prompts.critic_repair_turn(
-                    user=user,
-                    instruction="",
-                    error=str(exc),
-                    guidance=hint() if callable(hint) else "",
-                    rejected=rejected() if callable(rejected) else "",
-                ),
-                schema=IssueRepairs,
-                max_tokens=CRITIC_MAX_TOKENS,
-            )
+            try:
+                repairs = client.structured(
+                    alias,
+                    system=prompts.CRITIC_SYSTEM,
+                    user=prompts.critic_repair_turn(
+                        user=user,
+                        instruction="",
+                        error=str(exc),
+                        guidance=hint() if callable(hint) else "",
+                        rejected=rejected() if callable(rejected) else "",
+                    ),
+                    schema=IssueRepairs,
+                    max_tokens=CRITIC_MAX_TOKENS,
+                )
+            except (MalformedOutputError, ValidationError) as repair_exc:
+                raise MalformedOutputError(
+                    f"{alias}: repair patch failed schema validation"
+                ) from repair_exc
             output, applied = triage.apply_repairs(output, repairs)
             # Content-free: indices and field names only, never a replacement value
             # (RA-016). An empty list is the honest answer when a critic could not anchor

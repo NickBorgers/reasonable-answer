@@ -189,7 +189,10 @@ def apply_repairs(output, repairs) -> tuple[object, list[str]]:
             match = _LOCUS_PATTERN.match(repair.replacement)
             if not match:
                 continue
-            value = StructuralRef(section=int(match.group(1)), paragraph=int(match.group(2)))
+            try:
+                value = StructuralRef(section=int(match.group(1)), paragraph=int(match.group(2)))
+            except ValidationError:
+                continue
         elif repair.field == "category":
             try:
                 value = Category(repair.replacement.strip())

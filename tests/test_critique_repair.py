@@ -17,6 +17,7 @@ mechanically.
 from __future__ import annotations
 
 import logging
+import re
 
 import pytest
 from fakes import FakeClient
@@ -45,6 +46,7 @@ At concentrations well above the recommended level, dental fluorosis occurs.
 VERBATIM = "reduces tooth decay by about 25% in children and adolescents"
 OTHER_VERBATIM = "dental fluorosis occurs"
 INVENTED = "reduces tooth decay by roughly a quarter in kids"
+OTHER_INVENTED = "fluoridation prevents every cavity"
 
 
 def _issue(claim_span: str, *, category=Category.OMITTED_COUNTERARGUMENT, section=1) -> RawIssue:
@@ -226,6 +228,47 @@ def test_a_rejection_still_logs_its_bounded_diagnostics(caplog):
     assert INVENTED not in line, "a rejected span must never reach a log (RA-016)"
 
 
+def test_span_fingerprints_are_stable_only_within_one_lens_repair_loop(caplog):
+    """D-repair-diagnostics depends on one call-local key spanning every lens repair:
+    a repeated candidate compares equal, while a changed candidate does not."""
+    client = _client(
+        issues=[_issue(INVENTED)],
+        patches=[(0, INVENTED), (0, OTHER_INVENTED)],
+        repairs=2,
+    )
+
+    with caplog.at_level(logging.INFO):
+        result = _run(client)
+
+    assert result.failed
+    lines = [message for message in caplog.messages if "lens rejection" in message]
+    fingerprints = [re.search(r"span=([0-9a-f]{8})", line).group(1) for line in lines]
+    assert fingerprints[0] == fingerprints[1]
+    assert fingerprints[1] != fingerprints[2]
+    assert INVENTED not in " ".join(lines)
+    assert OTHER_INVENTED not in " ".join(lines)
+
+
+def test_invalid_repair_schema_error_cannot_export_private_replacement(caplog):
+    private_replacement = "private report sentinel"
+
+    def reject_repair(_alias: str, _prompt: str):
+        raise critique_mod.MalformedOutputError(
+            f"critic: schema violation after repair: replacement={private_replacement}"
+        )
+
+    client = _client(issues=[_issue(INVENTED)])
+    client.repair_fn = reject_repair
+
+    with caplog.at_level(logging.WARNING):
+        result = _run(client)
+
+    assert result.failed
+    assert result.failure_reason == "critic: repair patch failed schema validation"
+    assert private_replacement not in (result.failure_reason or "")
+    assert private_replacement not in " ".join(caplog.messages)
+
+
 # ------------------------------------------------- every violation code, not just spans
 
 
@@ -282,7 +325,7 @@ def test_a_patch_naming_an_issue_that_does_not_exist_is_dropped():
     assert result.failed  # dropped, not applied somewhere convenient
 
 
-@pytest.mark.parametrize("value", ["not-a-locus", "S1", "P1.S1"])
+@pytest.mark.parametrize("value", ["not-a-locus", "S1", "P1.S1", "S1000.P1"])
 def test_an_unparseable_locus_patch_is_dropped_rather_than_guessed_at(value):
     client = _client(
         issues=[_issue(VERBATIM, section=9)], patches=[(0, value)], field="locus", repairs=1

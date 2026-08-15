@@ -5466,21 +5466,13 @@ model-authored or provider-authored text.
 
 **The measurement.** D-repair-diagnostics existed to answer one question the logs could not: across
 repair attempts, does a critic re-emit the same rejected span, or move to a different one? Those have
-different fixes. `run-a624c5099f9a` answered it.
-
-```
-00:52:22  gemma4 attempt 1: code=span_not_verbatim locus=S12.P1 issue=0/1 span=d2ae3c08
-00:57:34  gemma4 attempt 2: code=span_not_verbatim locus=S12.P1 issue=0/1 span=d2ae3c08
-00:57:43  gemma4 attempt 3: code=span_not_verbatim locus=S5.P1  issue=0/1 span=557f6710
-00:57:43  lens completeness failed
-```
-
-Attempt 2 re-emitted the **same keyed fingerprint over the same normalized span at the same locus**,
-after being handed the paragraph it had misquoted. That is a re-roll, not a repair. Attempt 3 then
-abandoned the issue and anchored a different one somewhere else, which also failed. A second case in
-the same run is sharper still: `glm-5.2` attempt 1 failed `span_not_verbatim`, attempt 2 failed
-`category_out_of_scope` — the re-ask fixed the span and broke something unrelated, which is what
-re-authoring a whole review rather than editing one field predicts.
+different fixes. A private production run supplied the measurement; the public record retains only
+the non-identifying result. In one repair sequence, the second attempt emitted the **same keyed
+fingerprint over the same normalized span at the same locus** after receiving the paragraph it had
+misquoted. That is a re-roll, not a repair. A later attempt moved to a different span and locus and
+still failed. In another sequence, a re-ask fixed a `span_not_verbatim` rejection but introduced a
+`category_out_of_scope` rejection — the whole-review retry changed an unrelated field, which is what
+re-authoring a review rather than editing one field predicts.
 
 The cause is in `llm.structured`: each repair attempt was a fresh single-turn prompt — system, the
 original user turn, the schema instruction, the error string. The rejected JSON was discarded. The
