@@ -5343,18 +5343,31 @@ with no URL* — a genuine signal about the draft — and instead it was dominat
 sit at one depth per section; a marker line deeper than that depth is an annotation of the reference
 above it and folds into that entry exactly as an unmarked continuation line always has.
 
-That depth is the shallowest marker indent **that carries a URL**, not column 0. Both anchors fix
-the reported case, and they differ on the converse shape — references nested under grouping bullets
-(`- Peer-reviewed:` / `  - Smith 2019. https://…`). Anchoring at column 0 would collapse those
-references into their headings, shrinking the denominator: three references under two headings would
-report as two cited and two addressable, which reads as a *fully* verified bibliography. Understating
-coverage is survivable; overstating the fraction is the exact failure D-observed-source-coverage
-exists to prevent. A marker shallower than the entry depth is dropped as a grouping heading only
-when the next non-blank line is a deeper marker carrying a URL. Otherwise it remains an entry, so a
-standalone URL-less reference cannot disappear from the denominator. A section whose markers carry
-no URL anywhere falls back to the shallowest marker depth; deeper markers then fold into those
-entries, so this fallback preserves a conservative unaddressable count but does not claim to recover
-every nested reference from a URL-free grouped list.
+That depth is the shallowest marker that is **not a grouping heading** — a label like
+`- Peer-reviewed:` that introduces references rather than being one, recognised by the colon it ends
+with and by carrying no address of its own.
+
+An earlier form of this decision anchored the depth on the shallowest marker *carrying a URL*
+instead. That looked equivalent and is not, and the difference is the whole of this amendment: in an
+annotated bibliography the URL frequently sits in the **annotation** rather than in the reference, so
+the anchor landed one level too deep and every reference above it became "shallower". Paired with a
+rule that dropped a shallower marker whenever a deeper URL-bearing line followed it, a reference like
+
+```
+- Smith, J. (2019). Title. Publisher.
+  - Available at: https://example.org/a
+```
+
+was discarded and its annotation became the entry. The count could still come out right by
+coincidence — three markers in, three entries out — while naming the wrong things, which is how it
+survived review the first time. A citation vanishing from the denominator reports *more* of the
+bibliography verified than was, and understating coverage is the only direction this heuristic is
+permitted to be wrong in.
+
+Recognising the heading by its own text rather than by what follows it also removes the lookahead
+entirely, and with it the end-of-section branch that had no way to be exercised. A section whose
+markers are all headings falls back to the shallowest marker depth, so a bibliography of nothing but
+labels is still represented
 
 The marker pattern's `\s{0,3}` bound is replaced by a captured indent of any width, with tabs
 expanded, because a bound on depth cannot express a comparison between depths. Nothing routes on

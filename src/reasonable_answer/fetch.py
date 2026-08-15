@@ -371,29 +371,39 @@ def _marker_indents(lines: list[str]) -> dict[int, int]:
     return indents
 
 
+#: A marker whose own payload is a *label* rather than a reference: a grouping bullet
+#: like `- Peer-reviewed:` sitting above the entries it introduces. Recognised by the
+#: colon it ends with and the absence of any address of its own, because that is what
+#: separates it from a reference — not the depth it sits at, and not whether the lines
+#: under it happen to carry URLs.
+_GROUPING_HEADING = re.compile(r"^[ \t]*(?:[-*+]\s+|\[\d+\]\s*|\(?\d+[.)]\s+)\s*\S[^\n]{0,80}:\s*$")
+
+
+def _is_grouping_heading(line: str) -> bool:
+    return bool(_GROUPING_HEADING.match(line)) and _URL.search(line) is None
+
+
 def _entry_indent(lines: list[str], marker_indents: dict[int, int]) -> int:
     """The indent depth at which the entries themselves sit.
 
-    The shallowest marker depth that carries an address, because that is the level a
-    writer puts *references* on: an annotation is indented under the reference it
-    describes, and a grouping bullet (`- Peer-reviewed:`) sits above one and carries no
-    URL of its own. Falling back to the shallowest marker of any kind keeps a URL-free
-    bibliography represented conservatively, although nested markers at deeper levels
-    cannot be distinguished from annotations and fold into those entries.
+    The shallowest marker that is not a *grouping heading*. Anchoring instead on the
+    shallowest marker that carries an address looked equivalent and is not: in an
+    annotated bibliography the address frequently sits in the annotation rather than in
+    the reference, which put the entry depth one level too deep and made every reference
+    above it look like a heading. `- Smith, J. (2019). Title. Publisher.` with
+    `  - Available at: <url>` beneath it then resolved to the *annotation* as the entry
+    and dropped the reference — a citation vanishing from the denominator, which reads as
+    more of the bibliography verified than was (D-bibliography-entry-nesting).
+
+    Falling back to the shallowest marker of any kind keeps a bibliography that is
+    nothing but headings represented conservatively.
     """
-    addressed = [indent for index, indent in marker_indents.items() if _URL.search(lines[index])]
-    return min(addressed) if addressed else min(marker_indents.values())
-
-
-def _is_grouping_heading(index: int, lines: list[str], marker_indents: dict[int, int]) -> bool:
-    """Whether a shallower marker immediately introduces a URL-bearing entry."""
-    indent = marker_indents[index]
-    for next_index in range(index + 1, len(lines)):
-        if not lines[next_index].strip():
-            continue
-        next_indent = marker_indents.get(next_index)
-        return next_indent is not None and next_indent > indent and _URL.search(lines[next_index]) is not None
-    return False
+    entries = [
+        indent
+        for index, indent in marker_indents.items()
+        if not _is_grouping_heading(lines[index])
+    ]
+    return min(entries) if entries else min(marker_indents.values())
 
 
 def source_entries(report: str) -> list[str]:
@@ -434,7 +444,7 @@ def source_entries(report: str) -> list[str]:
         if indent == depth:
             entries.append(stripped)
         elif indent is not None and indent < depth:
-            if _is_grouping_heading(index, lines, marker_indents):
+            if _is_grouping_heading(line):
                 continue
             entries.append(stripped)
         elif entries:

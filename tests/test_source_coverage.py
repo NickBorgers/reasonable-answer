@@ -165,6 +165,42 @@ def test_references_nested_under_grouping_bullets_are_still_the_entries():
     assert fetch.entry_url(entries[2]) == "https://example.org/c"
 
 
+def test_a_url_less_reference_survives_an_annotation_that_carries_the_url():
+    """The safety property, stated as a case. Here the *only* addressed marker is the
+    annotation, so anchoring the entry depth on it made the reference above shallower —
+    and reading one indented URL as a grouping heading then deleted that reference from
+    the denominator. A vanished citation reports *more* of the bibliography verified than
+    was, which is the one direction this heuristic may not be wrong in."""
+    report = (
+        "# T\n\n## Sources\n\n"
+        "[1] Chandler, A. (1977). The Visible Hand. Harvard University Press.\n"
+        "   - See https://example.org/review for a summary.\n"
+    )
+    entries = fetch.source_entries(report)
+
+    assert len(entries) == 1, "the reference is the entry; its annotation folds into it"
+    assert entries[0].startswith("[1] Chandler"), "the reference, not the annotation"
+    # Addressable *through* its own annotation, which is where this bibliography puts
+    # the URL. What must not happen is the reference disappearing and the annotation
+    # standing in for it.
+    assert fetch.entry_url(entries[0]) == "https://example.org/review"
+
+
+def test_a_url_less_reference_beside_an_addressed_one_stays_an_entry():
+    """A reference with no URL sitting at the same depth as one that has a URL. It is a
+    citation the report stands on and cannot be checked, so it belongs in the denominator
+    — the earlier lookahead rule was what let markers like this be read as headings and
+    dropped."""
+    report = (
+        "# T\n\n## Sources\n\n"
+        "[1] Hughes, T. (1983). Networks of Power. https://example.org/a\n"
+        "- Chandler, A. (1977). The Visible Hand.\n"
+    )
+    observed = fetch.coverage(report)
+    assert observed.cited == 2
+    assert observed.not_addressable == 1
+
+
 def test_a_mixed_nested_bibliography_keeps_an_unaddressable_reference():
     report = (
         "# T\n\n## Sources\n\n"
@@ -200,8 +236,11 @@ def test_url_free_grouped_markers_use_the_shallowest_depth():
         "  - Nakamura (2021). Publisher.\n"
     )
     observed = fetch.coverage(report)
-    assert observed.cited == 2
-    assert observed.not_addressable == 2
+    # Three references under two labels. Counting the labels as the bibliography — which
+    # is what anchoring on the shallowest marker did when no URL appeared anywhere — both
+    # named the wrong things and undercounted them (D-bibliography-entry-nesting).
+    assert observed.cited == 3
+    assert observed.not_addressable == 3
 
 
 def test_no_sources_section_means_nothing_cited():
