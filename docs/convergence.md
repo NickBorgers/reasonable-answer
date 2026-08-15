@@ -546,6 +546,14 @@ controller never issues and that carry no verdict about the artifact:
 up is not a verdict, and the audit trail must never claim the controller reached one. A
 human can always resume past it.
 
+An attempt refused by startup validation writes a `deferred` event and stays `interrupted`
+(D-deferred-not-abandoned) — it is not a third state. What it changes is the *count*: a
+deferred attempt cancels itself against the resume cap, because the models being
+unreachable is a fact about the deployment rather than about this run, and every queued run
+would have failed identically. The registry distinguishes it only in the note it shows
+("the model roster was unreachable; it retries automatically"), so a run parked by someone
+else's rate limit does not read like one that died.
+
 ## Lifecycle state machine
 
 ```mermaid

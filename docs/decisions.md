@@ -5462,6 +5462,141 @@ like on the wire, not when a lens is retried or abandoned. The untrusted-text bo
 `_dereference` operates on a schema this application generated from its own pydantic models, never on
 model-authored or provider-authored text.
 
+## D-degraded-roster — an unreachable alias costs the roster that alias, not the run
+
+**The finding.** `build_runtime` probed every entry in `roster.all_aliases` in a bare loop, and any
+`ProbeIncomplete` aborted the whole startup. Every alias was therefore a single point of failure for
+every run, regardless of what it did in the roster or how many healthy models stood beside it.
+
+Production showed the shape twice on 2026-08-15. Three queued runs crashed at 05:52, 06:08 and again
+at 16:44 because OpenRouter answered `404 No endpoints found` for `deepseek-v4-flash`; a restart
+cleared that and they crashed three more times at 17:16–17:17 because DeepInfra returned
+`429 engine_overloaded` for `nemotron-3-ultra`. On both occasions the other five aliases answered
+normally, and on the second the failing alias was `nemotron-3-ultra` — which `config/roster.yaml`
+marks writer-only, so the run could have proceeded on two healthy writers with every critic pool
+untouched. Nothing was spent, nothing was learned, and six hours of queued work sat still because one
+provider was busy.
+
+The precedent for the right shape already existed one decision away. D-probe-capability-evidence gave
+`ra doctor` exactly this treatment — catch `ProbeIncomplete` per alias, mark it unreachable, keep
+going — and deliberately left `build_runtime` raising, on the reasoning that doctor spends nothing
+while a run is about to spend money under a silently wrong extraction regime. That reasoning is still
+correct about *the alias that failed to probe*, and this decision does not touch it: an alias whose
+mode is unknown is never called under a guessed mode. What the earlier decision did not separate is
+the alias from the roster. Refusing to call a model you could not probe is fail-closed; refusing to
+run at all when five other probed models can staff the entire game is not a safety property, it is an
+outage.
+
+**The decision.** The probe loop collects unreachable aliases instead of raising on the first, then
+`_degrade_roster` removes them and re-runs `validate_roster_health` on what is left. If the reduced
+roster passes, the run proceeds under it, with the drop recorded as a warning and in the `startup`
+event's `unreachable_aliases`. If it does not, startup fails closed exactly as before, with a message
+naming both the unreachable aliases and what their absence emptied.
+
+`validate_roster_health` is the gate on purpose, rather than a new count of what is "enough roster".
+It is already the definition of a viable roster and it is already fail-closed, so a lens left with no
+eligible non-author critic still refuses to start — including the subtle case a pool-size check would
+miss, where a pool is non-empty but contains only the writer who is about to author. `_roster_without`
+checks the two structural emptinesses ahead of it (no reachable writer, no reachable critic for some
+lens) only so the failure reads as the outage it is instead of a pydantic field-length error.
+
+**Why silence is not what makes this safe.** A degraded roster cannot buy an `accepted` it did not
+earn, and this required no new code: `LensStatus.roster_limited` is computed per round from the
+critics that actually turn out to be eligible, so a lens thinned to one reaches `weak_met` and the run
+terminates `converged_unconfirmed` rather than `accepted`. The degradation is therefore visible in the
+verdict itself, which is the one place that cannot be missed — not only in a warning somebody has to
+read. Cross-model confirmation (D-cross-model-confirmation, D-two-clean-critiques) is enforced by the
+same machinery it always was.
+
+**The degraded roster is not part of the run's identity.** `_run_fingerprint` keeps hashing the
+*configured* roster, from `config` and never from `rt.config`. Hashing what an attempt settled for
+would make the recovery look like changed inputs: a run would resume happily for as long as the outage
+lasted and then hit `ResumeMismatch` (D-redeploy-survival) at the exact moment the provider came back
+and it could have finished properly. Degradation is per attempt, which is why `unreachable_aliases`
+is stamped on each `startup` event rather than on the run — a resumed run may legitimately have had
+different rosters on different attempts, and docs/run-provenance.md's per-attempt reading of the
+startup events is what shows it.
+
+**An unreachable orchestrator is a special case, and the cheapest one.** Clearing the field selects
+the documented default of `writers[0]` (D-orchestrator-roster-entry). Keeping the unreachable alias
+would instead leave `_orchestrate_call` swallowing a failure every round, disabling rule 9 silently
+for the whole run — the permanent invisible loss that decision exists to prevent. The orchestrator's
+job is bounded ints in and one boolean out, so any probed alias can do it, and rule 9 is cap-gated:
+the substitution can only ever *enable* a polish pass, never force one.
+
+**What this deliberately does not do.** It does not degrade on `probe_tool_calling` — a search-enabled
+roster with a tool-incapable writer still fails closed per D-retrieval-opt-in, and the writer-facing
+half of that check now sees the reduced roster anyway. It does not catch the definite capability
+verdict: the `ConfigError` for "cannot produce parseable structured output" is a measured fact about
+the alias, not about the moment, and still refuses to start. It does not retry the probe, add a
+backoff, or wait for a provider to recover; a deployment that is fully unreachable fails closed here
+and is handled by D-deferred-not-abandoned instead.
+
+**Invariants.** None of the six is in reach. Author exclusion is enforced by `roles.eligible_critics`
+at resolved identity, unchanged and now over a smaller pool. The orchestrator stays blind — which
+alias referees does not touch what `OrchestratorView` carries. Severity floors, termination and the
+untrusted-text boundary are untouched. Fail-closed lenses are unaffected in the sense the invariant
+means it (an invalid critic field still fails the whole lens); the startup-time roster check remains
+fail-closed, and is now asked the question it was always the right function to answer.
+
+## D-deferred-not-abandoned — a provider outage is not evidence against the run it stopped
+
+**The finding.** `WorkerPool._drain` caught every exception out of `run_graph` as one case: log
+`crashed`, leave the run `interrupted`, let the next boot re-enqueue it. `interrupted` is resumable,
+and `max_resume_attempts` (3) bounds how many consecutive auto-resumes a run may make without
+progressing before it is `abandoned` — the bound D-redeploy-survival introduced so that a run failing
+*deterministically* cannot be retried forever.
+
+A startup-validation failure is caught by that bound while being the one thing it was not written
+for. When no writer is reachable, the failure is not evidence about the run — every queued run fails
+identically at the same line, before a token is spent — so counting it against a per-run budget lets
+one provider outage abandon the entire backlog. On 2026-08-15 that was three restarts from happening:
+`run-bb0268a1f1b6` reached three consecutive auto-resumes, all of them crashes inside `build_runtime`
+against an overloaded provider, and the next boot would have abandoned a run whose inputs were never
+in question.
+
+**The decision.** `build_runtime` re-raises every fail-closed refusal as `StartupRefused`, and
+`_drain` catches that separately from a crash. It writes a `deferred` event naming the reason, leaves
+the run `interrupted` so the next boot still picks it up, and sends no owner notification — for the
+same reason `GracefulStop` sends none: nothing has happened to the run that its owner can act on.
+`consecutive_auto_resumes` then treats `deferred` as cancelling the attempt it belongs to.
+
+**The line is structural, not a list of causes.** `StartupRefused` exists because catching plain
+`ConfigError` in the worker would have been wrong, and quietly so: intake raises `ConfigError` too, for
+a question over `max_question_chars`, a seed over `max_report_chars`, or a missing question. Those
+depend on the run's own inputs, fail identically on every retry, and are precisely what the resume cap
+is for — deferring them would retry a permanently-bad run forever. What separates the two is not the
+kind of problem but where it was found: nothing `build_runtime` does reads the question or the seed,
+so whatever it refuses it refuses for every queued run alike. Wrapping that one function is therefore
+the whole rule, and it needs no taxonomy of causes to stay correct as new startup checks are added.
+`StartupRefused` subtypes `ConfigError`, so every caller that already caught the base type — the CLI's
+fail-closed exit among them — is unaffected.
+
+Cancelling, rather than resetting to zero as a progress event does, is what keeps the cap honest
+across a mixed history: three genuine crashes still abandon a run even if an outage happened to fall
+between two of them. The registry reports the state distinctly — "the model roster was unreachable; it
+retries automatically" rather than the generic resumable-crash note — because the cause is outside the
+run and outside the user's reach, and a run parked by someone else's rate limit should not read like
+one that died.
+
+**The trade, stated plainly.** This makes deferrals unbounded: a deployment whose roster never comes
+back will re-defer its queue on every boot, forever, where the old behaviour abandoned it after three.
+That is the better failure. A deferral costs one startup validation — seconds, zero tokens, no model
+call — and it happens once per container start rather than in a loop, so the waste is bounded by how
+often the operator restarts. Discarding work owed because a provider had a bad hour is not recoverable
+by contrast, and the run is still resumable by hand from `abandoned` in any case. The cap continues to
+do its actual job, which is bounding runs that fail deterministically on their own inputs.
+
+**What this deliberately does not do.** It does not retry inside the attempt, back off, or wait for a
+provider — the deferral ends the attempt immediately and the next boot is the retry. It does not
+change `ResumeMismatch`, which still abandons: that failure *is* about the run's inputs. It does not
+distinguish a transient outage from a permanently misconfigured roster; both defer, and both are
+visible in the log and on the run page.
+
+**Invariants.** None of the six is in reach. This changes what a worker does with an exception and
+how a registry counts attempts; no model call, prompt, critic assignment, severity, or controller rule
+is touched.
+
 ## Open items for a future round
 
 - Making `probe_structured_output` measure against a schema shaped like a real one, not `_Probe`'s

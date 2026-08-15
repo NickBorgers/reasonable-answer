@@ -195,6 +195,11 @@ class Registry:
             return "interrupted", "paused for a restart; it resumes automatically"
         if last == "queued":
             return "queued", "waiting for a worker"
+        if last == "deferred":
+            # Distinguished from the crash below because the cause is outside the run and
+            # outside the user's reach: nothing about this run is wrong, the models it
+            # needs were unreachable (D-deferred-not-abandoned).
+            return "interrupted", "the model roster was unreachable; it retries automatically"
         # Anything else means the process vanished mid-node. The checkpointer makes that
         # resumable rather than lost.
         return "interrupted", "no final result; the run can be resumed"
@@ -207,12 +212,22 @@ class Registry:
         run, and is redeployed thirty seconds later should not burn an attempt on a run
         it never touched — but one that genuinely made progress should start over from
         zero. Any progress event resets the count.
+
+        A `deferred` attempt cancels itself rather than resetting the count
+        (D-deferred-not-abandoned). The cap is there to bound a run that fails
+        *deterministically*, and startup validation refusing because no model was
+        reachable is not that run failing — every queued run fails there identically, so
+        counting it would let one provider outage abandon the entire backlog. Cancelling
+        rather than resetting keeps the cap honest across a mixed history: three real
+        crashes still abandon a run even if an outage happened to fall between two of them.
         """
         count = 0
         for event in self.events(run_id):
             kind = event.get("kind")
             if kind == "queued" and event.get("auto"):
                 count += 1
+            elif kind == "deferred":
+                count = max(0, count - 1)
             elif kind in PROGRESS_EVENTS:
                 count = 0
         return count

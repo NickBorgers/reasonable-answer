@@ -97,6 +97,20 @@ invisible to the stamp. The `startup` event records the resolved model `identiti
 enabled tiers alongside the build, which is what actually varies; check there before concluding two
 runs on the same commit were configured identically.
 
+**Two attempts of one run can have had different rosters.** `unreachable_aliases` on each `startup`
+event lists the aliases that attempt could not probe and therefore ran without (D-degraded-roster).
+It is empty on a healthy start. Because it is per attempt rather than per run — an outage ends, and
+the next resume gets the full roster back — comparing runs means reading it on the attempt that
+produced the rounds in question, exactly as with `build`:
+
+```bash
+jq -r 'select(.kind=="startup") | [.ts, (.unreachable_aliases | join(","))] | @tsv' \
+  runs/<run_id>/events.jsonl
+```
+
+A run whose review pools were thinned this way terminates `converged_unconfirmed` rather than
+`accepted`, so the verdict carries the fact too — but only the events say *which* models were missing.
+
 ## Keeping the stamp working
 
 The production path depends on CI passing `RA_BUILD_SHA` as a build argument

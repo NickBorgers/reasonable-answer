@@ -30,9 +30,9 @@ from . import dispute as dispute_mod
 from . import fetch, prompts, reading, resolve, roles, search, support, triage
 from . import report as report_mod
 from .build import build_identity
-from .config import Config, ConfigError, validate_roster_health
+from .config import Config, ConfigError, Roster, validate_roster_health
 from .controller import acceptance_state, decide, detect_cycle
-from .llm import LLMClient, MalformedOutputError, ModelCallError
+from .llm import LLMClient, MalformedOutputError, ModelCallError, ProbeIncomplete
 from .schemas import (
     AdjudicationRecord,
     CleanRecord,
@@ -172,10 +172,41 @@ class Runtime:
         return self.config.disputes.enabled
 
 
+class StartupRefused(ConfigError):
+    """Startup validation refused, before anything about the run itself was read.
+
+    The distinction that earns this its own type is structural, not a taxonomy of
+    causes: nothing `build_runtime` does looks at the question or the seed, so whatever
+    it refuses, it refuses identically for *every* queued run — an unreachable proxy, a
+    roster no longer viable once unreachable aliases are dropped, a missing credential,
+    a critic graded unfit. That makes it a fact about the deployment, which is what lets
+    a worker defer the run rather than spend one of its resume attempts on it
+    (D-deferred-not-abandoned).
+
+    Intake's own `ConfigError`s — a question over `max_question_chars`, a seed over
+    `max_report_chars`, a missing question — deliberately stay outside this type. They
+    depend on the run's inputs, they will fail the same way on every retry, and the
+    resume cap is exactly the right thing to spend on them.
+    """
+
+
 def build_runtime(
     config: Config, run_id: str | None = None, client: LLMClient | None = None
 ) -> Runtime:
-    """Startup validation, fail closed before a single token is spent (RA-015)."""
+    """Startup validation, fail closed before a single token is spent (RA-015).
+
+    Every fail-closed refusal in here is re-raised as `StartupRefused`, which is a
+    `ConfigError`, so callers that only ever caught the base type are unaffected.
+    """
+    try:
+        return _build_runtime(config, run_id, client)
+    except ConfigError as exc:
+        raise StartupRefused(str(exc)) from exc
+
+
+def _build_runtime(
+    config: Config, run_id: str | None, client: LLMClient | None
+) -> Runtime:
     client = client or LLMClient(config)
     identities = client.resolve_identities(config.roster.all_aliases)
     warnings = validate_roster_health(config, identities)
@@ -187,9 +218,20 @@ def build_runtime(
         config.audition, config.roster, identities, config.require_verbatim_spans
     )
 
+    unreachable: dict[str, str] = {}
     for alias in config.roster.all_aliases:
-        mode = client.probe_structured_output(alias)
+        try:
+            mode = client.probe_structured_output(alias)
+        except ProbeIncomplete as exc:
+            # An availability failure, not a capability finding (D-probe-capability-evidence).
+            # Collected rather than raised so the whole roster is probed before anything is
+            # decided: which aliases are reachable is what says whether the run can go on,
+            # and giving up on the first one cannot know that.
+            unreachable[alias] = str(exc)
+            continue
         log.info("structured-output mode for %s (%s): %s", alias, identities[alias], mode)
+    if unreachable:
+        config, warnings = _degrade_roster(config, identities, unreachable, warnings)
 
     searcher = _build_searcher(config, client)
     read_pdfs = _pdf_reading_enabled(config)
@@ -241,6 +283,12 @@ def build_runtime(
         read_pdfs=read_pdfs,
         resolve_tiers=sorted(_enabled_tiers(config)),
         audition_enforced=config.audition.enforce,
+        # Which aliases this attempt could not probe, and so ran without
+        # (D-degraded-roster). Empty on a healthy start. Recorded per attempt because it
+        # is a fact about the moment, not about the run: the same run resumed an hour
+        # later may well have the full roster back, and the audit trail has to be able
+        # to say which rounds were reviewed by whom.
+        unreachable_aliases=sorted(unreachable),
         # Per attempt, not per run: a resumed run can cross a deploy, and the set of
         # startup events is the only place that shows it (docs/run-provenance.md).
         build=build_identity().as_dict(),
@@ -249,6 +297,80 @@ def build_runtime(
         log.warning("roster: %s", warning)
     return Runtime(config=config, client=client, identities=identities, store=store,
                    warnings=warnings, searcher=searcher, fetcher=fetcher, reader=reader)
+
+
+def _degrade_roster(
+    config: Config,
+    identities: dict[str, str],
+    unreachable: dict[str, str],
+    warnings: list[str],
+) -> tuple[Config, list[str]]:
+    """Run without the aliases that could not be probed — if what remains is a roster
+    that still satisfies every structural rule (D-degraded-roster).
+
+    An unprobeable alias is a fact about the moment, not about the model
+    (D-probe-capability-evidence). Treating the *whole* roster as a precondition made
+    every alias a single point of failure for the run: on 2026-08-15 one writer behind
+    an overloaded provider aborted three runs before a token was spent, twice, while
+    the other five aliases answered normally. That is the correct outcome when the
+    survivors cannot staff the game and the wrong one when they can — and
+    `validate_roster_health` is already the function that knows the difference, so this
+    asks it rather than inventing a second, weaker notion of "enough roster".
+
+    Silence is not what makes this safe; the verdict is. `LensStatus.roster_limited` is
+    computed per round from the critics that actually turn out to be eligible, so a lens
+    thinned to one reaches `weak_met` and the run terminates `converged_unconfirmed`
+    rather than `accepted`. A degraded run therefore cannot claim a strength it did not
+    earn even if nobody reads the warnings below.
+    """
+    dropped = set(unreachable)
+    named = ", ".join(sorted(dropped))
+    for alias, reason in sorted(unreachable.items()):
+        log.warning("alias %s could not be probed on this attempt: %s", alias, reason)
+
+    try:
+        degraded = config.model_copy(update={"roster": _roster_without(config.roster, dropped)})
+        # The reduced roster's warnings, not the configured roster's: the pools this run
+        # will actually draw from are the ones a reader needs named.
+        reduced_warnings = validate_roster_health(degraded, identities)
+    except ConfigError as exc:
+        raise ConfigError(
+            f"fail closed: could not probe {named}, and the roster left without "
+            f"{'them' if len(dropped) > 1 else 'it'} cannot staff a run — {exc}"
+        ) from exc
+
+    note = (
+        f"degraded roster: {named} could not be probed on this attempt and the run "
+        f"proceeds without {'them' if len(dropped) > 1 else 'it'}; any lens this leaves "
+        f"with fewer than two eligible critics can reach only converged_unconfirmed"
+    )
+    return degraded, [note, *reduced_warnings]
+
+
+def _roster_without(roster: Roster, dropped: set[str]) -> Roster:
+    """The roster minus `dropped`, or a `ConfigError` naming what removing them emptied.
+
+    The two structural emptinesses are checked here rather than left to `Roster`'s own
+    validators only so the failure reads as "this outage cost you the logic lens"
+    instead of a field-constraint error about a list length.
+    """
+    writers = [a for a in roster.writers if a not in dropped]
+    if not writers:
+        raise ConfigError("no writer is reachable")
+    critics = {
+        lens: [a for a in pool if a not in dropped] for lens, pool in roster.critics.items()
+    }
+    if empty := sorted(lens for lens, pool in critics.items() if not pool):
+        raise ConfigError(f"no critic is reachable for {', '.join(empty)}")
+    # An unreachable orchestrator costs a polish pass, never the run: its whole job is
+    # bounded ints in and one boolean out, so any probed alias can do it, and clearing
+    # the field selects the documented default of `writers[0]`
+    # (D-orchestrator-roster-entry). Keeping the unreachable alias instead would leave
+    # `_orchestrate_call` swallowing a failure every round and disable rule 9 silently
+    # for the whole run — precisely the permanent, invisible loss that decision exists
+    # to prevent.
+    orchestrator = None if roster.orchestrator in dropped else roster.orchestrator
+    return Roster(writers=writers, critics=critics, orchestrator=orchestrator)
 
 
 def _build_reader(config: Config, fetcher) -> reading.SourceReader | None:
@@ -2009,6 +2131,13 @@ def run(
     # system, and losing an hour of critique to a dropped connection is the failure
     # mode that matters. An unfinished thread continues from its last completed node;
     # a fresh one starts at intake.
+    #
+    # `config`, deliberately, and never `rt.config`: a roster degraded by an unreachable
+    # provider (D-degraded-roster) is a property of this attempt, not of the run's
+    # identity. Fingerprinting what the attempt settled for would make the *recovery*
+    # look like changed inputs — the run would resume fine while the outage lasted and
+    # then hit `ResumeMismatch` the moment the provider came back, which is the one
+    # moment it should have been able to finish properly.
     fingerprint = _run_fingerprint(config, question, seed)
     initial: State | None = {
         "run_id": rt.store.run_id,

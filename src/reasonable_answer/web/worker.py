@@ -26,7 +26,7 @@ from typing import TYPE_CHECKING, Any
 from .. import shutdown
 from ..build import build_identity
 from ..config import Config
-from ..graph import GracefulStop, ResumeMismatch
+from ..graph import GracefulStop, ResumeMismatch, StartupRefused
 from ..graph import run as run_graph
 from ..store import RunStore, UnsafeRunId, safe_run_dir
 
@@ -430,6 +430,22 @@ class RunWorker:
                     "abandoned", reason="question, seed, roster or budgets changed since this run started"
                 )
                 outcome = ("abandoned", False)
+            except StartupRefused as exc:
+                # Startup validation refused before a token was spent, and before
+                # anything about *this* run was read: no reachable writer, a lens with no
+                # reachable critic, an unreachable proxy (D-deferred-not-abandoned).
+                # Every queued run would fail here identically, so it is not evidence
+                # about this one, and spending one of its resume attempts on it would
+                # discard work owed because a provider had a bad hour. `deferred` records
+                # the attempt and cancels its cost; the run stays `interrupted`, so the
+                # next boot picks it up again. Intake's own rejections are not
+                # `StartupRefused` — those depend on the run's inputs and still burn the
+                # cap, which is what the cap is for.
+                log.warning("%s deferred: %s", job.run_id, exc)
+                RunStore(self._config.runs_dir, job.run_id).event("deferred", reason=str(exc))
+                # No notification, for the same reason `GracefulStop` sends none: nothing
+                # has happened to the run that its owner can act on or needs to know.
+                outcome = None
             except Exception:
                 # The graph writes its own terminal state and audit trail; anything
                 # escaping to here is a crash, and the registry will show the run as

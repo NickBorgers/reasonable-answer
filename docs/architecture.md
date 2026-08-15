@@ -181,6 +181,18 @@ Shortening the grace period wastes work; it does not corrupt anything.
   fruitless auto-resumes, so a deterministically-failing run cannot be retried forever.
   Abandonment writes an event, never a `final.json` — that file means the controller
   reached a verdict, and giving up is not a verdict. A human can always resume past it.
+* **An attempt stopped by startup validation is `deferred`, and costs nothing**
+  (D-deferred-not-abandoned). `build_runtime` re-raises its refusals as `StartupRefused`
+  — no reachable writer, a lens with no reachable critic, an unreachable proxy — which
+  says the *deployment* cannot run anything right now, not that this run is bad: nothing
+  in `build_runtime` reads the question or the seed, so every queued run fails there
+  identically, before a token is spent. The worker writes a `deferred` event, notifies
+  nobody, leaves the run `interrupted` so the next boot retries it, and cancels the
+  auto-resume it belongs to, so one provider outage cannot abandon the whole backlog.
+  Cancelling rather than resetting keeps the cap honest: three genuine crashes still
+  abandon a run even with a deferral among them. Intake's own `ConfigError`s (question or
+  seed over their caps) are deliberately *not* `StartupRefused` — those are about this
+  run's inputs, and bounding them is what the cap is for.
 * **A roster change invalidates every in-flight run.** `_run_fingerprint` covers the
   roster and budgets, so a deploy that also ships a new `config/roster.yaml` will refuse
   to resume runs started under the old one. That refusal is correct — it lands them in
@@ -322,6 +334,18 @@ carried no headings is accepted with a warning; the warning rides the run's exis
   every alias in the roster (writers, critics, and the orchestrator), validates per-lens roster
   health, and checks the config invariant `0 < min_ticks < hard_cap` (fail closed) so no generating
   rule can fire at or beyond the cap.
+- **Degraded roster (D-degraded-roster):** an alias whose structured-output mode could not be probed
+  is dropped for the attempt rather than aborting it, and `validate_roster_health` is re-run on what
+  remains — so the run proceeds when the survivors can staff the game and fails closed, naming what
+  the outage emptied, when they cannot. An alias is never *called* under a guessed mode; what changes
+  is only whether one unreachable provider stops five healthy ones. The degradation cannot buy an
+  acceptance it did not earn, because `roster_limited` is computed per round from the critics that
+  are actually eligible: a lens thinned to one reaches `weak_met` and terminates
+  `converged_unconfirmed`. An unreachable orchestrator clears the field to its documented
+  `writers[0]` default rather than disabling rule 9 silently for the whole run. The drop is recorded
+  per attempt in the `startup` event's `unreachable_aliases`, and deliberately stays out of
+  `_run_fingerprint`, which keeps hashing the *configured* roster — otherwise a provider's recovery
+  would read as changed inputs and trip `ResumeMismatch` at the moment the run could finally finish.
 - **Writer-pool depth (D-provider-retry):** author exclusion applies to writers too, so the pool the *next* draft
   may come from is `writers \ {author(Rₙ)}`. Size the pool for **≥2 eligible writers on a revision
   round** — i.e. at least three writers — or one flaky response is an aborted run rather than a
@@ -354,10 +378,13 @@ carried no headings is accepted with a warning; the warning rides the run's exis
   `http_400`/`http_422`, leaves capability unknown because a broad status cannot identify which
   request field was rejected; the probe raises `ProbeIncomplete` instead of silently pinning the
   alias to a weaker mode or marking it tool-incapable for the rest of the process
-  (D-probe-capability-evidence). `ra run`/`serve`/`ra audition`/`ra audition-refine` let that
-  `ConfigError` subtype propagate to their existing fail-closed exit, since each
-  is about to spend on a run or measurement the probe result governs. `ra doctor` is the one
-  exception: it spends nothing and is the tool reached for when the proxy is already misbehaving, so
+  (D-probe-capability-evidence). `ra audition`/`ra audition-refine` let that `ConfigError` subtype
+  propagate to their existing fail-closed exit, since each is about to spend on a measurement the
+  probe result governs; `ra run`/`serve` now drop the unprobeable alias and re-validate the roster
+  instead (D-degraded-roster), which keeps the "never call an alias under a guessed mode" half of
+  this decision while no longer letting one alias abort a run five healthy models could staff.
+  `ra doctor` remains distinct in kind:
+  it spends nothing and is the tool reached for when the proxy is already misbehaving, so
   it catches `ProbeIncomplete` per alias, prints an `unreachable` marker distinct from a real mode and
   from a definite `NO`, keeps rendering the rest of the roster table and its warnings, and exits `2` —
   distinct from a clean pass and from the `1` a definite capability finding still produces.
