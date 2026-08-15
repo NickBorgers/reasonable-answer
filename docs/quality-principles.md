@@ -96,14 +96,26 @@ argument against. Three things bound it, and the register's own evidence is what
 
 * QP4 rests on Huang et al. 2024, whose result is that self-correction degrades **without external
   feedback**. A deterministic validator naming a field, a locus and a violated constraint is
-  external feedback; the citation does not reach this case.
-* Chen, Su & Chiang 2026 measures relabeling a model's own output *as external input* raising
-  correction rates by 23–93 points. The rejected value is therefore fenced and attributed to the
-  validator, never as "your previous response" — the self-attributed framing is the one that
-  measurement penalizes.
+  external feedback, so that citation does not settle this case either way.
+* **Gou et al. 2023 (CRITIC)** is the new evidence this exception rests on, added to the References
+  table under §4. It is the positive half of the same boundary: a verify → correct → verify loop in
+  which a model revises its own output *against external tool feedback* consistently improves it,
+  and the paper's own conclusion is "the crucial importance of external feedback". That is the shape
+  implemented here — a mechanical validator's verdict, the rejected field, and a bounded correction.
+  Its limit is stated rather than hidden: it evaluates factuality, program synthesis and toxicity,
+  not schema or field-level repair, so it establishes the enabling condition and not this
+  application.
 * Panickssery et al. 2024 self-preference is bounded by the channel rather than by the prompt: the
   validator's verdict is mechanical, the critic has no way to overrule it, and the output remains a
   closed schema that still fails the lens closed once the budget is gone.
+
+**What Chen, Su & Chiang 2026 does *not* support here.** An earlier draft of this note claimed that
+study backed attributing the rejected value to the validator rather than to the critic. It does not.
+It moves a byte-identical erroneous claim between actual chat-template **roles** — assistant thought,
+user, tool, system memory — with the best role varying by domain. The repair turn keeps the value in
+a user turn and changes only prose attribution, so the 23–93 point result is not inherited and is not
+claimed. The attribution wording stands as a design choice with a plain rationale — at that point the
+text *is* a candidate a check rejected — and carries no evidentiary weight.
 
 QP5's traffic boundary is untouched — nothing new crosses to a *generator*, and the returned value
 is the critic's own bounded field travelling back to the same call. QP6 is untouched: there is no
@@ -210,3 +222,4 @@ on without fetching something new.
 | [Verga et al. 2024, "Replacing Judges with Juries" (PoLL)](https://arxiv.org/abs/2404.18796) | A panel of judges drawn from disjoint families outperforms a single large judge and reduces intra-model bias. | QP2, QP3, QP8 |
 | [Grove et al. 2000, "Clinical versus mechanical prediction: a meta-analysis"](https://pubmed.ncbi.nlm.nih.gov/10752360/) | Across 136 studies, mechanical combination of information matches or beats holistic expert judgment. | QP1, QP8 |
 | [Beygelzimer et al. 2021, "The NeurIPS 2021 Consistency Experiment"](https://arxiv.org/abs/2306.03262) | Parallel expert committees disagreed on 23% of accept/reject decisions; single-reviewer verdicts are noisy even among experts. | QP8 |
+| [Gou et al. 2023, "CRITIC: Large Language Models Can Self-Correct with Tool-Interactive Critiquing" (ICLR 2024)](https://arxiv.org/abs/2305.11738) | A verify → correct → verify loop in which the model revises its own output against **external tool feedback** consistently improves it across free-form QA, mathematical program synthesis and toxicity reduction; the paper's stated conclusion is "the crucial importance of external feedback in promoting the ongoing self-improvement of LLMs". It evaluates factuality, program synthesis and toxicity — **not** schema or field-level repair, so it establishes the enabling condition, not this application. | QP4 |

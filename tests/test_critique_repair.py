@@ -20,6 +20,7 @@ import logging
 
 import pytest
 from fakes import FakeClient
+from pydantic import ValidationError
 
 from reasonable_answer import critique as critique_mod
 from reasonable_answer import prompts
@@ -281,16 +282,18 @@ def test_a_patch_naming_an_issue_that_does_not_exist_is_dropped():
     assert result.failed  # dropped, not applied somewhere convenient
 
 
-@pytest.mark.parametrize("value", ["not-a-locus", "S1", "P1.S1", ""])
+@pytest.mark.parametrize("value", ["not-a-locus", "S1", "P1.S1"])
 def test_an_unparseable_locus_patch_is_dropped_rather_than_guessed_at(value):
-    issues = [_issue(VERBATIM, section=9)]
-    if not value:  # the schema refuses an empty replacement before triage ever sees it
-        with pytest.raises(Exception):
-            IssueRepair(issue_index=0, field="locus", replacement=value)
-        return
-    client = _client(issues=issues, patches=[(0, value)], field="locus", repairs=1)
+    client = _client(
+        issues=[_issue(VERBATIM, section=9)], patches=[(0, value)], field="locus", repairs=1
+    )
 
     assert _run(client).failed
+
+
+def test_an_empty_replacement_is_refused_by_the_schema_before_triage_sees_it():
+    with pytest.raises(ValidationError):
+        IssueRepair(issue_index=0, field="locus", replacement="")
 
 
 def test_a_category_patch_cannot_escalate_severity_by_relabelling():

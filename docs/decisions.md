@@ -5488,29 +5488,48 @@ critic was told the rule it had broken and shown the source text, but never the 
 emitted, so it had to re-derive the entire review from a prompt materially identical to the one that
 had just failed.
 
-**The decision.** The repair turn carries the rejected field value back, fenced as data and
-attributed to the validator — *"a candidate issue was rejected"*, never *"your previous response"* —
-together with the existing source-text guidance, and an instruction to change only what was rejected.
-Only the offending field travels, never the whole issue array: the smallest anchor that can be
-corrected, already bounded by `MAX_SPAN`.
+**The decision.** Two changes, and the second is what makes the first honest.
 
-**Critic-specific by construction.** `structured()` gains an optional `repair_prompt` composer and
-`critique_once` is the only caller that passes one. Writer disputes, the arbiter, the blind
-orchestrator, question refinement and the refine audition all keep the previous wording byte for
-byte. That is not tidiness: `web.refine` hashes its own prompt surface into its cache key, so a
-shared edit would silently invalidate stored suggestions, and the orchestrator's guarantee that no
-content can reach it is easiest to keep true by not touching its path at all. No `rejected` value
-exists on any of those paths regardless — only `triage.LensValidationError` carries one.
+The repair turn carries the rejected field value back, fenced as data and attributed to the
+validator — *"a candidate issue was rejected"*, never *"your previous response"* — together with the
+existing source-text guidance.
 
-**Isolation.** This is the one bounded exception to the fresh-context rule, and it is recorded as
-such in the drift table, the critic's NEVER row, and the repair bullet in
-[isolation.md](./isolation.md), plus the rule-2 narrative in [convergence.md](./convergence.md). The
-argument is in the QP application note in [quality-principles.md](./quality-principles.md) and is
-deliberately narrow: Huang et al. 2024 is about self-correction *without external feedback* and a
-mechanical validator is external feedback; Chen, Su & Chiang 2026 supports the unattributed framing
-for localized verifiable errors; Panickssery et al. 2024 self-preference is bounded by a closed
-output schema and a verdict the critic cannot overrule. What is claimed is a bounded same-task
-exception — **not** that relabeling restores independence.
+And what is asked for back is a **patch**, not the review again: `{issue_index, field, replacement}`
+for the rejected field alone (`schemas.IssueRepairs`), merged into the retained `CritiqueOutput` by
+`triage.apply_repairs` and revalidated whole. An earlier draft of this decision echoed the field but
+still re-asked for the entire review, with an instruction to leave the other issues alone. That
+instruction cannot be obeyed: those values are not in the critic's context, so the model must
+regenerate them, and the `category_out_of_scope` regression above is exactly that happening. The
+patch removes the mechanism rather than asking a model not to trigger it — everything a repair does
+not name is carried across mechanically, with nothing in the path that could rewrite it.
+
+The patch channel is deliberately narrow. It may replace only the four fields
+`triage.validate_issue` can reject; it may not touch `severity`, `rationale` or `instruction`, so it
+cannot become a way to rewrite a finding under cover of fixing a quote. A replacement that will not
+parse is dropped rather than guessed at, and a category replacement whose mechanical floor is
+*higher* than the original's is refused — RC-005 reserves escalation to the floor table, and a
+repair must not become a back door to it.
+
+**Isolation, and the evidence it rests on.** This is the one bounded exception to the fresh-context
+rule, recorded as such in the drift table, the critic's NEVER row and the repair bullet in
+[isolation.md](./isolation.md), plus the rule-2 narrative in [convergence.md](./convergence.md).
+
+QP12 §4 requires new evidence, fetchable from a URL in the diff, before a principle gives ground.
+That evidence is **Gou et al. 2023 (CRITIC)**, added to the References table: a verify → correct →
+verify loop in which a model revises its own output against external tool feedback consistently
+improves it, concluding "the crucial importance of external feedback". That is the positive half of
+the boundary Huang et al. 2024 draws from the other side, and it is the shape built here. Its limit
+is stated in the table rather than left for a reader to find: it evaluates factuality, program
+synthesis and toxicity, not schema repair.
+
+One claim is explicitly withdrawn. An earlier draft cited Chen, Su & Chiang 2026 as support for
+attributing the value to the validator rather than the critic. That study moves a byte-identical
+claim between chat-template *roles*; this keeps the value in a user turn and changes only prose
+attribution, so the reported gain is not inherited and is no longer claimed. The wording stands on
+its own rationale — the text at that point *is* a candidate a check rejected — with no evidentiary
+weight behind it.
+
+What is claimed is a bounded same-task exception — **not** that relabeling restores independence.
 
 **RA-016 is unchanged.** `rejected_text()` is read only by the repair path, which stays inside the
 run. It is deliberately absent from `diagnostics()` and from `str(exc)`, because those reach stdout
