@@ -516,8 +516,12 @@ def critic_repair_turn(
     self-attributed form is the one the measurement penalizes. It is also the honest
     description of what this text now is — an input to a check that failed.
 
-    Only the offending field travels, never the whole issue array: the smallest anchor
-    that can be corrected, and one already bounded by `MAX_SPAN`.
+    What is asked for back is a **patch**, not the review again: `{issue_index, field,
+    replacement}` for the rejected field alone. Re-asking for the whole `CritiqueOutput`
+    is what let a repair fix the span and regress an unrelated field in the same breath,
+    and an instruction to "leave the others as they were" cannot be obeyed by a model
+    whose context no longer holds them. Everything not named is carried over mechanically
+    by `triage.apply_repairs`.
     """
     parts = [user, "", instruction, "", "A candidate issue was rejected by the validator.", error]
     if rejected:
@@ -538,8 +542,12 @@ def critic_repair_turn(
         parts += ["", guidance]
     parts += [
         "",
-        "Return corrected JSON only. No prose, no code fence. Change only what the "
-        "validator rejected; leave every other issue in the review as it was.",
+        "Return ONLY a replacement for the rejected field, as one `repairs` entry naming "
+        "the issue's index, the field, and the corrected value. Do not restate the issue "
+        "and do not resend the rest of your review — every field you do not name is kept "
+        "exactly as you wrote it. If no value drawn from the text above can anchor this "
+        "issue, return an empty `repairs` list and the issue will be rejected rather than "
+        "anchored to something that is not there.",
     ]
     return "\n".join(parts)
 

@@ -15,10 +15,11 @@ from typing import Any
 from pydantic import ValidationError
 
 from reasonable_answer.config import Budgets, ConfigError
-from reasonable_answer.llm import Completion, MalformedOutputError
+from reasonable_answer.llm import Completion, MalformedOutputError, ProbeIncomplete
 from reasonable_answer.schemas import (
     ArbiterVerdict,
     CritiqueOutput,
+    IssueRepairs,
     OrchestratorRecommendation,
     SupportManifest,
     WriterDisputes,
@@ -32,7 +33,6 @@ def structured_with_repair(
     validate: Callable[[Any], None] | None,
     repair_retries: int | None,
     record: Callable[[Exception], None] | None = None,
-    repair_prompt: Callable[..., str] | None = None,
 ) -> Any:
     """Mirror `LLMClient.structured`'s repair loop for a test double.
 
@@ -64,20 +64,13 @@ def structured_with_repair(
                 break
             # The re-ask carries the rejection and whatever guidance the error offers,
             # exactly as the real client composes it — a double that re-sent the
-            # original prompt would make a repair look like a re-roll. A caller with its
-            # own composer (the critic path, D-repair-turn-context) gets that composer
-            # here too, or the double would test wording production never sends.
-            if repair_prompt is not None:
-                attempt_user = repair_prompt(
-                    user=user, instruction="", error=last_err, exc=exc
-                )
-            else:
-                hint = getattr(exc, "repair_hint", None)
-                guidance = hint() if callable(hint) else ""
-                attempt_user = (
-                    f"{user}\n\nYour previous response was rejected by the schema "
-                    f"validator:\n{last_err}\n{guidance}"
-                )
+            # original prompt would make a repair look like a re-roll.
+            hint = getattr(exc, "repair_hint", None)
+            guidance = hint() if callable(hint) else ""
+            attempt_user = (
+                f"{user}\n\nYour previous response was rejected by the schema "
+                f"validator:\n{last_err}\n{guidance}"
+            )
     raise MalformedOutputError(f"{alias}: schema violation after repair: {last_err}")
 
 
@@ -104,6 +97,9 @@ class FakeClient:
     #: aliases whose structured-output mode cannot be pinned. Mirrors the real
     #: client's fail-closed probe path without requiring a live proxy.
     unprobeable: set[str] = field(default_factory=set)
+    #: aliases that completed every structured-output attempt without producing a
+    #: parseable result. This is a definite capability verdict, not an incomplete probe.
+    structured_incapable: set[str] = field(default_factory=set)
     #: aliases `probe_structured_output` has been asked about, in order. Recorded so a
     #: test can assert a command probed *before* it spent (D-audition-probe-parity);
     #: memoised like the real client, so a repeat probe is one entry, not two.
@@ -111,6 +107,10 @@ class FakeClient:
     generations: int = 0
     #: alias -> can it emit tool calls; absent means yes
     tool_capable: dict[str, bool] = field(default_factory=dict)
+    #: aliases whose tool-calling probe cannot complete at all — an availability
+    #: failure, not a capability finding. Mirrors `unprobeable` for the
+    #: structured-output probe (D-probe-capability-evidence).
+    tool_unprobeable: set[str] = field(default_factory=set)
     #: every tool-result string the fake handed back to a "model"
     tool_results: list[str] = field(default_factory=list)
     #: every validation rejection the repair loop saw, in order — what the real client
@@ -118,6 +118,8 @@ class FakeClient:
     validation_errors: list[Exception] = field(default_factory=list)
     #: callable(alias, user) -> WriterDisputes; None means "no disputes raised"
     dispute_fn: Any | None = None
+    #: callable(alias, repair_prompt) -> IssueRepairs; None means "no patch offered"
+    repair_fn: Any | None = None
     #: callable(alias, user) -> SupportManifest; None means "an empty manifest"
     support_fn: Any | None = None
     #: The tool calls this "model" makes when a handler is supplied, as
@@ -151,6 +153,11 @@ class FakeClient:
 
     def probe_structured_output(self, alias: str) -> str:
         if alias in self.unprobeable:
+            raise ProbeIncomplete(
+                f"fail closed: probe of alias '{alias}' could not be completed; "
+                f"its structured-output mode is unknown"
+            )
+        if alias in self.structured_incapable:
             raise ConfigError(f"fail closed: alias '{alias}' cannot produce structured output")
         if alias not in self.probes:
             self.probes.append(alias)
@@ -167,6 +174,10 @@ class FakeClient:
         return self.modes.get(alias, "json_schema")
 
     def probe_tool_calling(self, alias: str) -> bool:
+        if alias in self.tool_unprobeable:
+            raise ProbeIncomplete(
+                f"fail closed: alias '{alias}' tool-calling probe could not be completed"
+            )
         return self.tool_capable.get(alias, True)
 
     def tool_capable_for(self, alias: str) -> bool:
@@ -213,7 +224,6 @@ class FakeClient:
         schema: type,
         validate: Callable[[Any], None] | None = None,
         repair_retries: int | None = None,
-        repair_prompt: Callable[..., str] | None = None,
         **kwargs: Any,
     ):
         def produce(attempt_user: str):
@@ -226,11 +236,18 @@ class FakeClient:
                     else "clean",
                 )
             if schema is CritiqueOutput:
-                return self.critique_fn(alias, attempt_user)
+                return self.critique_fn(alias, user)
             if schema is WriterDisputes:
                 if self.dispute_fn is None:
                     return WriterDisputes(disputes=[])
                 return self.dispute_fn(alias, user)
+            if schema is IssueRepairs:
+                # The critic's repair channel (D-repair-turn-context). Default is an
+                # empty patch — a critic that offers nothing leaves the issue rejected,
+                # which is the fail-closed direction.
+                if self.repair_fn is None:
+                    return IssueRepairs(repairs=[])
+                return self.repair_fn(alias, attempt_user)
             if schema is SupportManifest:
                 if self.support_fn is None:
                     return SupportManifest(entries=[])
@@ -242,13 +259,7 @@ class FakeClient:
             raise AssertionError(f"unexpected schema {schema}")
 
         return structured_with_repair(
-            alias,
-            user,
-            produce,
-            validate,
-            repair_retries,
-            self.validation_errors.append,
-            repair_prompt,
+            alias, user, produce, validate, repair_retries, self.validation_errors.append
         )
 
 

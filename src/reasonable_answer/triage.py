@@ -19,6 +19,8 @@ import hashlib
 import re
 from enum import Enum
 
+from pydantic import ValidationError
+
 from .report import Structure
 from .schemas import (
     MAX_SPAN,
@@ -157,6 +159,57 @@ class LensValidationError(ValueError):
         if self._rejected:
             fields["span"] = self.fingerprint(fingerprint_key)
         return fields
+
+
+_LOCUS_PATTERN = re.compile(r"^\s*S(\d+)\.P(\d+)\s*$", re.IGNORECASE)
+
+
+def apply_repairs(output, repairs) -> tuple[object, list[str]]:
+    """Merge a critic's field replacements into the review it already returned.
+
+    Mechanical, and deliberately so (D-repair-turn-context): everything a repair does not
+    name is carried over byte-for-byte, so a repair cannot regress a field it was not
+    asked about. That is the whole difference from re-asking for the full `CritiqueOutput`,
+    where the model regenerates every field and an unrelated one can change — measured in
+    production as a repair that fixed a span and broke a category.
+
+    Returns the patched output and a bounded, content-free list of what was applied, for
+    the audit trail. A patch that cannot be parsed or does not address a real issue is
+    **dropped, never guessed at**: the issue keeps its rejected value and the next
+    validation pass fails it again, which is the fail-closed direction.
+    """
+    patched = [issue.model_copy() for issue in output.issues]
+    applied: list[str] = []
+    for repair in repairs.repairs:
+        if repair.issue_index >= len(patched):
+            continue
+        issue = patched[repair.issue_index]
+        value: object
+        if repair.field == "locus":
+            match = _LOCUS_PATTERN.match(repair.replacement)
+            if not match:
+                continue
+            value = StructuralRef(section=int(match.group(1)), paragraph=int(match.group(2)))
+        elif repair.field == "category":
+            try:
+                value = Category(repair.replacement.strip())
+            except ValueError:
+                continue
+            # A repair may not move a finding into a category with a *higher* mechanical
+            # floor: that would let the repair channel escalate severity by relabelling,
+            # which RC-005 reserves to the floor table alone.
+            if SEVERITY_RANK[clamp_to_floor(value, issue.severity)] > SEVERITY_RANK[
+                clamp_to_floor(issue.category, issue.severity)
+            ]:
+                continue
+        else:
+            value = repair.replacement
+        try:
+            patched[repair.issue_index] = issue.model_copy(update={repair.field: value})
+        except ValidationError:
+            continue
+        applied.append(f"{repair.issue_index}:{repair.field}")
+    return output.model_copy(update={"issues": patched}), applied
 
 
 def _quote_hint(field: str, scope: str, source_text: str) -> str:

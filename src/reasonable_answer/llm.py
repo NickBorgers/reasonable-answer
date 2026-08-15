@@ -97,6 +97,10 @@ class PermanentCallError(ModelCallError):
         super().__init__(message, failure_class=failure_class)
 
 
+class ProbeIncomplete(ConfigError):
+    """The probe did not establish whether the alias has the capability."""
+
+
 #: HTTP statuses where the fault is in the request, not the moment. 408 (timeout) and
 #: 429 (rate limit) are deliberately absent — those are exactly what backoff is for,
 #: and so is every 5xx.
@@ -288,7 +292,22 @@ class LLMClient:
     # ---------------------------------------------------------------- capability
 
     def probe_structured_output(self, alias: str) -> str:
-        """Pin `alias` to the strongest structured-output mode it actually supports."""
+        """Pin `alias` to the strongest structured-output mode it actually supports.
+
+        Only observed output is capability evidence: `MalformedOutputError` means the
+        model answered, but not inside the closed schema, so the probe may try the next
+        mode. A call exception cannot identify which request field caused a provider
+        rejection, even when its status is `http_400`/`http_422`; it therefore leaves
+        the mode unknown. Retryable call failures have already spent `_create`'s
+        `budgets.call_retries` before reaching this boundary. Demoting on any call
+        failure would silently
+        pin the alias to a weaker mode for the rest of the process on nothing more
+        than a bad moment on the wire: `ra doctor` did exactly that to
+        `nemotron-3-ultra` on 2026-08-11, pinned to `json_object` after three
+        DeepInfra 429s during the `json_schema` probe (D-probe-capability-evidence).
+        So an incomplete probe raises rather than falling through to a weaker mode
+        under a false "unsupported" verdict.
+        """
         if alias in self._modes:
             return self._modes[alias]
 
@@ -306,9 +325,15 @@ class LLMClient:
                     max_tokens=3000,
                     repair_retries=0,
                 )
-            except Exception as exc:
+            except MalformedOutputError as exc:
                 log.debug("alias %s does not support mode %s: %s", alias, mode, exc)
                 continue
+            except Exception as exc:
+                raise ProbeIncomplete(
+                    f"fail closed: probe of alias '{alias}' for mode '{mode}' could "
+                    f"not be completed ({exc}); its structured-output mode is "
+                    f"unknown, not unsupported — resolve the call failure and retry"
+                ) from exc
             self._modes[alias] = mode
             return mode
         raise ConfigError(
@@ -569,6 +594,13 @@ class LLMClient:
         never happens is the failure mode this exists to catch: the writer prompt
         still demands a '## Sources' section, so an un-searched draft comes back
         with invented citations that look exactly like verified ones.
+
+        Only observed behaviour marks the alias incapable: the call succeeds and the
+        model simply never calls the tool (below — no exception at all). A call
+        exception cannot identify whether a provider rejected `tools` or some unrelated
+        part of the request, even when its status is `http_400`/`http_422`; it leaves
+        capability unknown. Raise instead of silently pinning the alias tool-incapable
+        for the process (D-probe-capability-evidence).
         """
         if alias in self._tool_capable:
             return self._tool_capable[alias]
@@ -600,9 +632,11 @@ class LLMClient:
                 },
             )
         except Exception as exc:
-            log.debug("alias %s failed the tool-calling probe: %s", alias, exc)
-            self._tool_capable[alias] = False
-            return False
+            raise ProbeIncomplete(
+                f"fail closed: probe of alias '{alias}' for tool-calling could not be "
+                f"completed ({exc}); its tool-calling capability is unknown, not "
+                f"absent — resolve the call failure and retry"
+            ) from exc
         capable = bool(_tool_calls(reply.message))
         self._tool_capable[alias] = capable
         return capable
@@ -622,7 +656,6 @@ class LLMClient:
         repair_retries: int | None = None,
         timeout: float | None = None,
         validate: Callable[[T], None] | None = None,
-        repair_prompt: Callable[..., str] | None = None,
     ) -> T:
         """A completion validated against a closed schema. Bounded repair, then raise.
 
@@ -640,20 +673,17 @@ class LLMClient:
         converge, and it is what aborted two production runs. If the raised error
         offers a `repair_hint()`, its text is handed to the model alongside the error,
         so the second attempt knows what the first got wrong.
-
-        `repair_prompt`, when given, composes the re-ask instead of the default wording —
-        called as `(user=, instruction=, error=, exc=)` and returning the whole next user
-        turn. It exists so the *critic* path can hand back the field it got wrong
-        (D-repair-turn-context) without changing the prompt any other caller sees: writer
-        disputes, the arbiter, the blind orchestrator and question refinement all keep the
-        default text byte for byte, and `web.refine` in particular hashes its prompt
-        surface, so a shared edit would silently invalidate its cache.
         """
         mode = mode or self.mode_for(alias)
         repair_retries = (
             self._config.budgets.repair_retries if repair_retries is None else repair_retries
         )
-        json_schema = schema.model_json_schema()
+        # Dereferenced once, here, so both the native `response_format` (below, via
+        # `_strictify`) and the prompt-mode instruction see the self-contained form
+        # (D-dereferenced-schema). Anthropic's native structured-output API rejects
+        # `$ref`; a schema pydantic emits for any model with a nested model or enum —
+        # `CritiqueOutput` among them — carries one for every such field.
+        json_schema = _dereference(schema.model_json_schema())
         response_format = _response_format(mode, schema.__name__, json_schema)
         instruction = _schema_instruction(json_schema)
 
@@ -694,20 +724,15 @@ class LLMClient:
                 # Duck-typed rather than a shared base class: the validators that carry
                 # guidance live in `triage`, which is deliberately LLM-free and must not
                 # import this module to say so.
-                if repair_prompt is not None:
-                    attempt_user = repair_prompt(
-                        user=user, instruction=instruction, error=last_err, exc=exc
-                    )
-                else:
-                    hint = getattr(exc, "repair_hint", None)
-                    guidance = hint() if callable(hint) else ""
-                    attempt_user = (
-                        f"{user}\n\n{instruction}\n\n"
-                        f"Your previous response was rejected by the schema validator:\n"
-                        f"{last_err}\n"
-                        f"{guidance}\n"
-                        f"Return corrected JSON only. No prose, no code fence."
-                    )
+                hint = getattr(exc, "repair_hint", None)
+                guidance = hint() if callable(hint) else ""
+                attempt_user = (
+                    f"{user}\n\n{instruction}\n\n"
+                    f"Your previous response was rejected by the schema validator:\n"
+                    f"{last_err}\n"
+                    f"{guidance}\n"
+                    f"Return corrected JSON only. No prose, no code fence."
+                )
         raise MalformedOutputError(f"{alias}: schema violation after repair: {last_err}")
 
 
@@ -771,6 +796,60 @@ def _identity_matches(reported: str, alias: str, resolved: str | None) -> bool:
     if resolved:
         accepted.add(resolved.strip().casefold())
     return value in accepted
+
+
+def _dereference(schema: dict[str, Any]) -> dict[str, Any]:
+    """Inline every `$ref` against `$defs` and drop `$defs`. Pure and total: dicts,
+    lists, scalars pass through unchanged apart from the substitution.
+
+    Pydantic emits `$ref`/`$defs` for any nested model or enum, and Anthropic's native
+    structured-output API does not accept `$ref` at all: LiteLLM falls back to a
+    synthesized tool call and unwraps its arguments under a junk envelope key
+    (`json_value`, `parameter`, ...), which strict validation then rejects wholesale —
+    the payload is correct, just nested one level too deep (D-dereferenced-schema).
+    Dereferencing before the schema is used for anything makes every caller of
+    `model_json_schema()` in this module — `response_format`, via `_strictify`, and
+    the prompt-rendered instruction — see the same self-contained form, so a
+    `prompt`-mode model no longer has to resolve `$ref` indirection by eye either.
+
+    A `$ref` node may carry sibling keys (a field-level `description` override is the
+    only one pydantic emits); those win over the same key on the resolved target,
+    matching how `allOf`-wrapped refs are meant to compose.
+
+    No schema in this repository is recursive today, but a naive inliner is a
+    landmine waiting for one that becomes so: it raises `ValueError` on a `$ref`
+    cycle rather than looping forever or silently truncating. Cycle detection is a
+    path-sensitive "currently being resolved" stack, not a global visited set, so the
+    same `$defs` entry may legitimately appear twice in one schema (e.g. two sibling
+    fields sharing a type) without tripping the guard.
+    """
+    defs = schema.get("$defs", {})
+
+    def resolve(node: Any, resolving: tuple[str, ...]) -> Any:
+        if isinstance(node, list):
+            return [resolve(item, resolving) for item in node]
+        if not isinstance(node, dict):
+            return node
+        ref = node.get("$ref")
+        if ref is None:
+            return {key: resolve(value, resolving) for key, value in node.items() if key != "$defs"}
+        if not (isinstance(ref, str) and ref.startswith("#/$defs/")):
+            raise ValueError(f"cannot dereference $ref target: {ref!r}")
+        name = ref.removeprefix("#/$defs/")
+        if name in resolving:
+            cycle = " -> ".join((*resolving, name))
+            raise ValueError(f"recursive $ref cycle in JSON schema: {cycle}")
+        if name not in defs:
+            raise ValueError(f"$ref to undefined $defs entry: {name!r}")
+        resolved = resolve(defs[name], (*resolving, name))
+        overrides = {
+            key: resolve(value, resolving)
+            for key, value in node.items()
+            if key not in ("$ref", "$defs")
+        }
+        return {**resolved, **overrides} if overrides else resolved
+
+    return resolve(schema, ())
 
 
 def _response_format(mode: str, name: str, json_schema: dict[str, Any]) -> dict[str, Any] | None:

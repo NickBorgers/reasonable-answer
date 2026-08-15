@@ -26,6 +26,8 @@ from reasonable_answer.llm import (
     LLMClient,
     MalformedOutputError,
     ModelCallError,
+    PermanentCallError,
+    ProbeIncomplete,
     _diagnostics_suffix,
     _message_dict,
     _Reply,
@@ -284,12 +286,44 @@ def test_probe_rejects_a_model_that_accepts_tools_and_never_calls_one(client):
     assert client.probe_tool_calling("writer-a") is False
 
 
-def test_probe_treats_an_error_as_incapable(client):
+def test_probe_raises_on_an_availability_failure_rather_than_calling_it_incapable(client):
+    """D-probe-capability-evidence. A transient failure (here a bare `ModelCallError`,
+    the shape `_create` raises after exhausting retries on a 429/timeout/5xx) says
+    nothing about whether the model can call a tool — it says the moment was bad. The
+    old behaviour pinned the alias tool-incapable for the rest of the process on
+    exactly this; it must now abort the probe instead."""
+
     def boom(alias, kwargs):
         raise ModelCallError("proxy exploded")
 
     client._create = boom  # type: ignore[method-assign]
-    assert client.probe_tool_calling("writer-a") is False
+    with pytest.raises(ProbeIncomplete, match="tool-calling capability is unknown"):
+        client.probe_tool_calling("writer-a")
+    assert "writer-a" not in client._tool_capable
+
+
+def test_probe_treats_a_rejected_request_as_inconclusive(client):
+    """A broad status cannot identify whether the provider rejected `tools`."""
+
+    def boom(alias, kwargs):
+        raise PermanentCallError("bad request", failure_class="http_400")
+
+    client._create = boom  # type: ignore[method-assign]
+    with pytest.raises(ProbeIncomplete, match="tool-calling capability is unknown"):
+        client.probe_tool_calling("writer-a")
+    assert "writer-a" not in client._tool_capable
+
+
+def test_probe_raises_on_a_rejected_credential_rather_than_calling_it_incapable(client):
+    """`http_401`/`403`/`404`/`413` say the credential or the route is wrong, not that
+    the model lacks tool support — must raise, not demote to incapable."""
+
+    def boom(alias, kwargs):
+        raise PermanentCallError("unauthorized", failure_class="http_401")
+
+    client._create = boom  # type: ignore[method-assign]
+    with pytest.raises(ProbeIncomplete, match="tool-calling capability is unknown"):
+        client.probe_tool_calling("writer-a")
 
 
 def test_probe_result_is_cached(client):
@@ -520,50 +554,6 @@ def test_a_validator_rejection_is_repaired_with_its_hint(client):
     repair_prompt = seen[1]["messages"][-1]["content"]
     assert "value is not verbatim" in repair_prompt
     assert "COPY THIS EXACTLY" in repair_prompt
-
-
-def test_only_a_caller_that_asks_gets_the_critic_repair_wording(client):
-    """D-repair-turn-context is critic-specific on purpose. `structured()` also serves
-    writer disputes, the arbiter, the blind orchestrator, question refinement and the
-    refine audition — and `web.refine` hashes its prompt surface into its cache key, so a
-    shared edit would silently invalidate stored suggestions."""
-
-    class _Rejected(ValueError):
-        def repair_hint(self) -> str:
-            return "COPY THIS EXACTLY: the cited paragraph"
-
-        def rejected_text(self) -> str:
-            return "SUBMITTED-SPAN"
-
-    def validate(parsed: _Echo) -> None:
-        if parsed.value != "good":
-            raise _Rejected("value is not verbatim")
-
-    seen: list[dict] = []
-    _sdk_scripted(client, ['{"value": "bad"}', '{"value": "good"}'], record=seen)
-    client.structured(
-        "writer-a", system="s", user="u", schema=_Echo, repair_retries=1, validate=validate
-    )
-    default_repair = seen[1]["messages"][-1]["content"]
-
-    # The default path is unchanged: it names the rule and hands back guidance, and it
-    # does NOT echo the submitted value even when the error is willing to offer one.
-    assert "Your previous response was rejected by the schema validator" in default_repair
-    assert "SUBMITTED-SPAN" not in default_repair
-
-    seen2: list[dict] = []
-    _sdk_scripted(client, ['{"value": "bad"}', '{"value": "good"}'], record=seen2)
-    client.structured(
-        "writer-a",
-        system="s",
-        user="u",
-        schema=_Echo,
-        repair_retries=1,
-        validate=validate,
-        repair_prompt=lambda **kw: f"CUSTOM {kw['exc'].rejected_text()}",
-    )
-
-    assert seen2[1]["messages"][-1]["content"] == "CUSTOM SUBMITTED-SPAN"
 
 
 def test_a_validators_diagnostics_reach_the_log_and_nothing_else_does():
