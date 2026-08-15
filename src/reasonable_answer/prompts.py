@@ -497,7 +497,7 @@ CRITIC_SYSTEM = (
 
 
 def critic_repair_turn(
-    *, user: str, instruction: str, error: str, guidance: str = "", rejected: str = ""
+    *, user: str, error: str, instruction: str = "", guidance: str = "", rejected: str = ""
 ) -> str:
     """The critic's re-ask after a rejected review (D-repair-turn-context).
 
@@ -510,11 +510,11 @@ def critic_repair_turn(
     everything rather than editing one field predicts.
 
     The rejected value is handed back **fenced and unattributed** — as a candidate the
-    validator rejected, never as "your previous response". That framing is not decoration:
-    Chen, Su & Chiang 2026 (docs/quality-principles.md) measures relabeling a model's own
-    output as external input raising explicit correction rates by 23-93 points, and the
-    self-attributed form is the one the measurement penalizes. It is also the honest
-    description of what this text now is — an input to a check that failed.
+    validator rejected, never as "your previous response". No measurement is claimed for
+    that wording: an earlier draft cited Chen, Su & Chiang 2026 and docs/quality-principles.md
+    withdraws the claim, because that study moves a claim between chat-template *roles*
+    while this keeps it in a user turn. It stands on being the honest description of what
+    the text is at that point — an input to a check that failed, not a position to defend.
 
     What is asked for back is a **patch**, not the review again: `{issue_index, field,
     replacement}` for the rejected field alone. Re-asking for the whole `CritiqueOutput`
@@ -523,7 +523,10 @@ def critic_repair_turn(
     whose context no longer holds them. Everything not named is carried over mechanically
     by `triage.apply_repairs`.
     """
-    parts = [user, "", instruction, "", "A candidate issue was rejected by the validator.", error]
+    parts = [user]
+    if instruction:
+        parts += ["", instruction]
+    parts += ["", "A candidate issue was rejected by the validator.", error]
     if rejected:
         # Neutralised, not trusted: this value came from a model and is about to sit
         # beside a fence marker. A span carrying the end marker verbatim would otherwise

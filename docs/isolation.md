@@ -316,11 +316,14 @@ Mitigations, by boundary:
   count; an unknown category or invalid/over-length field **fails the entire lens** (fail-closed,
   RB-007) — nothing is silently dropped, so an adversarial critique can't collapse into a
   fake-clean empty result. Validation runs *inside* the model call, on the same bounded
-  repair budget as a schema violation (`budgets.critic_repair_retries`): a rejection is
-  returned to the critic with the text it should have quoted **and the field value it
-  submitted**, and what is asked back is a **patch for that field alone**, merged
-  mechanically into the review it already returned (D-repair-turn-context). Only a critic
-  that cannot correct itself within that budget fails the lens. Repair does not loosen the check — the same violation still
+  repair budget as a schema violation — `budgets.critic_repair_retries` governs both, and
+  is passed to the review call and to the lens loop alike. Validation runs *after* that
+  call returns rather than inside it, because a lens rejection is answered by a **patch
+  for the rejected field alone**, which needs a different response schema than the review
+  did; the patch is merged mechanically into the review already in hand
+  (D-repair-turn-context). The rejection is returned to the critic with the text it should
+  have quoted **and the field value it submitted**. Only a critic that cannot correct
+  itself within that budget fails the lens. Repair does not loosen the check — the same violation still
   fails closed once the budget is gone — it stops a recoverable quoting slip from costing
   one of the run's `critique_attempts`. The returned field is fenced as data and
   attributed to the validator, never to the critic; see the exception noted in the drift

@@ -89,17 +89,21 @@ def critique_once(
     )
 
     try:
-        # The client's own repair budget still covers *schema* violations — malformed
-        # JSON, a missing field — exactly as it does for every other caller. Lens
-        # validation is repaired below instead, because a lens rejection is answered with
-        # a patch rather than another whole review (D-repair-turn-context), and that needs
-        # a different response schema than this call's.
+        # One budget governs both halves of a critic's repair, as isolation.md and
+        # convergence.md say it does. `critic_repair_retries` is passed here for *schema*
+        # violations — malformed JSON, a missing field — and again to the lens loop below.
+        # Omitting it silently dropped the schema half to the generic `repair_retries`
+        # (1 against 2), which is a budget change nobody asked for and no document
+        # described. Lens validation is repaired below rather than here only because a
+        # lens rejection is answered with a patch, which needs a different response schema
+        # than this call's (D-repair-turn-context).
         output = client.structured(
             alias,
             system=prompts.CRITIC_SYSTEM,
             user=user,
             schema=CritiqueOutput,
             max_tokens=CRITIC_MAX_TOKENS,
+            repair_retries=client.budgets.critic_repair_retries,
         )
         output = _repair_until_valid(
             client,

@@ -944,9 +944,9 @@ def prompt_hash() -> str:
     for lens in LENS_CATEGORIES:
         digest.update(prompts.critic_user(lens, "q", "body", None).encode())
     digest.update(
-        prompts.critic_repair_turn(
-            user="u", instruction="i", error="e", guidance="g", rejected="r"
-        ).encode()
+        # The production shape: `critique` passes no `instruction`, so hashing one with a
+        # value would cover a prompt this system never sends.
+        prompts.critic_repair_turn(user="u", error="e", guidance="g", rejected="r").encode()
     )
     return digest.hexdigest()[:16]
 

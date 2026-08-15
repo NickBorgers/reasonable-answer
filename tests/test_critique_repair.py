@@ -298,6 +298,8 @@ def test_a_category_out_of_scope_is_repaired_with_no_hint_and_nothing_echoed():
     result = _run(client)
 
     assert not result.failed
+    # Also the permitted direction of the guard: a relabel that keeps the finding
+    # material is applied, so only a drop out of the counts is refused.
     assert result.issues[0].category is Category.OMITTED_COUNTERARGUMENT
     repair_prompt = client.calls[1].user
     assert "out of scope" in repair_prompt
@@ -339,20 +341,23 @@ def test_an_empty_replacement_is_refused_by_the_schema_before_triage_sees_it():
         IssueRepair(issue_index=0, field="locus", replacement="")
 
 
-def test_a_category_patch_cannot_escalate_severity_by_relabelling():
-    """A repair may fix a category, not use one to raise a finding's floor — RC-005
-    reserves escalation to the mechanical floor table."""
+def test_a_category_patch_cannot_relabel_a_finding_downward():
+    """RC-005 is directional: escalate freely, never downgrade. The dangerous direction
+    is *down* — `stylistic` is excluded from the convergence counts unconditionally, so
+    relabelling into it makes a material finding vanish and a lens with nothing else
+    outstanding reads clean off the back of a repair. The guard was originally written the
+    other way round, and compared clamped severities, which `clamp_to_floor` never lowers
+    — so it answered "unchanged" for every relabel and guarded nothing."""
     client = _client(
         issues=[_issue(VERBATIM, category=Category.UNCITED_CLAIM)],
-        patches=[(0, Category.FABRICATED_CITATION.value)],
+        patches=[(0, Category.STYLISTIC.value)],  # counts_for_convergence excludes it
         field="category",
         repairs=1,
     )
 
     result = _run(client)
 
-    # The relabel is refused, so the out-of-scope category stands and the lens fails.
-    assert result.failed
+    assert result.failed, "a downgrade is refused, so the out-of-scope category stands"
 
 
 def test_a_typographic_quote_is_not_a_misquote():

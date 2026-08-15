@@ -5498,9 +5498,23 @@ not name is carried across mechanically, with nothing in the path that could rew
 The patch channel is deliberately narrow. It may replace only the four fields
 `triage.validate_issue` can reject; it may not touch `severity`, `rationale` or `instruction`, so it
 cannot become a way to rewrite a finding under cover of fixing a quote. A replacement that will not
-parse is dropped rather than guessed at, and a category replacement whose mechanical floor is
-*higher* than the original's is refused — RC-005 reserves escalation to the floor table, and a
-repair must not become a back door to it.
+parse is dropped rather than guessed at.
+
+The category guard is directional, and its direction was wrong in the first draft of this decision.
+RC-005 permits escalation and forbids downgrades, and downward is the direction that can change a
+*convergence outcome*: `stylistic` is excluded from the counts unconditionally, whatever severity it
+carries, so relabelling into it makes a material finding vanish and a lens with nothing else
+outstanding reads clean off the back of a repair. The guard now refuses a replacement that would take
+a finding `counts_for_convergence` accepts and make it one it does not — asking that predicate
+directly rather than comparing floors, because `clamp_to_floor` only ever raises, so a floor
+comparison answered "unchanged" for every relabel it was meant to catch and guarded nothing.
+
+**One budget, both halves.** `budgets.critic_repair_retries` is passed to the review call *and* to
+the lens loop: the review call spends it on schema violations — malformed JSON, a missing field —
+and the lens loop on patch rounds. What moved out of `client.structured` is lens validation, not the
+budget, so isolation.md and convergence.md keep naming one number for a critic's repairs. An
+intermediate draft dropped the argument from the review call, which silently rehomed a critic's
+schema repairs onto the generic `repair_retries` — 1 against 2, a change no document described.
 
 **Isolation, and the evidence it rests on.** This is the one bounded exception to the fresh-context
 rule, recorded as such in the drift table, the critic's NEVER row and the repair bullet in

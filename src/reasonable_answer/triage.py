@@ -198,16 +198,27 @@ def apply_repairs(output, repairs) -> tuple[object, list[str]]:
                 value = Category(repair.replacement.strip())
             except ValueError:
                 continue
-            # A repair may not move a finding into a category with a *higher* mechanical
-            # floor: that would let the repair channel escalate severity by relabelling,
-            # which RC-005 reserves to the floor table alone.
-            if SEVERITY_RANK[clamp_to_floor(value, issue.severity)] > SEVERITY_RANK[
-                clamp_to_floor(issue.category, issue.severity)
-            ]:
+            # A repair may not relabel a *material* finding into one that does not count.
+            # RC-005 is directional — escalate freely, never downgrade — and the direction
+            # that matters here is the one that can change a convergence outcome:
+            # relabelling to `stylistic` drops the finding from the counts unconditionally,
+            # whatever severity it carries, so a lens with nothing else outstanding then
+            # reads clean off the back of a repair. `counts_for_convergence` is the exact
+            # predicate triage uses to decide materiality, so the guard asks it rather than
+            # comparing floors — `clamp_to_floor` only ever raises, so a floor comparison
+            # answered "unchanged" for every relabel and guarded nothing.
+            if counts_for_convergence(issue.category, issue.severity) and not (
+                counts_for_convergence(value, issue.severity)
+            ):
                 continue
         else:
             value = repair.replacement
         try:
+            # Live only for `locus`/`category`, where a `StructuralRef`/`Category` is
+            # constructed above; `model_copy` does not revalidate, so the span branches
+            # rely on `IssueRepair.replacement` carrying bounds identical to
+            # `RawIssue.claim_span`. Widening `RepairableField` to a field whose bounds
+            # differ would need that checked here rather than inherited from this except.
             patched[repair.issue_index] = issue.model_copy(update={repair.field: value})
         except ValidationError:
             continue
