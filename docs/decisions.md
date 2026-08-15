@@ -141,7 +141,7 @@ decisions.
 | Failure handling | malformed/timeout/partial-lens → not counted clean; repeated → abort |
 | Resume/replay | checkpoint replay idempotency; stale-hash rejection |
 | Redeploy survival (`tests/test_shutdown.py`) | a stop flag pauses the graph at a **node boundary**, never mid-node: work completed before the pause survives and is not re-run on resume, and the run reaches its normal terminal status; the pause is recorded as an event and is not logged as a crash; `shutdown()` returns within its budget while a job is in flight; queued-but-unstarted work is durable on disk, not only in the in-memory queue; boot recovery re-enqueues `queued`/`interrupted` runs and skips finished ones, and can be switched off; a run that makes no progress across `max_resume_attempts` **consecutive** auto-resumes is abandoned, while any progress event resets the count; `ResumeMismatch` (e.g. a roster change under an in-flight run) abandons rather than retrying every boot; abandonment writes an event and **never** a `final.json` — the audit trail must not claim a terminal status the controller never issued; `abandoned` is terminal for the UI yet still manually resumable; the grace budget is read from the platform and falls back rather than crashing on a bad value |
-| Retrieval / web search (D-retrieval-opt-in) | offline-when-off (no `tools` offered, prompt byte-identical to the pre-retrieval path); startup fails closed on a missing credential **and** on a tool-incapable writer; `probe_tool_calling` returns False for a model that accepts `tools` and never calls one, and for a probe that raises; per-**run** query budget (not per-call) enforced under concurrency; budget exhaustion and fetch failure surfaced to the model as text, never as silence; results fenced as untrusted (RA-010); the agentic tool loop terminates — the exhausted round drops `tools` and forces prose — and `Completion.tool_calls` matches the number executed; the query string never reaches a log (RA-016) |
+| Retrieval / web search (D-retrieval-opt-in) | offline-when-off (no `tools` offered, prompt byte-identical to the pre-retrieval path); startup fails closed on a missing credential **and** on a tool-incapable writer; `probe_tool_calling` returns False when a model accepts `tools` and completes without calling one, while any raised call failure leaves capability unknown and aborts the probe (D-probe-capability-evidence); per-**run** query budget (not per-call) enforced under concurrency; budget exhaustion and fetch failure surfaced to the model as text, never as silence; results fenced as untrusted (RA-010); the agentic tool loop terminates — the exhausted round drops `tools` and forces prose — and `Completion.tool_calls` matches the number executed; the query string never reaches a log (RA-016) |
 | Source verification (D-source-verification, D-notfound-fabrication) | citation URLs extracted from the `## Sources` section only (a URL mentioned in passing is not fetched); **only the evidence lens** receives page text — logic and completeness never do; each fetch carries a closed `SourceOutcome` (FULL_TEXT / NOT_FOUND / BLOCKED / UNREADABLE / EMPTY / ERROR) rendered to the critic as its own label (`NOT FOUND` / `BLOCKED` / `COULD NOT READ` …) rather than one flat "could not fetch", and the audit tally counts the enum, never the free-text `error` (RA-016); a cited URL that returns a definitive not-found (HTTP 404/410) yields a mechanical `fabricated_citation` at its `blocking` floor, independent of any critic (D-notfound-fabrication); every other failed fetch (403 and the other blocked codes, connection error/timeout, unreadable content type, empty body) yields **no** defect and keeps the on-its-face bar, never read as evidence of fabrication, each class pinned by a test; a twelve-of-twelve-404 fetch leaves the evidence lens **not** clean while a twelve-of-twelve-403 stays clean; truncation disclosed; a cited **PDF is read rather than refused** when `sources.enabled` **and** `sources.pdf.enabled` are both on — both switches required so enabling one tier never enables another (`test_a_cited_pdf_is_read_rather_than_refused`, `test_both_switches_are_required_to_read_pdfs`), fail-closed with a startup error when `pypdf` is absent (`test_pdf_reading_without_pypdf_refuses_to_start`), a truncated PDF refused not parsed (`test_a_truncated_pdf_is_refused_not_parsed`), a scanned/no-text-layer PDF reported `UNREADABLE` distinctly from `EMPTY` (`test_a_scanned_pdf_says_so_rather_than_looking_empty`), and the larger 25 MB PDF byte cap applying to PDFs only, never buying back HTML's 400 KB cap (`test_the_larger_pdf_cap_applies_only_to_pdfs`); with that tier off a PDF is still reported honestly as an unreadable content type; pages fetched once per run and cached across rounds; bounded by timeout, byte cap, redirect cap and http(s)-only; verification off ⇒ the evidence prompt is byte-identical to the D-retrieval-opt-in path |
 | Seed ingest / format conversion (D-seed-conversion) | every converter meets the output contract (blank-line-separated blocks, headings alone on their line) so `report.parse` loci survive; PDF/`.docx`/HTML/`.txt` conversion each covered offline (urllib's opener stubbed — no network, no keys); one bounded http(s)-only egress point reused from `fetch.http_get`; `file:`/`ftp:`/`data:` schemes refused before any opener exists; the `.docx` zip-bomb guard (`seed.docx_max_uncompressed_bytes`) trips **before** decompression; truncation is fatal for binary formats and a warning for text; a heading-less format yields one section plus a warning, never a failure; URL seeds refused when `seed.allow_url` is off (the default) — the form field disappears and the parameter 400s; the web layer never constructs a `Path` from request data; converted markdown is byte-identical between what is hashed, stored and critiqued (resume fingerprint) |
 | End-to-end | labeled fixtures where a known-flawed seed must reach `accepted` with the flaw fixed |
@@ -5325,6 +5325,143 @@ lenses, severity floors, termination and the untrusted-text boundary are all unt
 field is derived from an exception type, never from model-authored text, and it reaches the run
 record rather than any prompt.
 
+## D-probe-capability-evidence — a probe that cannot complete does not get to say the alias is incapable
+
+**The finding.** `LLMClient.probe_structured_output` walked `MODES = ("json_schema", "json_object",
+"prompt")` strongest-first and caught bare `Exception` around each attempt: any failure at all —
+schema violation, malformed JSON, a 429, a timeout, a 500 — read as "this alias does not support this
+mode", and fell through to the next, weaker one. `probe_tool_calling` had the identical shape: any
+exception from the probe call was read as "this alias cannot call a tool" and cached `False`.
+
+Both probes conflate two different kinds of fact. Whether a model can produce `json_schema`-shaped
+output, or emit a tool call, is a *capability* fact about the alias — stable across calls, worth
+caching for the process. Whether a single request got a 429, timed out, or hit a 5xx is an
+*availability* fact about that moment on the wire — exactly what `_create`'s own backoff already
+exists to ride out, and already has, by the time either probe's `except` block runs. Treating the
+second as the first is how `ra doctor` pinned `nemotron-3-ultra` to `json_object` on 2026-08-11,
+after DeepInfra returned HTTP 429 three times during the `json_schema` probe: the model supports
+`json_schema` fine, and the pin was wrong for the rest of the process. Because
+`structured_output_mode` is part of the audition cache identity (D-audition-probe-parity), the same
+mechanism can invalidate a cached audition verdict, or measure a critic under a weaker extraction
+mode than it deserves, on nothing more than a bad moment during the probe. It also supplies a
+plausible mechanism for a symptom D-writer-failure-class recorded without explaining: the roster
+documented `minimax-m3` as probing non-deterministically across `json_schema`, `json_object` and
+`prompt`. This decision does not claim that was the only cause — nobody measured minimax-m3's probe
+failures at the time — only that transient-failure misclassification during a probe is a mechanism
+that produces exactly that symptom.
+
+**The decision.** Both probes now distinguish observed capability evidence from an incomplete call,
+and only demote or mark incapable on the former:
+
+- **Capability evidence** — `MalformedOutputError` (the model answered, but not inside the closed
+  schema) demotes `probe_structured_output` to the next mode. A successful tool probe whose completion
+  contains no tool call marks that alias tool-incapable. Both conclusions come from model output the
+  probe actually observed.
+- **Incomplete probe** — every call exception aborts by raising `ProbeIncomplete`, a `ConfigError`
+  subtype distinct from the pre-existing "cannot produce parseable structured output" verdict. A
+  broad status such as `http_400` or `http_422` says the request was rejected, but does not identify
+  whether `response_format`, `tools`, or an unrelated field caused the rejection; it is therefore not
+  capability evidence. Retryable failures have already spent `_create`'s call budget before reaching
+  this boundary. The alias's capability remains unknown, not absent.
+
+Classification reads the exception type and the `failure_class`/status code carried on it, never the
+message text — the same rule `_permanent` and `_failure_class` already follow, for the same reason: a
+provider's wording is not an interface.
+
+**What this deliberately does not do.** It does not change the shape of either probe's ladder or its
+caching. It does not retry the probe itself beyond what `_create`'s own budget already provides — a
+probe that fails on availability grounds is meant to be re-run (a fresh `ra doctor` or a restarted
+`build_runtime`), not looped inside the failing attempt. It does not re-measure or invalidate any
+audition verdict already on disk; a verdict cached under a probed mode from before this fix is
+unaffected until the alias is re-probed.
+
+**Fail closed where it costs something; report where the job is diagnosis.** `build_runtime`
+(`ra run`, `serve`) and `ra audition`/`ra audition-refine` are unchanged: an incomplete probe
+raises, uncaught, all the way to the same `ConfigError` fail-closed path a
+genuine incapability already used — right, because each is about to spend money on a run or a
+measurement whose extraction regime would be silently wrong if the probe had degraded instead.
+`ra doctor` is different in kind, not degree: it is the tool an operator reaches for *when the proxy
+is misbehaving*, which is exactly the moment a probe is likely to hit a 429 or a timeout rather than
+settle a capability question, and it spends nothing — it exists only to report. Before this decision
+it had no `try/except` around either probe at all, so this fix would otherwise have turned every
+transient failure doctor's own purpose exists to surface into an uncaught Python traceback, at
+precisely the moment an operator needs the rest of the table. So `ra doctor` alone catches
+`ProbeIncomplete` per alias, renders a marker distinct from a real mode and from a definite `NO`
+("unreachable"), keeps printing every other alias and the roster-health warnings, and exits `2` —
+distinct from a clean `0` and from the `1` a *definite* capability finding (a writer confirmed unable
+to call a tool) still produces — so a scripted health check can tell "fully verified" apart from
+"could not fully verify" apart from "found a real problem".
+
+**Invariants.** None of the six is in reach. Author exclusion, the blind orchestrator, severity
+floors and termination are untouched. Fail-closed lenses are arguably strengthened, not weakened: a
+capability probe that could not be completed now fails closed loudly instead of silently degrading,
+everywhere except the one diagnostic command whose entire purpose is to report rather than spend or
+gate. The untrusted-text boundary is untouched — classification reads exception types and status
+codes, never provider-authored text, exactly as `_failure_class` already did.
+
+## D-dereferenced-schema — inline every `$ref` before a schema reaches a request or a prompt
+
+**The finding.** `LLMClient.structured()` built its `response_format` (and its prompt-mode
+instruction) straight from `schema.model_json_schema()`. Pydantic emits `$defs` + `$ref` for any
+nested model or enum, and `CritiqueOutput` has both — `RawIssue`, `Category`, `Severity` and
+`StructuralRef` all sit behind a `$ref` two or three levels deep. That is an interoperability risk
+on a proxy path that substitutes tool calling for structured output: upstream
+[LiteLLM issue #8898](https://github.com/BerriAI/litellm/issues/8898) documents an Anthropic request
+being converted to a forced tool call whose otherwise-correct JSON is nested under varying envelope
+keys. This application's strict `extra_forbidden` validation rejects any such envelope wholesale.
+Inlining references makes the schema self-contained before it reaches either the proxy or a model,
+rather than relying on every downstream structured-output path to interpret reference indirection
+the same way.
+
+`probe_structured_output` (D-probe-capability-evidence) pins an alias to `json_schema` using `_Probe`,
+a trivial `{"ok": boolean}` schema with no nested model and therefore no `$ref`. It can establish that
+the alias accepts that simple schema, but it cannot establish that the same path handles a real,
+reference-bearing schema such as `CritiqueOutput`. That representativeness gap is tracked as an open
+item below; this decision does not close it.
+
+**The decision.** A module-level `_dereference(schema)` in `llm.py` inlines every `$ref` against
+`$defs` and drops `$defs`, and `structured()` calls it once, immediately after
+`schema.model_json_schema()`, before the result reaches either `_response_format`/`_strictify` or
+`_schema_instruction` — so both the native request and the prompt-mode instruction see the same
+self-contained form. A `prompt`-mode model previously had to follow `$ref` indirection by eye to
+answer correctly; it no longer has to.
+
+The helper is pure and total over dicts, lists and scalars, and preserves everything else about the
+schema: `enum` lists, `minLength`/`maxLength`, `title`, nullable/optional unions expressed as
+`anyOf`, and a `$ref` node's own sibling keys (pydantic emits a `description` override this way; the
+override wins over the same key on the resolved target). `_strictify` is unchanged and runs on the
+dereferenced result exactly as it ran on the raw one.
+
+**The recursion guard.** No schema in this repository is recursive today — nothing self-references
+through `$defs`, since a critique or defect graph never contains itself. A naive inliner is a
+landmine for the day one does: `_dereference` tracks the `$defs` names currently being resolved on
+the current path (not a global visited set, since two sibling fields legitimately sharing the same
+`$defs` entry — every `RawIssue.locus` reusing `StructuralRef`, every list item reusing `RawIssue`
+itself — is ordinary and must not trip it) and raises `ValueError` the moment a name recurs into
+itself, naming the cycle. It fails loudly and immediately, not by hanging or by truncating at an
+arbitrary depth. A `$ref` to an undefined `$defs` entry, or a `$ref` in a form other than
+`#/$defs/<name>` (nothing pydantic emits does this, but the helper does not assume it), raises the
+same way rather than passing through unresolved.
+
+**What this deliberately does not do.** It does not touch the probe that can classify an alias as
+capable without exercising reference handling — the gap above is a `probe_structured_output`
+shortcoming rather than a `_dereference` one, and needs its own evidence (a probe schema shaped like
+a real one, not `_Probe`) to fix without becoming a second, larger request on every startup. It does
+not change `_strictify`'s
+own `$defs`/`definitions` branch, which stays reachable and tested directly
+(`tests/test_report_store_llm.py::test_strictify_closes_every_object`) against a raw, non-dereferenced
+schema — nothing requires every caller of `_strictify` to have dereferenced first. For a downstream
+path that already accepts `$ref`, the dereferenced schema is semantically identical to the one it
+replaces; the test suite asserts that directly (a hand-rolled JSON-Schema-subset checker confirms a
+payload validating against the original model still validates against the dereferenced schema,
+across `json_schema`, `json_object` and `prompt` modes) rather than assuming it.
+
+**Invariants.** None of the six is in reach. Author exclusion, the blind orchestrator, severity floors
+and termination are untouched. Fail-closed lenses are unaffected — this changes what a schema looks
+like on the wire, not when a lens is retried or abandoned. The untrusted-text boundary is untouched:
+`_dereference` operates on a schema this application generated from its own pydantic models, never on
+model-authored or provider-authored text.
+
 ## D-repair-turn-context — a critic is shown the field it got wrong, fenced as the validator's
 
 **The measurement.** D-repair-diagnostics existed to answer one question the logs could not: across
@@ -5401,6 +5538,14 @@ report text entering the same prompt still is not.
 
 ## Open items for a future round
 
+- Making `probe_structured_output` measure against a schema shaped like a real one, not `_Probe`'s
+  trivial `{"ok": boolean}` (D-dereferenced-schema). The probe's own schema has no nested model and
+  therefore no `$ref`, so it cannot detect whether an alias's structured-output path handles the
+  reference-bearing schemas this application actually sends, including `CritiqueOutput`.
+  `_dereference` removes that application-side dependency, but the probe gap remains distinct: it
+  does not exercise the schema feature whose capability it would be used to establish. Choosing a
+  representative probe schema without turning every startup into a second `CritiqueOutput`-sized
+  request needs its own evidence before it is a decision rather than a guess.
 - A third **logic**-lens family, and the candidate to audition for it (D-writer-failure-class
   surfaced the survey; the gap itself is the fit-first cost stated in D-minimax-retirement). The
   lens is `roster_limited` on every round `mistral-large-3` authors, and no unrostered candidate on
@@ -5478,3 +5623,17 @@ report text entering the same prompt still is not.
   non-empty transcript exists, so the first hang on any given session is still paid for once. Whether
   a transcript can be told apart from one `claude --continue` wedges on, without loading it, is an
   open question; the current answer is to make the attempt cheap rather than to predict it.
+- Verdict instability near the audition threshold
+  ([operator record](./model-evaluation-record-2026-08-10.md)). The 2026-08-10/11
+  logic-lens audition measured `claude-haiku-4-5` at 2.04 invented material issues per sound
+  control on one run and 1.04 on a re-run of the identical corpus — roughly a 2x swing against the
+  `max_control_material_rate: 1.00` ceiling, at the default `audition.repetitions: 3` (24 control
+  runs). Both runs graded `unfit` and the directional conclusion (no candidate came close to
+  `mistral-large-3`'s 0.08) is unaffected, because that gap is an order of magnitude — but a
+  single-run verdict turning on a rate close enough to the ceiling that a swing of that magnitude
+  would cross it is not settled. Two repeated values are not a sampling analysis and no confidence
+  interval was computed, so no numeric band is claimed here. Raising `audition.repetitions` for
+  such a candidate, or reporting an interval alongside the point estimate, should precede any
+  roster decision that rests on it. This
+  is recorded as an open item rather than a decision because no threshold or default changed here:
+  doing either is a measurement-methodology question, not a documentation one.

@@ -129,6 +129,15 @@ each failed attempt makes repeated failure modes countable without interpreting 
 The token is derived from an exception type and status code, so no LLM assessment enters it, and it
 reaches the audit trail rather than any control decision under QP1.
 
+**Application — probe capability evidence (D-probe-capability-evidence).** `structured_output_mode`
+is a term in the audition cache identity under QP8's `CacheEntry.matches`/`rubric_hash` rule
+(D-audition-probe-parity), so what `probe_structured_output` reports as an alias's mode is itself
+part of a verdict's deterministic identity. Reading any call failure — whether a transient 429 or a
+permanent 400 whose broad status does not identify the rejected field — as capability evidence would
+let an unobserved cause choose which regime a cached verdict is keyed to. That is exactly the kind of
+non-mechanical noise QP8 exists to keep out of aggregation. Capability verdicts now require observed
+model behaviour; an unresolved call raises instead of asserting a mode it never actually measured.
+
 **Application — writer source reads (D-writer-source-reads,
 D-support-normalized-text).** Writer-read page bodies are production evidence, not critique: QP5
 requires them to enter the writer context as fenced untrusted data, and no page instruction or

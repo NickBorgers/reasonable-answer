@@ -85,9 +85,10 @@ again before every send.
 
 ### What the proxy must not do
 
-Two requirements on the LiteLLM configuration itself. Neither is checkable from this repository —
-the application can only detect the first, after the fact, and pay for it. Both are failure modes RA
-guards against in code (RA-017, and the `_unparsed_tool_call` net in `llm.py`); see D-provider-retry.
+Three requirements on the LiteLLM configuration itself. None is fully checkable from this
+repository — the application can only detect the first, after the fact, and pay for it. All three
+are failure modes RA guards against in code (RA-017, the `_unparsed_tool_call` net in `llm.py`, and
+`_dereference` in `llm.py`); see D-provider-retry and D-dereferenced-schema.
 
 **No fallback routing on any alias the roster names.** A LiteLLM fallback that quietly serves
 `gemma4` from `meta-llama/llama-4-scout` breaks every downstream identity claim at once: author
@@ -103,6 +104,18 @@ raw markup back as message *content*, where it reads as a successful prose answe
 a guard (`_unparsed_tool_call`) that catches this and retries — a final answer that is nothing but a
 tool-call block is exactly what it is built for — but the guard is a net, not a fix, and every catch
 spends an attempt from the call budget.
+
+**A schema carrying `$defs`/`$ref` must not depend on proxy fallback behavior.** Upstream
+[LiteLLM issue #8898](https://github.com/BerriAI/litellm/issues/8898) documents an Anthropic request
+being converted to a forced tool call whose JSON is nested under varying envelope keys. Strict
+validation in this application rejects such an envelope wholesale. The application therefore
+dereferences every schema before it is sent: `_dereference` in `llm.py` inlines every `$ref` and
+drops `$defs`, so requests constructed by `LLMClient.structured()` carry a self-contained schema
+regardless of how the proxy handles reference-bearing input. Keep the proxy's native structured-
+output capability metadata accurate as a separate deployment responsibility; the application-side
+transformation is not permission to misdeclare an alias's capabilities. The startup probe uses a
+trivial `{"ok": boolean}` schema with no nested model and no `$ref`, so it cannot verify reference
+handling on the schemas used by real critique calls; see D-dereferenced-schema.
 
 ## Source verification is on in production
 
