@@ -5375,9 +5375,9 @@ probe that fails on availability grounds is meant to be re-run (a fresh `ra doct
 audition verdict already on disk; a verdict cached under a probed mode from before this fix is
 unaffected until the alias is re-probed.
 
-**Fail closed where it costs something; report where the job is diagnosis.** `build_runtime`
-(`ra run`, `serve`) and `ra audition`/`ra audition-refine` are unchanged: an incomplete probe
-raises, uncaught, all the way to the same `ConfigError` fail-closed path a
+**Fail closed where it costs something; report where the job is diagnosis.** `ra audition` and
+`ra audition-refine` are unchanged: an incomplete probe raises, uncaught, all the way to the same
+`ConfigError` fail-closed path a
 genuine incapability already used — right, because each is about to spend money on a run or a
 measurement whose extraction regime would be silently wrong if the probe had degraded instead.
 `ra doctor` is different in kind, not degree: it is the tool an operator reaches for *when the proxy
@@ -5391,6 +5391,13 @@ precisely the moment an operator needs the rest of the table. So `ra doctor` alo
 distinct from a clean `0` and from the `1` a *definite* capability finding (a writer confirmed unable
 to call a tool) still produces — so a scripted health check can tell "fully verified" apart from
 "could not fully verify" apart from "found a real problem".
+
+> Superseded in part by **D-degraded-roster**: `build_runtime` (`ra run`, `serve`) no longer lets
+> `ProbeIncomplete` propagate. It collects the unprobeable aliases, drops them, and re-runs
+> `validate_roster_health` on what remains, failing closed only when the survivors cannot staff the
+> game. The rest of this decision is untouched: an alias whose mode is unknown is still never called
+> under a guessed mode, and the definite `cannot produce parseable structured output` verdict still
+> refuses to start.
 
 **Invariants.** None of the six is in reach. Author exclusion, the blind orchestrator, severity
 floors and termination are untouched. Fail-closed lenses are arguably strengthened, not weakened: a
@@ -5468,14 +5475,11 @@ model-authored or provider-authored text.
 `ProbeIncomplete` aborted the whole startup. Every alias was therefore a single point of failure for
 every run, regardless of what it did in the roster or how many healthy models stood beside it.
 
-Production showed the shape twice on 2026-08-15. Three queued runs crashed at 05:52, 06:08 and again
-at 16:44 because OpenRouter answered `404 No endpoints found` for `deepseek-v4-flash`; a restart
-cleared that and they crashed three more times at 17:16–17:17 because DeepInfra returned
-`429 engine_overloaded` for `nemotron-3-ultra`. On both occasions the other five aliases answered
-normally, and on the second the failing alias was `nemotron-3-ultra` — which `config/roster.yaml`
-marks writer-only, so the run could have proceeded on two healthy writers with every critic pool
-untouched. Nothing was spent, nothing was learned, and six hours of queued work sat still because one
-provider was busy.
+The startup flow makes the consequence deterministic: `build_runtime` used to stop before graph
+execution whenever any one alias raised `ProbeIncomplete`, even when removing that alias left the
+configured writers and every critic pool viable. `tests/test_degraded_roster.py` pins both sides of
+that boundary: an unreachable alias is removed when `validate_roster_health` still passes, while a
+reduced roster that cannot staff the game still fails closed.
 
 The precedent for the right shape already existed one decision away. D-probe-capability-evidence gave
 `ra doctor` exactly this treatment — catch `ProbeIncomplete` per alias, mark it unreachable, keep
@@ -5501,12 +5505,13 @@ checks the two structural emptinesses ahead of it (no reachable writer, no reach
 lens) only so the failure reads as the outage it is instead of a pydantic field-length error.
 
 **Why silence is not what makes this safe.** A degraded roster cannot buy an `accepted` it did not
-earn, and this required no new code: `LensStatus.roster_limited` is computed per round from the
-critics that actually turn out to be eligible, so a lens thinned to one reaches `weak_met` and the run
-terminates `converged_unconfirmed` rather than `accepted`. The degradation is therefore visible in the
-verdict itself, which is the one place that cannot be missed — not only in a warning somebody has to
-read. Cross-model confirmation (D-cross-model-confirmation, D-two-clean-critiques) is enforced by the
-same machinery it always was.
+earn when the drop leaves a lens roster-limited, and this required no new code:
+`LensStatus.roster_limited` is computed per round from the critics that actually turn out to be
+eligible, so a lens thinned below two reaches `weak_met` and the run terminates
+`converged_unconfirmed` rather than `accepted`. If every lens still has at least two eligible critics,
+the reduced roster may still earn `accepted`. Cross-model confirmation (D-cross-model-confirmation,
+D-two-clean-critiques) is enforced by the same machinery it always was, while each attempt's
+`startup` event records which aliases were unreachable.
 
 **The degraded roster is not part of the run's identity.** `_run_fingerprint` keeps hashing the
 *configured* roster, from `config` and never from `rt.config`. Hashing what an attempt settled for
@@ -5548,12 +5553,11 @@ progressing before it is `abandoned` — the bound D-redeploy-survival introduce
 *deterministically* cannot be retried forever.
 
 A startup-validation failure is caught by that bound while being the one thing it was not written
-for. When no writer is reachable, the failure is not evidence about the run — every queued run fails
-identically at the same line, before a token is spent — so counting it against a per-run budget lets
-one provider outage abandon the entire backlog. On 2026-08-15 that was three restarts from happening:
-`run-bb0268a1f1b6` reached three consecutive auto-resumes, all of them crashes inside `build_runtime`
-against an overloaded provider, and the next boot would have abandoned a run whose inputs were never
-in question.
+for. Nothing in `build_runtime` reads the question or seed, so a refusal there is not evidence about
+one run's inputs and applies equally to every queued run under the same deployment. Counting such a
+refusal against each run's budget can therefore abandon the backlog without any run reaching graph
+execution. `tests/test_shutdown.py` pins that accounting boundary separately from intake failures,
+which do depend on a run's own inputs and still spend the cap.
 
 **The decision.** `build_runtime` re-raises every fail-closed refusal as `StartupRefused`, and
 `_drain` catches that separately from a crash. It writes a `deferred` event naming the reason, leaves

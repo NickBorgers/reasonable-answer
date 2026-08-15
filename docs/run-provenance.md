@@ -108,8 +108,10 @@ jq -r 'select(.kind=="startup") | [.ts, (.unreachable_aliases | join(","))] | @t
   runs/<run_id>/events.jsonl
 ```
 
-A run whose review pools were thinned this way terminates `converged_unconfirmed` rather than
-`accepted`, so the verdict carries the fact too — but only the events say *which* models were missing.
+If the missing aliases leave any lens with fewer than two eligible critics, the run terminates
+`converged_unconfirmed` rather than `accepted`, so the verdict carries that roster limitation too —
+but only the events say *which* models were missing. A reduced roster that still leaves every lens
+with at least two eligible critics may still reach `accepted`.
 
 ## Keeping the stamp working
 
