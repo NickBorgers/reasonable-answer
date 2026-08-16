@@ -935,6 +935,18 @@ class Config(BaseModel):
     #: making progress. Bounds a run that fails deterministically: without a cap, every
     #: restart would pick it up, fail the same way, and restart again forever.
     max_resume_attempts: int = 3
+    #: How many times in a row a run may be *deferred* — refused by startup validation
+    #: before anything about the run itself was read (D-deferred-not-abandoned) — before
+    #: it is abandoned like any other run recovery gave up on. A separate budget from
+    #: `max_resume_attempts` because it bounds a different thing: that cap asks "is this
+    #: run broken", and three failures answer it, while this one asks "is the deployment
+    #: still coming back", where the honest answer takes far longer than three restarts.
+    #: Deliberately generous rather than absent — QP7 wants every loop capped, and an
+    #: uncapped one would leave a permanently misconfigured deployment silently
+    #: accumulating runs that never reach a terminal state for anyone to notice. A
+    #: deferral costs one startup validation and no tokens, so 20 restarts is cheap
+    #: insurance against a long outage and still terminates.
+    max_deferred_attempts: int = 20
     #: Backpressure on submission (RC-007). Concurrency already bounds token *spend*,
     #: but not how many runs may pile up waiting, nor the run directories each one
     #: writes on the way in. A cap on the queue's waiting depth turns a burst into

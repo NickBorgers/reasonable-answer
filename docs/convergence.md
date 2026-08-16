@@ -543,11 +543,30 @@ controller never issues and that carry no verdict about the artifact:
 | state | meaning |
 |-------|---------|
 | `interrupted` | the process went away mid-run; the checkpoint makes it resumable |
-| `abandoned` | recovery gave up — the resume attempt cap was reached, or the run's inputs no longer match its checkpoint |
+| `abandoned` | recovery gave up — the resume attempt cap or startup-deferral cap was reached, or the run's inputs no longer match its checkpoint |
 
 `abandoned` is terminal for the UI, but it is deliberately **not** a `final.json`: giving
 up is not a verdict, and the audit trail must never claim the controller reached one. A
 human can always resume past it.
+
+**Under web-worker recovery**, an attempt refused by startup validation writes a `deferred`
+event and stays `interrupted` (D-deferred-not-abandoned) — it is not a third state. What it
+changes is the *count*: a deferred attempt cancels itself against the resume cap, because
+the models being unreachable is a fact about the deployment rather than about this run, and
+every queued run would have failed identically. The registry distinguishes it only in the
+note it shows ("the model roster was unreachable; it retries automatically"), so a run
+parked by someone else's rate limit does not read like one that died. Deferrals are
+themselves capped by `max_deferred_attempts`, generously and separately from
+`max_resume_attempts`: a deployment that refuses that many boots in a row is a
+configuration nobody is coming to fix, and the run is `abandoned` like any other recovery
+gave up on, rather than deferring silently forever.
+
+This is a property of `RunWorker._drain`, not of `StartupRefused`. A direct `ra run` calls
+`build_runtime` itself and has no registry lifecycle to move: the CLI catches the same
+`ConfigError` it always did, prints `fail closed:` with the full diagnostic message, and
+exits `2`. No `deferred` event is written and no run reaches a lifecycle state, because
+there is nothing to recover — the operator is standing right there, which is precisely the
+difference the deferral exists to paper over when nobody is.
 
 ## Lifecycle state machine
 

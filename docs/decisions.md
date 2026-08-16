@@ -5387,9 +5387,9 @@ probe that fails on availability grounds is meant to be re-run (a fresh `ra doct
 audition verdict already on disk; a verdict cached under a probed mode from before this fix is
 unaffected until the alias is re-probed.
 
-**Fail closed where it costs something; report where the job is diagnosis.** `build_runtime`
-(`ra run`, `serve`) and `ra audition`/`ra audition-refine` are unchanged: an incomplete probe
-raises, uncaught, all the way to the same `ConfigError` fail-closed path a
+**Fail closed where it costs something; report where the job is diagnosis.** `ra audition` and
+`ra audition-refine` are unchanged: an incomplete probe raises, uncaught, all the way to the same
+`ConfigError` fail-closed path a
 genuine incapability already used — right, because each is about to spend money on a run or a
 measurement whose extraction regime would be silently wrong if the probe had degraded instead.
 `ra doctor` is different in kind, not degree: it is the tool an operator reaches for *when the proxy
@@ -5404,12 +5404,82 @@ distinct from a clean `0` and from the `1` a *definite* capability finding (a wr
 to call a tool) still produces — so a scripted health check can tell "fully verified" apart from
 "could not fully verify" apart from "found a real problem".
 
+> Superseded in part by **D-degraded-roster**: `build_runtime` (`ra run`, `serve`) no longer lets
+> `ProbeIncomplete` propagate. It collects the unprobeable aliases, drops them, and re-runs
+> `validate_roster_health` on what remains, failing closed only when the survivors cannot staff the
+> game. The rest of this decision is untouched: an alias whose mode is unknown is still never called
+> under a guessed mode, and the definite `cannot produce parseable structured output` verdict still
+> refuses to start.
+
 **Invariants.** None of the six is in reach. Author exclusion, the blind orchestrator, severity
 floors and termination are untouched. Fail-closed lenses are arguably strengthened, not weakened: a
 capability probe that could not be completed now fails closed loudly instead of silently degrading,
 everywhere except the one diagnostic command whose entire purpose is to report rather than spend or
 gate. The untrusted-text boundary is untouched — classification reads exception types and status
 codes, never provider-authored text, exactly as `_failure_class` already did.
+
+## D-dereferenced-schema — inline every `$ref` before a schema reaches a request or a prompt
+
+**The finding.** `LLMClient.structured()` built its `response_format` (and its prompt-mode
+instruction) straight from `schema.model_json_schema()`. Pydantic emits `$defs` + `$ref` for any
+nested model or enum, and `CritiqueOutput` has both — `RawIssue`, `Category`, `Severity` and
+`StructuralRef` all sit behind a `$ref` two or three levels deep. That is an interoperability risk
+on a proxy path that substitutes tool calling for structured output: upstream
+[LiteLLM issue #8898](https://github.com/BerriAI/litellm/issues/8898) documents an Anthropic request
+being converted to a forced tool call whose otherwise-correct JSON is nested under varying envelope
+keys. This application's strict `extra_forbidden` validation rejects any such envelope wholesale.
+Inlining references makes the schema self-contained before it reaches either the proxy or a model,
+rather than relying on every downstream structured-output path to interpret reference indirection
+the same way.
+
+`probe_structured_output` (D-probe-capability-evidence) pins an alias to `json_schema` using `_Probe`,
+a trivial `{"ok": boolean}` schema with no nested model and therefore no `$ref`. It can establish that
+the alias accepts that simple schema, but it cannot establish that the same path handles a real,
+reference-bearing schema such as `CritiqueOutput`. That representativeness gap is tracked as an open
+item below; this decision does not close it.
+
+**The decision.** A module-level `_dereference(schema)` in `llm.py` inlines every `$ref` against
+`$defs` and drops `$defs`, and `structured()` calls it once, immediately after
+`schema.model_json_schema()`, before the result reaches either `_response_format`/`_strictify` or
+`_schema_instruction` — so both the native request and the prompt-mode instruction see the same
+self-contained form. A `prompt`-mode model previously had to follow `$ref` indirection by eye to
+answer correctly; it no longer has to.
+
+The helper is pure and total over dicts, lists and scalars, and preserves everything else about the
+schema: `enum` lists, `minLength`/`maxLength`, `title`, nullable/optional unions expressed as
+`anyOf`, and a `$ref` node's own sibling keys (pydantic emits a `description` override this way; the
+override wins over the same key on the resolved target). `_strictify` is unchanged and runs on the
+dereferenced result exactly as it ran on the raw one.
+
+**The recursion guard.** No schema in this repository is recursive today — nothing self-references
+through `$defs`, since a critique or defect graph never contains itself. A naive inliner is a
+landmine for the day one does: `_dereference` tracks the `$defs` names currently being resolved on
+the current path (not a global visited set, since two sibling fields legitimately sharing the same
+`$defs` entry — every `RawIssue.locus` reusing `StructuralRef`, every list item reusing `RawIssue`
+itself — is ordinary and must not trip it) and raises `ValueError` the moment a name recurs into
+itself, naming the cycle. It fails loudly and immediately, not by hanging or by truncating at an
+arbitrary depth. A `$ref` to an undefined `$defs` entry, or a `$ref` in a form other than
+`#/$defs/<name>` (nothing pydantic emits does this, but the helper does not assume it), raises the
+same way rather than passing through unresolved.
+
+**What this deliberately does not do.** It does not touch the probe that can classify an alias as
+capable without exercising reference handling — the gap above is a `probe_structured_output`
+shortcoming rather than a `_dereference` one, and needs its own evidence (a probe schema shaped like
+a real one, not `_Probe`) to fix without becoming a second, larger request on every startup. It does
+not change `_strictify`'s
+own `$defs`/`definitions` branch, which stays reachable and tested directly
+(`tests/test_report_store_llm.py::test_strictify_closes_every_object`) against a raw, non-dereferenced
+schema — nothing requires every caller of `_strictify` to have dereferenced first. For a downstream
+path that already accepts `$ref`, the dereferenced schema is semantically identical to the one it
+replaces; the test suite asserts that directly (a hand-rolled JSON-Schema-subset checker confirms a
+payload validating against the original model still validates against the dereferenced schema,
+across `json_schema`, `json_object` and `prompt` modes) rather than assuming it.
+
+**Invariants.** None of the six is in reach. Author exclusion, the blind orchestrator, severity floors
+and termination are untouched. Fail-closed lenses are unaffected — this changes what a schema looks
+like on the wire, not when a lens is retried or abandoned. The untrusted-text boundary is untouched:
+`_dereference` operates on a schema this application generated from its own pydantic models, never on
+model-authored or provider-authored text.
 
 ## D-bibliography-entry-nesting — indentation says which bibliography lines are references
 
@@ -5474,69 +5544,6 @@ validation and severity floors are not in this path. The untrusted-text boundary
 kind and degree — the bibliography was already untrusted model output being counted, and it still
 reaches no generator as instruction. `extract_source_urls`, which decides what is actually fetched,
 is not touched at all; this changes the denominator a run reports, never the egress it performs.
-
-## D-dereferenced-schema — inline every `$ref` before a schema reaches a request or a prompt
-
-**The finding.** `LLMClient.structured()` built its `response_format` (and its prompt-mode
-instruction) straight from `schema.model_json_schema()`. Pydantic emits `$defs` + `$ref` for any
-nested model or enum, and `CritiqueOutput` has both — `RawIssue`, `Category`, `Severity` and
-`StructuralRef` all sit behind a `$ref` two or three levels deep. That is an interoperability risk
-on a proxy path that substitutes tool calling for structured output: upstream
-[LiteLLM issue #8898](https://github.com/BerriAI/litellm/issues/8898) documents an Anthropic request
-being converted to a forced tool call whose otherwise-correct JSON is nested under varying envelope
-keys. This application's strict `extra_forbidden` validation rejects any such envelope wholesale.
-Inlining references makes the schema self-contained before it reaches either the proxy or a model,
-rather than relying on every downstream structured-output path to interpret reference indirection
-the same way.
-
-`probe_structured_output` (D-probe-capability-evidence) pins an alias to `json_schema` using `_Probe`,
-a trivial `{"ok": boolean}` schema with no nested model and therefore no `$ref`. It can establish that
-the alias accepts that simple schema, but it cannot establish that the same path handles a real,
-reference-bearing schema such as `CritiqueOutput`. That representativeness gap is tracked as an open
-item below; this decision does not close it.
-
-**The decision.** A module-level `_dereference(schema)` in `llm.py` inlines every `$ref` against
-`$defs` and drops `$defs`, and `structured()` calls it once, immediately after
-`schema.model_json_schema()`, before the result reaches either `_response_format`/`_strictify` or
-`_schema_instruction` — so both the native request and the prompt-mode instruction see the same
-self-contained form. A `prompt`-mode model previously had to follow `$ref` indirection by eye to
-answer correctly; it no longer has to.
-
-The helper is pure and total over dicts, lists and scalars, and preserves everything else about the
-schema: `enum` lists, `minLength`/`maxLength`, `title`, nullable/optional unions expressed as
-`anyOf`, and a `$ref` node's own sibling keys (pydantic emits a `description` override this way; the
-override wins over the same key on the resolved target). `_strictify` is unchanged and runs on the
-dereferenced result exactly as it ran on the raw one.
-
-**The recursion guard.** No schema in this repository is recursive today — nothing self-references
-through `$defs`, since a critique or defect graph never contains itself. A naive inliner is a
-landmine for the day one does: `_dereference` tracks the `$defs` names currently being resolved on
-the current path (not a global visited set, since two sibling fields legitimately sharing the same
-`$defs` entry — every `RawIssue.locus` reusing `StructuralRef`, every list item reusing `RawIssue`
-itself — is ordinary and must not trip it) and raises `ValueError` the moment a name recurs into
-itself, naming the cycle. It fails loudly and immediately, not by hanging or by truncating at an
-arbitrary depth. A `$ref` to an undefined `$defs` entry, or a `$ref` in a form other than
-`#/$defs/<name>` (nothing pydantic emits does this, but the helper does not assume it), raises the
-same way rather than passing through unresolved.
-
-**What this deliberately does not do.** It does not touch the probe that can classify an alias as
-capable without exercising reference handling — the gap above is a `probe_structured_output`
-shortcoming rather than a `_dereference` one, and needs its own evidence (a probe schema shaped like
-a real one, not `_Probe`) to fix without becoming a second, larger request on every startup. It does
-not change `_strictify`'s
-own `$defs`/`definitions` branch, which stays reachable and tested directly
-(`tests/test_report_store_llm.py::test_strictify_closes_every_object`) against a raw, non-dereferenced
-schema — nothing requires every caller of `_strictify` to have dereferenced first. For a downstream
-path that already accepts `$ref`, the dereferenced schema is semantically identical to the one it
-replaces; the test suite asserts that directly (a hand-rolled JSON-Schema-subset checker confirms a
-payload validating against the original model still validates against the dereferenced schema,
-across `json_schema`, `json_object` and `prompt` modes) rather than assuming it.
-
-**Invariants.** None of the six is in reach. Author exclusion, the blind orchestrator, severity floors
-and termination are untouched. Fail-closed lenses are unaffected — this changes what a schema looks
-like on the wire, not when a lens is retried or abandoned. The untrusted-text boundary is untouched:
-`_dereference` operates on a schema this application generated from its own pydantic models, never on
-model-authored or provider-authored text.
 
 ## D-repair-turn-context — a critic is shown the field it got wrong, and asked for a patch
 
@@ -5651,6 +5658,160 @@ This is not a new exception to RA-010; it closes a gap between D-repair-turn-con
 boundary and its implementation. The regression inspects the complete repair prompt with markers in
 the question, report and fetched source as well as the appended repair fields, so an assertion over
 only the prompt tail cannot miss an earlier raw close marker again.
+
+## D-degraded-roster — an unreachable alias costs the roster that alias, not the run
+
+**The finding.** `build_runtime` probed every entry in `roster.all_aliases` in a bare loop, and any
+`ProbeIncomplete` aborted the whole startup. Every alias was therefore a single point of failure for
+every run, regardless of what it did in the roster or how many healthy models stood beside it.
+
+The startup flow makes the consequence deterministic: `build_runtime` used to stop before graph
+execution whenever any one alias raised `ProbeIncomplete`, even when removing that alias left the
+configured writers and every critic pool viable. `tests/test_degraded_roster.py` pins both sides of
+that boundary: an unreachable alias is removed when `validate_roster_health` still passes, while a
+reduced roster that cannot staff the game still fails closed.
+
+The precedent for the right shape already existed one decision away. D-probe-capability-evidence gave
+`ra doctor` exactly this treatment — catch `ProbeIncomplete` per alias, mark it unreachable, keep
+going — and deliberately left `build_runtime` raising, on the reasoning that doctor spends nothing
+while a run is about to spend money under a silently wrong extraction regime. That reasoning is still
+correct about *the alias that failed to probe*, and this decision does not touch it: an alias whose
+mode is unknown is never called under a guessed mode. What the earlier decision did not separate is
+the alias from the roster. Refusing to call a model you could not probe is fail-closed; refusing to
+run at all when five other probed models can staff the entire game is not a safety property, it is an
+outage.
+
+**The decision.** The probe loop collects unreachable aliases instead of raising on the first, then
+`_degrade_roster` removes them and re-runs `validate_roster_health` on what is left. If the reduced
+roster passes, the run proceeds under it, with the drop recorded as a warning and in the `startup`
+event's `unreachable_aliases`. If it does not, startup fails closed exactly as before, with a message
+naming both the unreachable aliases and what their absence emptied.
+
+`validate_roster_health` is the gate on purpose, rather than a new count of what is "enough roster".
+It is already the definition of a viable roster and it is already fail-closed, so a lens left with no
+eligible non-author critic still refuses to start — including the subtle case a pool-size check would
+miss, where a pool is non-empty but contains only the writer who is about to author. `_roster_without`
+checks the two structural emptinesses ahead of it (no reachable writer, no reachable critic for some
+lens) only so the failure reads as the outage it is instead of a pydantic field-length error.
+
+**Why silence is not what makes this safe.** A degraded roster cannot buy an `accepted` it did not
+earn when the drop leaves a lens roster-limited, and this required no new code:
+`LensStatus.roster_limited` is computed per round from the critics that actually turn out to be
+eligible, so a lens thinned below two reaches `weak_met` and the run terminates
+`converged_unconfirmed` rather than `accepted`. If every lens still has at least two eligible critics,
+the reduced roster may still earn `accepted`. Cross-model confirmation (D-cross-model-confirmation,
+D-two-clean-critiques) is enforced by the same machinery it always was, while each attempt's
+`startup` event records which aliases were unreachable.
+
+**The degraded roster is not part of the run's identity.** `_run_fingerprint` keeps hashing the
+*configured* roster, from `config` and never from `rt.config`. Hashing what an attempt settled for
+would make the recovery look like changed inputs: a run would resume happily for as long as the outage
+lasted and then hit `ResumeMismatch` (D-redeploy-survival) at the exact moment the provider came back
+and it could have finished properly. Degradation is per attempt, which is why `unreachable_aliases`
+is stamped on each `startup` event rather than on the run — a resumed run may legitimately have had
+different rosters on different attempts, and docs/run-provenance.md's per-attempt reading of the
+startup events is what shows it.
+
+**An unreachable orchestrator is a special case, and the cheapest one.** Clearing the field selects
+the documented default of `writers[0]` (D-orchestrator-roster-entry). Keeping the unreachable alias
+would instead leave `_orchestrate_call` swallowing a failure every round, disabling rule 9 silently
+for the whole run — the permanent invisible loss that decision exists to prevent. The orchestrator's
+job is bounded ints in and one boolean out, so any probed alias can do it, and rule 9 is cap-gated:
+the substitution can only ever *enable* a polish pass, never force one.
+
+**What this deliberately does not do.** It does not degrade on `probe_tool_calling` — a search-enabled
+roster with a tool-incapable writer still fails closed per D-retrieval-opt-in, and the writer-facing
+half of that check now sees the reduced roster anyway. It does not catch the definite capability
+verdict: the `ConfigError` for "cannot produce parseable structured output" is a measured fact about
+the alias, not about the moment, and still refuses to start. It does not retry the probe, add a
+backoff, or wait for a provider to recover; a deployment that is fully unreachable fails closed here
+and is handled by D-deferred-not-abandoned instead.
+
+**Invariants.** None of the six is in reach. Author exclusion is enforced by `roles.eligible_critics`
+at resolved identity, unchanged and now over a smaller pool. The orchestrator stays blind — which
+alias referees does not touch what `OrchestratorView` carries. Severity floors, termination and the
+untrusted-text boundary are untouched. Fail-closed lenses are unaffected in the sense the invariant
+means it (an invalid critic field still fails the whole lens); the startup-time roster check remains
+fail-closed, and is now asked the question it was always the right function to answer.
+
+## D-deferred-not-abandoned — a provider outage is not evidence against the run it stopped
+
+**The finding.** `WorkerPool._drain` caught every exception out of `run_graph` as one case: log
+`crashed`, leave the run `interrupted`, let the next boot re-enqueue it. `interrupted` is resumable,
+and `max_resume_attempts` (3) bounds how many consecutive auto-resumes a run may make without
+progressing before it is `abandoned` — the bound D-redeploy-survival introduced so that a run failing
+*deterministically* cannot be retried forever.
+
+A startup-validation failure is caught by that bound while being the one thing it was not written
+for. Nothing in `build_runtime` reads the question or seed, so a refusal there is not evidence about
+one run's inputs and applies equally to every queued run under the same deployment. Counting such a
+refusal against each run's budget can therefore abandon the backlog without any run reaching graph
+execution. `tests/test_shutdown.py` pins that accounting boundary separately from intake failures,
+which do depend on a run's own inputs and still spend the cap.
+
+**The decision.** `build_runtime` re-raises every fail-closed refusal as `StartupRefused`, and
+`_drain` catches that separately from a crash. It writes a `deferred` event naming the reason, leaves
+the run `interrupted` so the next boot still picks it up, and sends no owner notification — for the
+same reason `GracefulStop` sends none: nothing has happened to the run that its owner can act on.
+`consecutive_auto_resumes` then treats `deferred` as cancelling the attempt it belongs to.
+
+**The line is structural, not a list of causes.** `StartupRefused` exists because catching plain
+`ConfigError` in the worker would have been wrong, and quietly so: intake raises `ConfigError` too, for
+a question over `max_question_chars`, a seed over `max_report_chars`, or a missing question. Those
+depend on the run's own inputs, fail identically on every retry, and are precisely what the resume cap
+is for — deferring them would retry a permanently-bad run forever. What separates the two is not the
+kind of problem but where it was found: nothing `build_runtime` does reads the question or the seed,
+so whatever it refuses it refuses for every queued run alike. Wrapping that one function is therefore
+the whole rule, and it needs no taxonomy of causes to stay correct as new startup checks are added.
+`StartupRefused` subtypes `ConfigError`, so every caller that already caught the base type — the CLI's
+fail-closed exit among them — is unaffected.
+
+Cancelling, rather than resetting to zero as a progress event does, is what keeps the cap honest
+across a mixed history: three genuine crashes still abandon a run even if an outage happened to fall
+between two of them. The registry reports the state distinctly — "the model roster was unreachable; it
+retries automatically" rather than the generic resumable-crash note — because the cause is outside the
+run and outside the user's reach, and a run parked by someone else's rate limit should not read like
+one that died.
+
+**Two budgets, both capped, because they answer different questions.** The first draft of this
+decision made deferrals *unbounded*, on the reasoning that a deferral is nearly free — one startup
+validation, seconds, zero tokens, once per container start — while discarding work owed because a
+provider had a bad hour is not recoverable. The cheapness holds; the conclusion did not. QP7 requires
+every loop to be capped, and an uncapped one has a failure mode the argument missed: a permanently
+misconfigured deployment would accumulate runs that defer on every boot and never reach a terminal
+state, so nothing ever asks anyone for help. A silent backlog is worse than a terminal one precisely
+because it never surfaces. Weakening QP7 would also have needed new fetchable evidence under QP12,
+and there is none — the right answer was not a retreat but a second cap.
+
+So recovery now spends two separate budgets. `max_resume_attempts` (3) asks *is this run broken*, and
+three failures answer it. `max_deferred_attempts` (20) asks *is the deployment still coming back*,
+where an honest answer takes far longer than three restarts. A run that exhausts the second is
+`abandoned` in exactly the same shape as one that exhausts the first: an event, never a `final.json`,
+and a human can resume past it. Twenty deliberately gives deployment recovery more boot cycles than
+the three-attempt run-failure budget while still terminating.
+
+**What the audit trail may say about it.** The `deferred` event records `StartupRefused.code`, a
+closed token (`startup_refused` / `roster_unreachable`), never `str(exc)`. The message is written to
+the container log instead, which is reachable only by someone who can already read the deployment.
+The distinction is load-bearing rather than tidy: `StartupRefused` wraps every `ConfigError`
+`build_runtime` can raise, including proxy-reachability failures whose text carries the proxy base
+URL and the upstream provider's own wording — and `/runs/<run_id>/audit.json` serves every event
+verbatim to anyone holding a run id (D-id-as-credential). Persisting the message would have made a
+run id a key to deployment state it has no business naming. A closed vocabulary also means a reader
+of the audit trail can enumerate the possibilities, which free text never allows.
+
+**What this deliberately does not do.** It does not retry inside the attempt, back off, or wait for a
+provider — the deferral ends the attempt immediately and the next boot is the retry. It does not
+change `ResumeMismatch`, which still abandons: that failure *is* about the run's inputs. It does not
+distinguish a transient outage from a permanently misconfigured roster at the moment of failure; both
+defer, and it is the deferral cap, not a classification, that eventually tells them apart. And it is
+a property of `RunWorker._drain` only: a direct `ra run` has no registry lifecycle to move, so the
+CLI catches the same `ConfigError` it always did, prints the full diagnostic, and exits `2` — the
+operator is standing right there, which is the case the deferral exists to cover when nobody is.
+
+**Invariants.** None of the six is in reach. This changes what a worker does with an exception and
+how a registry counts attempts; no model call, prompt, critic assignment, severity, or controller rule
+is touched.
 
 ## Open items for a future round
 
