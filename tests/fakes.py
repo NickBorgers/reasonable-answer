@@ -19,6 +19,7 @@ from reasonable_answer.llm import Completion, MalformedOutputError, ProbeIncompl
 from reasonable_answer.schemas import (
     ArbiterVerdict,
     CritiqueOutput,
+    IssueRepairs,
     OrchestratorRecommendation,
     SupportManifest,
     WriterDisputes,
@@ -117,6 +118,8 @@ class FakeClient:
     validation_errors: list[Exception] = field(default_factory=list)
     #: callable(alias, user) -> WriterDisputes; None means "no disputes raised"
     dispute_fn: Any | None = None
+    #: callable(alias, repair_prompt) -> IssueRepairs; None means "no patch offered"
+    repair_fn: Any | None = None
     #: callable(alias, user) -> SupportManifest; None means "an empty manifest"
     support_fn: Any | None = None
     #: The tool calls this "model" makes when a handler is supplied, as
@@ -238,6 +241,13 @@ class FakeClient:
                 if self.dispute_fn is None:
                     return WriterDisputes(disputes=[])
                 return self.dispute_fn(alias, user)
+            if schema is IssueRepairs:
+                # The critic's repair channel (D-repair-turn-context). Default is an
+                # empty patch — a critic that offers nothing leaves the issue rejected,
+                # which is the fail-closed direction.
+                if self.repair_fn is None:
+                    return IssueRepairs(repairs=[])
+                return self.repair_fn(alias, attempt_user)
             if schema is SupportManifest:
                 if self.support_fn is None:
                     return SupportManifest(entries=[])

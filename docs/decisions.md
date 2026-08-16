@@ -5119,6 +5119,13 @@ budget, fail-closed lens failure and every controller rule are untouched.
 fails the whole review once the budget is gone, and no subset of issues is salvaged. Untrusted text
 still reaches no generator as instruction; the diagnostics travel to a log, not to a prompt.
 
+**Amended by D-repair-turn-context:** lens validation no longer runs inside `LLMClient.structured`'s
+repair loop — it moved to `critique._repair_until_valid`, which answers a rejection with a field
+patch rather than a full re-ask. The diagnostics line this decision specifies is emitted there now;
+`llm._diagnostics_suffix` remains for schema violations on the `structured` loop itself. The
+guaranteed property — one fresh key per repair loop, reused across its attempts, never logged — is
+unchanged and pinned by test.
+
 ## D-repair-diagnostic-keying — span correlation is limited to one repair loop
 
 **The finding.** An unkeyed truncated SHA-256 was content-derived even though it did not quote the
@@ -5140,6 +5147,11 @@ rejected span out of that path.
 
 **Invariants.** Validation, fail-closed lens handling, repair budgets, prompts and controller rules
 are unchanged. This tightens only the audit-privacy scope of the diagnostic identifier.
+
+**Amended by D-repair-turn-context:** the lens-rejection repair loop now lives in
+`critique._repair_until_valid`, which mints its own fresh 32-byte key per loop; `structured()`'s own
+key still exists for schema violations. The property this decision guarantees is preserved either
+place a repair loop runs.
 
 ## D-decisions-merge-regions — the decisions merge driver reasons about the colliding region, not the whole file
 
@@ -5469,6 +5481,184 @@ like on the wire, not when a lens is retried or abandoned. The untrusted-text bo
 `_dereference` operates on a schema this application generated from its own pydantic models, never on
 model-authored or provider-authored text.
 
+## D-bibliography-entry-nesting — indentation says which bibliography lines are references
+
+**The finding.** `fetch.source_entries` split the `## Sources` section on any line opening with a
+list marker at up to three spaces of indentation. In an annotated bibliography — the citation, then
+an indented sub-bullet of commentary — that marked sub-bullet was read as a second entry. When the
+annotation carried no URL, it landed in `not_addressable` and gave the real citation a phantom
+unaddressable twin.
+
+`source_entries` was conservative in the direction that understates coverage, which is the safe
+direction and is why this was a reporting defect rather than an overstatement. But a 2x error is
+misleading rather than cautious, and it masked the metric's real job: now that every addressable
+citation is fetched, a non-zero `not_independently_checked` should mean *the writer cited something
+with no URL* — a genuine signal about the draft — and instead it was dominated by formatting noise.
+
+**The decision.** Indentation, which the parser already had and discarded, decides nesting. Entries
+sit at one depth per section; a marker line deeper than that depth is an annotation of the reference
+above it and folds into that entry exactly as an unmarked continuation line always has.
+
+That depth is the shallowest marker that is **not a grouping heading** — a label like
+`- Peer-reviewed:` that introduces references rather than being one, recognised by the colon it ends
+with and by carrying no address of its own.
+
+An earlier form of this decision anchored the depth on the shallowest marker *carrying a URL*
+instead. That looked equivalent and is not, and the difference is the whole of this amendment: in an
+annotated bibliography the URL frequently sits in the **annotation** rather than in the reference, so
+the anchor landed one level too deep and every reference above it became "shallower". Paired with a
+rule that dropped a shallower marker whenever a deeper URL-bearing line followed it, a reference like
+
+```
+- Smith, J. (2019). Title. Publisher.
+  - Available at: https://example.org/a
+```
+
+was discarded and its annotation became the entry. The count could still come out right by
+coincidence — three markers in, three entries out — while naming the wrong things, which is how it
+survived review the first time. A citation vanishing from the denominator reports *more* of the
+bibliography verified than was, and understating coverage is the only direction this heuristic is
+permitted to be wrong in.
+
+Recognising the heading by its own text rather than by what follows it also removes the lookahead
+entirely, and with it the end-of-section branch that had no way to be exercised. A section whose
+markers are all headings falls back to the shallowest marker depth, so a bibliography of nothing but
+labels is still represented
+
+The marker pattern's `\s{0,3}` bound is replaced by a captured indent of any width, with tabs
+expanded, because a bound on depth cannot express a comparison between depths. Nothing routes on
+this pattern: it is only ever used to count.
+
+**Still a heuristic.** This is a guess at model-written markdown and remains one — the observed
+count is reported as an observation and never as a completeness claim. What changes is that the
+guess is now pinned against explicit fixtures for flat `[n]`, `-`/`*`/`+`, `1.`/`1)`,
+wrapped continuations, the annotated two-line form, a tab-indented annotation, grouped references,
+a mixed grouped bibliography with an unaddressable reference, and flat and grouped bibliographies
+with no URLs each have a fixture in `tests/test_source_coverage.py`, because this heuristic is
+load-bearing for a published number.
+
+**Invariants.** None of the six is in reach. The count feeds `fetch.coverage`, which is observation
+only: no controller rule reads it, no `OrchestratorView` field carries it, and it mints no defect,
+so termination and the blind orchestrator are untouched. Author exclusion, fail-closed lens
+validation and severity floors are not in this path. The untrusted-text boundary is unchanged in
+kind and degree — the bibliography was already untrusted model output being counted, and it still
+reaches no generator as instruction. `extract_source_urls`, which decides what is actually fetched,
+is not touched at all; this changes the denominator a run reports, never the egress it performs.
+
+## D-repair-turn-context — a critic is shown the field it got wrong, and asked for a patch
+
+**The problem.** In `llm.structured`, each repair attempt was a fresh single-turn prompt — system, the
+original user turn, the schema instruction, the error string. The rejected JSON was discarded. The
+critic was told the rule it had broken and shown the source text, but never the field it actually
+emitted, so it had to re-derive the entire review from a prompt materially identical to the one that
+had just failed.
+
+**The decision.** Two changes, and the second is what makes the first honest.
+
+The repair turn carries the rejected field value back, fenced as data and attributed to the
+validator — *"a candidate issue was rejected"*, never *"your previous response"* — together with the
+validator's guidance and the source text the corrected field must be drawn from.
+
+And what is asked for back is a **patch**, not the review again: `{issue_index, field, replacement}`
+for the rejected field alone (`schemas.IssueRepairs`), merged into the retained `CritiqueOutput` by
+`triage.apply_repairs` and revalidated whole. An earlier draft of this decision echoed the field but
+still re-asked for the entire review, with an instruction to leave the other issues alone. That
+instruction cannot be obeyed: those values are not in the critic's context, so the model must
+regenerate them, and the `category_out_of_scope` regression above is exactly that happening. The
+patch removes the mechanism rather than asking a model not to trigger it — everything a repair does
+not name is carried across mechanically, with nothing in the path that could rewrite it.
+
+**The patch channel is narrow, and the narrowness is enforced, not requested.** The schema admits
+only the four fields `triage.validate_issue` can reject — never `severity`, `rationale` or
+`instruction`, so the channel cannot become a way to rewrite a finding under cover of fixing a
+quote. And `apply_repairs` is told which issue and which field the validator rejected, and **drops
+every entry naming any other issue or field**, however well-formed. That guard exists because the
+repair turn embeds report-derived text (the source excerpt, the rejected value), and report text is
+untrusted (RA-010): an instruction smuggled into a report paragraph that talked the critic into
+patching a *different* issue would otherwise ride a valid-looking entry through whole-output
+revalidation, which rejects malformed patches but not well-formed changes to another issue. The
+repair turn states the same scope to the critic — naming the index and field the entry must carry —
+so the instruction and the enforcement agree. A replacement that will not parse is dropped rather
+than guessed at.
+
+**Every model-side string in the repair turn is fenced or content-free.** The rejected value and the
+source excerpt are both neutralised (fence markers replaced) and placed inside the repository's
+untrusted-data fences; an earlier draft fenced only the rejected value and let the source excerpt
+travel inside the validator's guidance string, outside the markers. The two now ride separate
+parameters (`repair_hint()` for validator-authored instruction, `repair_excerpt()` for report text),
+so the boundary is typeful rather than a convention inside one string. What remains outside the
+fences is validator-authored: the violation message, the structural loci list, and the quoting rule —
+closed-vocabulary text no report content can reach.
+
+The category guard is directional, and its direction was wrong in the first draft of this decision.
+RC-005 permits escalation and forbids downgrades, and downward is the direction that can change a
+*convergence outcome*: `stylistic` is excluded from the counts unconditionally, whatever severity it
+carries, so relabelling into it makes a material finding vanish and a lens with nothing else
+outstanding reads clean off the back of a repair. The guard now refuses a replacement that would take
+a finding `counts_for_convergence` accepts and make it one it does not — asking that predicate
+directly rather than comparing floors, because `clamp_to_floor` only ever raises, so a floor
+comparison answered "unchanged" for every relabel it was meant to catch and guarded nothing.
+
+**One budget, both halves.** `budgets.critic_repair_retries` is passed to the review call *and* to
+the lens loop: the review call spends it on schema violations — malformed JSON, a missing field —
+and the lens loop on patch rounds. What moved out of `client.structured` is lens validation, not the
+budget, so isolation.md and convergence.md keep naming one number for a critic's repairs. An
+intermediate draft dropped the argument from the review call, which silently rehomed a critic's
+schema repairs onto the generic `repair_retries` — 1 against 2, a change no document described.
+
+**Isolation, and the evidence it rests on.** This is the one bounded exception to the fresh-context
+rule, recorded as such in the drift table, the critic's NEVER row and the repair bullet in
+[isolation.md](./isolation.md), plus the rule-2 narrative in [convergence.md](./convergence.md).
+
+QP12 §4 requires new evidence, fetchable from a URL in the diff, before a principle gives ground.
+That evidence is **Gou et al. 2023 (CRITIC)**, added to the References table: a verify → correct →
+verify loop in which a model revises its own output against external tool feedback consistently
+improves it, concluding "the crucial importance of external feedback". That is the positive half of
+the boundary Huang et al. 2024 draws from the other side, and it is the shape built here. Its limit
+is stated in the table rather than left for a reader to find: it evaluates factuality, program
+synthesis and toxicity, not schema repair.
+
+One claim is explicitly withdrawn. An earlier draft cited Chen, Su & Chiang 2026 as support for
+attributing the value to the validator rather than the critic. That study moves a byte-identical
+claim between chat-template *roles*; this keeps the value in a user turn and changes only prose
+attribution, so the reported gain is not inherited and is no longer claimed. The wording stands on
+its own rationale — the text at that point *is* a candidate a check rejected — with no evidentiary
+weight behind it.
+
+What is claimed is a bounded same-task exception — **not** that relabeling restores independence.
+
+**RA-016 is unchanged.** `rejected_text()` and `repair_excerpt()` are read only by the repair path,
+which stays inside the run. They are deliberately absent from `diagnostics()` and from `str(exc)`,
+because those reach stdout and `LensResult.failure_reason`, which live outside the 0700 run tree. A
+log still gets only `fingerprint()`; the text goes back to the model that emitted it and nowhere
+else.
+
+**Invariants.** Fail-closed lens validation is unchanged: a rejection still fails the whole review
+once the budget is spent, and no subset of issues is salvaged. Author exclusion, the blind
+orchestrator, severity floors and termination are untouched. The untrusted-text boundary is
+unchanged in kind and narrowed in two respects — every report-derived string in the repair turn is
+now fenced and marker-scrubbed, and the patch channel is mechanically confined to the one field the
+validator rejected.
+
+## D-repair-fence-scrubbing — reused critic inputs are scrubbed before a repair turn
+
+The repair turn reuses the complete original critic prompt before appending the rejected field and
+source excerpt. Scrubbing only those appended values is insufficient: an end marker embedded in the
+question, rendered report or fetched-source entry would already have closed an earlier data fence,
+and the repair call would preserve that escape unchanged.
+
+The boundary is therefore enforced where those original blocks are constructed. `critic_user`
+marker-scrubs the question and rendered report, and `fetched_sources_block` marker-scrubs each whole
+entry before joining it inside the source fence. The latter covers every third-party field that can
+enter an entry — page text, URL, title, mirror URL, registry metadata and fetch error — without
+depending on each entry shape to remember the rule independently. The repair turn keeps its existing
+scrubbing for the rejected value and source excerpt.
+
+This is not a new exception to RA-010; it closes a gap between D-repair-turn-context's stated
+boundary and its implementation. The regression inspects the complete repair prompt with markers in
+the question, report and fetched source as well as the appended repair fields, so an assertion over
+only the prompt tail cannot miss an earlier raw close marker again.
+
 ## D-degraded-roster — an unreachable alias costs the roster that alias, not the run
 
 **The finding.** `build_runtime` probed every entry in `roster.all_aliases` in a bare loop, and any
@@ -5622,70 +5812,6 @@ operator is standing right there, which is the case the deferral exists to cover
 **Invariants.** None of the six is in reach. This changes what a worker does with an exception and
 how a registry counts attempts; no model call, prompt, critic assignment, severity, or controller rule
 is touched.
-
-## D-bibliography-entry-nesting — indentation says which bibliography lines are references
-
-**The finding.** `fetch.source_entries` split the `## Sources` section on any line opening with a
-list marker at up to three spaces of indentation. In an annotated bibliography — the citation, then
-an indented sub-bullet of commentary — that marked sub-bullet was read as a second entry. When the
-annotation carried no URL, it landed in `not_addressable` and gave the real citation a phantom
-unaddressable twin.
-
-`source_entries` was conservative in the direction that understates coverage, which is the safe
-direction and is why this was a reporting defect rather than an overstatement. But a 2x error is
-misleading rather than cautious, and it masked the metric's real job: now that every addressable
-citation is fetched, a non-zero `not_independently_checked` should mean *the writer cited something
-with no URL* — a genuine signal about the draft — and instead it was dominated by formatting noise.
-
-**The decision.** Indentation, which the parser already had and discarded, decides nesting. Entries
-sit at one depth per section; a marker line deeper than that depth is an annotation of the reference
-above it and folds into that entry exactly as an unmarked continuation line always has.
-
-That depth is the shallowest marker that is **not a grouping heading** — a label like
-`- Peer-reviewed:` that introduces references rather than being one, recognised by the colon it ends
-with and by carrying no address of its own.
-
-An earlier form of this decision anchored the depth on the shallowest marker *carrying a URL*
-instead. That looked equivalent and is not, and the difference is the whole of this amendment: in an
-annotated bibliography the URL frequently sits in the **annotation** rather than in the reference, so
-the anchor landed one level too deep and every reference above it became "shallower". Paired with a
-rule that dropped a shallower marker whenever a deeper URL-bearing line followed it, a reference like
-
-```
-- Smith, J. (2019). Title. Publisher.
-  - Available at: https://example.org/a
-```
-
-was discarded and its annotation became the entry. The count could still come out right by
-coincidence — three markers in, three entries out — while naming the wrong things, which is how it
-survived review the first time. A citation vanishing from the denominator reports *more* of the
-bibliography verified than was, and understating coverage is the only direction this heuristic is
-permitted to be wrong in.
-
-Recognising the heading by its own text rather than by what follows it also removes the lookahead
-entirely, and with it the end-of-section branch that had no way to be exercised. A section whose
-markers are all headings falls back to the shallowest marker depth, so a bibliography of nothing but
-labels is still represented
-
-The marker pattern's `\s{0,3}` bound is replaced by a captured indent of any width, with tabs
-expanded, because a bound on depth cannot express a comparison between depths. Nothing routes on
-this pattern: it is only ever used to count.
-
-**Still a heuristic.** This is a guess at model-written markdown and remains one — the observed
-count is reported as an observation and never as a completeness claim. What changes is that the
-guess is now pinned against explicit fixtures for flat `[n]`, `-`/`*`/`+`, `1.`/`1)`,
-wrapped continuations, the annotated two-line form, a tab-indented annotation, grouped references,
-a mixed grouped bibliography with an unaddressable reference, and flat and grouped bibliographies
-with no URLs each have a fixture in `tests/test_source_coverage.py`, because this heuristic is
-load-bearing for a published number.
-
-**Invariants.** None of the six is in reach. The count feeds `fetch.coverage`, which is observation
-only: no controller rule reads it, no `OrchestratorView` field carries it, and it mints no defect,
-so termination and the blind orchestrator are untouched. Author exclusion, fail-closed lens
-validation and severity floors are not in this path. The untrusted-text boundary is unchanged in
-kind and degree — the bibliography was already untrusted model output being counted, and it still
-reaches no generator as instruction. `extract_source_urls`, which decides what is actually fetched,
-is not touched at all; this changes the denominator a run reports, never the egress it performs.
 
 ## Open items for a future round
 

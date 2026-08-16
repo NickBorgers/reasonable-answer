@@ -1286,6 +1286,12 @@ def test_prompt_hash_tracks_the_critic_prompt(monkeypatch):
     assert audition.prompt_hash() != before
 
 
+def test_prompt_hash_tracks_the_repair_turn(monkeypatch):
+    before = audition.prompt_hash()
+    monkeypatch.setattr(prompts, "critic_repair_turn", lambda **kwargs: "different")
+    assert audition.prompt_hash() != before
+
+
 def test_prompt_hash_carries_the_source_mode(monkeypatch):
     """The hash covers the source-less surface only, so the mode has to be in the key.
 

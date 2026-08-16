@@ -278,7 +278,12 @@ def test_a_misquote_carries_the_paragraph_it_should_have_quoted():
         validate_issue(Lens.EVIDENCE, bad, STRUCTURE)
 
     assert "not a verbatim quote" in str(exc.value)
-    assert "Intro paragraph making a claim." in exc.value.repair_hint()
+    # The source text rides `repair_excerpt()`, not the hint: it is report text, and the
+    # prompt composer fences it as untrusted data (RA-010). The hint stays
+    # validator-authored instruction only.
+    assert "Intro paragraph making a claim." in exc.value.repair_excerpt()
+    assert "Intro paragraph making a claim." not in exc.value.repair_hint()
+    assert "character-for-character" in exc.value.repair_hint()
 
 
 def test_an_invented_locus_is_told_which_loci_exist():
@@ -299,6 +304,7 @@ def test_a_category_out_of_scope_offers_no_hint():
         validate_issue(Lens.COMPLETENESS, wrong, STRUCTURE)
 
     assert exc.value.repair_hint() == ""
+    assert exc.value.repair_excerpt() == ""
 
 
 def test_a_rejection_names_its_class_so_a_log_can_tell_them_apart():
@@ -370,9 +376,10 @@ def test_a_rejected_span_never_reaches_the_error_message():
 
     assert secret not in str(exc.value)
     assert secret not in " ".join(exc.value.diagnostics(b"k" * 32).values())
-    # The hint hands back the *source* text the span should have come from, never the
-    # rejected span itself — so there is no path from here to a log either.
+    # The hint and excerpt hand back the *source* text the span should have come from,
+    # never the rejected span itself — so there is no path from here to a log either.
     assert secret not in exc.value.repair_hint()
+    assert secret not in exc.value.repair_excerpt()
 
 
 def test_typographic_punctuation_does_not_make_an_honest_quote_a_misquote():

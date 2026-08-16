@@ -10,7 +10,7 @@ The system fights **three different biases**, and they have different isolation 
 
 | bias | cause | isolation unit that fixes it | priority |
 |------|-------|------------------------------|----------|
-| **Social / context drift** — sycophancy, contextual drag, anchoring, in-session self-review | **shared context**: a peer's opinion, prior reasoning, or one's own earlier output in the same window | a **fresh, blind context window** per task | **primary** |
+| **Social / context drift** — sycophancy, contextual drag, anchoring, in-session self-review | **shared context**: a peer's opinion, prior reasoning, or one's own earlier output in the same window | a **fresh, blind context window** per task — with one bounded exception, the in-call repair turn (D-repair-turn-context) | **primary** |
 | **Correlated blind spots** — a model's systematic failure modes | the model itself; the same model repeats/misses the same error even in a fresh context | **model diversity** (distinct model families) | secondary |
 | **Social / content bias** — loaded framing, one-sided source selection, inherited presuppositions | **shared training-corpus and cultural priors** across every model in the roster, plus the question's own framing | **documented observable-text rules** ([bias.md](./bias.md)) enforced as lens categories, on top of decorrelated critic pools | tertiary |
 
@@ -80,7 +80,7 @@ flowchart TB
     end
     subgraph CRIT["Per-lens critics — 3 lenses × review.depth models, each its own fresh context"]
         Cin["SEES: report + question + its ONE lens + taxonomy"]
-        Cno["NEVER: who wrote the report · the tick number · whether this is a confirmation critique · other lenses' output · the OTHER critic on its own lens · prior critiques"]
+        Cno["NEVER: who wrote the report · the tick number · whether this is a confirmation critique · other lenses' output · the OTHER critic on its own lens · prior critiques (its own rejected field returns inside one call only — D-repair-turn-context)"]
     end
     subgraph ORC["Orchestrator (blind LLM)"]
         Oin["SEES: OrchestratorView (category × severity counts, bounded ints/enums)"]
@@ -295,7 +295,10 @@ bound it:
   for evidence categories `related_span` is deliberately not verbatim-anchored, since it describes
   a source rather than quoting the report. That channel is pre-existing and is not widened here.)
 - **Same fence, restated.** The untrusted-data note is repeated inside the fetched-pages block
-  rather than relied on from the top of the prompt, given how much text sits between them.
+  rather than relied on from the top of the prompt, given how much text sits between them. Every
+  untrusted source entry is marker-scrubbed before the entries are joined inside that fence, so a
+  page, title, URL, mirror URL, abstract or fetch error cannot close the block early
+  (D-repair-fence-scrubbing).
 - **Registry metadata is the same class of text (D-existence-vs-body).** A title, author list and abstract from
   Crossref or OpenAlex are third-party content from a vendor the run did not choose, and they enter
   the evidence lens through the same block, inside the same fence, under the same restriction to
@@ -315,12 +318,25 @@ Mitigations, by boundary:
 - **Triage validates** every field against the schema before it becomes a defect-task or a
   count; an unknown category or invalid/over-length field **fails the entire lens** (fail-closed,
   RB-007) — nothing is silently dropped, so an adversarial critique can't collapse into a
-  fake-clean empty result. Validation runs *inside* the model call, on the same bounded
-  repair loop as a schema violation (`budgets.critic_repair_retries`): a rejection is
-  returned to the critic with the text it should have quoted, and only a critic that
-  cannot correct itself within that budget fails the lens. Repair does not loosen the
-  check — the same violation still fails closed once the budget is gone — it stops a
-  recoverable quoting slip from costing one of the run's `critique_attempts`.
+  fake-clean empty result. The review call's structured-output/schema repairs and the
+  lens loop share the same bounded budget — `budgets.critic_repair_retries` is passed to
+  both. Lens validation runs *after* the review call returns, because a lens rejection is
+  answered by a **patch
+  for the rejected field alone**, which needs a different response schema than the review
+  did; the patch is merged mechanically into the review already in hand
+  (D-repair-turn-context). The rejection is returned to the critic with the text it should
+  have quoted **and the field value it submitted**. Only a critic that cannot correct
+  itself within that budget fails the lens. Repair does not loosen the check — the same violation still
+  fails closed once the budget is gone — it stops a recoverable quoting slip from costing
+  one of the run's `critique_attempts`. The returned field **and the source excerpt it
+  must be corrected from** are each fenced as untrusted data and marker-scrubbed, and the
+  value is attributed to the validator, never to the critic; `triage.apply_repairs` drops
+  any patch entry naming an issue or field other than the one the validator rejected, so
+  the channel's narrowness is enforced rather than requested (D-repair-turn-context). See
+  the exception noted in the drift table above, which this is the whole of. The original question,
+  report and fetched-source block reused by that repair turn are marker-scrubbed at their initial
+  construction too; protecting only the newly appended rejected value and excerpt would leave an
+  earlier close marker intact (D-repair-fence-scrubbing).
 - **Loci are bounded structural references** (section/paragraph indices), not free text; quoted
   spans are length-limited untrusted data — closing the critic→generator free-text channel. Each
   category states **what its `claim_span` anchors to** (D-absence-anchor), because the anchor is not self-evident

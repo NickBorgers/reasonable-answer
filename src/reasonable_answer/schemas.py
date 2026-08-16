@@ -203,6 +203,48 @@ class SupportManifest(BaseModel):
     )
 
 
+#: The fields a critic may be asked to replace after a validation rejection. Exactly the
+#: four `triage.validate_issue` can reject, and nothing else: a repair may not touch
+#: `severity` (mechanically floored anyway), `rationale` or `instruction`, so the channel
+#: cannot become a way to rewrite a finding under cover of fixing a quote.
+RepairableField = Literal["category", "locus", "claim_span", "related_span"]
+
+
+class IssueRepair(BaseModel):
+    """One replacement value for one rejected field of one issue (D-repair-turn-context).
+
+    The critic is asked for *this*, not for its whole review again. Re-asking for the
+    entire `CritiqueOutput` is what let a repair fix the rejected span and regress an
+    unrelated field in the same breath — observed in production run `run-a624c5099f9a`
+    as attempt 1 failing `span_not_verbatim` and attempt 2 failing
+    `category_out_of_scope`. A patch cannot do that: everything it does not name is
+    carried over untouched by `triage.apply_repairs`, mechanically, with no model in
+    the path — and `apply_repairs` also drops any entry addressing an issue or field
+    other than the one the validator rejected, so the schema's breadth (any index, any
+    repairable field) is not the channel's breadth (RA-010).
+    """
+
+    model_config = ConfigDict(extra="forbid")
+
+    issue_index: int = Field(ge=0, lt=MAX_ISSUES_PER_LENS)
+    field: RepairableField
+    #: `locus` arrives as "S<section>.P<paragraph>" and `category` as a taxonomy value;
+    #: both are parsed by `apply_repairs` and a value that will not parse leaves the issue
+    #: unchanged, so the next validation pass rejects it again rather than silently
+    #: accepting a malformed patch.
+    replacement: str = Field(min_length=1, max_length=MAX_SPAN)
+
+
+class IssueRepairs(BaseModel):
+    """The whole of one repair attempt. An empty list is a valid answer — a critic that
+    concludes it cannot anchor the issue leaves it unrepaired, and the lens fails closed
+    on the next pass rather than accepting an invented span."""
+
+    model_config = ConfigDict(extra="forbid")
+
+    repairs: list[IssueRepair] = Field(default_factory=list, max_length=MAX_ISSUES_PER_LENS)
+
+
 class CleanRecord(BaseModel):
     """Immutable per-lens attestation, keyed to one artifact hash (RC-001/RC-002)."""
 
