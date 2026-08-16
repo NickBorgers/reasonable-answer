@@ -5597,8 +5597,8 @@ So recovery now spends two separate budgets. `max_resume_attempts` (3) asks *is 
 three failures answer it. `max_deferred_attempts` (20) asks *is the deployment still coming back*,
 where an honest answer takes far longer than three restarts. A run that exhausts the second is
 `abandoned` in exactly the same shape as one that exhausts the first: an event, never a `final.json`,
-and a human can resume past it. Twenty restarts is far beyond any real outage-and-retry sequence —
-the incident above was three — while still terminating.
+and a human can resume past it. Twenty deliberately gives deployment recovery more boot cycles than
+the three-attempt run-failure budget while still terminating.
 
 **What the audit trail may say about it.** The `deferred` event records `StartupRefused.code`, a
 closed token (`startup_refused` / `roster_unreachable`), never `str(exc)`. The message is written to

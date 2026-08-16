@@ -540,7 +540,7 @@ controller never issues and that carry no verdict about the artifact:
 | state | meaning |
 |-------|---------|
 | `interrupted` | the process went away mid-run; the checkpoint makes it resumable |
-| `abandoned` | recovery gave up — the resume attempt cap was reached, or the run's inputs no longer match its checkpoint |
+| `abandoned` | recovery gave up — the resume attempt cap or startup-deferral cap was reached, or the run's inputs no longer match its checkpoint |
 
 `abandoned` is terminal for the UI, but it is deliberately **not** a `final.json`: giving
 up is not a verdict, and the audit trail must never claim the controller reached one. A

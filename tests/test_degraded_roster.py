@@ -14,7 +14,7 @@ import pytest
 from fakes import FakeClient
 
 from reasonable_answer.config import Budgets, Config, ConfigError, ProxyConfig, Roster
-from reasonable_answer.graph import _run_fingerprint, build_runtime
+from reasonable_answer.graph import StartupRefused, _run_fingerprint, build_runtime
 from reasonable_answer.schemas import CritiqueOutput
 
 IDENTITIES = {
@@ -155,8 +155,11 @@ def test_losing_every_writer_fails_closed(tmp_path):
     client = _client()
     client.unprobeable.update({"writer-a", "writer-b"})
 
-    with pytest.raises(ConfigError, match="no writer is reachable"):
+    with pytest.raises(ConfigError, match="no writer is reachable") as caught:
         build_runtime(config, client=client)
+
+    assert isinstance(caught.value, StartupRefused)
+    assert caught.value.code == "roster_unreachable"
 
 
 def test_emptying_a_critic_pool_fails_closed(tmp_path):
