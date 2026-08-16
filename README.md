@@ -499,12 +499,18 @@ src/reasonable_answer/
   llm.py         LiteLLM proxy client, identity resolution, structured-output ladder
   prompts.py     all prompts; untrusted data is fenced, roles never leak
   report.py      structural loci and artifact hashing
-  triage.py      mechanical: floors, counts, defect list, clean records
+  critique.py    one lens, one critic, one call — and the in-call field-patch repair loop
+  triage.py      mechanical: floors, counts, defect list, clean records, patch merging
   dispute.py     writer disputes: mechanical adjudication, arbiter eligibility
   controller.py  the 14-rule ordered stop decision — pure, deterministic, total
   graph.py       the LangGraph loop
+  audition.py    measured critic capability: fixtures, metrics, cached verdicts
+  fetch.py       the one egress point: source fetching, coverage tallies
+  search.py      writer retrieval: web_search, source reads, support manifest
+  ingest.py      seed conversion (PDF / docx / HTML / URL → markdown) at the edge
   store.py       audit trail and retention
   export.py      report + review record, for markdown, self-contained HTML and print
+  web/           FastAPI app: routes, auth middleware, SSE stream, question refinement
 ```
 
 The test suite is offline: a scriptable fake proxy drives the whole graph, so the loop's safety

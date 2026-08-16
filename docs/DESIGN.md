@@ -143,11 +143,11 @@ can't game because none can see the whole board.
 | # | Principle | Enforcement in this design |
 |---|-----------|-----------------------------|
 | 1 | Artifact-first handoffs | Held: only the report + a structured, depersonalized defect list pass forward — objective fix-tasks, never reasoning or verdicts. See [decisions.md](./decisions.md). |
-| 2 | Social isolation | The 3 lenses run as separate fresh contexts, blind to each other. Critics never see prior critiques. |
+| 2 | Social isolation | The 3 lenses run as separate fresh contexts, blind to each other. Critics never see prior critiques — with one bounded exception: within a single review call, a critic's own validator-rejected field returns to it for repair, fenced as data (D-repair-turn-context; see the drift table in [isolation.md](./isolation.md)). |
 | 3 | Authorship blindness | No critic is told who produced the report it evaluates. |
 | 4 | Focused, role-scoped prompts | Each lens gets one job (logic / evidence / completeness), not "review everything." |
 | 5 | Refinement over debate | Each tick improves the report; models never argue with each other. |
-| 6 | Fresh context per agent | Generator sees only {question, latest report, defect list}; critics see only {question, report, lens}. No history accumulation. |
+| 6 | Fresh context per agent | Generator sees only {question, latest report, defect list}; critics see only {question, report, lens} — plus, mid-call, the validator's rejection of a field they just emitted (the principle-2 exception). No history accumulation across calls. |
 | 7 | Production ≠ review | Guaranteed by `critic(Rₙ) ≠ generator(Rₙ)`. |
 
 Each principle's empirical grounding — and the two places where the evidence bounds the claim
