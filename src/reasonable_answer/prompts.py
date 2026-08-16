@@ -562,7 +562,9 @@ def critic_repair_turn(
     if rejected:
         parts += [
             "",
-            "THE REJECTED FIELD VALUE, AS SUBMITTED:",
+            # Validator-attributed by construction, per the decision: a candidate a
+            # check rejected, not "your submission" — "AS SUBMITTED" said otherwise.
+            "THE CANDIDATE VALUE THE VALIDATOR REJECTED:",
             DATA_FENCE,
             _neutralized(rejected),
             DATA_END,

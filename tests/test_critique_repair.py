@@ -141,7 +141,7 @@ def test_the_repair_turn_carries_both_the_source_text_and_the_submitted_field():
     assert INVENTED in repair_prompt  # the field it submitted
     assert prompts.DATA_FENCE in repair_prompt and prompts.DATA_END in repair_prompt
     # Both model-side strings are fenced, each under its own label (RA-010).
-    assert "THE REJECTED FIELD VALUE, AS SUBMITTED:" in repair_prompt
+    assert "THE CANDIDATE VALUE THE VALIDATOR REJECTED:" in repair_prompt
     assert "THE SOURCE TEXT THE CORRECTED FIELD MUST BE DRAWN FROM:" in repair_prompt
 
 
@@ -364,7 +364,7 @@ def test_a_category_out_of_scope_is_repaired_with_no_hint_and_nothing_echoed():
     assert result.issues[0].category is Category.OMITTED_COUNTERARGUMENT
     repair_prompt = client.calls[1].user
     assert "out of scope" in repair_prompt
-    assert "THE REJECTED FIELD VALUE" not in repair_prompt
+    assert "THE CANDIDATE VALUE THE VALIDATOR REJECTED" not in repair_prompt
 
 
 def test_a_span_that_normalises_away_is_repaired_through_the_same_channel():
@@ -476,6 +476,17 @@ def test_an_unparseable_category_patch_is_dropped_rather_than_guessed_at(value):
 def test_an_empty_replacement_is_refused_by_the_schema_before_triage_sees_it():
     with pytest.raises(ValidationError):
         IssueRepair(issue_index=0, field="locus", replacement="")
+
+
+@pytest.mark.parametrize("forbidden", ["severity", "rationale", "instruction"])
+def test_a_repair_may_not_name_a_field_outside_the_four_repairable_ones(forbidden):
+    """`RepairableField` is the bound that keeps the channel from rewriting a finding
+    under cover of fixing a quote (D-repair-turn-context). This is its rejecting side:
+    a patch naming a field the validator can never reject fails schema validation
+    before triage sees it — the same closed-schema rejection a real model response
+    would hit at `client.structured()`."""
+    with pytest.raises(ValidationError):
+        IssueRepair(issue_index=0, field=forbidden, replacement="anything")
 
 
 def test_a_category_patch_cannot_relabel_a_finding_downward():
