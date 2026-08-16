@@ -15,7 +15,8 @@ from conftest import WEB_IDENTITY, web_client
 from fakes import FakeClient
 
 from reasonable_answer import shutdown
-from reasonable_answer.graph import GracefulStop
+from reasonable_answer.config import ConfigError
+from reasonable_answer.graph import REFUSAL_CODES, GracefulStop, StartupRefused
 from reasonable_answer.graph import run as run_graph
 from reasonable_answer.schemas import CritiqueOutput
 from reasonable_answer.store import RunStore
@@ -328,6 +329,256 @@ def test_inputs_that_drifted_abandon_the_run_instead_of_looping(config):
         while worker.status("run-drifted") and time.time() < deadline:
             time.sleep(0.05)
         assert Registry(config.runs_dir).summary("run-drifted").status == "abandoned"
+    finally:
+        worker.shutdown(timeout=1.0)
+
+
+# ------------------------------------------------- outages are not the run's fault
+
+
+def _unreachable(cfg, *, question, seed, run_id, stop=None, **_):
+    """What `build_runtime` raises when no model in the roster can be probed."""
+    raise StartupRefused("fail closed: could not probe writer-a, and the roster left "
+                         "without it cannot staff a run — no writer is reachable",
+                         code="roster_unreachable")
+
+
+def _drain(worker, run_id: str) -> None:
+    deadline = time.time() + 5
+    while worker.status(run_id) and time.time() < deadline:
+        time.sleep(0.05)
+
+
+def test_a_roster_outage_defers_the_run_rather_than_crashing_it(config):
+    """D-deferred-not-abandoned. Startup validation refusing says the *deployment*
+    cannot run anything, not that this run is bad — every queued run fails identically
+    at the same line, before a token is spent."""
+    _interrupted_run(config, "run-outage")
+    worker = RunWorker(config, max_concurrent=1, runner=_unreachable)
+    try:
+        worker.recover(Registry(config.runs_dir))
+        _drain(worker, "run-outage")
+
+        summary = Registry(config.runs_dir).summary("run-outage")
+        assert summary.status == "interrupted"
+        assert "roster was unreachable" in summary.terminal_note
+        kinds = [e["kind"] for e in Registry(config.runs_dir).events("run-outage")]
+        assert kinds[-1] == "deferred"
+    finally:
+        worker.shutdown(timeout=1.0)
+
+
+def test_a_deferred_attempt_does_not_spend_a_resume_attempt(config):
+    """The cap bounds a run that fails deterministically on its own inputs. Counting an
+    outage against it would let one bad hour at a provider abandon the whole backlog."""
+    store = _interrupted_run(config, "run-deferred")
+    registry = Registry(config.runs_dir)
+
+    for n in range(config.max_resume_attempts + 2):
+        store.event("queued", attempt=n + 1, auto=True)
+        store.event("deferred", reason="no writer is reachable")
+
+    assert registry.consecutive_auto_resumes("run-deferred") == 0
+
+
+def test_a_deferral_between_crashes_does_not_buy_the_run_extra_attempts(config):
+    """Cancelling the attempt it belongs to, rather than resetting to zero the way a
+    progress event does: three genuine crashes still abandon a run even if an outage
+    happened to fall between two of them."""
+    store = _interrupted_run(config, "run-mixed")
+    registry = Registry(config.runs_dir)
+
+    store.event("queued", attempt=1, auto=True)
+    store.event("queued", attempt=2, auto=True)
+    store.event("queued", attempt=3, auto=True)
+    store.event("deferred", reason="no writer is reachable")
+    store.event("queued", attempt=4, auto=True)
+
+    assert registry.consecutive_auto_resumes("run-mixed") == config.max_resume_attempts
+
+
+def test_an_outage_lasting_longer_than_the_cap_still_leaves_the_work_owed(config):
+    """The whole point: restarting into a dead proxy as many times as the cap allows
+    must not discard a run whose inputs were never in question."""
+    _interrupted_run(config, "run-patient")
+
+    for _ in range(config.max_resume_attempts + 1):
+        worker = RunWorker(config, max_concurrent=1, runner=_unreachable)
+        try:
+            worker.recover(Registry(config.runs_dir))
+            _drain(worker, "run-patient")
+        finally:
+            worker.shutdown(timeout=1.0)
+
+    summary = Registry(config.runs_dir).summary("run-patient")
+    assert summary.status == "interrupted"
+    assert Registry(config.runs_dir).final("run-patient") is None
+
+
+def test_the_deferred_event_records_a_closed_code_not_the_exception_text(config):
+    """`audit.json` is served on a run id alone (D-id-as-credential), and a startup
+    message names the proxy URL and the provider's own wording. The diagnosis goes to
+    the container log; the audit trail gets a token that says what happened without
+    describing the deployment it happened to."""
+    _interrupted_run(config, "run-quiet-code")
+    worker = RunWorker(config, max_concurrent=1, runner=_unreachable)
+    try:
+        worker.recover(Registry(config.runs_dir))
+        _drain(worker, "run-quiet-code")
+
+        deferred = [
+            e for e in Registry(config.runs_dir).events("run-quiet-code")
+            if e["kind"] == "deferred"
+        ]
+        assert [e["reason"] for e in deferred] == ["roster_unreachable"]
+        assert all(e["reason"] in REFUSAL_CODES for e in deferred)
+        # Nothing from the message survived into the record.
+        assert not any("probe" in str(e.get("reason", "")) for e in deferred)
+    finally:
+        worker.shutdown(timeout=1.0)
+
+
+def test_an_unclassified_startup_refusal_still_gets_a_closed_code(config):
+    """The default matters as much as the classified case: a refusal nobody thought to
+    label must not fall back to leaking its message."""
+    def refused(cfg, *, question, seed, run_id, stop=None, **_):
+        raise StartupRefused("fail closed: cannot reach the LiteLLM proxy at https://x/v1")
+
+    _interrupted_run(config, "run-unclassified")
+    worker = RunWorker(config, max_concurrent=1, runner=refused)
+    try:
+        worker.recover(Registry(config.runs_dir))
+        _drain(worker, "run-unclassified")
+
+        deferred = [
+            e for e in Registry(config.runs_dir).events("run-unclassified")
+            if e["kind"] == "deferred"
+        ]
+        assert [e["reason"] for e in deferred] == ["startup_refused"]
+        assert not any("https://" in str(e.get("reason", "")) for e in deferred)
+    finally:
+        worker.shutdown(timeout=1.0)
+
+
+def test_deferrals_are_capped_so_a_dead_deployment_does_not_defer_forever(config):
+    """QP7: every loop is capped. A deferral is cheap, which argues for a generous cap,
+    not an absent one — uncapped, a permanently misconfigured roster accumulates runs
+    that never reach a terminal state for anyone to notice."""
+    store = _interrupted_run(config, "run-hopeless")
+    for _ in range(config.max_deferred_attempts):
+        store.event("deferred", reason="roster_unreachable")
+
+    worker = RunWorker(config, max_concurrent=1, runner=_unreachable)
+    try:
+        assert worker.recover(Registry(config.runs_dir)) == []
+        summary = Registry(config.runs_dir).summary("run-hopeless")
+        assert summary.status == "abandoned"
+        assert "startup refusal cap" in summary.terminal_note
+        # Giving up is not a verdict, exactly as with the resume cap.
+        assert Registry(config.runs_dir).final("run-hopeless") is None
+    finally:
+        worker.shutdown(timeout=1.0)
+
+
+def test_the_deferral_cap_is_far_looser_than_the_resume_cap(config):
+    """The two budgets answer different questions — "is this run broken" versus "is the
+    deployment coming back" — and an outage that outlasts three restarts is ordinary."""
+    assert config.max_deferred_attempts > config.max_resume_attempts
+    store = _interrupted_run(config, "run-patient-2")
+    for _ in range(config.max_resume_attempts + 1):
+        store.event("deferred", reason="roster_unreachable")
+
+    worker = RunWorker(config, max_concurrent=1, runner=lambda *a, **k: None)
+    try:
+        assert worker.recover(Registry(config.runs_dir)) == ["run-patient-2"]
+    finally:
+        worker.shutdown(timeout=1.0)
+
+
+def test_progress_clears_the_deferral_budget(config):
+    """A run that got somewhere is no longer waiting on the deployment."""
+    store = _interrupted_run(config, "run-recovered")
+    registry = Registry(config.runs_dir)
+
+    for _ in range(config.max_deferred_attempts):
+        store.event("deferred", reason="roster_unreachable")
+    assert registry.consecutive_deferrals("run-recovered") == config.max_deferred_attempts
+
+    store.event("control", rule=3, action="generate", round=2)
+    assert registry.consecutive_deferrals("run-recovered") == 0
+
+
+def test_back_to_back_deferrals_never_drive_the_resume_count_negative(config):
+    """The clamp in `consecutive_auto_resumes` at its floor: two deferrals with no
+    auto-queue between them must not bank credit against a later real crash."""
+    store = _interrupted_run(config, "run-floor")
+    registry = Registry(config.runs_dir)
+
+    store.event("deferred", reason="roster_unreachable")
+    store.event("deferred", reason="roster_unreachable")
+    assert registry.consecutive_auto_resumes("run-floor") == 0
+
+    store.event("queued", attempt=1, auto=True)
+    assert registry.consecutive_auto_resumes("run-floor") == 1
+
+
+def test_a_deferred_run_tells_its_owner_nothing(config):
+    """Same reasoning as a shutdown pause: nothing has happened that the owner can act
+    on, and a notification per restart during an outage is pure noise."""
+
+    class Recorder:
+        def __init__(self):
+            self.sent = []
+
+        def notify(self, **kwargs):
+            self.sent.append(kwargs)
+
+    recorder = Recorder()
+    _interrupted_run(config, "run-quiet")
+    worker = RunWorker(config, max_concurrent=1, runner=_unreachable, notifier=recorder)
+    try:
+        worker.recover(Registry(config.runs_dir))
+        _drain(worker, "run-quiet")
+        assert recorder.sent == []
+    finally:
+        worker.shutdown(timeout=1.0)
+
+
+def test_an_intake_rejection_still_burns_the_cap(config):
+    """The line is structural: `build_runtime` never reads the question or the seed, so
+    what it refuses it refuses for every run alike. Intake's refusals are the opposite —
+    they are *about* this run's inputs, will fail identically on every retry, and are
+    exactly what the resume cap exists to bound. A `ConfigError` from there must not be
+    mistaken for an outage."""
+    def rejected(cfg, *, question, seed, run_id, stop=None, **_):
+        raise ConfigError("intake rejected: question exceeds 4000 chars")
+
+    _interrupted_run(config, "run-toolong")
+    worker = RunWorker(config, max_concurrent=1, runner=rejected)
+    try:
+        worker.recover(Registry(config.runs_dir))
+        _drain(worker, "run-toolong")
+        kinds = [e["kind"] for e in Registry(config.runs_dir).events("run-toolong")]
+        assert "deferred" not in kinds
+        assert Registry(config.runs_dir).consecutive_auto_resumes("run-toolong") == 1
+    finally:
+        worker.shutdown(timeout=1.0)
+
+
+def test_a_real_crash_is_still_a_crash(config):
+    """The deferral path is keyed on `StartupRefused`, not on "anything that went
+    wrong". An ordinary exception must keep burning the cap it always burned."""
+    def broken(cfg, *, question, seed, run_id, stop=None, **_):
+        raise RuntimeError("the graph fell over")
+
+    _interrupted_run(config, "run-broken")
+    worker = RunWorker(config, max_concurrent=1, runner=broken)
+    try:
+        worker.recover(Registry(config.runs_dir))
+        _drain(worker, "run-broken")
+        kinds = [e["kind"] for e in Registry(config.runs_dir).events("run-broken")]
+        assert "deferred" not in kinds
+        assert Registry(config.runs_dir).consecutive_auto_resumes("run-broken") == 1
     finally:
         worker.shutdown(timeout=1.0)
 

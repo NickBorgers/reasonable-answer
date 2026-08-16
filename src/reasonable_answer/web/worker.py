@@ -26,7 +26,7 @@ from typing import TYPE_CHECKING, Any
 from .. import shutdown
 from ..build import build_identity
 from ..config import Config
-from ..graph import GracefulStop, ResumeMismatch
+from ..graph import GracefulStop, ResumeMismatch, StartupRefused
 from ..graph import run as run_graph
 from ..store import RunStore, UnsafeRunId, safe_run_dir
 
@@ -269,11 +269,27 @@ class RunWorker:
             return []
 
         cap = self._config.max_resume_attempts
+        defer_cap = self._config.max_deferred_attempts
         recovered: list[str] = []
         for summary in reversed(registry.list(active=self.active())):
             if summary.status not in ("queued", "interrupted"):
                 continue
             store = RunStore(self._config.runs_dir, summary.run_id)
+            deferrals = registry.consecutive_deferrals(summary.run_id)
+            if deferrals >= defer_cap:
+                # The deployment has refused to start this run `defer_cap` boots in a
+                # row, which stopped being an outage and became a configuration nobody
+                # is coming to fix (D-deferred-not-abandoned). Landing it somewhere
+                # terminal is the honest end: a queue of runs deferring forever is a
+                # backlog that never asks anyone for help. Same shape as the resume cap
+                # below — an event, never a `final.json`, and a human can resume past it.
+                log.warning(
+                    "%s hit the startup-refusal cap (%d); abandoning it",
+                    summary.run_id,
+                    defer_cap,
+                )
+                store.event("abandoned", reason="startup refusal cap", attempts=deferrals)
+                continue
             attempt = registry.consecutive_auto_resumes(summary.run_id) + 1
             if attempt > cap:
                 # Deliberately no final.json: that file means "the graph reached a
@@ -430,6 +446,30 @@ class RunWorker:
                     "abandoned", reason="question, seed, roster or budgets changed since this run started"
                 )
                 outcome = ("abandoned", False)
+            except StartupRefused as exc:
+                # Startup validation refused before a token was spent, and before
+                # anything about *this* run was read: no reachable writer, a lens with no
+                # reachable critic, an unreachable proxy (D-deferred-not-abandoned).
+                # Every queued run would fail here identically, so it is not evidence
+                # about this one, and spending one of its resume attempts on it would
+                # discard work owed because a provider had a bad hour. `deferred` records
+                # the attempt and cancels its cost; the run stays `interrupted`, so the
+                # next boot picks it up again. Intake's own rejections are not
+                # `StartupRefused` — those depend on the run's inputs and still burn the
+                # cap, which is what the cap is for.
+                #
+                # `exc.code`, never `str(exc)`: the message names the proxy URL, the
+                # provider's own wording and which aliases failed, and every event is
+                # served verbatim by `/runs/<run_id>/audit.json`, which is reachable by
+                # anyone holding a run id (D-id-as-credential). The diagnosis belongs in
+                # the container log — which is what the line above is — and the audit
+                # trail gets a closed token that says what happened without describing
+                # the deployment it happened to.
+                log.warning("%s deferred (%s): %s", job.run_id, exc.code, exc)
+                RunStore(self._config.runs_dir, job.run_id).event("deferred", reason=exc.code)
+                # No notification, for the same reason `GracefulStop` sends none: nothing
+                # has happened to the run that its owner can act on or needs to know.
+                outcome = None
             except Exception:
                 # The graph writes its own terminal state and audit trail; anything
                 # escaping to here is a crash, and the registry will show the run as
