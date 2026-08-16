@@ -632,8 +632,8 @@ def critic_user(
         f"YOUR DIMENSION: {lens.value}\n{LENS_BRIEF[lens]}\n\n"
         f"Raise issues ONLY in these categories. Anything outside them is out of scope "
         f"for you, however tempting:\n{table}\n\n"
-        f"QUESTION THE REPORT ANSWERS\n{DATA_FENCE}\n{question}\n{DATA_END}\n\n"
-        f"REPORT UNDER REVIEW\n{DATA_FENCE}\n{rendered_report}\n{DATA_END}\n\n"
+        f"QUESTION THE REPORT ANSWERS\n{DATA_FENCE}\n{_neutralized(question)}\n{DATA_END}\n\n"
+        f"REPORT UNDER REVIEW\n{DATA_FENCE}\n{_neutralized(rendered_report)}\n{DATA_END}\n\n"
         f"{fetched_sources_block(sources, source_char_budget) if sources else ''}"
         "Each paragraph is prefixed with its locus marker [S<section>.P<paragraph>]. For "
         "every issue you raise:\n"
@@ -730,7 +730,9 @@ def fetched_sources_block(sources: list, char_budget: int | None = None) -> str:
     return (
         f"PAGES CITED BY THE REPORT, AS FETCHED\n"
         f"{UNTRUSTED_NOTE}\n"
-        f"{DATA_FENCE}\n" + "\n\n---\n\n".join(entries) + f"\n{DATA_END}\n\n"
+        f"{DATA_FENCE}\n"
+        + "\n\n---\n\n".join(_neutralized(entry) for entry in entries)
+        + f"\n{DATA_END}\n\n"
         "Use these to check what the report says about each source against what the "
         "page actually says.\n"
         "- A page that does not contain the attributed claim is `misrepresented_source`.\n"

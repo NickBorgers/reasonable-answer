@@ -5540,33 +5540,7 @@ model-authored or provider-authored text.
 
 ## D-repair-turn-context — a critic is shown the field it got wrong, and asked for a patch
 
-**The measurement.** D-repair-diagnostics existed to answer one question the logs could not: across
-repair attempts, does a critic re-emit the same rejected span, or move to a different one? Those have
-different fixes. Production run `run-a624c5099f9a`
-([run report](https://reasonable-answer.nickborgers.net/runs/run-a624c5099f9a/report); see
-[run-provenance.md](./run-provenance.md) for what a run id identifies) answered it. Its diagnostics —
-bounded and content-free by D-repair-diagnostics' own contract, reproduced here verbatim so the claim
-is checkable against its primary record rather than resting on an operator's recollection:
-
-```
-00:52:22  gemma4 attempt 1: code=span_not_verbatim locus=S12.P1 issue=0/1 span=d2ae3c08
-00:57:34  gemma4 attempt 2: code=span_not_verbatim locus=S12.P1 issue=0/1 span=d2ae3c08
-00:57:43  gemma4 attempt 3: code=span_not_verbatim locus=S5.P1  issue=0/1 span=557f6710
-00:57:43  lens completeness failed
-```
-
-Attempt 2 emitted the **same keyed fingerprint over the same normalized span at the same locus**
-after receiving the paragraph it had misquoted. That is a re-roll, not a repair. Attempt 3 moved to a
-different span and locus and still failed. In a second sequence from the same run, `glm-5.2` fixed a
-`span_not_verbatim` rejection on attempt 2 and introduced a `category_out_of_scope` rejection — the
-whole-review retry changed an unrelated field, which is what re-authoring a review rather than
-editing one field predicts.
-
-The scope of this evidence is stated rather than implied: it is **one production run**, and it
-motivates the mechanism — it is not presented as a study, and the design's justification for
-touching isolation rests on the external literature cited below, not on this record.
-
-The cause was in `llm.structured`: each repair attempt was a fresh single-turn prompt — system, the
+**The problem.** In `llm.structured`, each repair attempt was a fresh single-turn prompt — system, the
 original user turn, the schema instruction, the error string. The rejected JSON was discarded. The
 critic was told the rule it had broken and shown the source text, but never the field it actually
 emitted, so it had to re-derive the entire review from a prompt materially identical to the one that
@@ -5652,24 +5626,31 @@ because those reach stdout and `LensResult.failure_reason`, which live outside t
 log still gets only `fingerprint()`; the text goes back to the model that emitted it and nowhere
 else.
 
-**Deliberately not done, on the evidence of the same run.** Two mechanisms proposed alongside this
-one are dropped because run-a624c5099f9a refutes them. Aggregating every violation into one round
-would buy nothing: every failing response in that run carried `issue=0/1`, `1/2` or `5/7`, so
-exhaustion by multi-defect responses is not what is happening. Windowing the artifact-scope hint has
-no evidence either: all eleven verbatim failures were `claim_span` against a paragraph, and not one
-was `related_span` against the artifact. Both stay unbuilt until something measured asks for them —
-and both observations carry the same stated scope as the measurement above: one run.
-
-**Still open.** All eleven `span_not_verbatim` failures in that run were at `.P1` — the first
-paragraph of a section, across six sections and three critics, with none at P2 or later. That
-clustering is unexplained and this decision does not address it.
-
 **Invariants.** Fail-closed lens validation is unchanged: a rejection still fails the whole review
 once the budget is spent, and no subset of issues is salvaged. Author exclusion, the blind
 orchestrator, severity floors and termination are untouched. The untrusted-text boundary is
 unchanged in kind and narrowed in two respects — every report-derived string in the repair turn is
 now fenced and marker-scrubbed, and the patch channel is mechanically confined to the one field the
 validator rejected.
+
+## D-repair-fence-scrubbing — reused critic inputs are scrubbed before a repair turn
+
+The repair turn reuses the complete original critic prompt before appending the rejected field and
+source excerpt. Scrubbing only those appended values is insufficient: an end marker embedded in the
+question, rendered report or fetched-source entry would already have closed an earlier data fence,
+and the repair call would preserve that escape unchanged.
+
+The boundary is therefore enforced where those original blocks are constructed. `critic_user`
+marker-scrubs the question and rendered report, and `fetched_sources_block` marker-scrubs each whole
+entry before joining it inside the source fence. The latter covers every third-party field that can
+enter an entry — page text, URL, title, mirror URL, registry metadata and fetch error — without
+depending on each entry shape to remember the rule independently. The repair turn keeps its existing
+scrubbing for the rejected value and source excerpt.
+
+This is not a new exception to RA-010; it closes a gap between D-repair-turn-context's stated
+boundary and its implementation. The regression inspects the complete repair prompt with markers in
+the question, report and fetched source as well as the appended repair fields, so an assertion over
+only the prompt tail cannot miss an earlier raw close marker again.
 
 ## Open items for a future round
 

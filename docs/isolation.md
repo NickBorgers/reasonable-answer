@@ -295,7 +295,10 @@ bound it:
   for evidence categories `related_span` is deliberately not verbatim-anchored, since it describes
   a source rather than quoting the report. That channel is pre-existing and is not widened here.)
 - **Same fence, restated.** The untrusted-data note is repeated inside the fetched-pages block
-  rather than relied on from the top of the prompt, given how much text sits between them.
+  rather than relied on from the top of the prompt, given how much text sits between them. Every
+  untrusted source entry is marker-scrubbed before the entries are joined inside that fence, so a
+  page, title, URL, mirror URL, abstract or fetch error cannot close the block early
+  (D-repair-fence-scrubbing).
 - **Registry metadata is the same class of text (D-existence-vs-body).** A title, author list and abstract from
   Crossref or OpenAlex are third-party content from a vendor the run did not choose, and they enter
   the evidence lens through the same block, inside the same fence, under the same restriction to
@@ -330,7 +333,10 @@ Mitigations, by boundary:
   value is attributed to the validator, never to the critic; `triage.apply_repairs` drops
   any patch entry naming an issue or field other than the one the validator rejected, so
   the channel's narrowness is enforced rather than requested (D-repair-turn-context). See
-  the exception noted in the drift table above, which this is the whole of.
+  the exception noted in the drift table above, which this is the whole of. The original question,
+  report and fetched-source block reused by that repair turn are marker-scrubbed at their initial
+  construction too; protecting only the newly appended rejected value and excerpt would leave an
+  earlier close marker intact (D-repair-fence-scrubbing).
 - **Loci are bounded structural references** (section/paragraph indices), not free text; quoted
   spans are length-limited untrusted data — closing the critic→generator free-text channel. Each
   category states **what its `claim_span` anchors to** (D-absence-anchor), because the anchor is not self-evident
