@@ -35,14 +35,21 @@ but **triage clamps it up to a mechanical, category-specific floor** — the cri
 | evidence | `fabricated_citation` | citation cannot be what it claims on its face | **blocking** |
 | evidence | `misrepresented_source` | cited source does not support the claim as stated | **major** |
 | evidence | `uncited_claim` | material claim with no citation | **major** |
+| evidence | `one_sided_sourcing` | sources drawn from one outlet or viewpoint cluster where genuine alternatives exist ([bias.md](./bias.md)) | **major** |
 | logic | `contradicted_claim` | claim contradicts another claim or a cited source | **blocking** |
 | logic | `invalid_inference` | conclusion does not follow from premises | **major** |
 | logic | `overstated_claim` | claim stronger than its support | **major** |
 | logic | `conceptual_conflation` | two materially distinct things are treated as interchangeable, and the substitution carries an inference | **major** |
+| logic | `loaded_language` | evaluative characterization smuggled in as description, neither attributed nor argued ([bias.md](./bias.md)) | minor |
 | completeness | `incomplete_answer` | an explicit, material part of the question is unanswered or replaced by an adjacent question | **major** |
 | completeness | `omitted_counterargument` | a material opposing view is missing, or a purported opposing case substitutes an easier objection that does not challenge a load-bearing conclusion | **major** |
 | completeness | `unclear_structure` | organization/clarity impedes evaluation | minor |
+| completeness | `unexamined_presupposition` | a contested premise of the question is inherited rather than surfaced and examined ([bias.md](./bias.md)) | **major** |
 | any | `stylistic` | cosmetic preference | minor (**ignored** for convergence) |
+
+The three social-bias categories are constrained by their own rulebook — what a bias finding may
+and may not be (span-anchored, no viewpoint quotas, no intent attribution) — in
+[bias.md](./bias.md); they enter triage, floors and the counts exactly like every other category.
 
 **Severity floor for convergence = `major`.** `material = blocking + major`. Convergence requires
 `material == 0`; `minor`/`stylistic` never block. (Flooring `overstated_claim`/
@@ -532,7 +539,7 @@ and keep their gates (RI-001, RH-001).
 | `converged_unconfirmed` | every lens at least weakly-cleared, but ≥1 lens is `roster_limited` (only one eligible non-author model) — the record names the under-reviewed dimension |
 | `exhausted_unresolved` | cap/stagnation reached with only non-blocking issues, or clean-but-unconfirmed at cap; returned **with annotations** |
 | `needs_human_review` | cap/stagnation/cycle reached with **blocking** issues present |
-| `aborted` | fatal (model unavailable, repeated malformed/incomplete review, empty writer pool, or a lens with zero eligible non-author critics) |
+| `aborted` | fatal (a model unavailable **mid-run**, repeated malformed/incomplete review, empty writer pool, or a lens with zero eligible non-author critics; a provider unreachable at *startup* degrades the roster or defers the attempt instead — D-degraded-roster) |
 
 A known-unacceptable artifact is **never** labeled `accepted` or `converged_unconfirmed`.
 

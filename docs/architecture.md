@@ -104,6 +104,11 @@ emit `Issue[]` against a closed schema.
 At `review.depth: 2` (the default, D-front-loaded-depth) each of those boxes is **two** critics
 rather than one: the next distinct eligible non-author model in the pool reads the same artifact
 under the same prompt, in its own fresh context, blind to the first critic and to what it found.
+Fresh has one bounded exception, *within* a single review call: a critic whose output fails lens
+validation is shown its own rejected field — fenced as untrusted data, attributed to the
+validator — and asked for a patch confined to that field (D-repair-turn-context; the isolation
+consequences are argued in [isolation.md](./isolation.md)). Nothing from that exchange reaches any
+other context.
 Depth is a ceiling — a lens the roster can staff only once runs one critic — and the union of the
 slate's findings is triaged before any revision, with one finding counted once however many critics
 report it (`triage.distinct_issues`).
@@ -140,7 +145,7 @@ failed lens" vs. "unknown categories dropped") is resolved **in favor of fail-cl
 | Failure | Behavior |
 |---------|----------|
 | Unknown enum / invalid or over-length field in any issue | **fails the entire lens** — never silently dropped |
-| Malformed / schema-violating critic output | up to *R* bounded repair retries; then lens **failed** |
+| Malformed / schema-violating critic output | schema violations (bad JSON, missing field) are repaired on the `llm.structured` call; a *lens-validation* rejection (misquoted span, invented locus, out-of-scope category) is answered in `critique._repair_until_valid` by a field patch merged mechanically by `triage.apply_repairs` (D-repair-turn-context). One budget — `critic_repair_retries` — covers both halves; spent, the lens **fails** |
 | A **lens with no completed review** in a tick | `lenses_failed > 0` ⇒ review incomplete ⇒ controller rule 2 (re-critique); budget exhausted ⇒ rule 3 `fatal` → `aborted` |
 | One critic of a lens fails while another **completes** (only possible at `review.depth ≥ 2`) | the failed review contributes nothing — no issue, no clean record; the lens is *reviewed*, so rules 2/3 do not fire. The missing depth lands on `cleared_count`, so the artifact cannot be accepted: rule 8 tops it up if clean, rule 14 replaces it if not (D-front-loaded-depth) |
 | A **dispute** cannot be adjudicated (no eligible arbiter, arbiter down/malformed, budget spent) | recorded `dismissed` with the concrete method; **the finding stands** — every non-`upheld` path is the status quo ante (D-writer-disputes) |

@@ -10,7 +10,7 @@ The system fights **three different biases**, and they have different isolation 
 
 | bias | cause | isolation unit that fixes it | priority |
 |------|-------|------------------------------|----------|
-| **Social / context drift** — sycophancy, contextual drag, anchoring, in-session self-review | **shared context**: a peer's opinion, prior reasoning, or one's own earlier output in the same window | a **fresh, blind context window** per task — with one bounded exception, the in-call repair turn (D-repair-turn-context) | **primary** |
+| **Social / context drift** — sycophancy, contextual drag, anchoring, in-session self-review | **shared context**: a peer's opinion, prior reasoning, or one's own earlier output in the same window | a **fresh, blind context window** per task — with one bounded exception, the in-call repair turn: a critic whose review fails validation is shown its own rejected field, fenced, and asked for a patch (D-repair-turn-context; [details under the threat model](#prompt-injection-threat-model-ra-010)) | **primary** |
 | **Correlated blind spots** — a model's systematic failure modes | the model itself; the same model repeats/misses the same error even in a fresh context | **model diversity** (distinct model families) | secondary |
 | **Social / content bias** — loaded framing, one-sided source selection, inherited presuppositions | **shared training-corpus and cultural priors** across every model in the roster, plus the question's own framing | **documented observable-text rules** ([bias.md](./bias.md)) enforced as lens categories, on top of decorrelated critic pools | tertiary |
 

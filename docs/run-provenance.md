@@ -108,9 +108,10 @@ jq -r 'select(.kind=="startup") | [.ts, (.unreachable_aliases | join(","))] | @t
   runs/<run_id>/events.jsonl
 ```
 
-If the missing aliases leave any lens with fewer than two eligible critics, the run terminates
-`converged_unconfirmed` rather than `accepted`, so the verdict carries that roster limitation too —
-but only the events say *which* models were missing. A reduced roster that still leaves every lens
+If the missing aliases leave any lens with fewer than two eligible critics, the run can reach at
+best `converged_unconfirmed`, never `accepted` — it may equally end `exhausted_unresolved`,
+`needs_human_review`, or `aborted` if it never comes clean — so a verdict short of `accepted`
+carries that roster limitation too, but only the events say *which* models were missing. A reduced roster that still leaves every lens
 with at least two eligible critics may still reach `accepted`.
 
 ## Keeping the stamp working

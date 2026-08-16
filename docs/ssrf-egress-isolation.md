@@ -193,4 +193,4 @@ publisher (inbound only).
 This isolates the **serve host**, which is the only place the graph's fetch path runs. The
 CI review agents review code and do not run the graph's fetch, so they are a different
 threat (agent behaviour, not SSRF) with a different control (who may trigger a job). See
-`docs/security-review.md`.
+[ci-pipeline.md](./ci-pipeline.md).

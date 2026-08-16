@@ -52,7 +52,7 @@ can cheaply act on it: the asker, before the run starts.
 ## UX flow
 
 1. User types in the existing question textarea on `/`
-   (`render_index`, `web/render.py:116-153`).
+   (`web/render.py::render_index`).
 2. Inline JS debounces: after ~1.5 s of typing pause and ≥ 20 characters, it
    `fetch()`es the refinement route with the current text (same-origin; permitted
    by the existing CSP, `connect-src 'self'`). The route is `POST /refine`; the
@@ -145,9 +145,13 @@ inside the graph.
   `enabled_transforms: set[str]` (defaults to all except
   `question_behind_the_question`). Excluded from the resume fingerprint.
   When `enabled`, the effective alias participates in startup identity
-  resolution and structured-output capability probing exactly like roster
-  aliases (`llm.resolve_identities`) — a bad or schema-incapable alias fails
-  at startup, not on the first user request.
+  resolution and structured-output capability probing through the same
+  machinery as roster aliases (`llm.resolve_identities`) — a bad or
+  schema-incapable alias fails at startup, not on the first user request.
+  One divergence since D-degraded-roster: a *roster* alias whose probe
+  cannot complete is dropped for the attempt and the run proceeds on what
+  remains, while the refine alias has no degrade path — any probe failure
+  still fails web boot closed.
 - **Service** (`web/refine.py`, new): a `RefinementService` owning the LLM
   call, validation, cache, offer records, rate limiter, and concurrency
   semaphore, constructed with injected `LLMClient`, clock, and config. The
@@ -163,7 +167,7 @@ inside the graph.
   never even described to the model.
 - **Schema and validation** (`schemas.py`): `RefinementSuggestions` — list of
   `{transform: <enum of the six>, label: str≤40, question: str≤200}` —
-  validated via `LLMClient.structured` (`llm.py:318-359`), called with a
+  validated via `LLMClient.structured`, called with a
   small `max_tokens` (~700), at most **one** repair retry, and — because the
   client is synchronous — a **provider-level request timeout**
   (`timeout_seconds` passed through to the underlying OpenAI/LiteLLM request),
