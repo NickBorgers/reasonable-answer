@@ -183,6 +183,7 @@ def _repair_until_valid(
                     ),
                     schema=IssueRepairs,
                     max_tokens=CRITIC_MAX_TOKENS,
+                    repair_retries=client.budgets.critic_repair_retries,
                 )
             except (MalformedOutputError, ValidationError) as repair_exc:
                 raise MalformedOutputError(

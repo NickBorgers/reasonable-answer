@@ -27,6 +27,8 @@ from reasonable_answer import critique as critique_mod
 from reasonable_answer import prompts, triage
 from reasonable_answer.fetch import FetchedSource
 from reasonable_answer.schemas import (
+    MAX_ISSUES_PER_LENS,
+    MAX_SPAN,
     CritiqueOutput,
     IssueRepair,
     IssueRepairs,
@@ -246,6 +248,22 @@ def test_a_critic_that_never_anchors_the_issue_still_fails_the_lens_closed():
     assert result.failed
     assert "verbatim quote" in (result.failure_reason or "")
     assert len(client.calls) == 3  # one review + the two-patch budget, not one more
+
+
+def test_the_patch_schema_call_uses_the_critic_repair_budget():
+    client = _client(issues=[_issue(INVENTED)], patches=[(0, VERBATIM)], repairs=2)
+    structured = client.structured
+    patch_budgets = []
+
+    def record_budget(*args, **kwargs):
+        if kwargs["schema"] is IssueRepairs:
+            patch_budgets.append(kwargs.get("repair_retries"))
+        return structured(*args, **kwargs)
+
+    client.structured = record_budget
+
+    assert not _run(client).failed
+    assert patch_budgets == [client.budgets.critic_repair_retries]
 
 
 def test_an_empty_patch_leaves_the_issue_rejected():
@@ -476,6 +494,23 @@ def test_an_unparseable_category_patch_is_dropped_rather_than_guessed_at(value):
 def test_an_empty_replacement_is_refused_by_the_schema_before_triage_sees_it():
     with pytest.raises(ValidationError):
         IssueRepair(issue_index=0, field="locus", replacement="")
+
+
+@pytest.mark.parametrize("issue_index", [-1, MAX_ISSUES_PER_LENS])
+def test_a_repair_issue_index_must_stay_inside_the_issue_list_bound(issue_index):
+    with pytest.raises(ValidationError):
+        IssueRepair(issue_index=issue_index, field="locus", replacement="S1.P1")
+
+
+def test_a_replacement_longer_than_the_span_bound_is_refused_by_the_schema():
+    with pytest.raises(ValidationError):
+        IssueRepair(issue_index=0, field="claim_span", replacement="x" * (MAX_SPAN + 1))
+
+
+def test_a_patch_list_longer_than_the_issue_bound_is_refused_by_the_schema():
+    repair = IssueRepair(issue_index=0, field="locus", replacement="S1.P1")
+    with pytest.raises(ValidationError):
+        IssueRepairs(repairs=[repair] * (MAX_ISSUES_PER_LENS + 1))
 
 
 @pytest.mark.parametrize("forbidden", ["severity", "rationale", "instruction"])

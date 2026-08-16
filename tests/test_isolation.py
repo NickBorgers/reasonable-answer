@@ -14,10 +14,18 @@ from conftest import make_view
 from fakes import FakeClient
 from pydantic import ValidationError
 
+from reasonable_answer import critique as critique_mod
 from reasonable_answer import prompts
+from reasonable_answer.fetch import FetchedSource
 from reasonable_answer.graph import _orchestrate_call, run
-from reasonable_answer.schemas import CritiqueOutput, OrchestratorView
-from reasonable_answer.taxonomy import LENSES
+from reasonable_answer.schemas import (
+    CritiqueOutput,
+    IssueRepair,
+    IssueRepairs,
+    OrchestratorView,
+    RawIssue,
+)
+from reasonable_answer.taxonomy import LENSES, Category, Lens, Severity
 
 CLEAN_REPORT = """# Answer
 
@@ -114,6 +122,69 @@ def test_confirmation_critique_is_byte_identical_to_a_normal_one(identities, con
     # every critique of the same artifact on the same lens used the identical prompt,
     # first pass and confirmation alike
     assert all(len(v) == 1 for v in by_lens.values()), by_lens
+
+
+def test_repair_turn_contains_only_the_bounded_critic_context():
+    question = "QUESTION BOUNDARY MARKER"
+    report = "# Answer\n\nSOURCE EXCERPT BOUNDARY MARKER.\n"
+    rejected = "REJECTED FIELD BOUNDARY MARKER"
+    source_text = "FETCHED SOURCE BOUNDARY MARKER"
+    issue = RawIssue(
+        category=Category.OMITTED_COUNTERARGUMENT,
+        severity=Severity.MAJOR,
+        locus={"section": 1, "paragraph": 1},
+        claim_span=rejected,
+        rationale="The report omits a material limitation.",
+        instruction="Add the limitation.",
+    )
+    client = FakeClient(
+        identities={"critic": "vendor-x/critic"},
+        critique_fn=lambda _alias, _user: CritiqueOutput(issues=[issue]),
+        repair_fn=lambda _alias, _user: IssueRepairs(
+            repairs=[IssueRepair(issue_index=0, field="claim_span", replacement="SOURCE EXCERPT")]
+        ),
+        report_fn=lambda _attempt: report,
+        critic_repair_retries=1,
+    )
+    source = FetchedSource(
+        url="https://example.org/source",
+        title="Boundary source",
+        text=source_text,
+        status=200,
+    )
+
+    result = critique_mod.critique_once(
+        client,
+        "critic",
+        "vendor-x/critic",
+        Lens.COMPLETENESS,
+        question,
+        report,
+        "h" * 64,
+        "vendor-a/author",
+        sources=[source],
+    )
+
+    assert not result.failed
+    assert [call.schema for call in client.calls] == ["CritiqueOutput", "IssueRepairs"]
+    repair_prompt = client.calls[1].user
+    for allowed in (
+        question,
+        "SOURCE EXCERPT BOUNDARY MARKER",
+        rejected,
+        source_text,
+        "YOUR DIMENSION: completeness",
+        "issue 0 of 1",
+    ):
+        assert allowed in repair_prompt
+    for forbidden in (
+        "vendor-a/author",
+        "tick number:",
+        "confirmation status:",
+        "other lens output:",
+        "other critic output:",
+    ):
+        assert forbidden not in repair_prompt.lower()
 
 
 def test_generator_prompt_carries_no_critique_prose(identities, config):
