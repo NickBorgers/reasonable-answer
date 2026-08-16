@@ -208,6 +208,58 @@ def test_a_definite_capability_failure_is_not_degraded_away(tmp_path):
         build_runtime(config, client=client)
 
 
+def test_a_reachable_explicit_orchestrator_is_left_alone(tmp_path):
+    """The other branch of the orchestrator ternary: dropping some *other* alias must
+    not quietly reassign a referee that was answering fine."""
+    config = _config(tmp_path, _full_roster(orchestrator="referee"))
+    client = _client()
+    client.unprobeable.add("writer-b")
+
+    rt = build_runtime(config, client=client)
+
+    assert rt.config.roster.orchestrator == "referee"
+    assert rt.config.roster.orchestrator_alias == "referee"
+
+
+def _searching_config(tmp_path) -> Config:
+    return Config(
+        proxy=ProxyConfig(),
+        roster=_full_roster(),
+        budgets=Budgets(min_ticks=2, hard_cap=5, retry_backoff_seconds=0.0),
+        runs_dir=tmp_path / "runs",
+        search={"enabled": True},
+    )
+
+
+def test_a_non_probe_startup_refusal_is_typed_the_same_way(tmp_path, monkeypatch):
+    """The wrapper's scope is every fail-closed refusal `build_runtime` can make, not
+    only the probe path. A tool-incapable writer under D-retrieval-opt-in has nothing to
+    do with a provider outage, and still defers rather than crashing — it is equally a
+    fact about the deployment. It carries the unclassified code, not the roster one."""
+    from reasonable_answer.graph import StartupRefused
+
+    monkeypatch.setenv("BRAVE_SEARCH_API_KEY", "test-token")
+    client = _client()
+    client.tool_capable["writer-a"] = False
+
+    with pytest.raises(StartupRefused) as caught:
+        build_runtime(_searching_config(tmp_path), client=client)
+    assert caught.value.code == "startup_refused"
+    assert "cannot emit tool calls" in str(caught.value)
+
+
+def test_a_missing_search_credential_defers_rather_than_crashing(tmp_path, monkeypatch):
+    """`SearchConfigError` is not a `ConfigError`, but it is raised from the same place
+    for the same reason and would otherwise have escaped the wrapper as a bare crash."""
+    from reasonable_answer.graph import StartupRefused
+
+    monkeypatch.delenv("BRAVE_SEARCH_API_KEY", raising=False)
+
+    with pytest.raises(StartupRefused) as caught:
+        build_runtime(_searching_config(tmp_path), client=_client())
+    assert caught.value.code == "startup_refused"
+
+
 def test_startup_refusals_are_typed_so_a_worker_can_tell_them_from_a_bad_run(tmp_path):
     """`build_runtime` never reads the question or the seed, so whatever it refuses it
     refuses for every queued run alike. `StartupRefused` is how the worker knows that

@@ -187,7 +187,26 @@ class StartupRefused(ConfigError):
     `max_report_chars`, a missing question — deliberately stay outside this type. They
     depend on the run's inputs, they will fail the same way on every retry, and the
     resume cap is exactly the right thing to spend on them.
+
+    `code` is a closed, content-free token from `REFUSAL_CODES`, carried separately from
+    the message because the two have different audiences and different exposure. The
+    message is for the container log, which is reachable only by someone who can already
+    read the deployment; it names the proxy URL, the provider's own wording, and which
+    aliases failed. The code is what may be persisted to `events.jsonl`, which
+    `/runs/<run_id>/audit.json` serves to anyone holding a run id (D-id-as-credential) —
+    so it must say what happened without saying anything about the deployment it
+    happened to.
     """
+
+    def __init__(self, message: str, code: str = "startup_refused") -> None:
+        super().__init__(message)
+        self.code = code
+
+
+#: Every value `StartupRefused.code` may take. Closed on purpose: a reader of the audit
+#: trail can enumerate the possibilities, and no provider- or deployment-authored string
+#: can reach it by accident.
+REFUSAL_CODES = ("startup_refused", "roster_unreachable")
 
 
 def build_runtime(
@@ -196,11 +215,20 @@ def build_runtime(
     """Startup validation, fail closed before a single token is spent (RA-015).
 
     Every fail-closed refusal in here is re-raised as `StartupRefused`, which is a
-    `ConfigError`, so callers that only ever caught the base type are unaffected.
+    `ConfigError`, so callers that only ever caught the base type are unaffected —
+    including `search.SearchConfigError`, which is not one but is raised from here for
+    the same reason, and which `ra run` consequently now reports fail-closed instead of
+    letting escape as a traceback.
     """
     try:
         return _build_runtime(config, run_id, client)
-    except ConfigError as exc:
+    except StartupRefused:
+        # Already classified — re-wrapping would flatten its code back to the default.
+        raise
+    except (ConfigError, search.SearchConfigError) as exc:
+        # `SearchConfigError` is not a `ConfigError` but is raised from the same place
+        # for the same reason — a missing Brave credential is deployment state, refused
+        # identically for every queued run — so it belongs on this side of the line too.
         raise StartupRefused(str(exc)) from exc
 
 
@@ -334,9 +362,10 @@ def _degrade_roster(
         # will actually draw from are the ones a reader needs named.
         reduced_warnings = validate_roster_health(degraded, identities)
     except ConfigError as exc:
-        raise ConfigError(
+        raise StartupRefused(
             f"fail closed: could not probe {named}, and the roster left without "
-            f"{'them' if len(dropped) > 1 else 'it'} cannot staff a run — {exc}"
+            f"{'them' if len(dropped) > 1 else 'it'} cannot staff a run — {exc}",
+            code="roster_unreachable",
         ) from exc
 
     note = (

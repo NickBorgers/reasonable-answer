@@ -269,11 +269,27 @@ class RunWorker:
             return []
 
         cap = self._config.max_resume_attempts
+        defer_cap = self._config.max_deferred_attempts
         recovered: list[str] = []
         for summary in reversed(registry.list(active=self.active())):
             if summary.status not in ("queued", "interrupted"):
                 continue
             store = RunStore(self._config.runs_dir, summary.run_id)
+            deferrals = registry.consecutive_deferrals(summary.run_id)
+            if deferrals >= defer_cap:
+                # The deployment has refused to start this run `defer_cap` boots in a
+                # row, which stopped being an outage and became a configuration nobody
+                # is coming to fix (D-deferred-not-abandoned). Landing it somewhere
+                # terminal is the honest end: a queue of runs deferring forever is a
+                # backlog that never asks anyone for help. Same shape as the resume cap
+                # below — an event, never a `final.json`, and a human can resume past it.
+                log.warning(
+                    "%s hit the startup-refusal cap (%d); abandoning it",
+                    summary.run_id,
+                    defer_cap,
+                )
+                store.event("abandoned", reason="startup refusal cap", attempts=deferrals)
+                continue
             attempt = registry.consecutive_auto_resumes(summary.run_id) + 1
             if attempt > cap:
                 # Deliberately no final.json: that file means "the graph reached a
@@ -441,8 +457,16 @@ class RunWorker:
                 # next boot picks it up again. Intake's own rejections are not
                 # `StartupRefused` — those depend on the run's inputs and still burn the
                 # cap, which is what the cap is for.
-                log.warning("%s deferred: %s", job.run_id, exc)
-                RunStore(self._config.runs_dir, job.run_id).event("deferred", reason=str(exc))
+                #
+                # `exc.code`, never `str(exc)`: the message names the proxy URL, the
+                # provider's own wording and which aliases failed, and every event is
+                # served verbatim by `/runs/<run_id>/audit.json`, which is reachable by
+                # anyone holding a run id (D-id-as-credential). The diagnosis belongs in
+                # the container log — which is what the line above is — and the audit
+                # trail gets a closed token that says what happened without describing
+                # the deployment it happened to.
+                log.warning("%s deferred (%s): %s", job.run_id, exc.code, exc)
+                RunStore(self._config.runs_dir, job.run_id).event("deferred", reason=exc.code)
                 # No notification, for the same reason `GracefulStop` sends none: nothing
                 # has happened to the run that its owner can act on or needs to know.
                 outcome = None

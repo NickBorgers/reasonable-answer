@@ -5583,19 +5583,41 @@ retries automatically" rather than the generic resumable-crash note — because 
 run and outside the user's reach, and a run parked by someone else's rate limit should not read like
 one that died.
 
-**The trade, stated plainly.** This makes deferrals unbounded: a deployment whose roster never comes
-back will re-defer its queue on every boot, forever, where the old behaviour abandoned it after three.
-That is the better failure. A deferral costs one startup validation — seconds, zero tokens, no model
-call — and it happens once per container start rather than in a loop, so the waste is bounded by how
-often the operator restarts. Discarding work owed because a provider had a bad hour is not recoverable
-by contrast, and the run is still resumable by hand from `abandoned` in any case. The cap continues to
-do its actual job, which is bounding runs that fail deterministically on their own inputs.
+**Two budgets, both capped, because they answer different questions.** The first draft of this
+decision made deferrals *unbounded*, on the reasoning that a deferral is nearly free — one startup
+validation, seconds, zero tokens, once per container start — while discarding work owed because a
+provider had a bad hour is not recoverable. The cheapness holds; the conclusion did not. QP7 requires
+every loop to be capped, and an uncapped one has a failure mode the argument missed: a permanently
+misconfigured deployment would accumulate runs that defer on every boot and never reach a terminal
+state, so nothing ever asks anyone for help. A silent backlog is worse than a terminal one precisely
+because it never surfaces. Weakening QP7 would also have needed new fetchable evidence under QP12,
+and there is none — the right answer was not a retreat but a second cap.
+
+So recovery now spends two separate budgets. `max_resume_attempts` (3) asks *is this run broken*, and
+three failures answer it. `max_deferred_attempts` (20) asks *is the deployment still coming back*,
+where an honest answer takes far longer than three restarts. A run that exhausts the second is
+`abandoned` in exactly the same shape as one that exhausts the first: an event, never a `final.json`,
+and a human can resume past it. Twenty restarts is far beyond any real outage-and-retry sequence —
+the incident above was three — while still terminating.
+
+**What the audit trail may say about it.** The `deferred` event records `StartupRefused.code`, a
+closed token (`startup_refused` / `roster_unreachable`), never `str(exc)`. The message is written to
+the container log instead, which is reachable only by someone who can already read the deployment.
+The distinction is load-bearing rather than tidy: `StartupRefused` wraps every `ConfigError`
+`build_runtime` can raise, including proxy-reachability failures whose text carries the proxy base
+URL and the upstream provider's own wording — and `/runs/<run_id>/audit.json` serves every event
+verbatim to anyone holding a run id (D-id-as-credential). Persisting the message would have made a
+run id a key to deployment state it has no business naming. A closed vocabulary also means a reader
+of the audit trail can enumerate the possibilities, which free text never allows.
 
 **What this deliberately does not do.** It does not retry inside the attempt, back off, or wait for a
 provider — the deferral ends the attempt immediately and the next boot is the retry. It does not
 change `ResumeMismatch`, which still abandons: that failure *is* about the run's inputs. It does not
-distinguish a transient outage from a permanently misconfigured roster; both defer, and both are
-visible in the log and on the run page.
+distinguish a transient outage from a permanently misconfigured roster at the moment of failure; both
+defer, and it is the deferral cap, not a classification, that eventually tells them apart. And it is
+a property of `RunWorker._drain` only: a direct `ra run` has no registry lifecycle to move, so the
+CLI catches the same `ConfigError` it always did, prints the full diagnostic, and exits `2` — the
+operator is standing right there, which is the case the deferral exists to cover when nobody is.
 
 **Invariants.** None of the six is in reach. This changes what a worker does with an exception and
 how a registry counts attempts; no model call, prompt, critic assignment, severity, or controller rule

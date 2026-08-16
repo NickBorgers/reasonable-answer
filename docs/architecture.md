@@ -192,7 +192,18 @@ Shortening the grace period wastes work; it does not corrupt anything.
   Cancelling rather than resetting keeps the cap honest: three genuine crashes still
   abandon a run even with a deferral among them. Intake's own `ConfigError`s (question or
   seed over their caps) are deliberately *not* `StartupRefused` — those are about this
-  run's inputs, and bounding them is what the cap is for.
+  run's inputs, and bounding them is what the cap is for. The event records
+  `StartupRefused.code`, a closed token, never the exception message: `audit.json` is
+  served on a run id alone (D-id-as-credential) and startup messages name the proxy URL
+  and the upstream provider's wording. The diagnostic goes to the container log.
+* **Deferrals are capped too, separately and generously** — `max_deferred_attempts`
+  (20), counted by `registry.consecutive_deferrals`. Two budgets because they answer
+  different questions: `max_resume_attempts` asks whether *this run* is broken, which
+  three failures settle, while this asks whether the *deployment* is coming back, which
+  takes far longer. A deferral is nearly free, which argues for a generous cap and not an
+  absent one — uncapped, a permanently misconfigured roster would accumulate runs that
+  defer on every boot and never reach a terminal state anyone would notice. Exhausting it
+  writes the same `abandoned` event as the resume cap.
 * **A roster change invalidates every in-flight run.** `_run_fingerprint` covers the
   roster and budgets, so a deploy that also ships a new `config/roster.yaml` will refuse
   to resume runs started under the old one. That refusal is correct — it lands them in

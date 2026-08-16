@@ -220,6 +220,7 @@ class Registry:
         counting it would let one provider outage abandon the entire backlog. Cancelling
         rather than resetting keeps the cap honest across a mixed history: three real
         crashes still abandon a run even if an outage happened to fall between two of them.
+        Deferrals are not thereby free: `consecutive_deferrals` bounds them separately.
         """
         count = 0
         for event in self.events(run_id):
@@ -228,6 +229,27 @@ class Registry:
                 count += 1
             elif kind == "deferred":
                 count = max(0, count - 1)
+            elif kind in PROGRESS_EVENTS:
+                count = 0
+        return count
+
+    def consecutive_deferrals(self, run_id: str) -> int:
+        """How many times in a row startup validation refused before this run could start.
+
+        The second of the two budgets recovery spends, and it answers a different
+        question from `consecutive_auto_resumes` (D-deferred-not-abandoned): not "is this
+        run broken" but "is the deployment still coming back". Both are capped, because
+        QP7 wants every loop capped and an uncapped deferral would let a permanently
+        misconfigured roster accumulate runs that never reach a terminal state — the
+        silent-backlog failure, which is worse than a terminal one because nobody is
+        told. Progress resets it for the same reason it resets the other: a run that got
+        somewhere is no longer waiting on the deployment.
+        """
+        count = 0
+        for event in self.events(run_id):
+            kind = event.get("kind")
+            if kind == "deferred":
+                count += 1
             elif kind in PROGRESS_EVENTS:
                 count = 0
         return count
