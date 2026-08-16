@@ -664,13 +664,12 @@ class LLMClient:
         per-call deadline (e.g. `web.refine.RefinementService`) want that deadline to
         apply to the repair attempt too, not just the first.
 
-        `validate` runs *after* the schema parses and rejects by raising `ValueError`.
-        It exists so that checks the schema cannot express — a critic's `claim_span`
-        having to be real text from the paragraph it cites — are repaired on this loop
-        rather than outside it. A caller that validates after `structured()` returns
-        has only one move left when it fails, which is to throw the whole response away
-        and ask a fresh model the identical question; that is a retry that cannot
-        converge, and it is what aborted two production runs. If the raised error
+        `validate` runs *after* the schema parses and rejects by raising `ValueError`,
+        and its rejection is repaired on this loop by re-asking for the whole schema.
+        The critic path no longer uses it: a lens rejection is answered with a *patch*
+        against a different schema, so `critique._repair_until_valid` runs that loop
+        itself, outside this call (D-repair-turn-context). The hook stays for callers
+        whose semantic check is best repaired by a full re-ask; if the raised error
         offers a `repair_hint()`, its text is handed to the model alongside the error,
         so the second attempt knows what the first got wrong.
         """

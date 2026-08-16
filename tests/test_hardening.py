@@ -2,6 +2,11 @@
 
 Each test here corresponds to a way the system could have claimed a guarantee it
 was not actually delivering.
+
+The critic repair turn's prompt-injection coverage (a rejected span or a report
+paragraph carrying a fence marker cannot escape its data block, and a patch cannot
+reach beyond the field the validator rejected — D-repair-turn-context) lives with the
+rest of that mechanism in `test_critique_repair.py`, not here.
 """
 
 from __future__ import annotations

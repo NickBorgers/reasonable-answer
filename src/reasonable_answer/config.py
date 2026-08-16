@@ -83,9 +83,12 @@ class Budgets(BaseModel):
     repair_retries: int = Field(default=1, ge=0, le=10)
     # A critic's rejections are mostly quoting slips — a `claim_span` retyped instead of
     # copied — and they are correctable once the model is shown the paragraph it should
-    # have quoted. Given a wider budget than the generic `repair_retries` because the
-    # alternative is controller rule 2, which throws away every issue in the response
-    # and spends a whole `critique_attempts` slot to ask a fresh model the same thing.
+    # have quoted and the span it actually sent. Given a wider budget than the generic
+    # `repair_retries` because the alternative is controller rule 2, which throws away
+    # every issue in the response and spends a whole `critique_attempts` slot to ask a
+    # fresh model the same thing. Covers *both* halves of a critic's repair: the review
+    # call's own schema violations, and the lens rejections answered by a patch
+    # (D-repair-turn-context).
     critic_repair_retries: int = Field(default=2, ge=0, le=10)
     call_retries: int = Field(default=2, ge=0, le=10)
     # How many times a single draft is asked for before the run dies. Attempts rotate

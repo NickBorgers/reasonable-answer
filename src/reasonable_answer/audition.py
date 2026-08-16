@@ -931,12 +931,33 @@ def prompt_hash() -> str:
     What keeps the narrower hash honest is the mode tag: `AUDITION_SOURCE_MODE` is part
     of the identity, so a sources-present mode added later cannot silently reuse a
     verdict measured without sources.
+
+    The **repair turn** is in, by that same criterion (D-repair-turn-context): the harness
+    calls the production `critique_once`, so its repair loop runs here, and whether a
+    critic recovers from a quoting slip or fails the lens closed is a measured difference
+    in `schema_failures` and in what it is finally graded on. A surface this harness
+    exercises belongs in the identity; the sources block, which it never reaches, does not.
     """
     digest = hashlib.sha256()
     digest.update(AUDITION_SOURCE_MODE.encode())
     digest.update(prompts.CRITIC_SYSTEM.encode())
     for lens in LENS_CATEGORIES:
         digest.update(prompts.critic_user(lens, "q", "body", None).encode())
+    digest.update(
+        # The production shape: `critique` passes no `instruction`, so hashing one with a
+        # value would cover a prompt this system never sends. Every surface production
+        # does send is exercised — the guidance, its fenced excerpt, the rejected value
+        # and the target-naming line.
+        prompts.critic_repair_turn(
+            user="u",
+            error="e",
+            guidance="g",
+            guidance_excerpt="x",
+            rejected="r",
+            issue_index=0,
+            issue_count=1,
+        ).encode()
+    )
     return digest.hexdigest()[:16]
 
 

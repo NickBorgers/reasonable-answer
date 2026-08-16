@@ -19,6 +19,8 @@ import hashlib
 import re
 from enum import Enum
 
+from pydantic import ValidationError
+
 from .report import Structure
 from .schemas import (
     MAX_SPAN,
@@ -87,12 +89,14 @@ class LensValidationError(ValueError):
         *,
         code: ViolationCode,
         hint: str = "",
+        hint_excerpt: str = "",
         field: str = "",
         locus: object = None,
         rejected: str = "",
     ) -> None:
         super().__init__(message)
         self._hint = hint
+        self._hint_excerpt = hint_excerpt
         self._rejected = rejected
         self.code = code
         self.field = field
@@ -107,6 +111,31 @@ class LensValidationError(ValueError):
         offer (a category out of scope for the lens is a reading failure, not a
         recoverable slip)."""
         return self._hint
+
+    def repair_excerpt(self) -> str:
+        """The source text the corrected field must be drawn from, or "" when the
+        violation has none.
+
+        Report text, therefore untrusted (RA-010). It travels separately from
+        `repair_hint()` — which is validator-authored instruction — precisely so the
+        prompt composer can fence it as data, the same way it fences `rejected_text()`;
+        a single string mixing the two is what put report text outside the data fence
+        in an earlier draft of D-repair-turn-context. Same RA-016 handling as
+        `rejected_text()`: read only by the repair path, never on `diagnostics()`,
+        never in `str(self)`.
+        """
+        return self._hint_excerpt
+
+    def rejected_text(self) -> str:
+        """The field value that failed, or "" when the violation has no quotable value.
+
+        Read only by the *repair* path, which stays inside the run (D-repair-turn-context).
+        It is deliberately not on `diagnostics()` and never in `str(self)`: those go to
+        stdout and to `LensResult.failure_reason`, which live outside the 0700 run tree
+        (RA-016). A log gets `fingerprint()`; only the model that emitted this text gets
+        the text back.
+        """
+        return self._rejected
 
     def at_issue(self, index: int, *, of: int) -> None:
         """Record which issue of how many this violation came from."""
@@ -148,14 +177,91 @@ class LensValidationError(ValueError):
         return fields
 
 
+_LOCUS_PATTERN = re.compile(r"^\s*S(\d+)\.P(\d+)\s*$", re.IGNORECASE)
+
+
+def apply_repairs(output, repairs, *, issue_index: int, field: str) -> tuple[object, list[str]]:
+    """Merge a critic's field replacements into the review it already returned.
+
+    Mechanical, and deliberately so (D-repair-turn-context): everything a repair does not
+    name is carried over byte-for-byte, so a repair cannot regress a field it was not
+    asked about. That is the whole difference from re-asking for the full `CritiqueOutput`,
+    where the model regenerates every field and an unrelated one can change — observed in
+    production run `run-a624c5099f9a` as a repair that fixed a span and broke a category.
+
+    `issue_index`/`field` name the one rejection this round is repairing, and they bound
+    what a patch may touch (RA-010): the repair turn embeds report-derived text, so a
+    response to it is only trusted to address what the validator actually rejected. An
+    entry naming any other issue or field — however parseable — is dropped, which is what
+    keeps "the channel patches the rejected field alone" a property of this function
+    rather than a hope about the model.
+
+    Returns the patched output and a bounded, content-free list of what was applied, for
+    the audit trail. A patch that cannot be parsed or does not address the named
+    rejection is **dropped, never guessed at**: the issue keeps its rejected value and
+    the next validation pass fails it again, which is the fail-closed direction.
+    """
+    patched = [issue.model_copy() for issue in output.issues]
+    applied: list[str] = []
+    for repair in repairs.repairs:
+        if repair.issue_index != issue_index or repair.field != field:
+            continue
+        if repair.issue_index >= len(patched):
+            continue
+        issue = patched[repair.issue_index]
+        value: object
+        if repair.field == "locus":
+            match = _LOCUS_PATTERN.match(repair.replacement)
+            if not match:
+                continue
+            try:
+                value = StructuralRef(section=int(match.group(1)), paragraph=int(match.group(2)))
+            except ValidationError:
+                continue
+        elif repair.field == "category":
+            try:
+                value = Category(repair.replacement.strip())
+            except ValueError:
+                continue
+            # A repair may not relabel a *material* finding into one that does not count.
+            # RC-005 is directional — escalate freely, never downgrade — and the direction
+            # that matters here is the one that can change a convergence outcome:
+            # relabelling to `stylistic` drops the finding from the counts unconditionally,
+            # whatever severity it carries, so a lens with nothing else outstanding then
+            # reads clean off the back of a repair. `counts_for_convergence` is the exact
+            # predicate triage uses to decide materiality, so the guard asks it rather than
+            # comparing floors — `clamp_to_floor` only ever raises, so a floor comparison
+            # answered "unchanged" for every relabel and guarded nothing.
+            if counts_for_convergence(issue.category, issue.severity) and not (
+                counts_for_convergence(value, issue.severity)
+            ):
+                continue
+        else:
+            value = repair.replacement
+        try:
+            # Live only for `locus`/`category`, where a `StructuralRef`/`Category` is
+            # constructed above; `model_copy` does not revalidate, so the span branches
+            # rely on `IssueRepair.replacement` carrying bounds identical to
+            # `RawIssue.claim_span`. Widening `RepairableField` to a field whose bounds
+            # differ would need that checked here rather than inherited from this except.
+            patched[repair.issue_index] = issue.model_copy(update={repair.field: value})
+        except ValidationError:
+            continue
+        applied.append(f"{repair.issue_index}:{repair.field}")
+    return output.model_copy(update={"issues": patched}), applied
+
+
 def _quote_hint(field: str, scope: str, source_text: str) -> str:
-    """Guidance for a span that did not appear in its source: hand the source back."""
-    excerpt = source_text[:REPAIR_HINT_MAX_CHARS]
+    """Guidance for a span that did not appear in its source: hand the source back.
+
+    Instruction only. The source text itself is report text — untrusted — and travels
+    separately as `hint_excerpt` so the prompt composer can fence it as data (RA-010)
+    rather than have it ride along inside validator-authored instruction."""
     truncated = " (truncated)" if len(source_text) > REPAIR_HINT_MAX_CHARS else ""
     return (
-        f"`{field}` must be copied character-for-character from the {scope} below"
-        f"{truncated}. Choose a span that appears in it verbatim, or drop the issue.\n"
-        f"---\n{excerpt}\n---"
+        f"`{field}` must be copied character-for-character from the {scope}, shown"
+        f"{truncated} between the data markers below. Choose a span that appears in it "
+        "verbatim, or drop the issue."
     )
 
 
@@ -277,6 +383,7 @@ def _require_quote(span: str, source_text: str, field: str, locus, scope: str) -
             f"{field} at {locus} contains no quotable text",
             code=ViolationCode.SPAN_EMPTY,
             hint=_quote_hint(field, scope, source_text),
+            hint_excerpt=source_text[:REPAIR_HINT_MAX_CHARS],
             field=field,
             locus=locus,
         )
@@ -285,6 +392,7 @@ def _require_quote(span: str, source_text: str, field: str, locus, scope: str) -
             f"{field} at {locus} is not a verbatim quote from the {scope}",
             code=ViolationCode.SPAN_NOT_VERBATIM,
             hint=_quote_hint(field, scope, source_text),
+            hint_excerpt=source_text[:REPAIR_HINT_MAX_CHARS],
             field=field,
             locus=locus,
             rejected=span,
