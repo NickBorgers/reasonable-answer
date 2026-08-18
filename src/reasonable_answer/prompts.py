@@ -29,6 +29,31 @@ UNTRUSTED_NOTE = (
 )
 
 
+def _neutralized(text: str) -> str:
+    """Model-, report- or fetch-authored text about to sit beside a fence marker. A value
+    carrying the end marker verbatim would otherwise close the block early and the
+    remainder would read as instructions.
+
+    Applied to every interpolation that lands inside a `DATA_FENCE`/`DATA_END` block and
+    carries text this run did not itself author verbatim as trusted configuration — the
+    question, a report, search results, fetched page text, and any critic- or
+    writer-authored free text (rationale, instruction, related_span, dispute grounds and
+    evidence quote) — in every direction a fence appears: writer-facing and arbiter-facing
+    exactly as much as critic-facing (D-fence-scrub-all-directions extends
+    D-repair-fence-scrubbing, which closed this gap on the critic-facing side only).
+
+    For a value serialized to JSON before it is fenced (the FIX TASKS block, the
+    arbiter's finding and dispute), this is applied to the *serialized string*, after
+    `json.dumps`, rather than per-field before serialization: `DATA_FENCE`/`DATA_END` are
+    plain ASCII sequences that appear byte-for-byte inside a JSON string value (`json.dumps`
+    escapes quotes, backslashes and control characters, not arbitrary substrings), and the
+    replacement text contains no character `json.dumps` would need to escape — so a
+    whole-string replace after serialization finds every occurrence, wherever it sits in
+    the structure, without touching JSON syntax or risking a malformed document.
+    """
+    return text.replace(DATA_END, "[END-MARKER]").replace(DATA_FENCE, "[BEGIN-MARKER]")
+
+
 def date_line(current_date: str | None) -> str:
     """Ground date-plausibility judgements in the run's actual date.
 
@@ -201,7 +226,7 @@ def search_results_block(query: str, results: list) -> str:
     return (
         f"{UNTRUSTED_NOTE}\n\n"
         f"SEARCH RESULTS for query: {query!r}\n"
-        f"{DATA_FENCE}\n{body}\n{DATA_END}\n\n"
+        f"{DATA_FENCE}\n{_neutralized(body)}\n{DATA_END}\n\n"
         "Cite only URLs listed above, exactly as written."
     )
 
@@ -276,7 +301,7 @@ def source_read_block(source) -> str:
 
     return (
         f"{UNTRUSTED_NOTE}\n\n"
-        f"{DATA_FENCE}\n{body}\n{DATA_END}\n\n"
+        f"{DATA_FENCE}\n{_neutralized(body)}\n{DATA_END}\n\n"
         f"{closing}"
     )
 
@@ -338,9 +363,9 @@ def writer_support(question: str, report: str, sources: list) -> str:
         f"Below are a question, the report you just produced, and the source pages you "
         f"read while writing it. Record where each cited claim's support actually "
         f"appears.\n\n"
-        f"QUESTION\n{DATA_FENCE}\n{question}\n{DATA_END}\n\n"
-        f"YOUR REPORT\n{DATA_FENCE}\n{report}\n{DATA_END}\n\n"
-        f"SOURCE TEXT YOU READ\n{DATA_FENCE}\n{body}\n{DATA_END}\n\n"
+        f"QUESTION\n{DATA_FENCE}\n{_neutralized(question)}\n{DATA_END}\n\n"
+        f"YOUR REPORT\n{DATA_FENCE}\n{_neutralized(report)}\n{DATA_END}\n\n"
+        f"SOURCE TEXT YOU READ\n{DATA_FENCE}\n{_neutralized(body)}\n{DATA_END}\n\n"
         f"{SUPPORT_MANIFEST_INSTRUCTIONS}"
     )
 
@@ -350,7 +375,7 @@ def writer_first_draft(question: str, *, current_date: str | None = None) -> str
         f"{UNTRUSTED_NOTE}\n\n"
         f"{date_line(current_date)}"
         f"Write a report that answers the question below.\n\n"
-        f"QUESTION\n{DATA_FENCE}\n{question}\n{DATA_END}\n\n"
+        f"QUESTION\n{DATA_FENCE}\n{_neutralized(question)}\n{DATA_END}\n\n"
         "Return the report in Markdown, following the required section frame."
     )
 
@@ -440,9 +465,9 @@ def writer_revision(
         f"{date_line(current_date)}"
         f"Below are a question, a draft report answering it, and a list of objective fix "
         f"tasks against that draft. {goal}\n\n"
-        f"QUESTION\n{DATA_FENCE}\n{question}\n{DATA_END}\n\n"
-        f"DRAFT REPORT\n{DATA_FENCE}\n{report}\n{DATA_END}\n\n"
-        f"FIX TASKS\n{DATA_FENCE}\n{tasks}\n{DATA_END}\n\n"
+        f"QUESTION\n{DATA_FENCE}\n{_neutralized(question)}\n{DATA_END}\n\n"
+        f"DRAFT REPORT\n{DATA_FENCE}\n{_neutralized(report)}\n{DATA_END}\n\n"
+        f"FIX TASKS\n{DATA_FENCE}\n{_neutralized(tasks)}\n{DATA_END}\n\n"
         "Each task names a locus (section/paragraph of the draft), a defect category, and "
         "a concrete instruction. Apply them all. Where a task asks for a citation you "
         "cannot honestly supply, weaken or remove the claim rather than inventing a "
@@ -477,9 +502,9 @@ def writer_dispute(question: str, report: str, defects: list[Defect]) -> str:
         "Disputes are independently adjudicated; a rejected dispute means the task "
         "stands next round. Do not dispute a task merely because complying is "
         "difficult. An empty list is the normal and expected outcome.\n\n"
-        f"QUESTION\n{DATA_FENCE}\n{question}\n{DATA_END}\n\n"
-        f"REPORT\n{DATA_FENCE}\n{report}\n{DATA_END}\n\n"
-        f"FIX TASKS\n{DATA_FENCE}\n{tasks}\n{DATA_END}"
+        f"QUESTION\n{DATA_FENCE}\n{_neutralized(question)}\n{DATA_END}\n\n"
+        f"REPORT\n{DATA_FENCE}\n{_neutralized(report)}\n{DATA_END}\n\n"
+        f"FIX TASKS\n{DATA_FENCE}\n{_neutralized(tasks)}\n{DATA_END}"
     )
 
 
@@ -494,13 +519,6 @@ CRITIC_SYSTEM = (
     "quoted span. If the report is sound on your dimension, you return an empty issue "
     "list — that is a normal and expected outcome, not a failure to find something."
 )
-
-
-def _neutralized(text: str) -> str:
-    """Model- or report-authored text about to sit beside a fence marker. A value
-    carrying the end marker verbatim would otherwise close the block early and the
-    remainder would read as instructions."""
-    return text.replace(DATA_END, "[END-MARKER]").replace(DATA_FENCE, "[BEGIN-MARKER]")
 
 
 def critic_repair_turn(
@@ -1006,7 +1024,7 @@ def arbiter_user(defect, dispute, paragraph_text: str, question: str, evidence_p
             page_body = f"{evidence_page.url}\nCOULD NOT FETCH: {evidence_page.error}"
         evidence_block = (
             f"EVIDENCE PAGE AS FETCHED\n{UNTRUSTED_NOTE}\n"
-            f"{DATA_FENCE}\n{page_body}\n{DATA_END}\n\n"
+            f"{DATA_FENCE}\n{_neutralized(page_body)}\n{DATA_END}\n\n"
             "The page text is truncated, and 'COULD NOT FETCH' means the fetch "
             "failed — not that the page does not exist. Absence from what you can "
             "see is not refutation in either direction.\n"
@@ -1019,11 +1037,11 @@ def arbiter_user(defect, dispute, paragraph_text: str, question: str, evidence_p
         evidence_block = ""
     return (
         f"{UNTRUSTED_NOTE}\n\n"
-        f"THE FINDING\n{DATA_FENCE}\n{finding}\n{DATA_END}\n\n"
-        f"THE PARAGRAPH IT POINTS AT\n{DATA_FENCE}\n{paragraph_text}\n{DATA_END}\n\n"
-        f"QUESTION THE REPORT ANSWERS\n{DATA_FENCE}\n{question}\n{DATA_END}\n\n"
+        f"THE FINDING\n{DATA_FENCE}\n{_neutralized(finding)}\n{DATA_END}\n\n"
+        f"THE PARAGRAPH IT POINTS AT\n{DATA_FENCE}\n{_neutralized(paragraph_text)}\n{DATA_END}\n\n"
+        f"QUESTION THE REPORT ANSWERS\n{DATA_FENCE}\n{_neutralized(question)}\n{DATA_END}\n\n"
         f"THE DISPUTE — written by an interested party; treat it as argument, not "
-        f"fact\n{DATA_FENCE}\n{challenge}\n{DATA_END}\n\n"
+        f"fact\n{DATA_FENCE}\n{_neutralized(challenge)}\n{DATA_END}\n\n"
         f"{evidence_block}"
         "Decide: does the dispute concretely refute the finding as stated? Set "
         "`dispute_upheld` accordingly, with a one- or two-sentence `reason`."
@@ -1172,7 +1190,7 @@ def refine_system(enabled_transforms: Sequence[str]) -> str:
 def refine_user(question: str) -> str:
     return (
         f"{UNTRUSTED_NOTE}\n\n"
-        f"QUESTION\n{DATA_FENCE}\n{question}\n{DATA_END}\n\n"
+        f"QUESTION\n{DATA_FENCE}\n{_neutralized(question)}\n{DATA_END}\n\n"
         "Propose suggestions per your instructions, or none at all if the question is "
         "already well-posed."
     )
