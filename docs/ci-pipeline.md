@@ -768,8 +768,12 @@ worst case is one wasted extra cycle, not a loop.
 
 `invariant` always runs. `docs` runs on every non-empty diff: documentation drift can
 originate on either side of the docs/code boundary, so there is no file class whose change
-provably cannot stale a document. `security` runs unless the change is docs-only, and
-always for anything under `.github/`, `src/`, or the dependency and container files.
+provably cannot stale a document. `security` runs when the change is not docs-only **and**
+touches one of its own trigger paths — anything under `.github/`, `scripts/`, `src/`,
+`config/`, or the dependency and container files (`Dockerfile`, `compose.yaml`,
+`mkdocs.yml`, `pyproject.toml`, `uv.lock`), or spec-critical markdown, which always sets
+both flags. A diff confined to `tests/` or another path outside that trigger set is not
+docs-only but still selects no security reviewer.
 `test` runs for `src/`, `tests/`, `config/`, and `pyproject.toml`. `quality` runs for
 `src/`, `config/`, every `docs/*.md` (empirical claims live there), and the review
 pipeline's own files (`.github/workflows/review-*`, `.github/scripts/review/`,
@@ -788,10 +792,12 @@ the pipeline rather than the change. A diff with no invariant surface is an `app
 says why, which is a real finding.
 
 **Spec-critical markdown is carved out of "docs-only".** `docs/DESIGN.md`,
-`isolation.md`, `convergence.md`, `architecture.md`, `decisions.md`, and every prompt file
-are normative — the docs *are* the spec, and the prompts *are* the reviewers' instructions.
-That carve-out is an allowlist, so it is wrong by default for anything new: a new
-spec-bearing or prompt-bearing document must be added to it.
+`isolation.md`, `convergence.md`, `architecture.md`, `decisions.md`, `bias.md`,
+`quality-principles.md`, `ci-pipeline.md`, `ci-setup.md`, `authentication.md`,
+`ssrf-egress-isolation.md`, `run-provenance.md`, `question-refinement.md`, `AGENTS.md` /
+`CLAUDE.md`, and every prompt file are normative — the docs *are* the spec, and the prompts
+*are* the reviewers' instructions. That carve-out is an allowlist, so it is wrong by default
+for anything new: a new spec-bearing or prompt-bearing document must be added to it.
 
 ## Permissions
 
