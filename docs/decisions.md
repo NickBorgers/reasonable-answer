@@ -5813,6 +5813,33 @@ operator is standing right there, which is the case the deferral exists to cover
 how a registry counts attempts; no model call, prompt, critic assignment, severity, or controller rule
 is touched.
 
+## D-latest-round-tiebreak — the best-scoring tie-break ships the latest round, and the spec now says so
+
+**The finding.** `docs/convergence.md` stated that a scoreboard tie between equally-scored artifacts
+was broken toward the **earliest** round. The code has broken it toward the **latest** round since
+commit 2c54713 (#14, 2026-07-20), and has been asserted that way by
+`tests/test_controller.py::test_best_scoring_index_breaks_ties_toward_the_latest_round` since the same
+commit. Neither `docs/convergence.md` nor this log was updated when the behavior changed: the spec and
+the shipped controller disagreed on which draft a non-`accepted` terminal returns, silently, for four
+weeks, until this entry.
+
+**Scope of the record.** `latest_scores_per_artifact` and the tie direction solve distinct problems.
+The former applies RC-002 to selection by keeping the scoreboard's last triage of each
+`artifact_hash`; it prevents a refuted earlier score for the same bytes from remaining eligible.
+`best_scoring_index` then receives one row per artifact, ordered by round, and its `(score, -index)`
+key deterministically selects the latest row when distinct artifacts have equal severity totals.
+Commit 2c54713 changed both operations, but its stale-triage case establishes the need for the first,
+not that refinement is monotonic or that recency is evidence of higher quality between tied artifacts
+(QP7).
+
+**The decision.** `docs/convergence.md`'s best-scoring-version rule is corrected to match the code and
+its tests: ties go to the latest round. No behavior changes; this decision retroactively records the
+shipped deterministic rule and closes the drift between spec and implementation. It does not claim
+that latest is intrinsically better or weaken QP7.
+
+**Invariants.** None of the six is in reach. This is a documentation correction only — no code, test,
+prompt, or controller rule changes.
+
 ## D-doc-accuracy-sweep — a batch of verified documentation-accuracy corrections
 
 **The finding.** A sweep of `docs/*.md`, `README.md`, `AGENTS.md`, `mkdocs.yml`, and one
@@ -5864,32 +5891,93 @@ shape the exception must take, not that it has been implemented that way on the 
 assignment, severity, or controller rule; every change is a correction of a description to match
 behavior that was already there.
 
-## D-latest-round-tiebreak — the best-scoring tie-break ships the latest round, and the spec now says so
+## D-brave-egress-hardening — the Brave search request carries the fetch user agent and a bounded read
 
-**The finding.** `docs/convergence.md` stated that a scoreboard tie between equally-scored artifacts
-was broken toward the **earliest** round. The code has broken it toward the **latest** round since
-commit 2c54713 (#14, 2026-07-20), and has been asserted that way by
-`tests/test_controller.py::test_best_scoring_index_breaks_ties_toward_the_latest_round` since the same
-commit. Neither `docs/convergence.md` nor this log was updated when the behavior changed: the spec and
-the shipped controller disagreed on which draft a non-`accepted` terminal returns, silently, for four
-weeks, until this entry.
+**The finding.** `BraveSearch.search` (`search.py`) built its `urllib.request.Request` with no
+`User-Agent` header at all, so the request egressed under urllib's Python-version-dependent default
+— directly contradicting docs/deployment-profile.md's "the outbound user agent is fixed" and
+AGENTS.md's "the outbound user agent is fixed… tests assert it". No test anywhere asserted the
+claim for this path; the one `User-Agent` literal in the test suite (`tests/test_fetch.py`'s
+`_CREDENTIALLED` fixture) was unrelated canned data that did not even match `fetch.USER_AGENT`'s
+real value, so it could not have caught the gap. The same request also read its response with a bare
+`resp.read()` — no byte cap — while the neighbouring fetch-mediated paths named here
+(`fetch.SourceFetcher`'s `max_bytes`, `resolve/base.py`'s `json_post`) bound what they will read from
+an endpoint that answers with more than expected.
 
-**Scope of the record.** `latest_scores_per_artifact` and the tie direction solve distinct problems.
-The former applies RC-002 to selection by keeping the scoreboard's last triage of each
-`artifact_hash`; it prevents a refuted earlier score for the same bytes from remaining eligible.
-`best_scoring_index` then receives one row per artifact, ordered by round, and its `(score, -index)`
-key deterministically selects the latest row when distinct artifacts have equal severity totals.
-Commit 2c54713 changed both operations, but its stale-triage case establishes the need for the first,
-not that refinement is monotonic or that recency is evidence of higher quality between tied artifacts
-(QP7).
+**The decision.** `search.py` imports `fetch.USER_AGENT` rather than duplicating the string, and
+sends it on the Brave request exactly as `resolve/base.py`'s `json_post` does. The read is bounded
+to a new `search.MAX_RESPONSE_BYTES` (500,000 — double `resolve/base.py`'s `MAX_RESPONSE_BYTES`,
+because Brave's JSON envelope carries fields this module never parses — `meta_url` objects,
+thumbnails, alternate result types — alongside the `web.results` `_parse_results` actually reads),
+read one byte past the cap in the same style as `fetch._request`, and refused with a `SearchError`
+when the body is oversized rather than silently truncated and parsed. `tests/test_search.py` pins
+three things directly: the request headers carry exactly `fetch.USER_AGENT`, a response at the cap
+parses normally, and a response one byte past it is refused — plus a bare assertion on
+`fetch.USER_AGENT`'s literal value, so a future change to the constant trips a test instead of
+silently drifting the two egress paths apart again. `tests/test_fetch.py`'s stale fixture now reads
+`USER_AGENT` from `fetch` rather than a copy of it, so it can never again go stale relative to what
+ships.
 
-**The decision.** `docs/convergence.md`'s best-scoring-version rule is corrected to match the code and
-its tests: ties go to the latest round. No behavior changes; this decision retroactively records the
-shipped deterministic rule and closes the drift between spec and implementation. It does not claim
-that latest is intrinsically better or weaken QP7.
+The response cap is the anti-pathological retrieval bound permitted by QP10 and
+D-unbounded-evidence, not a spend control. Brave's JSON envelope is untrusted endpoint output, so
+the transport must not accept an arbitrarily large body; reading one byte past the cap makes the
+bound explicit and refuses the search with `SearchError` rather than silently truncating a response
+and presenting missing results as evidence absence.
 
-**Invariants.** None of the six is in reach. This is a documentation correction only — no code, test,
-prompt, or controller rule changes.
+**What was deliberately left alone.** The Brave request's opener (`_no_redirect_opener`, i.e.
+`fetch._http_only_opener(0)`) still names no `allowed_hosts`, unlike `json_post`'s paid-tier POSTs.
+This is not an omission this decision closes: at `max_redirects=0`, `fetch._BoundedRedirects`
+raises on the very first redirect attempt before it ever reaches the host check, so a host
+allowlist on this particular request would guard nothing a redirect cap of zero does not already
+guard. docs/deployment-profile.md is corrected to say this rather than to claim a host allowlist
+that was never true for this path.
+
+**Invariants.** None of the six is in reach. This changes a request header and adds a byte cap to
+one egress path; no model call, prompt, critic assignment, severity, or controller rule is touched.
+
+## D-spec-critical-coverage — the classify allowlist must name every normative page, not just the ones present when it was written
+
+**The finding.** `.github/actions/review-classify/action.yml`'s `is_spec_critical` allowlist is
+what keeps a docs-only PR from skipping the `security`, `test`, and `quality` reviewers when the
+"docs" it touches are actually the specification. The allowlist is enumerated by hand, and three
+pages that self-declare or otherwise function as normative had never been added to it:
+`docs/ssrf-egress-isolation.md` (the infrastructure half of the fetch boundary `fetch.py` itself
+says it is not — [ssrf-egress-isolation.md](./ssrf-egress-isolation.md)), `docs/run-provenance.md`
+(the contract for which build produced a run, load-bearing for comparing runs across a change —
+[run-provenance.md](./run-provenance.md)), and `docs/question-refinement.md`, which states outright
+at its own tail that "the design above is normative." A PR that touched only one of these three
+classified as docs-only: `invariant`, `docs`, and `quality` still ran, but `security` and `test`
+were skipped outright. For the SSRF boundary document specifically, that is the concrete exposure —
+the page governing an egress control gets no `security` review to catch a boundary weakened in
+prose.
+
+`docs/deployment-profile.md` was checked and correctly excluded: it says of itself that it is
+"descriptive, not normative" and that "nothing here licenses changing" the committed defaults it
+records.
+
+**The decision.** Add the three pages to `is_spec_critical`, in the file's existing per-line
+style. No change to the allowlist's shape — it stays a hand-maintained allowlist, wrong by default
+for anything new, exactly as `docs/ci-pipeline.md` and `AGENTS.md` already say. What changes here
+is only that it now agrees with the document map in `docs/DESIGN.md` and the `nav:` in
+`mkdocs.yml`, both of which already listed all three pages; only the classify action's allowlist
+had drifted.
+
+`docs/ci-pipeline.md`'s "Role selection" section is corrected alongside: its enumeration of the
+spec-critical set named only five of the thirteen `docs/` pages the allowlist now carries, and its
+claim that "`security` runs unless the change is docs-only" was never the whole rule — the code
+also requires the diff to touch one of `security`'s own trigger paths, so a `tests/`-only diff is
+not docs-only and still selects no security reviewer. The prose now states the conjunction.
+
+Two stale identifier mentions are fixed alongside, in scope because they are inside the reviewer
+prompts this PR was already required to touch under AGENTS.md's "unless the task explicitly
+asks" carve-out: `.github/scripts/review/prompts/invariant.md` row 12 asked a PR to add "a new
+`D<n>`" to `docs/decisions.md`, and `docs/quality-principles.md` compared `QP<n>` ids to `D<n>`
+ids — both predate D-decision-slugs and now read `D-<slug>`, matching every other reference to the
+scheme.
+
+**Invariants.** None of the six is in reach; this changes only which reviewer roles a diff
+selects and corrects prose describing that selection. No model call, prompt content sent to a
+model, critic assignment, severity, or controller rule is touched.
 
 ## Open items for a future round
 

@@ -15,7 +15,7 @@ import pytest
 from fakes import http_stub
 
 from reasonable_answer import prompts
-from reasonable_answer.fetch import FetchedSource, SourceFetcher, extract_source_urls
+from reasonable_answer.fetch import USER_AGENT, FetchedSource, SourceFetcher, extract_source_urls
 from reasonable_answer.taxonomy import Lens
 
 # ------------------------------------------------------------------- extraction
@@ -482,7 +482,7 @@ def _transport(monkeypatch, *responses):
 #: A provider call's shape: identification plus two credentials under names nobody
 #: could have enumerated in advance.
 _CREDENTIALLED = {
-    "User-Agent": "reasonable-answer/1.0",
+    "User-Agent": USER_AGENT,
     "Authorization": "Bearer sk-live-secret",
     "X-API-Key": "sk-live-secret",
 }
