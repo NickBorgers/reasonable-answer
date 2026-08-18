@@ -70,8 +70,9 @@ uv run ra export <run_id> [--format md|html] [-o out.html]
 ## Web interface
 
 `make serve`, or `ra serve --host 0.0.0.0 --port 8080` in a container. Submit a question, watch
-the loop converge live, and browse your own past runs — the index is scoped to whoever is asking,
-though reading a run is public: no sign-in is required, holding the run id is enough.
+the loop converge live, and browse your own past runs — the index is scoped to whoever is asking.
+A served run with an `owner.txt` record is public to read: no sign-in is required, and holding its
+run id is enough. Ownerless run directories are not exposed by the web interface.
 
 The run page streams the pipeline's own event log over server-sent events, so you see each round
 as it happens — which model wrote the draft, which critic drew which lens, what each one found,
@@ -88,10 +89,11 @@ round 2   writer deepseek-v4-flash
 **Callers are identified by a header, and it is trusted rather than verified.** It comes from
 whatever fronts the app — `Cf-Access-Authenticated-User-Email` from Cloudflare Access, or the
 `Tailscale-User-*` headers from `tailscale serve` — and a request carrying neither is refused on
-every route but `/healthz` and the `GET`s under `/runs/`, which are public: holding a run id is
-the credential for reading that run, so a finished report can be shared with anyone (D-id-as-credential). Every
-write still needs an identity. Runs belong to whoever submitted them: your index shows only your
-own runs, and only its owner can resume a run.
+every route but `/healthz` and the `GET`s under `/runs/`, which are public for served runs carrying
+an `owner.txt` record: holding a run id is the credential for reading that run, so a finished report
+can be shared with anyone (D-id-as-credential). Ownerless run directories return 404. Every write
+still needs an identity. Runs belong to whoever submitted them: your index shows only your own runs,
+and only its owner can resume a run.
 
 Because the header is not verified, anyone who can reach the port directly can claim to be any
 user. `ra serve` binds `127.0.0.1` by default and `compose.yaml` publishes only to loopback for

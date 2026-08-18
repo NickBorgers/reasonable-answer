@@ -310,15 +310,13 @@ disputes:
 # On evidence it is now at position 2 of a two-model pool, and it is measured, not
 # unmeasured: see the `evidence:` pool comment above, which grades it `marginal`
 # (0.50 sensitivity / 0.12 invented material issues per sound control).
-# At `review.depth: 2` a two-model pool means both positions read every draft whenever
-# neither is this round's author, so gemma4 is no longer confirmation-only the way a
-# genuinely unmeasured position-3 slot would be; it is reached on the ordinary first
-# pass in the common case. The residual is author exclusion shrinking the pool to one:
-# when this round's writer is glm-5.2, gemma4 reviews evidence alone, and a false clean
-# from a lone marginal critic still only reaches `converged_unconfirmed` (roster_limited),
-# never a strong `accepted` — rule 8's confirmation top-up is what would need a second
-# eligible family to promote it further, and there is none. Re-audition the pair before
-# raising `review.depth` above 2.
+# At `review.depth: 2` a two-model pool means both positions read every draft. Neither
+# evidence critic is in `writers:`, so author exclusion never shrinks this pool: both
+# families stay eligible every round, gemma4 is reached on the ordinary first pass, and
+# a strong `accepted` remains reachable. The residual is critic quality, not
+# `roster_limited`: both critics are marginal, so a first-pass miss by glm-5.2 followed
+# by a clean from gemma4 can terminate the run as `accepted` on two marginal opinions.
+# Re-audition the pair before raising `review.depth` above 2.
 # Measuring is opt-in by being its own command (`ra audition`) — there is no `enabled`
 # flag here. Everything below only shapes what that command measures and what the two
 # cache readers, `ra doctor` and the `enforce` gate, make of the result.

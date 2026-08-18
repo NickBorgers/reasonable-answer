@@ -556,7 +556,7 @@ and keep their gates (RI-001, RH-001).
 | `converged_unconfirmed` | every lens at least weakly-cleared, but ≥1 lens is `roster_limited` (only one eligible non-author model) — the record names the under-reviewed dimension |
 | `exhausted_unresolved` | cap/stagnation reached with only non-blocking issues, or clean-but-unconfirmed at cap; returned **with annotations** |
 | `needs_human_review` | cap/stagnation/cycle reached with **blocking** issues present |
-| `aborted` | fatal (a model unavailable **mid-run**, repeated malformed/incomplete review, empty writer pool, or a lens with zero eligible non-author critics; a provider unreachable at *startup* degrades the roster or defers the attempt instead — D-degraded-roster) |
+| `aborted` | either a fatal writer failure (empty writer pool or every eligible writer attempt failed), or a failed-lens path that reaches rule 3 after rule 2 cannot recover it (including zero eligible non-author critics or exhausted malformed/incomplete-review repairs); a provider unreachable at *startup* degrades the roster or defers the attempt instead — D-degraded-roster |
 
 A known-unacceptable artifact is **never** labeled `accepted` or `converged_unconfirmed`.
 
