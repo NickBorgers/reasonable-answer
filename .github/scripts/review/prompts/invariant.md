@@ -48,8 +48,8 @@ If the diff changes the **behavior** of any invariant in rows 1–11 and does **
 
 - update the corresponding normative statement in `docs/DESIGN.md` / `docs/isolation.md` /
   `docs/convergence.md` / `docs/architecture.md`, **and**
-- add or amend an entry in `docs/decisions.md` (a new `D<n>` for a deliberate design change, or an
-  amended finding row when a prior finding's resolution is being revised),
+- add or amend an entry in `docs/decisions.md` (a new `D-<slug>` for a deliberate design change, or
+  an amended finding row when a prior finding's resolution is being revised),
 
 …that is **blocking**, severity `high`, `decision_ref` = the ID of the invariant the diff moved.
 Stable id: `inv-docs-drift-<n>`.
