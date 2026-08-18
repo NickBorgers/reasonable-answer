@@ -5813,18 +5813,18 @@ operator is standing right there, which is the case the deferral exists to cover
 how a registry counts attempts; no model call, prompt, critic assignment, severity, or controller rule
 is touched.
 
-## D-brave-egress-hardening — the Brave search request carries the fixed user agent and a bounded read, like every other egress path
+## D-brave-egress-hardening — the Brave search request carries the fetch user agent and a bounded read
 
 **The finding.** `BraveSearch.search` (`search.py`) built its `urllib.request.Request` with no
 `User-Agent` header at all, so the request egressed under urllib's Python-version-dependent default
 — directly contradicting docs/deployment-profile.md's "the outbound user agent is fixed" and
 AGENTS.md's "the outbound user agent is fixed… tests assert it". No test anywhere asserted the
-claim; the one `User-Agent` literal in the test suite (`tests/test_fetch.py`'s `_CREDENTIALLED`
-fixture) was unrelated canned data that did not even match `fetch.USER_AGENT`'s real value, so it
-could not have caught the gap. The same request also read its response with a bare `resp.read()` —
-no byte cap — while every other egress path in the package (`fetch.SourceFetcher`'s `max_bytes`,
-`resolve/base.py`'s `json_post`) bounds what it will read from an endpoint that answers with more
-than expected.
+claim for this path; the one `User-Agent` literal in the test suite (`tests/test_fetch.py`'s
+`_CREDENTIALLED` fixture) was unrelated canned data that did not even match `fetch.USER_AGENT`'s
+real value, so it could not have caught the gap. The same request also read its response with a bare
+`resp.read()` — no byte cap — while the neighbouring fetch-mediated paths named here
+(`fetch.SourceFetcher`'s `max_bytes`, `resolve/base.py`'s `json_post`) bound what they will read from
+an endpoint that answers with more than expected.
 
 **The decision.** `search.py` imports `fetch.USER_AGENT` rather than duplicating the string, and
 sends it on the Brave request exactly as `resolve/base.py`'s `json_post` does. The read is bounded
@@ -5839,6 +5839,12 @@ parses normally, and a response one byte past it is refused — plus a bare asse
 silently drifting the two egress paths apart again. `tests/test_fetch.py`'s stale fixture now reads
 `USER_AGENT` from `fetch` rather than a copy of it, so it can never again go stale relative to what
 ships.
+
+The response cap is the anti-pathological retrieval bound permitted by QP10 and
+D-unbounded-evidence, not a spend control. Brave's JSON envelope is untrusted endpoint output, so
+the transport must not accept an arbitrarily large body; reading one byte past the cap makes the
+bound explicit and refuses the search with `SearchError` rather than silently truncating a response
+and presenting missing results as evidence absence.
 
 **What was deliberately left alone.** The Brave request's opener (`_no_redirect_opener`, i.e.
 `fetch._http_only_opener(0)`) still names no `allowed_hosts`, unlike `json_post`'s paid-tier POSTs.

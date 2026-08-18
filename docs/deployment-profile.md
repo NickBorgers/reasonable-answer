@@ -73,8 +73,9 @@ redirects, and an allowlist that strips `Authorization` and friends if a redirec
 A single allowed host is named for the paid-tier POSTs (`resolve/base.py`'s `json_post`, used by
 CORE and Firecrawl); the Brave GET (`search.py`) enforces the same zero-redirect cap but names no
 host allowlist, because at `max_redirects=0` no hop is ever followed for it to guard. The outbound
-user agent is fixed and is not configurable — every credentialled and anonymous request alike sends
-`fetch.USER_AGENT` (D-brave-egress-hardening).
+user agent is fixed and is not configurable on these fetch-mediated paths: the Brave GET, the
+paid-tier POSTs, and anonymous page fetches all send `fetch.USER_AGENT`
+(D-brave-egress-hardening).
 
 One outbound destination is not a provider and not configured by a credential: with `push.enabled`
 the server POSTs a notification to the push service named by each subscription (D-stop-notification). The default
