@@ -28,7 +28,7 @@ procedure](#3-refreshing-the-evidence-base) gives the literature itself one.
 ## 2. The principles
 
 A principle row is in play when a diff touches its surface. `QP<n>` ids are citable in
-review findings the way `D<n>` ids are.
+review findings the way `D-<slug>` ids are.
 
 | # | Principle | Surface | Evidence |
 |---|-----------|---------|----------|
