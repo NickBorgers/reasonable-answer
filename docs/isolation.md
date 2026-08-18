@@ -10,7 +10,7 @@ The system fights **three different biases**, and they have different isolation 
 
 | bias | cause | isolation unit that fixes it | priority |
 |------|-------|------------------------------|----------|
-| **Social / context drift** — sycophancy, contextual drag, anchoring, in-session self-review | **shared context**: a peer's opinion, prior reasoning, or one's own earlier output in the same window | a **fresh, blind context window** per task — with one bounded exception, the in-call repair turn: a critic whose review fails validation is shown its own rejected field, fenced, and asked for a patch (D-repair-turn-context; [details under the threat model](#prompt-injection-threat-model-ra-010)) | **primary** |
+| **Social / context drift** — sycophancy, contextual drag, anchoring, in-session self-review | **shared context**: a peer's opinion, prior reasoning, or one's own earlier output in the same window | a **fresh, blind context window** per task — with one bounded exception, the in-call repair turn, which covers both halves of a critic's repair budget: a lens rejection is shown its own rejected field, fenced, and asked for a patch, while a schema rejection is shown a fenced, marker-scrubbed, content-free `loc`/`msg`/`type` summary of what failed — either way attributed to the validator, never as "your previous response" (D-repair-turn-context, D-validator-error-hygiene; [details under the threat model](#prompt-injection-threat-model-ra-010)) | **primary** |
 | **Correlated blind spots** — a model's systematic failure modes | the model itself; the same model repeats/misses the same error even in a fresh context | **model diversity** (distinct model families) | secondary |
 | **Social / content bias** — loaded framing, one-sided source selection, inherited presuppositions | **shared training-corpus and cultural priors** across every model in the roster, plus the question's own framing | **documented observable-text rules** ([bias.md](./bias.md)) enforced as lens categories, on top of decorrelated critic pools | tertiary |
 
@@ -332,7 +332,16 @@ Mitigations, by boundary:
   must be corrected from** are each fenced as untrusted data and marker-scrubbed, and the
   value is attributed to the validator, never to the critic; `triage.apply_repairs` drops
   any patch entry naming an issue or field other than the one the validator rejected, so
-  the channel's narrowness is enforced rather than requested (D-repair-turn-context). See
+  the channel's narrowness is enforced rather than requested (D-repair-turn-context). The
+  schema-repair half of the same budget — a rejection before lens validation ever runs, e.g.
+  malformed JSON or a field pydantic rejects outright — keeps the same two guarantees rather
+  than a weaker version of them: the re-ask is fenced, marker-scrubbed, and reads "the
+  schema validator rejected the output", never "your previous response". What it fences
+  is a bounded `loc`/`msg`/`type` summary
+  (`errors(include_input=False, include_url=False)`) whose string locations are limited
+  to fields declared by the schema; model-authored extra keys become a fixed placeholder.
+  It never uses a pydantic `ValidationError`'s default rendering, which echoes the
+  rejected value itself (D-validator-error-hygiene). See
   the exception noted in the drift table above, which this is the whole of. The original question,
   report and fetched-source block reused by that repair turn are marker-scrubbed at their initial
   construction too; protecting only the newly appended rejected value and excerpt would leave an
