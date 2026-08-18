@@ -15,7 +15,9 @@ all leave the defect standing. Suppression is earned only by an explicit
 
 from __future__ import annotations
 
-from . import fetch, prompts
+from collections.abc import Collection
+
+from . import prompts
 from .config import Roster
 from .llm import LLMClient
 from .schemas import AdjudicationRecord, ArbiterVerdict, Defect, Dispute, WriterDisputes
@@ -59,22 +61,29 @@ def validate_disputes(
 
 
 def adjudicate_mechanical(
-    dispute: Dispute, defect: Defect, report_text: str, fetcher
+    dispute: Dispute, defect: Defect, cited_sources: Collection[str], fetcher
 ) -> bool | None:
     """True = dispute upheld on the page's own text. None = inconclusive (falls
     through to the arbiter). NEVER False: page text is truncated and fetches
     fail for transient reasons, so absence is not refutation.
 
-    Upheld requires all of: a mechanical category, an `evidence_url` the report
-    already cites (a writer cannot point at an arbitrary corroborating page — the
-    critic saw, or could have seen, this same source), a successful fetch of that
-    URL's **own** body, and the evidence quote present verbatim in the fetched text."""
+    Upheld requires all of: a mechanical category, an `evidence_url` in
+    `cited_sources`, a successful fetch of that URL's **own** body, and the evidence
+    quote present verbatim in the fetched text.
+
+    `cited_sources` must be the citation set of the draft the finding was RAISED
+    against — the one the raising critics actually reviewed — never the disputing
+    writer's own revision (D-dispute-evidence-prior-draft). A writer that could add a
+    URL to its own revision's '## Sources' and then cite that same URL as evidence
+    would be certifying its own dispute at a page no critic ever had access to; gating
+    on the prior draft's citations instead means a writer can only point at a source
+    the critic saw, or could have seen. The caller (`graph._adjudicate`) captures that
+    set at triage time, before the next `generate` call can add to it."""
     if fetcher is None or defect.category not in MECHANICAL_CATEGORIES:
         return None
     if not dispute.evidence_url or not dispute.evidence_quote:
         return None
-    cited = fetch.extract_source_urls(report_text)
-    if dispute.evidence_url not in cited:
+    if dispute.evidence_url not in cited_sources:
         return None
     page = fetcher.fetch(dispute.evidence_url)
     # `ok` already excludes a metadata-only or paywalled result, because a non-FULL_TEXT

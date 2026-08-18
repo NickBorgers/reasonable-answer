@@ -477,15 +477,17 @@ transition is byte-identical to a build without the feature, the D-retrieval-opt
    writer collects `WriterDisputes`: per dispute a `task_index`, bounded `grounds`, and optional
    `evidence_url` + `evidence_quote`. Any failure degrades to "no disputes", never fatal.
 2. **Adjudication**, in a new `adjudicate` node on the one-way generate → critique edge,
-   mechanical-first: a citation-category dispute whose `evidence_url` the report **already
-   cites**, whose fetch succeeds, and whose `evidence_quote` appears verbatim (triage
-   normalization) in the page text is **upheld with no model judgment**. Everything else goes to
+   mechanical-first: a citation-category dispute whose `evidence_url` is in the
+   `defect_citation_scope` captured at triage from the draft the finding was raised against, whose
+   fetch succeeds, and whose `evidence_quote` appears verbatim (triage normalization) in the page
+   text is **upheld with no model judgment**. Everything else goes to
    an **arbiter**: a fresh-context model whose resolved identity is neither the disputing writer
    nor any critic that raised the finding (raiser identities come from audit-side
    `defect_provenance` state and are consumed by eligibility code only — never a prompt). The
    arbiter sees the depersonalized finding, the one paragraph it points at, the question, the
    fenced dispute (labelled an interested party's argument), and the fetched page when the
-   evidence URL is one the report cites. It never sees the report body, an identity, the lens,
+   evidence URL is in that prior-draft `defect_citation_scope`, never merely because the disputing
+   writer added it to the current revision. It never sees the report body, an identity, the lens,
    or the round, and its tie-break is explicit: **uncertainty resolves in favor of the finding**.
 3. **The adjudicated-facts registry**, in checkpointed state, keyed `(category, normalized
    claim_span)` — the triage dedup key minus locus, since paragraphs shift between revisions
@@ -5928,56 +5930,123 @@ scheme.
 selects and corrects prose describing that selection. No model call, prompt content sent to a
 model, critic assignment, severity, or controller rule is touched.
 
-## D-doc-accuracy-sweep — a batch of verified documentation-accuracy corrections
+## D-validator-error-hygiene — the schema-repair re-ask is validator-attributed and content-free too
 
-**The finding.** A sweep of `docs/*.md`, `README.md`, `AGENTS.md`, `mkdocs.yml`, and one
-`config/roster.yaml` comment turned up 21 places where the prose no longer matched the code it
-describes — most from drift after later PRs (D-front-loaded-depth, D-repair-turn-context,
-D-decision-slugs, D-completeness-pool-noise, and the schema/nesting shape `ControllerInput` had
-already taken), a few pre-existing. Each item below was independently re-checked against the cited
-source before being corrected; none of them is a behavior change — the code was already right, only
-the description of it was not.
+**The finding.** D-repair-turn-context's "RA-016 is unchanged" paragraph audits `rejected_text()` and
+`repair_excerpt()` — the lens-repair half of a critic's repair budget — and is accurate about that
+half. It does not audit the other half of the same budget: `LLMClient.structured`'s own schema-repair
+loop, which runs before lens validation ever sees an output and handles the `CritiqueOutput`/
+`IssueRepairs` level — malformed JSON, a missing field, an enum value out of range. There,
+`last_err = str(exc)[:800]` took a pydantic `ValidationError`'s default rendering verbatim, and that
+rendering echoes `input_value=…` — a fragment of the very field the validator rejected, which for a
+critic's structured output is a quoted report span. The same string was re-prompted with "Your
+previous response was rejected by the schema validator" — the critic-attribution wording
+D-repair-turn-context specifically chose *not* to use for the lens half ("a candidate issue was
+rejected", never "your previous response") — and, on repair exhaustion, was carried unchanged into
+`MalformedOutputError`, which `critique.critique_once` truncates into `LensResult.failure_reason` and
+logs at WARNING, both outside the 0700 `runs/<id>/` tree (RA-016). D-repair-diagnostic-keying had
+already flagged the shape of this gap without closing it: "this decision does not generalize [keeping
+the rejected span out of `str(exc)`] to arbitrary validator messages; RA-016 relies on the triage
+error's message construction" — true only for `triage.LensValidationError`, never claimed for
+pydantic's own `ValidationError`. A second, smaller leak shared the same branch: `_extract_json`'s
+failure message quoted up to 200 characters of the unparseable response, which for a critic is
+report-adjacent model output too.
 
-| # | Location | Was | Now |
-|---|---|---|---|
-| 1 | `docs/run-provenance.md` | image builds record `dirty: null` | image builds record `dirty: false`; `null` is only a `git` build whose `git status` failed |
-| 2 | `docs/convergence.md` `ControllerInput` block | listed `roster_identities`/`clean_records` fields; flattened `polish_used`/`polish_cap` | matches `schemas.py`: nested `view: OrchestratorView`, pre-derived `lens_status: [LensStatus]`, documented `fatal_reason` |
-| 3 | `docs/convergence.md` rule-1 row | attributed a lens-with-no-eligible-critic and repeated-malformed reviews to `fatal` | only writer-pool-empty and all-writer-attempts-failed are `fatal`; the other two surface as failed `LensResult`s through rules 2→3 |
-| 4 | `docs/convergence.md` rule-8 row | "re-critique a toppable lens" (singular) | re-critiques *every* toppable lens per confirmation attempt |
-| 5 | `docs/convergence.md` stagnation definition + rule-2 cell | "K consecutive ticks"; "partial counts never used" | counts every completed triage pass, including a rule-2 re-critique of the same draft; partial passes do update `prev_material`/`prev_signature`/`stagnation_count`/scoreboard, they just never reach a stop decision because rule 2 precedes rules 4–14 |
-| 6 | `docs/convergence.md` severity-floor note | called `SEVERITY_FLOOR` "config-tunable" | it is a hardcoded constant (`taxonomy.py`) with no config surface |
-| 7 | `docs/convergence.md` view-block comment | "`lens_cleared`: distinct non-author models" | distinct non-author model *families* (matches the prose a few paragraphs later) |
-| 8 | `docs/convergence.md` clean-record reset | "any new generation IS a new `artifact_hash`" | the reset is unconditional on every generation, including byte-identical regeneration (RC-002) |
-| 9 | `docs/isolation.md` arbiter (`Ano`) row | "never sees the lens" stated without qualification | added the caveat that `defect.category` is in the prompt and, for every category but the shared `stylistic` one, names exactly one lens |
-| 10 | `README.md` source tree | omitted `build.py`, `reading.py`, `refine_audition.py`, `shutdown.py`, `support.py`, `textconv.py`, `resolve/` | added, each with a one-line role |
-| 11 | `README.md` output tree | omitted `support/` and `refinements/`; said only `reports/`/`critiques/` are sensitive | added both dirs; corrected to all five `store.CONTENT_DIRS` entries |
-| 12 | `README.md` web-interface section | "anyone signed in can open a run they hold the id for" | reading a run needs no sign-in at all; the run id alone is the credential (matches the auth section a few paragraphs below) |
-| 13 | `docs/architecture.md` lens diagram | omitted `loaded_language`, `one_sided_sourcing`, `unexamined_presupposition`; didn't note `stylistic` spans all three lenses | added the missing categories and the `stylistic` note |
-| 14 | `docs/index.md` | omitted `quality-principles.md`, `deployment-profile.md`, `run-provenance.md`, `model-evaluation.md`, `model-evaluation-record-2026-08-10.md` | added, in the page's existing style, matching `mkdocs.yml`'s nav grouping |
-| 15 | `mkdocs.yml` comments (×2) | called `decisions.md` "990 lines" | ~6,000 lines |
-| 16 | `docs/DESIGN.md` document map | "how each of the 20 findings was resolved" (round-1-only count) | reworded without a brittle count; names the `RA-`/`RB-`/`RC-`/`RG-` prefixes and "every round since" |
-| 17 | `AGENTS.md` | claimed `test_reviewer_prompt_ranges.py` is the repo-wide slug guarantee; called the resolve-issue invariant list "the six invariants CI checks" | credited `test_citation_resolution.py` as the repo-wide guarantee (the other test covers 3 prompts); clarified the six are a subset of the eleven `invariant.md` audits (plus a twelfth drift row) |
-| 18 | `docs/quality-principles.md` | called the evidence-base marker line "machine-checked" | it is checked by the `quality` CI reviewer (an LLM following `prompts/quality.md`), not a deterministic script |
-| 19 | `docs/question-refinement.md` implementation map, item 8 | described bumping a numeric valid-ID allowlist in `invariant.md` as current practice | reworded as history from before D-decision-slugs, with a pointer to the current slug-membership mechanism |
-| 20 | `config/roster.yaml` audition NOTE | said `gemma4` on evidence is "at position 3 and still unmeasured" | the pool is two entries, `gemma4` is at position 2 and measured (`marginal`); neither evidence critic is a writer, so author exclusion never shrinks this pool and strong `accepted` remains reachable |
-| 21 | `docs/ssrf-egress-isolation.md` + `docs/deployment-profile.md` | the egress contract's "must reach the LLM proxy" and "must not reach... the tailnet" read as flatly contradictory once the proxy sits at a `.ts.net` address | stated the LLM proxy as the one deliberate, pinned exception to the tailnet-wide deny (a specific host allow, not a range carve-out), and mirrored a one-clause pointer to that exception in `deployment-profile.md`'s proxy sentence |
+**The decision.** `llm._sanitized_schema_error` replaces `str(exc)[:800]` on both exception types
+`structured()`'s repair loop catches. For a pydantic `ValidationError` it renders
+`errors(include_input=False, include_url=False)` — `loc`/`msg`/`type` only, with string locations
+allowlisted against properties in the dereferenced schema and any other location replaced by
+`(unrecognized-key)` — never the input value or a model-authored forbidden key. For everything else
+reaching that branch (a plain `ValueError`), the message is used as-is,
+which is now safe on both sides that currently reach it: `_extract_json` no longer quotes the response
+it could not parse, and the `validate=` hook — unused by any caller today — is documented to describe
+the failure the way `LensValidationError` does, not to quote the value that failed it. The re-ask now
+reads "The schema validator rejected the output:" and fences and marker-scrubs the sanitized summary
+with `prompts.DATA_FENCE`/`DATA_END`, matching `critic_repair_turn`'s house style and its
+validator-attributed wording rather than "your previous response". `MalformedOutputError` therefore
+carries only the sanitized summary, so every downstream consumer — `critique.critique_once`'s
+`LensResult.failure_reason`, and the graph's support-manifest and dispute-pass warning logs — inherits
+the fix without being touched itself; two of those call sites already carried a comment explaining why
+they avoid `str(exc)` regardless of what it contains, updated to describe what the message now is
+rather than repeat the old warning as if it still held.
 
-**Why this is a decision entry and not a silent fix.** AGENTS.md requires a `docs/decisions.md`
-entry whenever a `docs/*.md` file changes, so that CI's docs-drift check (invariant row 12) has
-something to diff against — even when, as here, every change moves prose toward the code rather
-than away from it.
+**One budget, unchanged.** This does not touch `budgets.critic_repair_retries`, which half of a
+critic's repair spends it on schema violations versus lens patches, or the raise-on-exhaustion
+behaviour — only what the re-ask and the terminal error say.
 
-**What this deliberately does not do.** It does not touch any of: `docs/convergence.md`'s
-earliest-vs-latest tie-break wording, `docs/isolation.md`'s fence-mitigation/repair-turn/dispute
-passages, `docs/ci-pipeline.md`'s CI-mechanics lines, `docs/deployment-profile.md`'s redirect-hardening
-sentence, `docs/quality-principles.md`'s principle-row table, or anything under `.github/` — other
-PRs were in flight against those exact passages at the time of this sweep. It also does not verify
-or change the production Squid configuration for item 21's pinned-host allow; the doc now states the
-shape the exception must take, not that it has been implemented that way on the running proxy.
+**Invariants.** The untrusted-text boundary is strengthened: a pydantic error's `input_value` and a
+model-authored forbidden-key `loc` were report-adjacent content capable of reaching a generator's
+context under validator-attributed framing, and neither now does. Fail-closed lens validation, author
+exclusion, the blind orchestrator, severity floors and termination are untouched.
 
-**Invariants.** None of the six is in reach. Nothing here touches a model call, prompt, critic
-assignment, severity, or controller rule; every change is a correction of a description to match
-behavior that was already there.
+## D-dispute-evidence-prior-draft — a dispute's evidence URL is checked against the draft the finding was raised against, not the disputing writer's own revision
+
+**The problem.** D-writer-disputes' mechanical path and its arbiter evidence-fetch gate both read
+"the report" to decide whether a dispute's `evidence_url` is one the report already cites — and
+both read it from `state["report"]` at the point `_adjudicate` runs. But `_adjudicate` sits on the
+one-way `generate → adjudicate → critique` edge: by the time it runs, `state["report"]` is already
+the disputing writer's own just-written revision, not the draft the critics reviewed when they
+raised the finding. A writer could add an arbitrary URL to its own revision's `## Sources`,
+dispute a `fabricated_citation`/`misrepresented_source` finding citing that URL as evidence, and
+have `dispute.adjudicate_mechanical` (`cited = fetch.extract_source_urls(report_text)`, matched
+against the writer's own text) uphold it mechanically with **no model's judgment at all** — or, if
+mechanically inconclusive, have the arbiter evidence-fetch gate (`graph.py`'s `_adjudicate`) fetch
+that same self-supplied page and hand its text to the arbiter as "the cited source," at a page no
+raising critic ever had the chance to see. Both call sites carried the identical bug because both
+independently derived "the citation set" from the same wrong variable; docs/isolation.md's dispute
+passage claimed the opposite ("the mechanical path accepts evidence only from a URL the report
+already cites"), true only if "the report" meant the draft the finding was raised against, and the
+code never enforced that reading.
+
+**The decision.** Capture the citation set at the moment it is actually correct — `_triage`, when
+`defects` are minted from `state["report"]` (the draft that was just critiqued) — as a new
+checkpointed state field, `defect_citation_scope: list[str]` (`fetch.extract_source_urls(...)` of
+that draft, URLs only, never the draft's text). `_generate` reads `report`/`defects` to build
+`pending_disputes` but never writes this field, so it survives untouched from the triage that
+minted the disputed findings through to the `_adjudicate` call that rules on them — even across a
+resume between `generate` and `adjudicate`, the same guarantee `pending_disputes` itself already
+relies on. `dispute.adjudicate_mechanical` now takes `cited_sources: Collection[str]` instead of
+`report_text: str` (extraction moves to the caller, so both of `_adjudicate`'s citation-membership
+checks — the mechanical gate and the arbiter evidence-fetch gate — share one extraction instead of
+each recomputing `extract_source_urls` per dispute). `state["report"]` is still used for the
+arbiter's paragraph-context lookup (`_paragraph_containing`) — that one is deliberately the
+*current* draft, per its own existing comment, because the run only holds the current text and the
+writer was told to leave a disputed span intact.
+
+**Why capture at triage, not the alternatives.** Two others were considered. Looking the prior
+draft up by hash from `RunStore` was rejected: the store is write-only from the graph's side (no
+`RunStore` method reads a report back), so this would add a new read path into on-disk state a
+resumed run does not otherwise depend on, for a value the checkpointed graph state can carry more
+simply. Carrying the prior draft's full text in state (e.g. alongside `pending_disputes`, or via
+the already-checkpointed `scoreboard` rows `_triage` appends) was rejected too: every consumer of
+this value only ever needs URL membership, so storing the full text would duplicate potentially
+`max_report_chars` of content in state for no reader, and would invite a future caller to reach for
+`report_text` again out of convenience — precisely the mistake being fixed. `defect_citation_scope`
+stores exactly what is checked and nothing else, and it does not touch any LLM context — the
+mechanical gate never did, and the arbiter evidence-fetch gate's fetched-page text still only
+reaches the arbiter when the gate passes, exactly as before.
+
+**Reason persistence.** The same docs/isolation.md passage separately claimed the arbiter's
+`reason` "goes to the audit store only" — true of nothing, since no code ever read
+`ArbiterVerdict.reason` past the point of receiving it; `graph.py`'s adjudication loop discarded it
+after using only `.dispute_upheld`. Persisting it (rather than correcting the sentence to describe
+a discard) was trivial: `_adjudicate` now attaches `{"verdict": ..., "reason": ...}` to the same
+per-dispute content record `rt.store.dispute` already writes to the purgeable `disputes/`
+directory, only when an arbiter actually ruled. It never reaches `events.jsonl` (RA-016) and it
+never reaches another model's context — the two properties the original sentence was asserting —
+it simply now also reaches disk, which is what "goes to the audit store" is supposed to mean.
+
+**Invariants.** None of the six CI-checked invariants names this mechanism directly, but the
+change strengthens the dispute channel's own isolation guarantee (D-writer-disputes, principle 1
+of the seven in docs/isolation.md): a writer's own revision can no longer manufacture the evidence
+that adjudicates a finding raised against a draft it has already superseded. Arbiter ≠ disputer ≠
+raiser, the fenced/labelled dispute prose, the closed two-field arbiter schema, and the
+once-per-key registry are all untouched.
+
+**Known residual, accepted:** a URL the *prior* draft cited but that has since gone dead, changed
+content, or was itself compromised remains a valid mechanical-adjudication source — the guarantee
+is "the critics could have seen this," not "this page is trustworthy," which is the same bound
+D-writer-disputes already accepted for the pre-fix (single-draft) version of this check.
 
 ## D-confirm-state-implemented — the confirm-state label RB-010 describes now exists in code, not only in the docs
 
@@ -6071,54 +6140,56 @@ enforces uniformly rather than partially; the other five (author exclusion, blin
 fail-closed lenses, severity floors, termination) are untouched — no schema, no severity mapping, no
 controller rule changed.
 
-## D-validator-error-hygiene — the schema-repair re-ask is validator-attributed and content-free too
+## D-doc-accuracy-sweep — a batch of verified documentation-accuracy corrections
 
-**The finding.** D-repair-turn-context's "RA-016 is unchanged" paragraph audits `rejected_text()` and
-`repair_excerpt()` — the lens-repair half of a critic's repair budget — and is accurate about that
-half. It does not audit the other half of the same budget: `LLMClient.structured`'s own schema-repair
-loop, which runs before lens validation ever sees an output and handles the `CritiqueOutput`/
-`IssueRepairs` level — malformed JSON, a missing field, an enum value out of range. There,
-`last_err = str(exc)[:800]` took a pydantic `ValidationError`'s default rendering verbatim, and that
-rendering echoes `input_value=…` — a fragment of the very field the validator rejected, which for a
-critic's structured output is a quoted report span. The same string was re-prompted with "Your
-previous response was rejected by the schema validator" — the critic-attribution wording
-D-repair-turn-context specifically chose *not* to use for the lens half ("a candidate issue was
-rejected", never "your previous response") — and, on repair exhaustion, was carried unchanged into
-`MalformedOutputError`, which `critique.critique_once` truncates into `LensResult.failure_reason` and
-logs at WARNING, both outside the 0700 `runs/<id>/` tree (RA-016). D-repair-diagnostic-keying had
-already flagged the shape of this gap without closing it: "this decision does not generalize [keeping
-the rejected span out of `str(exc)`] to arbitrary validator messages; RA-016 relies on the triage
-error's message construction" — true only for `triage.LensValidationError`, never claimed for
-pydantic's own `ValidationError`. A second, smaller leak shared the same branch: `_extract_json`'s
-failure message quoted up to 200 characters of the unparseable response, which for a critic is
-report-adjacent model output too.
+**The finding.** A sweep of `docs/*.md`, `README.md`, `AGENTS.md`, `mkdocs.yml`, and one
+`config/roster.yaml` comment turned up 21 places where the prose no longer matched the code it
+describes — most from drift after later PRs (D-front-loaded-depth, D-repair-turn-context,
+D-decision-slugs, D-completeness-pool-noise, and the schema/nesting shape `ControllerInput` had
+already taken), a few pre-existing. Each item below was independently re-checked against the cited
+source before being corrected; none of them is a behavior change — the code was already right, only
+the description of it was not.
 
-**The decision.** `llm._sanitized_schema_error` replaces `str(exc)[:800]` on both exception types
-`structured()`'s repair loop catches. For a pydantic `ValidationError` it renders
-`errors(include_input=False, include_url=False)` — `loc`/`msg`/`type` only, with string locations
-allowlisted against properties in the dereferenced schema and any other location replaced by
-`(unrecognized-key)` — never the input value or a model-authored forbidden key. For everything else
-reaching that branch (a plain `ValueError`), the message is used as-is,
-which is now safe on both sides that currently reach it: `_extract_json` no longer quotes the response
-it could not parse, and the `validate=` hook — unused by any caller today — is documented to describe
-the failure the way `LensValidationError` does, not to quote the value that failed it. The re-ask now
-reads "The schema validator rejected the output:" and fences and marker-scrubs the sanitized summary
-with `prompts.DATA_FENCE`/`DATA_END`, matching `critic_repair_turn`'s house style and its
-validator-attributed wording rather than "your previous response". `MalformedOutputError` therefore
-carries only the sanitized summary, so every downstream consumer — `critique.critique_once`'s
-`LensResult.failure_reason`, and the graph's support-manifest and dispute-pass warning logs — inherits
-the fix without being touched itself; two of those call sites already carried a comment explaining why
-they avoid `str(exc)` regardless of what it contains, updated to describe what the message now is
-rather than repeat the old warning as if it still held.
+| # | Location | Was | Now |
+|---|---|---|---|
+| 1 | `docs/run-provenance.md` | image builds record `dirty: null` | image builds record `dirty: false`; `null` is only a `git` build whose `git status` failed |
+| 2 | `docs/convergence.md` `ControllerInput` block | listed `roster_identities`/`clean_records` fields; flattened `polish_used`/`polish_cap` | matches `schemas.py`: nested `view: OrchestratorView`, pre-derived `lens_status: [LensStatus]`, documented `fatal_reason` |
+| 3 | `docs/convergence.md` rule-1 row | attributed a lens-with-no-eligible-critic and repeated-malformed reviews to `fatal` | only writer-pool-empty and all-writer-attempts-failed are `fatal`; the other two surface as failed `LensResult`s through rules 2→3 |
+| 4 | `docs/convergence.md` rule-8 row | "re-critique a toppable lens" (singular) | re-critiques *every* toppable lens per confirmation attempt |
+| 5 | `docs/convergence.md` stagnation definition + rule-2 cell | "K consecutive ticks"; "partial counts never used" | counts every completed triage pass, including a rule-2 re-critique of the same draft; partial passes do update `prev_material`/`prev_signature`/`stagnation_count`/scoreboard, they just never reach a stop decision because rule 2 precedes rules 4–14 |
+| 6 | `docs/convergence.md` severity-floor note | called `SEVERITY_FLOOR` "config-tunable" | it is a hardcoded constant (`taxonomy.py`) with no config surface |
+| 7 | `docs/convergence.md` view-block comment | "`lens_cleared`: distinct non-author models" | distinct non-author model *families* (matches the prose a few paragraphs later) |
+| 8 | `docs/convergence.md` clean-record reset | "any new generation IS a new `artifact_hash`" | the reset is unconditional on every generation, including byte-identical regeneration (RC-002) |
+| 9 | `docs/isolation.md` arbiter (`Ano`) row | "never sees the lens" stated without qualification | added the caveat that `defect.category` is in the prompt and, for every category but the shared `stylistic` one, names exactly one lens |
+| 10 | `README.md` source tree | omitted `build.py`, `reading.py`, `refine_audition.py`, `shutdown.py`, `support.py`, `textconv.py`, `resolve/` | added, each with a one-line role |
+| 11 | `README.md` output tree | omitted `support/` and `refinements/`; said only `reports/`/`critiques/` are sensitive | added both dirs; corrected to all five `store.CONTENT_DIRS` entries |
+| 12 | `README.md` web-interface section | "anyone signed in can open a run they hold the id for" | reading a run needs no sign-in at all; the run id alone is the credential (matches the auth section a few paragraphs below) |
+| 13 | `docs/architecture.md` lens diagram | omitted `loaded_language`, `one_sided_sourcing`, `unexamined_presupposition`; didn't note `stylistic` spans all three lenses | added the missing categories and the `stylistic` note |
+| 14 | `docs/index.md` | omitted `quality-principles.md`, `deployment-profile.md`, `run-provenance.md`, `model-evaluation.md`, `model-evaluation-record-2026-08-10.md` | added, in the page's existing style, matching `mkdocs.yml`'s nav grouping |
+| 15 | `mkdocs.yml` comments (×2) | called `decisions.md` "990 lines" | ~6,000 lines |
+| 16 | `docs/DESIGN.md` document map | "how each of the 20 findings was resolved" (round-1-only count) | reworded without a brittle count; names the `RA-`/`RB-`/`RC-`/`RG-` prefixes and "every round since" |
+| 17 | `AGENTS.md` | claimed `test_reviewer_prompt_ranges.py` is the repo-wide slug guarantee; called the resolve-issue invariant list "the six invariants CI checks" | credited `test_citation_resolution.py` as the repo-wide guarantee (the other test covers 3 prompts); clarified the six are a subset of the eleven `invariant.md` audits (plus a twelfth drift row) |
+| 18 | `docs/quality-principles.md` | called the evidence-base marker line "machine-checked" | it is checked by the `quality` CI reviewer (an LLM following `prompts/quality.md`), not a deterministic script |
+| 19 | `docs/question-refinement.md` implementation map, item 8 | described bumping a numeric valid-ID allowlist in `invariant.md` as current practice | reworded as history from before D-decision-slugs, with a pointer to the current slug-membership mechanism |
+| 20 | `config/roster.yaml` audition NOTE | said `gemma4` on evidence is "at position 3 and still unmeasured" | the pool is two entries, `gemma4` is at position 2 and measured (`marginal`); neither evidence critic is a writer, so author exclusion never shrinks this pool and strong `accepted` remains reachable |
+| 21 | `docs/ssrf-egress-isolation.md` + `docs/deployment-profile.md` | the egress contract's "must reach the LLM proxy" and "must not reach... the tailnet" read as flatly contradictory once the proxy sits at a `.ts.net` address | stated the LLM proxy as the one deliberate, pinned exception to the tailnet-wide deny (a specific host allow, not a range carve-out), and mirrored a one-clause pointer to that exception in `deployment-profile.md`'s proxy sentence |
 
-**One budget, unchanged.** This does not touch `budgets.critic_repair_retries`, which half of a
-critic's repair spends it on schema violations versus lens patches, or the raise-on-exhaustion
-behaviour — only what the re-ask and the terminal error say.
+**Why this is a decision entry and not a silent fix.** AGENTS.md requires a `docs/decisions.md`
+entry whenever a `docs/*.md` file changes, so that CI's docs-drift check (invariant row 12) has
+something to diff against — even when, as here, every change moves prose toward the code rather
+than away from it.
 
-**Invariants.** The untrusted-text boundary is strengthened: a pydantic error's `input_value` and a
-model-authored forbidden-key `loc` were report-adjacent content capable of reaching a generator's
-context under validator-attributed framing, and neither now does. Fail-closed lens validation, author
-exclusion, the blind orchestrator, severity floors and termination are untouched.
+**What this deliberately does not do.** It does not touch any of: `docs/convergence.md`'s
+earliest-vs-latest tie-break wording, `docs/isolation.md`'s fence-mitigation/repair-turn/dispute
+passages, `docs/ci-pipeline.md`'s CI-mechanics lines, `docs/deployment-profile.md`'s redirect-hardening
+sentence, `docs/quality-principles.md`'s principle-row table, or anything under `.github/` — other
+PRs were in flight against those exact passages at the time of this sweep. It also does not verify
+or change the production Squid configuration for item 21's pinned-host allow; the doc now states the
+shape the exception must take, not that it has been implemented that way on the running proxy.
+
+**Invariants.** None of the six is in reach. Nothing here touches a model call, prompt, critic
+assignment, severity, or controller rule; every change is a correction of a description to match
+behavior that was already there.
 
 ## Open items for a future round
 

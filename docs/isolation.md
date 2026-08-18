@@ -378,11 +378,17 @@ Mitigations, by boundary:
 *interested* one: the writer authoring a dispute has a direct stake in the verdict. Three things
 bound it. The dispute enters the arbiter's context fenced and explicitly labelled as an
 interested party's argument, never as fact. The arbiter's output channel is a closed two-field
-schema — one boolean plus a bounded `reason` that goes to the audit store only, so no free text
-authored under a dispute's influence ever reaches another model's context; the only writer-facing
-residue of the whole channel is the bare `Defect.adjudicated` boolean. And the mechanical path
-accepts evidence only from a URL the report already cites, so a writer cannot steer adjudication
-at a page the critics never had access to. The arbiter also runs identity-blind in both
+schema — one boolean plus a bounded `reason` that goes to the audit store only (the per-run
+`disputes/` content record, never `events.jsonl`), so no free text authored under a dispute's
+influence ever reaches another model's context; the only writer-facing residue of the whole
+channel is the bare `Defect.adjudicated` boolean. And the mechanical path, and the arbiter's own
+evidence-fetch, each accept evidence only from a URL cited by the draft the finding was **raised
+against** — `defect_citation_scope`, captured at the triage that minted the finding, before the
+disputing writer's next revision exists — never the writer's own revision
+(D-dispute-evidence-prior-draft). A writer that added a URL to its own revision's `## Sources` and
+then disputed from that URL would otherwise be certifying its own dispute at a page no critic ever
+had access to; gating on the prior draft's citations instead means a writer can only point at a
+source the critic saw, or could have seen. The arbiter also runs identity-blind in both
 directions: raising-critic identities are consumed by *eligibility selection* (deterministic
 code) and never interpolated into any prompt.
 
