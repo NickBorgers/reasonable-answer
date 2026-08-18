@@ -1048,10 +1048,11 @@ def _record_support(
             max_tokens=8000,
         )
     except (ModelCallError, MalformedOutputError) as exc:
-        # Only the exception TYPE, never `str(exc)` — a MalformedOutputError's message
-        # is built from validation text that echoes the rejected input, which here is
-        # verbatim report and page material (RA-016), the same rule `_elicit_disputes`
-        # follows.
+        # Only the exception TYPE, never `str(exc)` — `MalformedOutputError`'s message is
+        # a sanitized validator summary as of D-validator-error-hygiene, but a
+        # `ModelCallError` alongside it can still carry raw provider/model text, which
+        # here is verbatim report and page material (RA-016), the same rule
+        # `_elicit_disputes` follows.
         log.warning("support manifest failed (%s); continuing", type(exc).__name__)
         rt.store.event("support_manifest_failed", round=round_no, reason=type(exc).__name__)
         return
@@ -1100,10 +1101,10 @@ def _elicit_disputes(
             max_tokens=8000,
         )
     except (ModelCallError, MalformedOutputError) as exc:
-        # Record only the exception TYPE — never `str(exc)`. A MalformedOutputError's
-        # message is built from schema-validation text that echoes the REJECTED INPUT
-        # (the writer's dispute grounds and evidence quotes), which is report-derived
-        # (private) content; a ModelCallError message can likewise carry model I/O.
+        # Record only the exception TYPE — never `str(exc)`. `MalformedOutputError`'s
+        # message is a sanitized validator summary as of D-validator-error-hygiene, but a
+        # ModelCallError message can still carry raw model I/O (the writer's dispute
+        # grounds and evidence quotes), which is report-derived (private) content.
         # events.jsonl is RETAINED by `ra purge --content-only` (D-writer-disputes), so any
         # exception-derived string here would leak artifact text past a content purge.
         rt.store.event("dispute_pass_failed", error_type=type(exc).__name__)
