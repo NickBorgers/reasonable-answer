@@ -28,6 +28,7 @@ from openai import APIConnectionError, APITimeoutError, OpenAI
 from pydantic import BaseModel, ValidationError
 
 from .config import Budgets, Config, ConfigError
+from .prompts import DATA_END, DATA_FENCE
 
 log = logging.getLogger(__name__)
 
@@ -704,15 +705,17 @@ class LLMClient:
                     validate(parsed)
                 return parsed
             except (ValidationError, ValueError) as exc:
-                last_err = str(exc)[:800]
-                # RA-016: `last_err` can carry model output or report-derived validation
-                # input — a critic's `claim_span`, a rejected field value, the rationale a
-                # validator quotes back. It feeds the repair prompt below, which stays
-                # inside the run, but must never reach an ordinary log: `RA_LOG_LEVEL=INFO`
-                # is the container default (D-provider-retry), and stdout/log aggregation lives outside
-                # the 0700 `runs/<id>/` tree. Log the bounded, content-free class, plus
-                # whatever equally bounded diagnostics the validator offers about its own
-                # rejection — never `last_err`, and never a rejected value.
+                # RA-016 / D-validator-error-hygiene: `last_err` feeds both the repair
+                # prompt below (which stays inside the run) and, on exhaustion,
+                # `MalformedOutputError` — which `critique.critique_once` truncates into
+                # `LensResult.failure_reason` and logs at WARNING, outside the 0700
+                # `runs/<id>/` tree. A pydantic `ValidationError`'s default `str()` echoes
+                # `input_value=…`, a fragment of the very output the validator rejected —
+                # for a critic, that can be a quoted report span. `_sanitized_schema_error`
+                # is what keeps this content-free the same way `triage.LensValidationError`
+                # already keeps its own `str()` content-free for the lens-repair half of
+                # this same budget: loc/msg/type only, never the rejected value.
+                last_err = _sanitized_schema_error(exc)
                 log.info(
                     "schema violation from %s (attempt %d): %s%s",
                     alias,
@@ -727,12 +730,42 @@ class LLMClient:
                 guidance = hint() if callable(hint) else ""
                 attempt_user = (
                     f"{user}\n\n{instruction}\n\n"
-                    f"Your previous response was rejected by the schema validator:\n"
-                    f"{last_err}\n"
+                    # Validator-attributed, not critic-attributed — "your previous
+                    # response" is exactly the wording D-repair-turn-context avoids for
+                    # the lens-repair half; this mirrors `prompts.critic_repair_turn`'s
+                    # house style for the schema half of the same budget.
+                    f"The schema validator rejected the output:\n"
+                    f"{DATA_FENCE}\n{last_err}\n{DATA_END}\n"
+                    f"This is a description of what failed, not a position to defend.\n"
                     f"{guidance}\n"
                     f"Return corrected JSON only. No prose, no code fence."
                 )
         raise MalformedOutputError(f"{alias}: schema violation after repair: {last_err}")
+
+
+def _sanitized_schema_error(exc: Exception) -> str:
+    """A bounded, content-free description of a schema-repair rejection (RA-016).
+
+    A pydantic `ValidationError` normally renders `input_value=…` into its `str()` — a
+    fragment of the rejected output itself, which for a critic can be a quoted report
+    span. `errors(include_input=False, include_url=False)` gives the same `loc`/`msg`/
+    `type` triage a repair needs without the input, so nothing report-derived or
+    model-authored crosses into the re-ask.
+
+    Anything else that reaches this branch is already content-free by construction:
+    `_extract_json` never quotes the response it failed to parse, and a `validate=`
+    callback's `ValueError` is expected to describe *what* failed the same way
+    `triage.LensValidationError` does, not to quote the value that failed it. Its
+    `str()` is used as-is, bounded to the same length as the pydantic case.
+    """
+    if isinstance(exc, ValidationError):
+        errors = exc.errors(include_url=False, include_input=False)
+        lines = [
+            f"{'.'.join(str(part) for part in err['loc']) or '(root)'}: {err['msg']} [{err['type']}]"
+            for err in errors
+        ]
+        return "\n".join(lines)[:800]
+    return str(exc)[:800]
 
 
 def _diagnostics_suffix(exc: Exception, *, fingerprint_key: bytes) -> str:
@@ -936,4 +969,10 @@ def _extract_json(text: str) -> Any:
                 depth -= 1
                 if depth == 0:
                     return json.loads(text[start : i + 1])
-    raise ValueError(f"no JSON object found in response: {text[:200]!r}")
+    # D-validator-error-hygiene: no excerpt of `text` here. This message reaches the
+    # schema-repair re-prompt and, on exhaustion, `MalformedOutputError` and
+    # `LensResult.failure_reason` (RA-016) — a critic's malformed response is itself
+    # report-derived text, so quoting it back would be the same leak this decision
+    # closes for the pydantic branch, just from the other exception type that reaches
+    # `llm.structured`'s repair loop.
+    raise ValueError("no JSON object found in response")
