@@ -477,15 +477,17 @@ transition is byte-identical to a build without the feature, the D-retrieval-opt
    writer collects `WriterDisputes`: per dispute a `task_index`, bounded `grounds`, and optional
    `evidence_url` + `evidence_quote`. Any failure degrades to "no disputes", never fatal.
 2. **Adjudication**, in a new `adjudicate` node on the one-way generate → critique edge,
-   mechanical-first: a citation-category dispute whose `evidence_url` the report **already
-   cites**, whose fetch succeeds, and whose `evidence_quote` appears verbatim (triage
-   normalization) in the page text is **upheld with no model judgment**. Everything else goes to
+   mechanical-first: a citation-category dispute whose `evidence_url` is in the
+   `defect_citation_scope` captured at triage from the draft the finding was raised against, whose
+   fetch succeeds, and whose `evidence_quote` appears verbatim (triage normalization) in the page
+   text is **upheld with no model judgment**. Everything else goes to
    an **arbiter**: a fresh-context model whose resolved identity is neither the disputing writer
    nor any critic that raised the finding (raiser identities come from audit-side
    `defect_provenance` state and are consumed by eligibility code only — never a prompt). The
    arbiter sees the depersonalized finding, the one paragraph it points at, the question, the
    fenced dispute (labelled an interested party's argument), and the fetched page when the
-   evidence URL is one the report cites. It never sees the report body, an identity, the lens,
+   evidence URL is in that prior-draft `defect_citation_scope`, never merely because the disputing
+   writer added it to the current revision. It never sees the report body, an identity, the lens,
    or the round, and its tie-break is explicit: **uncertainty resolves in favor of the finding**.
 3. **The adjudicated-facts registry**, in checkpointed state, keyed `(category, normalized
    claim_span)` — the triage dedup key minus locus, since paragraphs shift between revisions
