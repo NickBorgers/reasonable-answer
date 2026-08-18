@@ -15,7 +15,11 @@ of a head against its own already-merged parent reproduces that head's tree, so 
 never followed by another commit could not be re-reviewed at all (#163, observed on PR #162).
 The anchor and verdict now share one `review/verdict-anchor` status — its description names
 the commit the verdict was published for and its state carries the verdict
-(D-inherit-reviewed-anchor, D-atomic-verdict-anchor).
+(D-inherit-reviewed-anchor, D-atomic-verdict-anchor). That state has a third value: `error`,
+for an outcome that is not a judgement about the change — the cycle-cap cost backstop, or a
+`pipeline_error` — which nothing may inherit, because re-stamping a flake as a verdict walled
+cleared PRs off from the merge gate (#188, observed on PRs #182 and #186;
+D-nonjudgement-outcomes).
 
 There is no way to exercise that step short of running it, so these tests extract the `run:`
 block from the workflow and drive it under `bash` against throwaway git repositories built
@@ -540,15 +544,48 @@ def test_interleaved_display_verdict_cannot_replace_atomic_anchor_verdict(
 
 
 def test_finalize_writes_the_verdict_and_anchor_in_one_status() -> None:
-    """The publisher must create the atomic object the classifier trusts."""
+    """The publisher must create the atomic object the classifier trusts.
+
+    The state is no longer verdict alone: the two categories that are not judgements about the
+    change anchor as `error`, which is the state this classifier declines to inherit
+    (D-nonjudgement-outcomes). Both mappings are pinned here, because the expression is the
+    only place the distinction is made.
+    """
     spec = yaml.safe_load(FINALIZE.read_text(encoding="utf-8"))
     steps = spec["jobs"]["finalize"]["steps"]
     anchor = next(step for step in steps if step.get("name") == "Stamp review/verdict-anchor on post-fix SHA")
     inputs = anchor["with"]
 
     assert inputs["context"] == "review/verdict-anchor"
-    assert inputs["state"] == "${{ inputs.verdict == 'GO' && 'success' || 'failure' }}"
     assert inputs["description"] == "${{ inputs.reviewed_sha }}"
+    state = " ".join(inputs["state"].split())
+    assert state == (
+        "${{ (inputs.category == 'cycle_capped' || inputs.category == 'pipeline_error') "
+        "&& 'error' || (inputs.verdict == 'GO' && 'success' || 'failure') }}"
+    )
+
+
+def test_a_nonjudgement_anchor_reviews_normally(bench: Bench, script: str) -> None:
+    """A cost backstop and a pipeline error are not verdicts, so they are not inheritable.
+
+    Both used to anchor as `failure`, indistinguishable from a panel's NO-GO, so the next
+    pure-merge resync re-stamped a flake as a judgement and walled the PR off from the gate —
+    PR #182's 6af6acc inherited a `pipeline_error`, PR #186's e748c86 the same class on a PR
+    that had cleared at cycle 1. Reviewing instead converges (D-nonjudgement-outcomes).
+
+    The anchor's state is the only variable: the same push inherits when the state carries a
+    real verdict, so this fails on a revert of the `error` mapping and on nothing else.
+    """
+    reviewed = bench.commit_on_pr("feature.txt")
+    bench.advance_main("other.txt")
+    head = bench.merge_main()
+
+    assert bench.run(script, head, reviewed)["inherit"] == "true"
+
+    result = bench.run(script, head, reviewed, verdict="error")
+    assert result["inherit"] == "false"
+    assert result["inherited_verdict"] == ""
+    assert "records a non-judgement outcome" in result["_log"]
 
 
 def test_a_missing_anchor_reviews_normally(bench: Bench, script: str) -> None:

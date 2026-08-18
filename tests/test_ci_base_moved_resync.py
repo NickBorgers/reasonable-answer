@@ -23,9 +23,12 @@ offline: real `git`, no `gh`, no network, no token.
 
 from __future__ import annotations
 
+import json
 import os
+import shutil
 import stat
 import subprocess
+import time
 from pathlib import Path
 
 import pytest
@@ -394,3 +397,213 @@ def test_a_branch_that_moved_under_the_merge_is_not_pushed(bench: Bench) -> None
     assert result.returncode == 0, result.stderr
     assert bench.state(result) == "moved"
     assert bench.remote_pr_head() == bench.base
+
+
+# --- the loop that decides which PRs the script is even offered ------------------------
+#
+# The workflow's own step, not the script's: which PRs it hands over, and when it waits.
+# `sync_pr_with_base.sh` above answers "may this branch be merged"; this half answers "is
+# now the moment", and getting it wrong costs a five-role reviewer panel rather than a merge
+# (D-resync-defers-to-finalize). Driven under `bash` with a stub `gh`, a stub for the sync
+# script itself, and a fake clock, so the ten-minute wait budget is exercised in milliseconds.
+
+_SHA = "1a3c5283a231c252389887961a6887a91f2f854d"
+
+
+def _iso(epoch: int) -> str:
+    return time.strftime("%Y-%m-%dT%H:%M:%SZ", time.gmtime(epoch))
+
+
+class Loop:
+    """The `resync` step, with the two questions it asks the API answered from files."""
+
+    def __init__(self, tmp_path: Path) -> None:
+        self.root = tmp_path
+        self.stubs = tmp_path / "stubs"
+        self.stubs.mkdir()
+        self.bin = tmp_path / "bin"
+        self.bin.mkdir()
+        (tmp_path / "trusted" / "scripts").mkdir(parents=True)
+        (tmp_path / "work").mkdir()
+
+        self.calls = self.stubs / "sync-calls"
+        self.clock_file = self.stubs / "clock"
+        self.start = int(time.time())
+        self.clock_file.write_text(f"{self.start}\n", encoding="utf-8")
+        self.inflight(0)
+        self.statuses(_SHA, [])
+        self.candidates([(7, "pr", _SHA)])
+
+        sync = tmp_path / "trusted" / "scripts" / "sync_pr_with_base.sh"
+        self._script(sync, f'printf "%s\\n" "$*" >> "{self.calls}"\necho "state=synced"\n')
+
+        # Every stub the step reaches for. `gh` answers the pulls listing, the in-flight run
+        # count and the head's commit statuses; `sleep` advances a fake clock that `date`
+        # reads, so the loop's real deadline is honoured without the test waiting for it.
+        # `date -d` keeps its real behaviour: parsing a status timestamp is not the clock.
+        self._script(
+            self.bin / "gh",
+            f'args="$*"\n'
+            f'case "$args" in\n'
+            f'  *"/pulls"*) cat "{self.stubs}/candidates" ;;\n'
+            f'  *"review-entry.yml/runs"*) cat "{self.stubs}/inflight" ;;\n'
+            f'  *"/statuses"*)\n'
+            f'    sha="$(printf "%s\\n" "$args" | grep -oE "[0-9a-f]{{40}}" | head -1)"\n'
+            f'    if [ -f "{self.stubs}/statuses-${{sha}}" ]; then\n'
+            f'      cat "{self.stubs}/statuses-${{sha}}"\n'
+            f'    else\n'
+            f'      echo "[]"\n'
+            f'    fi ;;\n'
+            f'  *) echo "gh stub: unexpected query: $args" >&2; exit 1 ;;\n'
+            f'esac\n',
+        )
+        self._script(
+            self.bin / "sleep",
+            f'now="$(cat "{self.clock_file}")"\n'
+            f'printf "%s\\n" "$((now + ${{1%%.*}}))" > "{self.clock_file}"\n',
+        )
+        self._script(
+            self.bin / "date",
+            f'if [ "${{1:-}}" = "-d" ]; then exec {shutil.which("date")} "$@"; fi\n'
+            f'cat "{self.clock_file}"\n',
+        )
+
+    @staticmethod
+    def _script(path: Path, body: str) -> None:
+        path.write_text(f"#!/usr/bin/env bash\nset -euo pipefail\n{body}", encoding="utf-8")
+        path.chmod(path.stat().st_mode | stat.S_IEXEC)
+
+    def candidates(self, prs: list[tuple[int, str, str]]) -> None:
+        (self.stubs / "candidates").write_text(
+            "".join(f"{num} {ref} {sha}\n" for num, ref, sha in prs), encoding="utf-8"
+        )
+
+    def inflight(self, count: int) -> None:
+        (self.stubs / "inflight").write_text(f"{count}\n", encoding="utf-8")
+
+    def statuses(self, sha: str, entries: list[tuple[str, str]]) -> None:
+        """`(context, created_at)` pairs, as the commit-statuses API returns them."""
+        (self.stubs / f"statuses-{sha}").write_text(
+            json.dumps([{"context": ctx, "created_at": at, "state": "success"}
+                        for ctx, at in entries]),
+            encoding="utf-8",
+        )
+
+    def cycle_recorded(self, sha: str, *, age: int, anchored: bool) -> None:
+        entries = [("review/cycle", _iso(self.start - age))]
+        if anchored:
+            entries.append(("review/verdict-anchor", _iso(self.start - age + 1)))
+        self.statuses(sha, entries)
+
+    def run(self) -> subprocess.CompletedProcess:
+        step = next(
+            s for s in yaml.safe_load(WORKFLOW.read_text(encoding="utf-8"))["jobs"]["sync"]["steps"]
+            if s.get("id") == "resync"
+        )
+        return subprocess.run(
+            ["bash", "-c", step["run"]],
+            capture_output=True,
+            text=True,
+            env={
+                **os.environ,
+                "PATH": f"{self.bin}{os.pathsep}{os.environ['PATH']}",
+                "GH_TOKEN": "stub",
+                "REPO": "owner/repo",
+                "BASE_REF": "main",
+                "GITHUB_WORKSPACE": str(self.root),
+            },
+        )
+
+    def waited(self) -> int:
+        return int(self.clock_file.read_text(encoding="utf-8")) - self.start
+
+    def synced(self) -> list[str]:
+        return (
+            self.calls.read_text(encoding="utf-8").splitlines() if self.calls.exists() else []
+        )
+
+
+@pytest.fixture()
+def loop(tmp_path: Path) -> Loop:
+    return Loop(tmp_path)
+
+
+def test_a_finalized_head_is_offered_to_the_script_at_once(loop: Loop) -> None:
+    """The ordinary case: the last cycle published its verdict, so nothing is being raced."""
+    loop.cycle_recorded(_SHA, age=3600, anchored=True)
+
+    result = loop.run()
+
+    assert result.returncode == 0, result.stderr
+    assert "#7 (pr): synced" in result.stdout
+    assert len(loop.synced()) == 1
+    assert loop.waited() == 0
+
+
+def test_a_head_no_panel_has_recorded_is_offered_too(loop: Loop) -> None:
+    """No `review/cycle` at all is not the race — it is a PR whose panel never recorded one,
+    and a driver-resolved merge is the only thing that will let it earn one. Deferring on a
+    missing anchor alone would wall those off permanently."""
+    result = loop.run()
+
+    assert result.returncode == 0, result.stderr
+    assert "#7 (pr): synced" in result.stdout
+    assert loop.waited() == 0
+
+
+def test_a_cycle_awaiting_its_anchor_is_deferred(loop: Loop) -> None:
+    """The window this closes. `record-cycle` writes `review/cycle` when the panel has read
+    the code; the verdict anchor lands minutes later. A merge pushed in between gives the
+    successor's `gather` a cycle-recorded SHA with no anchor on it, which fail-closes to a
+    full five-role panel on a head whose only delta is that merge."""
+    loop.cycle_recorded(_SHA, age=60, anchored=False)
+
+    result = loop.run()
+
+    assert result.returncode == 0, result.stderr
+    assert f"deferred — a recorded cycle on {_SHA} has no published verdict anchor yet" in result.stdout
+    assert loop.synced() == [], "nothing may be pushed under a cycle that is still finalizing"
+    # Waited, but only under the one deadline the whole loop shares.
+    assert 600 <= loop.waited() <= 660
+    assert "deferred 1" in result.stdout
+
+
+def test_an_abandoned_cycle_stops_deferring(loop: Loop) -> None:
+    """A run cancelled between the two writes leaves that pair on the head forever. Waiting
+    on a status nothing will ever complete would wall off exactly the PR this workflow is the
+    only unblocker for, so the grace is bounded by the age of the cycle record."""
+    loop.cycle_recorded(_SHA, age=7200, anchored=False)
+
+    result = loop.run()
+
+    assert result.returncode == 0, result.stderr
+    assert "treating it as abandoned" in result.stdout + result.stderr
+    assert "#7 (pr): synced" in result.stdout
+    assert loop.waited() == 0
+
+
+def test_an_unreadable_cycle_timestamp_does_not_wedge_the_loop(loop: Loop) -> None:
+    """A record that cannot be aged cannot be waited on with a bound, and its own arithmetic
+    would abort the step. It reads as abandoned, which is the direction that strands nobody."""
+    loop.statuses(_SHA, [("review/cycle", "not-a-timestamp")])
+
+    result = loop.run()
+
+    assert result.returncode == 0, result.stderr
+    assert "unreadable review/cycle timestamp" in result.stdout + result.stderr
+    assert "#7 (pr): synced" in result.stdout
+
+
+def test_a_review_run_in_flight_is_deferred(loop: Loop) -> None:
+    """Unchanged behaviour, now reported as a defer rather than a warning: a run in flight
+    performs this merge itself if it needs one, and the fixer discards a whole cycle's fixes
+    when it finds the branch moved underneath it."""
+    loop.inflight(1)
+    loop.cycle_recorded(_SHA, age=3600, anchored=True)
+
+    result = loop.run()
+
+    assert result.returncode == 0, result.stderr
+    assert "deferred — a review run is in flight" in result.stdout
+    assert loop.synced() == []
+    assert 600 <= loop.waited() <= 660

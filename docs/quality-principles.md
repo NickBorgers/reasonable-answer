@@ -71,6 +71,24 @@ silently reset by a machine merge that answered no blockers. The gate it feeds i
 merge is deterministic git content on both sides of D-inherit-whole-range's tree-identity test, so
 QP8's "never an LLM grading prose" holds at the new entry point too.
 
+**Application — deferring that resync (D-resync-defers-to-finalize).** The same workflow now waits
+on a second question — a recorded cycle whose verdict anchor is not published yet — and QP7 governs
+the new wait exactly as it governs the first: both share the one 10-minute loop deadline, and the
+anchor wait carries a second bound the other does not need, the 30-minute age of the cycle record,
+because a run cancelled between the two writes would otherwise be waited on forever. The three
+constants (loop deadline, poll interval, record grace) are one bounded loop: changing any of them
+means re-checking the others rather than treating them independently. QP8 is untouched — the
+decision reads two commit statuses and a timestamp, and pushes strictly fewer merges than before.
+
+**Application — non-judgement outcomes (D-nonjudgement-outcomes).** QP7's cap only means something
+if what it counts is what it bounds. The counter was billing runs that consume nothing it bounds — an
+inherited verdict, and a run whose every reviewer guard refused — so PRs reached `cycle_capped`
+without the review → fix → push → review loop having turned twice. Holding the count on an inherited
+run does not widen the bound: the reviewers, `record-cycle` and `fix` are all gated off that path, so
+it cannot advance the loop it would be billed for, and it cannot repeat without a push from outside
+the pipeline. The gate that decides all this stays deterministic under QP8: git plumbing, bounded
+commit-status fields, and now a third status state (`error`) that marks an outcome no panel judged.
+
 **Application — the inherit anchor (D-inherit-reviewed-anchor).** That same gate was measuring from
 the wrong commit: `review/cycle` lands on the fixer's push, so the range walk and the tree
 recreation compared a head with itself and inherited unconditionally. Anchoring both on

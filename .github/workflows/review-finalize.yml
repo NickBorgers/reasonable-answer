@@ -37,6 +37,15 @@ on:
       category:
         required: true
         type: string
+      cycle_recorded:
+        description: >
+          Whether this run has a cycle to publish. False exactly when `record-cycle` was
+          skipped — no reviewer's guard cleared, so nothing was read — and `review/cycle` is
+          then not stamped at all: a run that reviewed nothing does not consume a cycle
+          (see docs/decisions.md D-nonjudgement-outcomes). Required, not defaulted, so a new
+          caller has to say which kind of run it is rather than silently billing one.
+        required: true
+        type: boolean
       skip_verdict_artifact:
         required: true
         type: boolean
@@ -75,7 +84,17 @@ jobs:
       # a SHA another run will review must not arrive pre-stamped with this run's cycle
       # and verdict. review-pipeline.yml keeps it out by passing the pre-sync SHA as
       # post_fix_sha there, so nothing below ever sees a sync-only successor.
+      #
+      # Skipped when this run has no cycle to publish. `record-cycle` defers the counter's
+      # write until a panel has actually read the code, precisely so a run whose every guard
+      # refused starts the next push from the same number — and stamping it here regardless
+      # billed those runs anyway, one commit further along. PR #186's resync (e748c86) is the
+      # observed case: no `review/cycle` from `record-cycle`, a fail-closed `pipeline_error`
+      # NO-GO, and a `cycle 2` stamped by this step for a panel that never ran. The sync-only
+      # path (D-unguarded-sync) is the same shape, and this file's own comment above already
+      # claims it consumes no cycle (D-nonjudgement-outcomes).
       - name: Stamp review/cycle on post-fix SHA
+        if: inputs.cycle_recorded
         uses: ./.github/actions/review-state
         with:
           op: write-status
@@ -111,13 +130,27 @@ jobs:
       # inherited path the inherit decision established that this head contains nothing the
       # anchor it inherited from did not, so it is a sound anchor in turn; on the cycle-cap
       # path the verdict is always NO-GO, which is the fail-closed direction.
+      #
+      # But two of the categories that reach here are not judgements about the change, and
+      # the state says which (D-nonjudgement-outcomes). `cycle_capped` is a cost backstop —
+      # the comment this pipeline posts for it says so in those words — and `pipeline_error`
+      # means the pipeline could not trust its own inputs. Both were anchored as `failure`,
+      # indistinguishable from a panel's NO-GO, so the next pure-merge resync inherited a
+      # flake as a verdict and walled a PR off from the gate that two earlier GOs had cleared
+      # (PR #182's 6af6acc, PR #186's e748c86). They anchor as `error` instead: the state
+      # D-atomic-verdict-anchor already reserves for "not an inheritable verdict", which sends
+      # the successor to a panel rather than to a re-stamp. The display status and the merge
+      # gate below still report NO-GO, so nothing about the gate is loosened — only what a
+      # later run is allowed to treat as a judgement someone made.
       - name: Stamp review/verdict-anchor on post-fix SHA
         uses: ./.github/actions/review-state
         with:
           op: write-status
           sha: ${{ inputs.post_fix_sha }}
           context: review/verdict-anchor
-          state: ${{ inputs.verdict == 'GO' && 'success' || 'failure' }}
+          state: >-
+            ${{ (inputs.category == 'cycle_capped' || inputs.category == 'pipeline_error')
+            && 'error' || (inputs.verdict == 'GO' && 'success' || 'failure') }}
           description: ${{ inputs.reviewed_sha }}
           github_token: ${{ secrets.WORKFLOW_PAT }}
 
