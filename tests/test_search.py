@@ -16,7 +16,7 @@ from io import BytesIO
 import pytest
 from pydantic import ValidationError
 
-from reasonable_answer import prompts, search
+from reasonable_answer import fetch, prompts, search
 from reasonable_answer.config import Config, ProxyConfig, SearchConfig
 from reasonable_answer.search import (
     BraveSearch,
@@ -197,6 +197,78 @@ def test_the_credentialled_request_is_not_redirectable(monkeypatch):
     # redirects. This is the same hardened opener citation fetching uses.
     assert not seen["handlers"] & {"FTPHandler", "FileHandler", "DataHandler"}
     assert seen["caps"] == [0], "a credential-bearing request follows no redirects"
+
+
+def test_fixed_user_agent_is_the_pinned_literal():
+    """Pins the constant itself, so any change to it trips this test directly rather
+    than only whichever header-inspection test happens to compare against it."""
+    assert fetch.USER_AGENT == "reasonable-answer/1.0 (citation verification)"
+
+
+def test_search_sends_the_fixed_user_agent(monkeypatch):
+    """docs/deployment-profile.md and AGENTS.md both claim the outbound user agent is
+    fixed. Nothing asserted it for the Brave request; the header carried no
+    `User-Agent` at all and egressed with urllib's version-dependent default."""
+    seen = {}
+
+    def capture(self, req, *a, **k):
+        seen["headers"] = dict(req.headers)
+        return _stub_response({"web": {"results": []}})
+
+    monkeypatch.setattr(urllib.request.OpenerDirector, "open", capture)
+    BraveSearch("tok", budget=QueryBudget(5), min_interval=0).search("q")
+
+    # urllib title-cases header names.
+    assert seen["headers"]["User-agent"] == fetch.USER_AGENT
+
+
+def test_oversized_response_is_refused_at_the_cap(monkeypatch):
+    """Every other egress path in the package bounds its read (fetch.SourceFetcher's
+    max_bytes, resolve/base.py's json_post). The Brave request didn't; `resp.read()`
+    was unbounded."""
+
+    class _Huge(BytesIO):
+        def __enter__(self):
+            return self
+
+        def __exit__(self, *exc):
+            return False
+
+    oversized = json.dumps(
+        {"web": {"results": [{"url": "https://example.org/a", "description": "d" * 5}]}}
+    ).encode()
+    oversized += b" " * (search.MAX_RESPONSE_BYTES - len(oversized) + 1)
+    assert len(oversized) > search.MAX_RESPONSE_BYTES
+
+    monkeypatch.setattr(
+        urllib.request.OpenerDirector, "open", lambda self, *a, **k: _Huge(oversized)
+    )
+    client = BraveSearch("tok", budget=QueryBudget(5), min_interval=0)
+    with pytest.raises(SearchError, match=f"exceeded {search.MAX_RESPONSE_BYTES} bytes"):
+        client.search("q")
+
+
+def test_a_response_at_exactly_the_cap_is_not_refused(monkeypatch):
+    """The cap is inclusive: a body that just fits must not be treated as truncated."""
+    padding_key = "x"
+    payload = {"web": {"results": []}, "pad": ""}
+    base_len = len(json.dumps(payload).encode())
+    payload["pad"] = padding_key * (search.MAX_RESPONSE_BYTES - base_len)
+    exact = json.dumps(payload).encode()
+    assert len(exact) == search.MAX_RESPONSE_BYTES
+
+    class _Exact(BytesIO):
+        def __enter__(self):
+            return self
+
+        def __exit__(self, *exc):
+            return False
+
+    monkeypatch.setattr(
+        urllib.request.OpenerDirector, "open", lambda self, *a, **k: _Exact(exact)
+    )
+    client = BraveSearch("tok", budget=QueryBudget(5), min_interval=0)
+    assert client.search("q") == []
 
 
 def test_http_error_becomes_search_error(monkeypatch):
