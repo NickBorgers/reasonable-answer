@@ -53,8 +53,9 @@ and may not be (span-anchored, no viewpoint quotas, no intent attribution) — i
 
 **Severity floor for convergence = `major`.** `material = blocking + major`. Convergence requires
 `material == 0`; `minor`/`stylistic` never block. (Flooring `overstated_claim`/
-`incomplete_answer`/`omitted_counterargument` at `major` is deliberately conservative and
-config-tunable.)
+`incomplete_answer`/`omitted_counterargument` at `major` is deliberately conservative. `SEVERITY_FLOOR`
+is a hardcoded constant (`taxonomy.py`) with no config surface — tunable only by changing the code,
+not by a run-time setting.)
 
 ### Conceptual conflation, and anchors for empirical scope claims (D-conceptual-conflation)
 
@@ -294,7 +295,7 @@ OrchestratorView {
   lenses_failed: int
   round: int, min_ticks: int, hard_cap: int
   roster_size: int
-  lens_cleared: { <lens>: int }   # # distinct non-author models clean for this lens on current hash
+  lens_cleared: { <lens>: int }   # # distinct non-author model FAMILIES clean for this lens on current hash
   acceptance: enum{none, weak_met, strong_met}   # derived from lens_cleared + roster eligibility
   polish_used: int, polish_cap: int
   stagnation_count: int, cycle_detected: bool
@@ -302,19 +303,25 @@ OrchestratorView {
 ```
 
 **`ControllerInput`** — the deterministic controller (not an LLM; still blind to report content)
-sees `OrchestratorView` **plus** every operational predicate the decision table consumes (RD-002):
+holds `OrchestratorView` **plus** every operational predicate the decision table consumes (RD-002),
+nested as `view` rather than flattened:
 
 ```
-ControllerInput = OrchestratorView + {
+ControllerInput {
+  view: OrchestratorView                          # polish_used/polish_cap live here, not flattened
   fatal: bool
+  fatal_reason: str | None                         # set on the fatal path; not surfaced elsewhere
   run_id, artifact_hash, artifact_hash_history
-  author_identity, roster_identities            # resolved provider/model/version
-  clean_records: [CleanRecord]                   # for the CURRENT artifact_hash only
+  author_identity                                  # resolved provider/model/version
+  lens_status: [LensStatus]                        # per-lens cleared_count/eligible_count/
+                                                     #   unused_eligible for the CURRENT artifact_hash,
+                                                     #   pre-derived by roles.lens_statuses from the
+                                                     #   hash-keyed clean records — no raw record list
+                                                     #   or roster identity map reaches the controller
   critique_attempts_remaining: int               # lens-failure retry budget
   confirmation_attempts_remaining: int           # bounds the per-lens top-up loop (rule 8)
   polish_recommended: bool                        # from the orchestrator LLM
-  polish_used: int, polish_cap: int
-  stagnation_limit K: int, cycle_period L: int
+  stagnation_limit: int, cycle_period: int
   rewrites_used: int, rewrite_cap: int            # rule 13's bounded rewrite (D-scoped-revision)
 }
 ```
@@ -336,8 +343,11 @@ categories. Each record is immutable and keyed by:
 CleanRecord { artifact_hash, lens, critic_resolved_identity, artifact_author_identity }
 ```
 
-**Any new generation or polish output is a new `artifact_hash`, which resets the current
-artifact's clean-record set** — stale attestations never satisfy acceptance (closes RC-002).
+**Clean records reset on every generation, unconditionally — regardless of whether the new text's
+hash actually differs from the last.** Keying the reset on "the hash changed" would let a clean
+record earned under a *different* author satisfy acceptance for a byte-identical regeneration by
+someone else; resetting on every `_generate` call closes that gap — stale attestations never
+satisfy acceptance (closes RC-002).
 
 A lens is **strongly-cleared** for the current hash when clean records cover **≥2 distinct
 non-author model families**; **weakly-cleared** when exactly one family does (because the roster
@@ -425,7 +435,8 @@ completed and the other failed:
 The controller evaluates these **in order; first match wins**. This is the *whole* controller
 function — lens-failure, polish, and cycle handling are all in the table (RC-003), and the
 incomplete-review check precedes every clean/material/cap conclusion (RC-004). Inputs are exactly
-the `ControllerInput` fields above.
+the `ControllerInput` fields above (`view` unpacked field-by-field where a rule needs an
+`OrchestratorView` value).
 
 The **non-generating** clean-artifact rules (7, 8, 10, 11) are **not gated on `round`**, so
 confirmation top-up (rule 8) remains reachable *at the cap* — it neither generates nor advances
@@ -439,11 +450,15 @@ rule generates once `round ≥ hard_cap`** and the hard cap is genuinely hard (R
 
 | # | Condition | Action / terminal |
 |---|-----------|-------------------|
-| 1 | `fatal` (writer pool empty, a lens has no eligible non-author, repeated malformed) | **aborted** |
-| 2 | `lenses_failed > 0` **and** `critique_attempts_remaining > 0` | **re-critique** the unreviewed lens(es) (→ Critiquing); `critique_attempts_remaining -= 1`; partial counts never used |
+| 1 | `fatal` (writer pool empty, or every eligible writer attempt failed) | **aborted** |
+| 2 | `lenses_failed > 0` **and** `critique_attempts_remaining > 0` | **re-critique** the unreviewed lens(es) (→ Critiquing); `critique_attempts_remaining -= 1`; the resulting triage pass still updates `prev_material`/`prev_signature`/`stagnation_count` and the scoreboard, but rule 2 precedes rules 4–14, so nothing about this partial pass ever reaches a stop decision |
 
 `lenses_failed` counts lenses with **no completed review** of the current artifact, not
 lenses one of whose reviews failed — see [Review depth](#what-lenses_failed-counts-rules-2-and-3).
+A lens with no eligible non-author critic, and a review that stays malformed past its repair
+budget, both land here too: each is recorded as a *failed* `LensResult` rather than raising
+`fatal` directly, so they reach the table through rule 2's re-critique and — once the budget
+is spent — rule 3's `aborted`, not through rule 1.
 
 A lens only reaches rule 2 once the critic has already been given
 `budgets.critic_repair_retries` chances to correct itself *before the lens is failed*,
@@ -461,7 +476,7 @@ the model that just failed.
 | 5 | `round ≥ hard_cap` **and** `blocking > 0` | **needs_human_review** |
 | 6 | `round ≥ hard_cap` **and** `major > 0` | **exhausted_unresolved** |
 | 7 | `material == 0` **and** `strong_met` | **accepted** |
-| 8 | `material == 0` **and** `top_up_possible` (some lens `toppable` **and** `confirmation_attempts_remaining > 0`) | **re-critique** a toppable lens by a fresh eligible non-author model (→ Critiquing, **no** generation); `confirmation_attempts_remaining -= 1`. At `review.depth ≥ 2` this is the top-up for *incomplete depth*, not the normal discovery path (D-front-loaded-depth) |
+| 8 | `material == 0` **and** `top_up_possible` (some lens `toppable` **and** `confirmation_attempts_remaining > 0`) | **re-critique** *every* toppable lens in this one pass (not just one), each by a fresh eligible non-author model (→ Critiquing, **no** generation); `confirmation_attempts_remaining -= 1` once for the pass. At `review.depth ≥ 2` this is the top-up for *incomplete depth*, not the normal discovery path (D-front-loaded-depth) |
 | 9 | `material == 0` **and** `round < hard_cap` **and** `minor > 0` **and** `polish_recommended` **and** `polish_used < polish_cap` | **continue** (polish → generate; `polish_used += 1`) |
 | 10 | `material == 0` **and** `weak_met` (every under-cleared lens is `roster_limited`) | **converged_unconfirmed** |
 | 11 | `material == 0` (not strong, not toppable, not weak — confirmation budget spent) | **exhausted_unresolved** (clean-but-unconfirmed) |
@@ -527,7 +542,9 @@ and keep their gates (RI-001, RH-001).
 
 - **material issue:** severity ≥ floor (`major`).
 - **signal-stagnation:** the per-category `{blocking, major}` multiset is unchanged for `K`
-  consecutive ticks (a *stuck signal*, not proven semantic repetition).
+  consecutive **triage passes** (a *stuck signal*, not proven semantic repetition) — every completed
+  triage increments or resets the counter, including a rule-2 re-critique pass over the same draft,
+  not only the passes that follow a fresh generation.
 - **cycle:** the `artifact_hash` sequence repeats with period ≤ `L` (byte-level).
 - **best-scoring version:** minimal `w_b·blocking + w_m·major + w_n·minor`; ties → earliest round.
 

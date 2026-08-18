@@ -9,10 +9,11 @@
 
 Evidence base last verified: 2026-07-28
 
-That marker line is machine-checked: the `quality` reviewer compares it to the current UTC
-date on every review and, past twelve months, files the refresh issue described in
+That marker line is checked every cycle: the `quality` reviewer — an LLM following
+`prompts/quality.md`, not a deterministic script — compares it to the current UTC date on every
+review and, past twelve months, files the refresh issue described in
 [§3](#3-refreshing-the-evidence-base). Its format is exactly
-`Evidence base last verified: YYYY-MM-DD` — change the wording and the check goes blind.
+`Evidence base last verified: YYYY-MM-DD` — change the wording and the reviewer may fail to find it.
 
 ## 1. Why this register exists
 

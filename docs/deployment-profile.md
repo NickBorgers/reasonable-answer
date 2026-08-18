@@ -50,8 +50,10 @@ loopback and putting Access in front is what makes header trust safe. `auth.dev_
 
 ## Outbound authentication
 
-All inference goes through a single OpenAI-compatible **LiteLLM proxy** on the tailnet. There are
-no provider SDKs and no per-provider keys in the application.
+All inference goes through a single OpenAI-compatible **LiteLLM proxy** on the tailnet — the one
+pinned exception to the tailnet-wide deny in [ssrf-egress-isolation.md](./ssrf-egress-isolation.md),
+allowed as a specific host rather than as a carve-out for the range. There are no provider SDKs and
+no per-provider keys in the application.
 
 | variable | purpose |
 |---|---|

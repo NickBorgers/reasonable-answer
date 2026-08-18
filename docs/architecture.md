@@ -88,9 +88,9 @@ rule is that a lens's model must **not** be the author of the artifact under rev
 
 ```mermaid
 flowchart TD
-    R["report Rₙ"] --> L1["logic lens · model: strong reasoner<br/>contradicted_claim · invalid_inference · overstated_claim · conceptual_conflation"]
-    R --> L2["evidence lens · model: lowest hallucination<br/>uncited_claim · fabricated_citation · misrepresented_source"]
-    R --> L3["completeness lens · model: most decorrelated priors<br/>incomplete_answer · omitted_counterargument · unclear_structure"]
+    R["report Rₙ"] --> L1["logic lens · model: strong reasoner<br/>contradicted_claim · invalid_inference · overstated_claim · conceptual_conflation · loaded_language"]
+    R --> L2["evidence lens · model: lowest hallucination<br/>uncited_claim · fabricated_citation · misrepresented_source · one_sided_sourcing"]
+    R --> L3["completeness lens · model: most decorrelated priors<br/>incomplete_answer · omitted_counterargument · unclear_structure · unexamined_presupposition"]
     L1 --> TR["triage (mechanical)"]
     L2 --> TR
     L3 --> TR
@@ -99,7 +99,8 @@ flowchart TD
 ```
 
 Each lens runs on the head of its assigned pool, in a **fresh context**, blind to the others. They
-emit `Issue[]` against a closed schema.
+emit `Issue[]` against a closed schema. `stylistic` (cosmetic preference, ignored for convergence)
+is not listed above per lens because it attaches to all three — any lens may raise it.
 
 At `review.depth: 2` (the default, D-front-loaded-depth) each of those boxes is **two** critics
 rather than one: the next distinct eligible non-author model in the pool reads the same artifact

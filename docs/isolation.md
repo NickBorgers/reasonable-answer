@@ -88,7 +88,7 @@ flowchart TB
     end
     subgraph ARB["Arbiter (D-writer-disputes, opt-in) — fresh context, ≠ disputer, ≠ raiser"]
         Ain["SEES: one finding (depersonalized) + the paragraph it points at + question + the dispute (labelled interested-party argument) + fetched evidence page"]
-        Ano["NEVER: report body · any alias/identity · the lens · the round · run_id/hash · other findings"]
+        Ano["NEVER: report body · any alias/identity · the lens (name) · the round · run_id/hash · other findings<br/>CAVEAT: the finding's category IS in the prompt, and every category but the shared stylistic one names exactly one lens"]
     end
     subgraph CT["Controller (deterministic)"]
         CTin["SEES: ControllerInput (OrchestratorView + round/hashes/model-ids/budgets)"]

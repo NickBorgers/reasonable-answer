@@ -202,8 +202,9 @@ and the docs reviewer blocks on the first.
 - **[model-evaluation-record-2026-08-10.md](./model-evaluation-record-2026-08-10.md)** — the public
   operator record behind that procedure's empirical claims: corpus identity, repetitions and call
   counts, measured logic-lens metrics, host probes, schema incidents, and the manual spot-check.
-- **[decisions.md](./decisions.md)** — design decisions, the Codex review, and how each of the
-  20 findings was resolved.
+- **[decisions.md](./decisions.md)** — design decisions and how each adversarial review finding
+  was resolved, across the Codex review round (`RA-`/`RB-`/`RC-`/`RG-` prefixes) and every round
+  since.
 - **[question-refinement.md](./question-refinement.md)** — the edge-side, ambient
   pre-run reframing suggestions (D-question-refinement): what they are, the reframe taxonomy, and the
   provenance/retention mechanism.
