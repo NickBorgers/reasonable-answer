@@ -5824,11 +5824,10 @@ says it is not — [ssrf-egress-isolation.md](./ssrf-egress-isolation.md)), `doc
 (the contract for which build produced a run, load-bearing for comparing runs across a change —
 [run-provenance.md](./run-provenance.md)), and `docs/question-refinement.md`, which states outright
 at its own tail that "the design above is normative." A PR that touched only one of these three
-classified as docs-only: `invariant` and `docs` still ran, but `security` was skipped outright, and
-`quality`/`test` lost their unconditional trigger and fell back to whatever the rest of the diff
-happened to touch. For the SSRF boundary document specifically, that is the concrete exposure —
-the page governing an egress control gets reviewed by nobody whose job is to catch a boundary
-weakened in prose.
+classified as docs-only: `invariant`, `docs`, and `quality` still ran, but `security` and `test`
+were skipped outright. For the SSRF boundary document specifically, that is the concrete exposure —
+the page governing an egress control gets no `security` review to catch a boundary weakened in
+prose.
 
 `docs/deployment-profile.md` was checked and correctly excluded: it says of itself that it is
 "descriptive, not normative" and that "nothing here licenses changing" the committed defaults it
@@ -5842,7 +5841,7 @@ is only that it now agrees with the document map in `docs/DESIGN.md` and the `na
 had drifted.
 
 `docs/ci-pipeline.md`'s "Role selection" section is corrected alongside: its enumeration of the
-spec-critical set named only five of the (now ten) pages the allowlist actually carries, and its
+spec-critical set named only five of the thirteen `docs/` pages the allowlist now carries, and its
 claim that "`security` runs unless the change is docs-only" was never the whole rule — the code
 also requires the diff to touch one of `security`'s own trigger paths, so a `tests/`-only diff is
 not docs-only and still selects no security reviewer. The prose now states the conjunction.
