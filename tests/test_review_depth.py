@@ -328,6 +328,25 @@ def _state(identities) -> dict:
     }
 
 
+def test_confirming_unstaffed_slot_is_labeled_confirm_state(identities, tmp_path):
+    """D-confirm-state-implemented also labels the no-eligible-critic result."""
+    roster = Roster(
+        writers=["writer-a", "writer-b"],
+        critics={lens.value: ["writer-a"] for lens in LENSES},
+    )
+    cfg = make_config(tmp_path, roster, depth=1)
+    rt = _runtime(cfg, identities, clean, tmp_path, "run-confirming-unstaffed")
+    state = _state(identities)
+    state["confirming"] = True
+
+    out = _critique(state, rt)
+
+    result = LensResult.model_validate(out["lens_results"]["logic"][0])
+    assert result.critic_alias == "(none)"
+    assert result.failed is True
+    assert result.confirm_state is True
+
+
 def test_one_failed_critic_does_not_discard_the_other_review(
     identities, roster, tmp_path
 ):
