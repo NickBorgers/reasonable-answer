@@ -78,6 +78,13 @@ class State(TypedDict, total=False):
     hash_history: list[str]
 
     pending_lenses: list[str]
+    #: Set by the controller alongside `pending_lenses` whenever it routes to
+    #: `_critique`: True only for a rule-8 confirmation top-up, False for a rule-2
+    #: discovery re-critique or a fresh draft's first pass. Consumed by `_critique` to
+    #: stamp `LensResult.confirm_state` *after* the model call returns — the prompt
+    #: built from `pending_lenses` never reads this flag, so a confirming critic sees
+    #: the identical interface a discovering one does (RB-010).
+    confirming: bool
     #: lens -> every review of the CURRENT artifact for that lens, in the order they
     #: completed. A list rather than a single entry because review depth runs several
     #: independent critics per lens per pass (D-front-loaded-depth); a failed review stays on
@@ -679,6 +686,7 @@ def _intake(state: State, rt: Runtime) -> dict:
         "terminal_status": None,
         "scoreboard": [],
         "pending_lenses": [lens.value for lens in LENSES],
+        "confirming": False,
         # Ingest runs at the edge, so anything it noticed about the seed — a format
         # that carried no headings, a truncated page — arrives here as text and joins
         # the run's own warnings rather than getting its own channel.
@@ -954,6 +962,7 @@ def _generate(state: State, rt: Runtime) -> dict:
         "polish_next": False,
         "full_rewrite_next": False,
         "pending_lenses": [lens.value for lens in LENSES],
+        "confirming": False,
         "pending_disputes": pending_disputes,
     }
 
@@ -1578,6 +1587,10 @@ def _critique(state: State, rt: Runtime) -> dict:
     results = _lens_results(state)
 
     run_date = state.get("run_date")
+    # RB-010: this pass's `LensResult`s are stamped `confirm_state` below, once each
+    # result already exists — a label the controller attaches to what came back, never
+    # an input the critic's prompt (built above from `pending_lenses` alone) can see.
+    confirming = bool(state.get("confirming", False))
     slots = _critic_slots(state, rt, pending)
     # Keyed by artifact hash and merged rather than replaced, exactly as `used_critics`
     # is: the shipped draft on a non-accepted terminal need not be the last one written,
@@ -1587,7 +1600,7 @@ def _critique(state: State, rt: Runtime) -> dict:
 
     def work(slot: _CritiqueSlot) -> LensResult:
         if slot.unstaffed_reason is not None:
-            return LensResult(
+            result = LensResult(
                 lens=slot.lens,
                 artifact_hash=artifact_hash,
                 critic_alias="(none)",
@@ -1597,7 +1610,8 @@ def _critique(state: State, rt: Runtime) -> dict:
                 failure_reason=slot.unstaffed_reason,
                 attempt=slot.attempt,
             )
-        return _critique_one(
+            return result.model_copy(update={"confirm_state": True}) if confirming else result
+        result = _critique_one(
             rt,
             slot.lens,
             slot.alias,
@@ -1609,6 +1623,7 @@ def _critique(state: State, rt: Runtime) -> dict:
             run_date=run_date,
             coverage_sink=coverage_by_artifact,
         )
+        return result.model_copy(update={"confirm_state": True}) if confirming else result
 
     # Bounded by `max_concurrency` exactly as before — review depth multiplies the
     # number of calls a pass makes, not the load it puts on the proxy at any instant.
@@ -1894,10 +1909,16 @@ def _control(state: State, rt: Runtime) -> dict:
         out["pending_lenses"] = [lens.value for lens in decision.recritique_lenses]
         if decision.rule == 2:
             out["critique_attempts_remaining"] = state["critique_attempts_remaining"] - 1
+            out["confirming"] = False
         else:
             out["confirmation_attempts_remaining"] = (
                 state["confirmation_attempts_remaining"] - 1
             )
+            # Rule 8 only: the controller-side label RB-010 describes, set here — after
+            # the decision is made, never before or during the model call that follows —
+            # so `_critique` can stamp `LensResult.confirm_state` post-hoc without the
+            # prompt it builds from `pending_lenses` ever reflecting it.
+            out["confirming"] = True
     elif decision.action == "generate":
         out["polish_next"] = decision.polish
         if decision.polish:
