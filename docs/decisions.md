@@ -5821,25 +5821,21 @@ commit 2c54713 (#14, 2026-07-20), and has been asserted that way by
 `tests/test_controller.py::test_best_scoring_index_breaks_ties_toward_the_latest_round` since the same
 commit. Neither `docs/convergence.md` nor this log was updated when the behavior changed: the spec and
 the shipped controller disagreed on which draft a non-`accepted` terminal returns, silently, for four
-weeks and 165 commits, until this entry.
+weeks, until this entry.
 
-**Why latest is correct.** `best_scoring_index` selects among `latest_scores_per_artifact` rows — the
-scoreboard's *last* triage of each `artifact_hash`, per RC-002's staleness rule applied to selection
-rather than to clearance (a dict keyed by hash would otherwise silently order by each artifact's
-*first* appearance, which is why `latest_scores_per_artifact` explicitly re-sorts by round before
-`best_scoring_index` ever sees it). Once selection is scored on the latest reading of each artifact, a
-tie between two *different* artifact hashes is not a coin flip: the later one has absorbed every
-fix-task the earlier one generated and has survived at least as many critique passes. Preferring the
-earlier of two equally-scored drafts ships the first draft that happened to look clean, discarding the
-one with the deeper review history. Commit 2c54713's own motivating case (run-d5934276fafd) is the
-sharper version of this problem — a *refuted* clean verdict outranking a later, genuinely-cleared
-artifact — fixed there by collapsing the board to one row per artifact before scoring at all; the
-tie-break direction is the same reasoning applied to the remaining, rarer case where two distinct
-artifacts still score equally after that collapse.
+**Scope of the record.** `latest_scores_per_artifact` and the tie direction solve distinct problems.
+The former applies RC-002 to selection by keeping the scoreboard's last triage of each
+`artifact_hash`; it prevents a refuted earlier score for the same bytes from remaining eligible.
+`best_scoring_index` then receives one row per artifact, ordered by round, and its `(score, -index)`
+key deterministically selects the latest row when distinct artifacts have equal severity totals.
+Commit 2c54713 changed both operations, but its stale-triage case establishes the need for the first,
+not that refinement is monotonic or that recency is evidence of higher quality between tied artifacts
+(QP7).
 
 **The decision.** `docs/convergence.md`'s best-scoring-version rule is corrected to match the code and
 its tests: ties go to the latest round. No behavior changes; this decision retroactively records the
-rationale commit 2c54713 already shipped and closes the drift between spec and implementation.
+shipped deterministic rule and closes the drift between spec and implementation. It does not claim
+that latest is intrinsically better or weaken QP7.
 
 **Invariants.** None of the six is in reach. This is a documentation correction only — no code, test,
 prompt, or controller rule changes.
