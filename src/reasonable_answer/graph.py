@@ -105,6 +105,16 @@ class State(TypedDict, total=False):
     adjudications: list[dict]
     dispute_budget_remaining: int
     defect_provenance: dict[str, list[str]]
+    #: The `## Sources' URLs the draft `defects` were minted against, captured in
+    #: `_triage` (not the draft's full text — the membership check is all any consumer
+    #: needs). `_generate` reads `report`/`defects` to build `pending_disputes` but never
+    #: touches this field, so by the time `_adjudicate` runs it still names the draft the
+    #: disputed findings were RAISED against, not the disputing writer's own revision —
+    #: which is what the mechanical citation-membership gate and the arbiter
+    #: evidence-fetch gate must check (D-dispute-evidence-prior-draft). A writer that
+    #: added a URL to its own revision could otherwise certify its own dispute at a page
+    #: no critic ever had access to.
+    defect_citation_scope: list[str]
 
     view: dict
     decision: dict
@@ -1136,8 +1146,17 @@ def _adjudicate(state: State, rt: Runtime) -> dict:
     ruled_keys = {dispute_mod.registry_key(r.category, r.claim_span) for r in records}
     budget = state.get("dispute_budget_remaining", 0)
     provenance = state.get("defect_provenance", {})
+    # `report` is already the disputing writer's revision by the time this node runs
+    # (D-writer-disputes' adjudicate sits on the one-way generate→critique edge) — fine for
+    # `structure` below, whose only job is finding the arbiter's context paragraph in
+    # whatever draft the run now holds. Citation membership is a different question:
+    # `defect_citation_scope`, captured at the LAST triage — i.e. against the draft
+    # `pending`'s findings were raised against — is what the mechanical gate and the
+    # arbiter evidence-fetch gate check, so a writer cannot add a URL in this same
+    # revision and dispute from it (D-dispute-evidence-prior-draft).
     report_text = state["report"]
     structure = report_mod.parse(report_text)
+    cited_sources = state.get("defect_citation_scope") or []
     round_no = state.get("round", 0)
     disputer = state.get("author_identity", "(none)")
 
@@ -1145,11 +1164,7 @@ def _adjudicate(state: State, rt: Runtime) -> dict:
         defect = Defect.model_validate(entry["defect"])
         challenge = Dispute.model_validate(entry["dispute"])
         key = dispute_mod.registry_key(defect.category, defect.claim_span)
-        # Content record first (purgeable dir): the full grounds are auditable
-        # while the run is retained, and droppable with the other content.
-        rt.store.dispute(
-            round_no, seq, {"defect": entry["defect"], "dispute": entry["dispute"]}
-        )
+        reason: str | None = None
 
         if key in ruled_keys:
             verdict, method = "dismissed", "duplicate"
@@ -1158,7 +1173,7 @@ def _adjudicate(state: State, rt: Runtime) -> dict:
         else:
             budget -= 1
             mechanical = dispute_mod.adjudicate_mechanical(
-                challenge, defect, report_text, rt.fetcher
+                challenge, defect, cited_sources, rt.fetcher
             )
             if mechanical is True:
                 verdict, method = "upheld", "mechanical"
@@ -1174,7 +1189,7 @@ def _adjudicate(state: State, rt: Runtime) -> dict:
                     if (
                         rt.fetcher is not None
                         and challenge.evidence_url
-                        and challenge.evidence_url in fetch.extract_source_urls(report_text)
+                        and challenge.evidence_url in cited_sources
                     ):
                         page = rt.fetcher.fetch(challenge.evidence_url)
                     try:
@@ -1193,6 +1208,7 @@ def _adjudicate(state: State, rt: Runtime) -> dict:
                     else:
                         verdict = "upheld" if ruling.dispute_upheld else "overruled"
                         method = "arbiter"
+                        reason = ruling.reason
 
         ruled_keys.add(key)
         records.append(
@@ -1204,6 +1220,13 @@ def _adjudicate(state: State, rt: Runtime) -> dict:
                 round=round_no,
             )
         )
+        # Content record (purgeable dir): the full grounds, and the arbiter's own
+        # reasoning where one ruled, are auditable while the run is retained and
+        # droppable with the other content — never in events.jsonl (D-writer-disputes).
+        payload = {"defect": entry["defect"], "dispute": entry["dispute"]}
+        if reason is not None:
+            payload["ruling"] = {"verdict": verdict, "reason": reason}
+        rt.store.dispute(round_no, seq, payload)
         # Signal-only: no spans, no grounds — events.jsonl outlives a content purge.
         rt.store.event(
             "adjudication",
@@ -1752,6 +1775,9 @@ def _triage(state: State, rt: Runtime) -> dict:
         # Audit-side raiser identities per surviving material issue: consumed only
         # by arbiter *eligibility* (deterministic code), never by any prompt (D-writer-disputes).
         "defect_provenance": triage.defect_provenance(results),
+        # The citation set `defects` were raised against, captured now — before the next
+        # `generate` can revise `report` and add a URL of its own (D-dispute-evidence-prior-draft).
+        "defect_citation_scope": fetch.extract_source_urls(state["report"]),
     }
 
 

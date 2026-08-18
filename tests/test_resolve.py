@@ -27,6 +27,7 @@ from reasonable_answer.fetch import (
     SourceFetcher,
     SourceMetadata,
     SourceOutcome,
+    extract_source_urls,
 )
 from reasonable_answer.resolve import SourceResolver, UnknownProvider, build
 from reasonable_answer.resolve import identifiers as ids
@@ -1072,6 +1073,10 @@ def citation_defect():
 
 
 REPORT_CITING = f"# T\n\nClaim [1].\n\n## Sources\n\n[1] {PAYWALL_URL}\n"
+# `adjudicate_mechanical` takes the citation *set*, not report text — this is the
+# set `REPORT_CITING` (standing in for the pre-revision draft the finding was raised
+# against) would produce (D-dispute-evidence-prior-draft).
+REPORT_CITING_SOURCES = extract_source_urls(REPORT_CITING)
 
 
 def test_an_abstract_can_never_uphold_a_dispute():
@@ -1080,7 +1085,7 @@ def test_an_abstract_can_never_uphold_a_dispute():
     from reasonable_answer.dispute import adjudicate_mechanical
 
     verdict = adjudicate_mechanical(
-        dispute_for(PAYWALL_URL), citation_defect(), REPORT_CITING,
+        dispute_for(PAYWALL_URL), citation_defect(), REPORT_CITING_SOURCES,
         _OnePage(metadata_page()),
     )
     assert verdict is None
@@ -1100,12 +1105,12 @@ def test_a_mirror_body_can_never_uphold_a_dispute_about_the_cited_url():
     direct = FetchedSource(url=PAYWALL_URL, text="The quoted sentence.")
 
     assert adjudicate_mechanical(
-        dispute_for(PAYWALL_URL), citation_defect(), REPORT_CITING, _OnePage(mirror)
+        dispute_for(PAYWALL_URL), citation_defect(), REPORT_CITING_SOURCES, _OnePage(mirror)
     ) is None
     # The same quote, read from the cited URL itself, still upholds — the guard is about
     # provenance, not about the quote.
     assert adjudicate_mechanical(
-        dispute_for(PAYWALL_URL), citation_defect(), REPORT_CITING, _OnePage(direct)
+        dispute_for(PAYWALL_URL), citation_defect(), REPORT_CITING_SOURCES, _OnePage(direct)
     ) is True
 
 

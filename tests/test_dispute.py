@@ -17,7 +17,7 @@ from fakes import FakeClient
 from pydantic import ValidationError
 
 from reasonable_answer import dispute as dispute_mod
-from reasonable_answer import prompts, triage
+from reasonable_answer import fetch, prompts, triage
 from reasonable_answer.config import (
     Budgets,
     Config,
@@ -26,7 +26,7 @@ from reasonable_answer.config import (
     validate_roster_health,
 )
 from reasonable_answer.fetch import FetchedSource
-from reasonable_answer.graph import run
+from reasonable_answer.graph import Runtime, _adjudicate, run
 from reasonable_answer.schemas import (
     AdjudicationRecord,
     ArbiterVerdict,
@@ -38,6 +38,7 @@ from reasonable_answer.schemas import (
     StructuralRef,
     WriterDisputes,
 )
+from reasonable_answer.store import RunStore
 from reasonable_answer.taxonomy import Category, Lens, Severity
 
 REPORT = """# Answer
@@ -50,6 +51,11 @@ The senator launched a re-election campaign in September 2025 [1].
 """
 
 SPAN = "The senator launched a re-election campaign in September 2025"
+
+# `adjudicate_mechanical` takes a citation *set*, not report text (D-dispute-evidence-prior-draft):
+# the set the draft a finding was RAISED against would produce. `REPORT` stands in for that
+# prior draft throughout this file's mechanical-adjudication tests.
+REPORT_SOURCES = fetch.extract_source_urls(REPORT)
 
 
 def make_defect(category=Category.FABRICATED_CITATION, span=SPAN, adjudicated=False) -> Defect:
@@ -104,7 +110,10 @@ GOOD_PAGE = FetchedSource(
 
 def test_mechanical_upholds_when_the_cited_page_contains_the_quote():
     fetcher = FakeFetcher(pages={GOOD_PAGE.url: GOOD_PAGE})
-    assert dispute_mod.adjudicate_mechanical(make_dispute(), make_defect(), REPORT, fetcher) is True
+    assert (
+        dispute_mod.adjudicate_mechanical(make_dispute(), make_defect(), REPORT_SOURCES, fetcher)
+        is True
+    )
 
 
 @pytest.mark.parametrize(
@@ -139,7 +148,24 @@ def test_mechanical_upholds_when_the_cited_page_contains_the_quote():
 def test_mechanical_is_inconclusive_never_refuting(dispute, defect, fetcher):
     """Every non-upheld path returns None (fall through to the arbiter) — never
     False. Absence of evidence in a truncated page is not evidence of absence."""
-    assert dispute_mod.adjudicate_mechanical(dispute, defect, REPORT, fetcher) is None
+    assert dispute_mod.adjudicate_mechanical(dispute, defect, REPORT_SOURCES, fetcher) is None
+
+
+def test_mechanical_is_inconclusive_for_a_url_only_the_writers_own_revision_added():
+    """The whole point of D-dispute-evidence-prior-draft: a URL absent from the citation
+    set passed in is never upheld, no matter how well the fetched page's text matches the
+    evidence quote. The caller is responsible for passing the PRIOR draft's citations,
+    never the disputing writer's own revision — this pins the function's contract."""
+    fetcher = FakeFetcher(
+        pages={"https://elsewhere.example/writer-added-source": GOOD_PAGE}
+    )
+    dispute = make_dispute(url="https://elsewhere.example/writer-added-source")
+    assert (
+        dispute_mod.adjudicate_mechanical(dispute, make_defect(), REPORT_SOURCES, fetcher)
+        is None
+    )
+    # never even reached the fetch: the URL was excluded before any I/O happened
+    assert fetcher.fetches == []
 
 
 # ------------------------------------------------------------ dispute validation
@@ -600,3 +626,172 @@ def test_dispute_content_lives_in_a_purgeable_dir(tmp_path):
     # the signal record survives, and it never carried span text
     events = (store.dir / "events.jsonl").read_text()
     assert "adjudication" in events and "secret text" not in events
+
+
+def test_the_arbiters_reason_is_persisted_to_the_dispute_audit_record(tmp_path):
+    """docs/isolation.md says the arbiter's `reason` 'goes to the audit store' — this
+    pins that it actually does (it previously did not: nothing consumed
+    `ArbiterVerdict.reason` at all), in the purgeable content dir, never in
+    events.jsonl (RA-016)."""
+    defect = make_defect(category=Category.OVERSTATED_CLAIM)  # not mechanical: straight to arbiter
+    dispute = make_dispute()
+    reason_text = "the cited page does not corroborate the writer's claim"
+
+    def arbiter(_alias, _user):
+        return ArbiterVerdict(dispute_upheld=False, reason=reason_text)
+
+    config = make_config(tmp_path)
+    client = FakeClient(
+        identities=IDENTITIES,
+        critique_fn=lambda a, u: CritiqueOutput(issues=[]),
+        report_fn=lambda n: REPORT,
+        arbiter_fn=arbiter,
+    )
+    store = RunStore(config.runs_dir, "run-reason-persist")
+    rt = Runtime(
+        config=config,
+        client=client,
+        identities=client.resolve_identities(config.roster.all_aliases),
+        store=store,
+    )
+    state = {
+        "question": "Did the senator launch a campaign?",
+        "report": REPORT,
+        "defect_citation_scope": fetch.extract_source_urls(REPORT),
+        "pending_disputes": _pending(defect, dispute),
+        "adjudications": [],
+        "dispute_budget_remaining": 3,
+        "defect_provenance": {},
+        "round": 2,
+        "author_identity": "vendor-a/model-a",
+    }
+
+    _adjudicate(state, rt)
+
+    dispute_files = list((store.dir / "disputes").iterdir())
+    assert len(dispute_files) == 1
+    payload = json.loads(dispute_files[0].read_text())
+    assert payload["ruling"] == {"verdict": "overruled", "reason": reason_text}
+    # never in events.jsonl — that survives a content-only purge and must carry
+    # closed-vocabulary signal only, never report-derived or arbiter-authored prose
+    events_text = (store.dir / "events.jsonl").read_text()
+    assert reason_text not in events_text
+
+
+# ------------------------------------------------- citation scope (D-dispute-evidence-prior-draft)
+
+#: No eligible arbiter once the disputer and the raising critic are excluded — isolates
+#: the assertions below to the citation-membership gate itself. If it ever mechanically
+#: upheld the wrong URL, or fetched it to feed an arbiter, there is no fallback path here
+#: to obscure that; an unexpected arbiter call (no `arbiter_fn`) also fails loudly.
+NO_ARBITER_ROSTER = Roster(
+    writers=["writer-a"],
+    critics={"logic": ["crit"], "evidence": ["crit"], "completeness": ["crit"]},
+)
+NO_ARBITER_IDENTITIES = {"writer-a": "vendor-a/model-a", "crit": "vendor-b/model-b"}
+
+#: A URL that exists only in the disputing writer's own revision — never in the prior
+#: draft the finding was raised against.
+NEW_URL = "https://elsewhere.example/writer-added-source"
+REVISED_WITH_NEW_SOURCE = REPORT.replace(
+    "[1] https://example.com/campaign-launch\n",
+    f"[1] https://example.com/campaign-launch\n[2] {NEW_URL}\n",
+)
+
+
+def _pending(defect: Defect, dispute: Dispute) -> list[dict]:
+    return [{"defect": defect.model_dump(mode="json"), "dispute": dispute.model_dump(mode="json")}]
+
+
+def _provenance_for(defect: Defect) -> dict[str, list[str]]:
+    key = dispute_mod.registry_key(defect.category, defect.claim_span)
+    return {f"{key[0]}|{key[1]}": ["vendor-b/model-b"]}
+
+
+def _no_arbiter_runtime(tmp_path, fetcher) -> Runtime:
+    config = Config(
+        roster=NO_ARBITER_ROSTER,
+        budgets=Budgets(min_ticks=2, hard_cap=6),
+        disputes=DisputeConfig(enabled=True, budget=6),
+        runs_dir=tmp_path / "runs",
+    )
+    client = FakeClient(
+        identities=NO_ARBITER_IDENTITIES,
+        critique_fn=lambda a, u: CritiqueOutput(issues=[]),
+        report_fn=lambda n: REPORT,
+        # no arbiter_fn given: an unexpected arbiter call raises, so a bug that reached
+        # one here would fail the test rather than pass it silently.
+    )
+    return Runtime(
+        config=config,
+        client=client,
+        identities=client.resolve_identities(config.roster.all_aliases),
+        store=RunStore(config.runs_dir, "run-citation-scope"),
+        fetcher=fetcher,
+    )
+
+
+def test_a_dispute_citing_a_url_only_the_revision_added_is_rejected_mechanically(tmp_path):
+    """The finding D-dispute-evidence-prior-draft closes: a writer's revision adds a
+    brand-new URL to its own '## Sources' and disputes a fabricated-citation finding by
+    citing that URL as evidence. Gating the mechanical check and the arbiter
+    evidence-fetch on the CURRENT (post-revision) report would let the writer certify its
+    own dispute at a page the critics who raised the finding never saw. Gating both on
+    `defect_citation_scope` — captured at the triage that minted the finding, before this
+    revision existed — rejects it outright, and the URL is never fetched: no eligible
+    arbiter remains once the raising critic is excluded, so the dispute is dismissed
+    without any I/O ever reaching the URL the writer just added."""
+    fetcher = FakeFetcher(pages={NEW_URL: GOOD_PAGE})
+    defect = make_defect()
+    dispute = make_dispute(url=NEW_URL, quote="the campaign launched in September 2025")
+
+    rt = _no_arbiter_runtime(tmp_path, fetcher)
+    state = {
+        "question": "Did the senator launch a campaign?",
+        "report": REVISED_WITH_NEW_SOURCE,  # the disputing writer's own revision
+        "defect_citation_scope": fetch.extract_source_urls(REPORT),  # the PRIOR draft
+        "pending_disputes": _pending(defect, dispute),
+        "adjudications": [],
+        "dispute_budget_remaining": 3,
+        "defect_provenance": _provenance_for(defect),
+        "round": 2,
+        "author_identity": "vendor-a/model-a",
+    }
+
+    result = _adjudicate(state, rt)
+
+    records = [AdjudicationRecord.model_validate(r) for r in result["adjudications"]]
+    assert len(records) == 1
+    assert records[0].verdict == "dismissed" and records[0].method == "no_eligible_arbiter"
+    # never fetched: the citation gate excluded the URL before any I/O, at both the
+    # mechanical check and the arbiter evidence-fetch gate
+    assert fetcher.fetches == []
+
+
+def test_a_dispute_citing_a_url_the_prior_draft_cited_still_upholds_mechanically(tmp_path):
+    """Control: same shape, but the evidence URL is the one the PRIOR draft (and so the
+    raising critic) actually cited. The mechanical path still upholds it — the fix
+    narrows which draft's citations count, it does not disable the channel."""
+    fetcher = FakeFetcher(pages={GOOD_PAGE.url: GOOD_PAGE})
+    defect = make_defect()
+    dispute = make_dispute()  # defaults to https://example.com/campaign-launch
+
+    rt = _no_arbiter_runtime(tmp_path, fetcher)
+    state = {
+        "question": "Did the senator launch a campaign?",
+        "report": REPORT,  # unrevised in this fixture
+        "defect_citation_scope": fetch.extract_source_urls(REPORT),
+        "pending_disputes": _pending(defect, dispute),
+        "adjudications": [],
+        "dispute_budget_remaining": 3,
+        "defect_provenance": _provenance_for(defect),
+        "round": 2,
+        "author_identity": "vendor-a/model-a",
+    }
+
+    result = _adjudicate(state, rt)
+
+    records = [AdjudicationRecord.model_validate(r) for r in result["adjudications"]]
+    assert len(records) == 1
+    assert records[0].verdict == "upheld" and records[0].method == "mechanical"
+    assert fetcher.fetches == [GOOD_PAGE.url]
