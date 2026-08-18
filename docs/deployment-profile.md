@@ -69,8 +69,12 @@ run. For every credential, an environment variable beats the on-disk token file 
 container the token files are unreadable anyway, since the filesystem is read-only.
 
 Credentialled requests are hardened the same way anonymous ones are: the same opener, zero
-redirects, a single allowed host, and an allowlist that strips `Authorization` and friends if a
-redirect is ever followed. The outbound user agent is fixed and is not configurable.
+redirects, and an allowlist that strips `Authorization` and friends if a redirect is ever followed.
+A single allowed host is named for the paid-tier POSTs (`resolve/base.py`'s `json_post`, used by
+CORE and Firecrawl); the Brave GET (`search.py`) enforces the same zero-redirect cap but names no
+host allowlist, because at `max_redirects=0` no hop is ever followed for it to guard. The outbound
+user agent is fixed and is not configurable — every credentialled and anonymous request alike sends
+`fetch.USER_AGENT` (D-brave-egress-hardening).
 
 One outbound destination is not a provider and not configured by a credential: with `push.enabled`
 the server POSTs a notification to the push service named by each subscription (D-stop-notification). The default
