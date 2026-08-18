@@ -289,11 +289,16 @@ bound it:
   and every extra channel into a lens is a way for material to reach a scope with no use for it.
 - **The critic's output channel is unchanged.** Verification adds evidence, not a tool, so the
   critic gains no new way to emit anything. Its findings still pass through the same closed schema,
-  and the resulting defect list still reaches the writer **only as fenced untrusted data**
-  (RA-010/D-evidence-bearing-fields) — that fence, not span-anchoring, is what stops a page-persuaded critic from
-  reaching the writer as a command. (A `Defect` does carry free-text `rationale`/`instruction`, and
-  for evidence categories `related_span` is deliberately not verbatim-anchored, since it describes
-  a source rather than quoting the report. That channel is pre-existing and is not widened here.)
+  and the resulting defect list still reaches the writer **only as fenced, marker-scrubbed
+  untrusted data** (RA-010/D-evidence-bearing-fields) — that fence, not span-anchoring, is what
+  stops a page-persuaded critic from reaching the writer as a command. (A `Defect` does carry
+  free-text `rationale`/`instruction`, and for evidence categories `related_span` is deliberately
+  not verbatim-anchored, since it describes a source rather than quoting the report. That channel is
+  pre-existing and is not widened here. `writer_revision` marker-scrubs the question, the draft
+  report and the whole serialized FIX TASKS list — including `rationale`, `instruction` and
+  `related_span` — before any of it is fenced, so a critic cannot use an embedded end marker to
+  close the block early and have the remainder read as a writer instruction; D-fence-scrub-all-directions,
+  extending D-repair-fence-scrubbing from the repair turn to every fence the file builds.)
 - **Same fence, restated.** The untrusted-data note is repeated inside the fetched-pages block
   rather than relied on from the top of the prompt, given how much text sits between them. Every
   untrusted source entry is marker-scrubbed before the entries are joined inside that fence, so a
@@ -313,8 +318,12 @@ reach the writer as an instruction, and the controller still bounds termination.
 Mitigations, by boundary:
 - **Structured output everywhere** — critics emit only closed-enum categories; a critic
   literally cannot emit a free-form instruction that reaches the generator as a command.
-- **Data is delimited/quoted** in prompts; models are told report/critique text is data to
-  operate on, never instructions to obey.
+- **Data is delimited/quoted, and every delimiter is marker-scrubbed** in prompts; models are told
+  report/critique text is data to operate on, never instructions to obey, and an embedded literal
+  end-of-data marker cannot close a block early — `prompts._neutralized` is applied wherever
+  untrusted text is interpolated inside a `DATA_FENCE`/`DATA_END` block, writer-facing and
+  arbiter-facing exactly as much as critic-facing, not only at the repair turn
+  (D-fence-scrub-all-directions, extending D-repair-fence-scrubbing).
 - **Triage validates** every field against the schema before it becomes a defect-task or a
   count; an unknown category or invalid/over-length field **fails the entire lens** (fail-closed,
   RB-007) — nothing is silently dropped, so an adversarial critique can't collapse into a
