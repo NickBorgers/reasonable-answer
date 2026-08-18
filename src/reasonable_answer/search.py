@@ -30,11 +30,22 @@ from dataclasses import dataclass
 from pathlib import Path
 
 from . import prompts
-from .fetch import _http_only_opener
+from .fetch import USER_AGENT, _http_only_opener
 
 log = logging.getLogger(__name__)
 
 BRAVE_ENDPOINT = "https://api.search.brave.com/res/v1/web/search"
+
+#: resolve/base.py's MAX_RESPONSE_BYTES (250_000) is the house bound for a registry's
+#: JSON record and is deliberately tight because that shape is simple. Brave's envelope
+#: is not: alongside the up-to-20 `web.results` this module actually parses, it carries
+#: `meta_url` objects, thumbnails, and whichever other result types (news, videos,
+#: discussions, FAQ) the query happened to match, none of which `_parse_results` reads.
+#: Doubling the registry bound gives that headroom while keeping the same discipline
+#: every other egress path in the package applies (fetch.SourceFetcher's max_bytes,
+#: resolve.base.json_post's max_bytes): a malfunctioning or hostile endpoint cannot
+#: stall a run by streaming an unbounded body.
+MAX_RESPONSE_BYTES = 500_000
 
 
 def _no_redirect_opener() -> urllib.request.OpenerDirector:
@@ -175,6 +186,11 @@ class BraveSearch:
             headers={
                 "Accept": "application/json",
                 "X-Subscription-Token": self._token,
+                # The same fixed identity every other egress path in the package sends
+                # (fetch.http_get's default, resolve/base.py's json_post) — never the
+                # Python-version-dependent urllib default, and never a browser
+                # impersonation (docs/deployment-profile.md, AGENTS.md).
+                "User-Agent": USER_AGENT,
             },
         )
         try:
@@ -187,7 +203,11 @@ class BraveSearch:
             # rather than a live hole, but a credential-bearing request has no reason
             # to be redirectable at all: the endpoint is a constant.
             with _no_redirect_opener().open(req, timeout=self._timeout) as resp:  # noqa: S310
-                payload = json.loads(resp.read())
+                # One byte past the cap: enough to tell a body that just fits from one
+                # that was cut off, mirroring fetch._request's own discipline. Every
+                # other egress path in the package bounds its read; this one silently
+                # didn't.
+                raw = resp.read(MAX_RESPONSE_BYTES + 1)
         except urllib.error.HTTPError as exc:
             # 429 is the one a caller can act on (back off); everything else is opaque.
             raise SearchError(f"brave search HTTP {exc.code}: {exc.reason}") from exc
@@ -196,6 +216,13 @@ class BraveSearch:
             # carries the query in its querystring, and several urllib errors embed
             # the URL in their str() — so an unfiltered message is a path for private
             # run material to reach a log line via an exception.
+            raise SearchError(f"brave search failed: {type(exc).__name__}") from exc
+
+        if len(raw) > MAX_RESPONSE_BYTES:
+            raise SearchError(f"brave search response exceeded {MAX_RESPONSE_BYTES} bytes")
+        try:
+            payload = json.loads(raw)
+        except Exception as exc:
             raise SearchError(f"brave search failed: {type(exc).__name__}") from exc
 
         return _parse_results(payload)
