@@ -166,6 +166,39 @@ def test_depth_one_restores_the_single_critic_pass(identities, roster, tmp_path)
     assert [e for e in events(cfg, final) if e["kind"] == "control" and e["rule"] == 8]
 
 
+def test_rule_8_confirmation_is_labeled_confirm_state_and_never_reaches_the_prompt(
+    identities, roster, tmp_path
+):
+    """RB-010's documented label, actually applied (D-confirm-state-implemented): the
+    controller stamps `LensResult.confirm_state` on a rule-8 top-up, leaves it False on
+    the discovery pass that preceded it, and the label is attached only after the
+    model call returns — so the two reviews of a lens share one byte-identical
+    prompt."""
+    cfg = make_config(tmp_path, roster, depth=1)
+    client = FakeClient(identities=identities, critique_fn=clean, report_fn=lambda n: REPORT)
+    final = run(cfg, question="Is it so?", seed=REPORT, client=client)
+
+    controls = [e for e in events(cfg, final) if e["kind"] == "control"]
+    assert any(e["rule"] == 8 for e in controls), "rule 8 never fired; test proves nothing"
+
+    for lens, group in final["lens_results"].items():
+        results = [LensResult.model_validate(r) for r in group]
+        assert len(results) == 2, (lens, results)
+        discovery, confirmation = results
+        assert discovery.confirm_state is False, (lens, discovery)
+        assert confirmation.confirm_state is True, (lens, confirmation)
+
+    # (b) the label is invisible to the model: every critique call on a given lens —
+    # discovery and confirmation alike — used the identical prompt.
+    by_lens: dict[str, set[str]] = {}
+    for call in client.calls:
+        if call.schema != "CritiqueOutput":
+            continue
+        by_lens.setdefault(lens_of(call.user), set()).add(call.user)
+    assert all(len(prompts) == 1 for prompts in by_lens.values()), by_lens
+    assert set(by_lens) == {lens.value for lens in LENSES}
+
+
 def test_depth_is_configurable_per_lens(tmp_path):
     roster = Roster(
         writers=["writer-a", "writer-b"],
@@ -293,6 +326,25 @@ def _state(identities) -> dict:
         "pending_lenses": ["logic"],
         "run_date": "2026-07-28",
     }
+
+
+def test_confirming_unstaffed_slot_is_labeled_confirm_state(identities, tmp_path):
+    """D-confirm-state-implemented also labels the no-eligible-critic result."""
+    roster = Roster(
+        writers=["writer-a", "writer-b"],
+        critics={lens.value: ["writer-a"] for lens in LENSES},
+    )
+    cfg = make_config(tmp_path, roster, depth=1)
+    rt = _runtime(cfg, identities, clean, tmp_path, "run-confirming-unstaffed")
+    state = _state(identities)
+    state["confirming"] = True
+
+    out = _critique(state, rt)
+
+    result = LensResult.model_validate(out["lens_results"]["logic"][0])
+    assert result.critic_alias == "(none)"
+    assert result.failed is True
+    assert result.confirm_state is True
 
 
 def test_one_failed_critic_does_not_discard_the_other_review(

@@ -5930,6 +5930,55 @@ scheme.
 selects and corrects prose describing that selection. No model call, prompt content sent to a
 model, critic assignment, severity, or controller rule is touched.
 
+## D-validator-error-hygiene — the schema-repair re-ask is validator-attributed and content-free too
+
+**The finding.** D-repair-turn-context's "RA-016 is unchanged" paragraph audits `rejected_text()` and
+`repair_excerpt()` — the lens-repair half of a critic's repair budget — and is accurate about that
+half. It does not audit the other half of the same budget: `LLMClient.structured`'s own schema-repair
+loop, which runs before lens validation ever sees an output and handles the `CritiqueOutput`/
+`IssueRepairs` level — malformed JSON, a missing field, an enum value out of range. There,
+`last_err = str(exc)[:800]` took a pydantic `ValidationError`'s default rendering verbatim, and that
+rendering echoes `input_value=…` — a fragment of the very field the validator rejected, which for a
+critic's structured output is a quoted report span. The same string was re-prompted with "Your
+previous response was rejected by the schema validator" — the critic-attribution wording
+D-repair-turn-context specifically chose *not* to use for the lens half ("a candidate issue was
+rejected", never "your previous response") — and, on repair exhaustion, was carried unchanged into
+`MalformedOutputError`, which `critique.critique_once` truncates into `LensResult.failure_reason` and
+logs at WARNING, both outside the 0700 `runs/<id>/` tree (RA-016). D-repair-diagnostic-keying had
+already flagged the shape of this gap without closing it: "this decision does not generalize [keeping
+the rejected span out of `str(exc)`] to arbitrary validator messages; RA-016 relies on the triage
+error's message construction" — true only for `triage.LensValidationError`, never claimed for
+pydantic's own `ValidationError`. A second, smaller leak shared the same branch: `_extract_json`'s
+failure message quoted up to 200 characters of the unparseable response, which for a critic is
+report-adjacent model output too.
+
+**The decision.** `llm._sanitized_schema_error` replaces `str(exc)[:800]` on both exception types
+`structured()`'s repair loop catches. For a pydantic `ValidationError` it renders
+`errors(include_input=False, include_url=False)` — `loc`/`msg`/`type` only, with string locations
+allowlisted against properties in the dereferenced schema and any other location replaced by
+`(unrecognized-key)` — never the input value or a model-authored forbidden key. For everything else
+reaching that branch (a plain `ValueError`), the message is used as-is,
+which is now safe on both sides that currently reach it: `_extract_json` no longer quotes the response
+it could not parse, and the `validate=` hook — unused by any caller today — is documented to describe
+the failure the way `LensValidationError` does, not to quote the value that failed it. The re-ask now
+reads "The schema validator rejected the output:" and fences and marker-scrubs the sanitized summary
+with `prompts.DATA_FENCE`/`DATA_END`, matching `critic_repair_turn`'s house style and its
+validator-attributed wording rather than "your previous response". `MalformedOutputError` therefore
+carries only the sanitized summary, so every downstream consumer — `critique.critique_once`'s
+`LensResult.failure_reason`, and the graph's support-manifest and dispute-pass warning logs — inherits
+the fix without being touched itself; two of those call sites already carried a comment explaining why
+they avoid `str(exc)` regardless of what it contains, updated to describe what the message now is
+rather than repeat the old warning as if it still held.
+
+**One budget, unchanged.** This does not touch `budgets.critic_repair_retries`, which half of a
+critic's repair spends it on schema violations versus lens patches, or the raise-on-exhaustion
+behaviour — only what the re-ask and the terminal error say.
+
+**Invariants.** The untrusted-text boundary is strengthened: a pydantic error's `input_value` and a
+model-authored forbidden-key `loc` were report-adjacent content capable of reaching a generator's
+context under validator-attributed framing, and neither now does. Fail-closed lens validation, author
+exclusion, the blind orchestrator, severity floors and termination are untouched.
+
 ## D-dispute-evidence-prior-draft — a dispute's evidence URL is checked against the draft the finding was raised against, not the disputing writer's own revision
 
 **The problem.** D-writer-disputes' mechanical path and its arbiter evidence-fetch gate both read
@@ -5999,54 +6048,97 @@ content, or was itself compromised remains a valid mechanical-adjudication sourc
 is "the critics could have seen this," not "this page is trustworthy," which is the same bound
 D-writer-disputes already accepted for the pre-fix (single-draft) version of this check.
 
-## D-validator-error-hygiene — the schema-repair re-ask is validator-attributed and content-free too
+## D-confirm-state-implemented — the confirm-state label RB-010 describes now exists in code, not only in the docs
 
-**The finding.** D-repair-turn-context's "RA-016 is unchanged" paragraph audits `rejected_text()` and
-`repair_excerpt()` — the lens-repair half of a critic's repair budget — and is accurate about that
-half. It does not audit the other half of the same budget: `LLMClient.structured`'s own schema-repair
-loop, which runs before lens validation ever sees an output and handles the `CritiqueOutput`/
-`IssueRepairs` level — malformed JSON, a missing field, an enum value out of range. There,
-`last_err = str(exc)[:800]` took a pydantic `ValidationError`'s default rendering verbatim, and that
-rendering echoes `input_value=…` — a fragment of the very field the validator rejected, which for a
-critic's structured output is a quoted report span. The same string was re-prompted with "Your
-previous response was rejected by the schema validator" — the critic-attribution wording
-D-repair-turn-context specifically chose *not* to use for the lens half ("a candidate issue was
-rejected", never "your previous response") — and, on repair exhaustion, was carried unchanged into
-`MalformedOutputError`, which `critique.critique_once` truncates into `LensResult.failure_reason` and
-logs at WARNING, both outside the 0700 `runs/<id>/` tree (RA-016). D-repair-diagnostic-keying had
-already flagged the shape of this gap without closing it: "this decision does not generalize [keeping
-the rejected span out of `str(exc)`] to arbitrary validator messages; RA-016 relies on the triage
-error's message construction" — true only for `triage.LensValidationError`, never claimed for
-pydantic's own `ValidationError`. A second, smaller leak shared the same branch: `_extract_json`'s
-failure message quoted up to 200 characters of the unparseable response, which for a critic is
-report-adjacent model output too.
+**The finding.** `docs/convergence.md`, `docs/isolation.md`, `docs/architecture.md`, and RB-010 in this
+file all describe `confirm_state` as a controller-side label, stamped after a rule-8 confirmation
+critique returns, that distinguishes a confirming review from a discovering one in the audit record.
+`LensResult.confirm_state: bool = False` has existed since RB-010 was recorded, but nothing in `graph.py`
+or `controller.py` ever set it to `True`. Every persisted critique — rule-2 discovery and rule-8
+confirmation alike — carried `confirm_state=False`, so the audit trail could not answer the question
+the field exists to answer: which of a lens's clean records came from the pass that first reported the
+artifact clean, and which came from the top-up rule 8 collected afterward.
 
-**The decision.** `llm._sanitized_schema_error` replaces `str(exc)[:800]` on both exception types
-`structured()`'s repair loop catches. For a pydantic `ValidationError` it renders
-`errors(include_input=False, include_url=False)` — `loc`/`msg`/`type` only, with string locations
-allowlisted against properties in the dereferenced schema and any other location replaced by
-`(unrecognized-key)` — never the input value or a model-authored forbidden key. For everything else
-reaching that branch (a plain `ValueError`), the message is used as-is,
-which is now safe on both sides that currently reach it: `_extract_json` no longer quotes the response
-it could not parse, and the `validate=` hook — unused by any caller today — is documented to describe
-the failure the way `LensValidationError` does, not to quote the value that failed it. The re-ask now
-reads "The schema validator rejected the output:" and fences and marker-scrubs the sanitized summary
-with `prompts.DATA_FENCE`/`DATA_END`, matching `critic_repair_turn`'s house style and its
-validator-attributed wording rather than "your previous response". `MalformedOutputError` therefore
-carries only the sanitized summary, so every downstream consumer — `critique.critique_once`'s
-`LensResult.failure_reason`, and the graph's support-manifest and dispute-pass warning logs — inherits
-the fix without being touched itself; two of those call sites already carried a comment explaining why
-they avoid `str(exc)` regardless of what it contains, updated to describe what the message now is
-rather than repeat the old warning as if it still held.
+**What was not broken.** The safety property RB-010 actually names — a critic cannot infer it is
+confirming and flip to a biased binary verdict — held regardless, because it rests on prompt
+byte-identity, not on the field. Nothing ever threaded `confirm_state` (or any equivalent signal) into
+a prompt, so a confirming critique was always indistinguishable from a discovering one *to the model*.
+`tests/test_isolation.py::test_confirmation_critique_is_byte_identical_to_a_normal_one` already covered
+that half and needed no change. What was missing was the half the docs also promise: that the audit
+record itself, read after the run, can tell the two apart.
 
-**One budget, unchanged.** This does not touch `budgets.critic_repair_retries`, which half of a
-critic's repair spends it on schema violations versus lens patches, or the raise-on-exhaustion
-behaviour — only what the re-ask and the terminal error say.
+**The decision.** `State` gains a `confirming: bool` field, set by `_control` in the same branch that
+already sets `pending_lenses` for a `recritique` action: `True` only when `decision.rule == 8`, `False`
+for `decision.rule == 2`, and reset to `False` at intake and on every fresh generation (the same two
+places `pending_lenses` is reset to the full lens list). `_critique` reads `state["confirming"]` once,
+after building every prompt from `pending_lenses`, and stamps `confirm_state=True` via
+`LensResult.model_copy(update=...)` on each result `work()` returns for that pass — including a
+result built from an unstaffed slot, so a rule-8 pass that could not find an eligible critic is still
+labeled as one. The copy happens strictly after the model call returns (or, for an unstaffed slot,
+after the roster-exhaustion path decides no call will be made), so the label is order-of-operations
+incapable of reaching the prompt that produced the result it is attached to.
 
-**Invariants.** The untrusted-text boundary is strengthened: a pydantic error's `input_value` and a
-model-authored forbidden-key `loc` were report-adjacent content capable of reaching a generator's
-context under validator-attributed framing, and neither now does. Fail-closed lens validation, author
-exclusion, the blind orchestrator, severity floors and termination are untouched.
+No acceptance or controller logic reads `confirm_state`: `acceptance_state`, `roles.lens_statuses`, and
+`toppable` computation are unchanged and keyed on clean records and `used_critics` exactly as before.
+This is a labeling fix to the audit record, not a behavior change to convergence.
+
+**Verification.** `tests/test_review_depth.py::test_rule_8_confirmation_is_labeled_confirm_state_and_never_reaches_the_prompt`
+drives a real rule-8 top-up (`review.depth: 1` against a two-eligible-critic roster, the same
+configuration `test_depth_one_restores_the_single_critic_pass` uses) and asserts both halves: every
+lens's discovery `LensResult` persists `confirm_state=False` and its confirmation top-up persists
+`confirm_state=True`, and every critique call on a given lens — discovery and confirmation alike —
+used the byte-identical prompt.
+
+**Invariants.** None of the six. Author exclusion, the blind orchestrator, fail-closed lens validation,
+severity floors, termination, and untrusted text reaching a generator are all unaffected — this closes
+a gap between the audit record and its own documentation, not a live isolation or convergence property.
+
+## D-fence-scrub-all-directions — every fenced block is marker-scrubbed, not only the critic-facing ones
+
+**The finding.** D-repair-fence-scrubbing closed the gap between a repair prompt's stated boundary
+and its implementation, but only on one side of the run: `prompts._neutralized` was called from
+`critic_user`, `fetched_sources_block` and `critic_repair_turn` alone. Every writer-facing and
+arbiter-facing fence interpolated the same class of untrusted text raw. `writer_revision` fenced the
+question, the draft report and a serialized FIX TASKS list — the second of which carries a critic's
+own `rationale`, `instruction` and `related_span`, free text by design — without scrubbing any of
+them; the same pattern repeated in `writer_first_draft`, `writer_dispute`, `writer_support`,
+`search_results_block`, `source_read_block` and `arbiter_user`. A defect whose `rationale` embedded
+`DATA_END` verbatim closed the FIX TASKS fence early, and whatever followed sat outside the data
+block next to a live instruction ("Apply them all."). The arbiter case was the most consequential:
+its context fences a writer's own dispute `grounds` and `evidence_quote` — an interested party's
+argument, by the prompt's own description — and `dispute_upheld=true` permanently suppresses the
+finding those fields sit next to. A dispute that broke its fence would not need to argue the finding
+wrong; it would only need to get its own free text read as the instruction that follows.
+
+**The decision.** `_neutralized` is applied to every interpolation that lands inside a
+`DATA_FENCE`/`DATA_END` block across the whole file, in both directions: `writer_revision` (question,
+report, the FIX TASKS JSON), `writer_first_draft` and `writer_dispute` (question, report, FIX TASKS
+JSON), `writer_support` (question, report, read source bodies), `search_results_block`,
+`source_read_block`, `arbiter_user` (the finding JSON, the paragraph, the question, the challenge
+JSON, the fetched evidence page) and `refine_user` (the question). This is not new scope for the
+untrusted-text boundary — RA-010 already named the question, every report and every span as data —
+it is closing the same implementation gap D-repair-fence-scrubbing closed, generalized to every fence
+the file builds rather than to the one repair prompt that motivated it first.
+
+`_neutralized` itself moved from the critics section to sit beside `DATA_FENCE`/`DATA_END`, since it
+is now a file-wide primitive rather than a critic-repair one; its semantics are unchanged (replace
+`DATA_END` with `[END-MARKER]`, `DATA_FENCE` with `[BEGIN-MARKER]`).
+
+**Serialized JSON is scrubbed after `json.dumps`, not field-by-field before it.** The FIX TASKS list,
+the arbiter's finding and its challenge are all built with `json.dumps` before they are fenced.
+`DATA_FENCE` and `DATA_END` are plain ASCII sequences; `json.dumps` escapes quotes, backslashes and
+control characters, not arbitrary substrings, so a marker embedded in a field's value survives
+serialization byte-for-byte inside the resulting string. Scrubbing the serialized string finds every
+occurrence in one pass, wherever it sits in the structure, and the replacement text
+(`[END-MARKER]`/`[BEGIN-MARKER]`) contains no character `json.dumps` would need to escape — so the
+result is still valid JSON. Scrubbing each field before serialization would need to be applied at
+every call site that builds one of these dicts and re-applied at every future field added to them;
+scrubbing the serialized string is one call, made once, that cannot be forgotten per field.
+
+**Invariants.** Untrusted text never reaching a generator as instruction is what this decision
+enforces uniformly rather than partially; the other five (author exclusion, blind orchestrator,
+fail-closed lenses, severity floors, termination) are untouched — no schema, no severity mapping, no
+controller rule changed.
 
 ## Open items for a future round
 
