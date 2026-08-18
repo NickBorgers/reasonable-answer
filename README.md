@@ -469,15 +469,18 @@ events.jsonl          every stage: startup, intake, generate, critique, triage, 
 reports/              every draft, with its author
 critiques/            every lens result, with provenance
 disputes/             every writer dispute, with its grounds (when enabled)
-support/              the support manifest per draft: claim/source spans the writer read
+support/              the support manifest per draft — claim/source spans the writer read — when
+                      `search.support_manifest` is enabled; off by default, and requires
+                      `search.read_sources`, so a shipped-config run writes nothing here
 refinements/          the pre-run question-refinement record, when refinement ran
 signals/views.jsonl   what the blind orchestrator saw, per round
 signals/decisions.jsonl  which rule fired, per round
 ```
 
-`reports/`, `critiques/`, `disputes/`, `refinements/` and `support/` hold the sensitive material
-(`store.CONTENT_DIRS`); `ra purge <id> --content-only` drops all of them and keeps the decision
-record — and `owner.txt`, so a purged run stays in its owner's index.
+`reports/`, `critiques/`, `disputes/`, `refinements/` and `support/` are `store.CONTENT_DIRS`: the
+directories that hold sensitive material *when the corresponding feature actually ran* (`support/`
+and `refinements/` can be empty). `ra purge <id> --content-only` drops whatever they hold and keeps
+the decision record — and `owner.txt`, so a purged run stays in its owner's index.
 
 Every run also stamps the commit it ran on, in `final.json` and on each `startup` event, so runs
 can be sorted into before and after a given change — see
