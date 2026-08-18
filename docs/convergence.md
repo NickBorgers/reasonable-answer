@@ -546,7 +546,9 @@ and keep their gates (RI-001, RH-001).
   triage increments or resets the counter, including a rule-2 re-critique pass over the same draft,
   not only the passes that follow a fresh generation.
 - **cycle:** the `artifact_hash` sequence repeats with period ≤ `L` (byte-level).
-- **best-scoring version:** minimal `w_b·blocking + w_m·major + w_n·minor`; ties → earliest round.
+- **best-scoring version:** minimal `w_b·blocking + w_m·major + w_n·minor`, using each artifact's
+  latest triage (RC-002); after those rows are ordered by round, ties → **latest round**
+  (D-latest-round-tiebreak).
 
 ### Terminal statuses (RA-012, RC-001)
 
