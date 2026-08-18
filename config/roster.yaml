@@ -307,12 +307,16 @@ disputes:
 # that flagged nothing in that run. On completeness that worry is now answered by
 # measurement rather than by position — the 2026-08-02 audition graded it `fit` there —
 # which is why D-completeness-pool-noise moved it to position 1 of a two-model pool.
-# On evidence it is still at position 3 and still unmeasured: at `review.depth: 2`
-# positions 1 and 2 read every draft and position 3 is unreachable on the first pass, so
-# gemma4 is reached there on the rule 8 confirmation top-up — where a false clean raises
-# cleared_count to 2, satisfies strong_met, and terminates the run `accepted`. Audition
-# that slot before trusting it, and re-audition the whole lineup before raising
-# `review.depth` to 3, which would pull every position 3 into every pass.
+# On evidence it is now at position 2 of a two-model pool, and it is measured, not
+# unmeasured: see the `evidence:` pool comment above, which grades it `marginal`
+# (0.50 sensitivity / 0.12 invented material issues per sound control).
+# At `review.depth: 2` a two-model pool means both positions read every draft. Neither
+# evidence critic is in `writers:`, so author exclusion never shrinks this pool: both
+# families stay eligible every round, gemma4 is reached on the ordinary first pass, and
+# a strong `accepted` remains reachable. The residual is critic quality, not
+# `roster_limited`: both critics are marginal, so a first-pass miss by glm-5.2 followed
+# by a clean from gemma4 can terminate the run as `accepted` on two marginal opinions.
+# Re-audition the pair before raising `review.depth` above 2.
 # Measuring is opt-in by being its own command (`ra audition`) — there is no `enabled`
 # flag here. Everything below only shapes what that command measures and what the two
 # cache readers, `ra doctor` and the `enforce` gate, make of the result.

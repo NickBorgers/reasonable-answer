@@ -89,7 +89,7 @@ markdown_extensions:
   - toc:
       permalink: true
       # Keeps decisions.md's right-hand TOC at its ## D-headings plus one level, rather
-      # than a wall of every sub-heading in a 990-line append-only log.
+      # than a wall of every sub-heading in a ~6,000-line append-only log.
       toc_depth: 3
       # GitHub-compatible slugs. Not byte-identical — a heading whose words are separated
       # by a spaced em-dash slugifies with one hyphen here and two on GitHub — but every
@@ -114,7 +114,7 @@ markdown_extensions:
 # and it lives outside docs_dir. index.md links out to it.
 #
 # decisions.md gets its own top-level entry, last and outside any group, under a nav title
-# that differs from its H1. At 990 lines it is an append-only record rather than a chapter;
+# that differs from its H1. At ~6,000 lines it is an append-only record rather than a chapter;
 # inside a group it would dwarf the sidebar. It is not split — README.md and DESIGN.md link
 # to it by filename.
 nav:

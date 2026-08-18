@@ -70,8 +70,9 @@ uv run ra export <run_id> [--format md|html] [-o out.html]
 ## Web interface
 
 `make serve`, or `ra serve --host 0.0.0.0 --port 8080` in a container. Submit a question, watch
-the loop converge live, and browse your own past runs — the index is scoped to whoever is asking,
-though anyone signed in can open a run they hold the id for.
+the loop converge live, and browse your own past runs — the index is scoped to whoever is asking.
+A served run with an `owner.txt` record is public to read: no sign-in is required, and holding its
+run id is enough. Ownerless run directories are not exposed by the web interface.
 
 The run page streams the pipeline's own event log over server-sent events, so you see each round
 as it happens — which model wrote the draft, which critic drew which lens, what each one found,
@@ -88,10 +89,11 @@ round 2   writer deepseek-v4-flash
 **Callers are identified by a header, and it is trusted rather than verified.** It comes from
 whatever fronts the app — `Cf-Access-Authenticated-User-Email` from Cloudflare Access, or the
 `Tailscale-User-*` headers from `tailscale serve` — and a request carrying neither is refused on
-every route but `/healthz` and the `GET`s under `/runs/`, which are public: holding a run id is
-the credential for reading that run, so a finished report can be shared with anyone (D-id-as-credential). Every
-write still needs an identity. Runs belong to whoever submitted them: your index shows only your
-own runs, and only its owner can resume a run.
+every route but `/healthz` and the `GET`s under `/runs/`, which are public for served runs carrying
+an `owner.txt` record: holding a run id is the credential for reading that run, so a finished report
+can be shared with anyone (D-id-as-credential). Ownerless run directories return 404. Every write
+still needs an identity. Runs belong to whoever submitted them: your index shows only your own runs,
+and only its owner can resume a run.
 
 Because the header is not verified, anyone who can reach the port directly can claim to be any
 user. `ra serve` binds `127.0.0.1` by default and `compose.yaml` publishes only to loopback for
@@ -471,12 +473,18 @@ events.jsonl          every stage: startup, intake, generate, critique, triage, 
 reports/              every draft, with its author
 critiques/            every lens result, with provenance
 disputes/             every writer dispute, with its grounds (when enabled)
+support/              the support manifest per draft — claim/source spans the writer read — when
+                      `search.support_manifest` is enabled; off by default, and requires
+                      `search.read_sources`, so a shipped-config run writes nothing here
+refinements/          the pre-run question-refinement record, when refinement ran
 signals/views.jsonl   what the blind orchestrator saw, per round
 signals/decisions.jsonl  which rule fired, per round
 ```
 
-`reports/` and `critiques/` hold the sensitive material; `ra purge <id> --content-only` drops them
-and keeps the decision record — and `owner.txt`, so a purged run stays in its owner's index.
+`reports/`, `critiques/`, `disputes/`, `refinements/` and `support/` are `store.CONTENT_DIRS`: the
+directories that hold sensitive material *when the corresponding feature actually ran* (`support/`
+and `refinements/` can be empty). `ra purge <id> --content-only` drops whatever they hold and keeps
+the decision record — and `owner.txt`, so a purged run stays in its owner's index.
 
 Every run also stamps the commit it ran on, in `final.json` and on each `startup` event, so runs
 can be sorted into before and after a given change — see
@@ -509,9 +517,18 @@ src/reasonable_answer/
   controller.py  the 14-rule ordered stop decision — pure, deterministic, total
   graph.py       the LangGraph loop
   audition.py    measured critic capability: fixtures, metrics, cached verdicts
+  refine_audition.py  the same auditioning discipline for the question-refinement surface
   fetch.py       the one egress point: source fetching, coverage tallies
+  resolve/       the bibliographic-identifier ladder fetch falls back to: URL → identifier
+                 extraction, registry lookups (Crossref, OpenAlex, Unpaywall, Europe PMC,
+                 arXiv, CORE), and the paid rendering-provider tier
   search.py      writer retrieval: web_search, source reads, support manifest
+  reading.py     the read_source writer tool and its per-call URL allowlist
+  support.py     the support manifest: mechanical claim/source verification, no model
   ingest.py      seed conversion (PDF / docx / HTML / URL → markdown) at the edge
+  textconv.py    shared PDF/docx/HTML → markdown conversion used by both ingest and fetch
+  build.py       which build produced this run: commit + dirty-tree stamping (image/git/unknown)
+  shutdown.py    cooperative shutdown: leans on the LangGraph checkpointer, not the grace period
   store.py       audit trail and retention
   export.py      report + review record, for markdown, self-contained HTML and print
   web/           FastAPI app: routes, auth middleware, SSE stream, question refinement

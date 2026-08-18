@@ -35,10 +35,10 @@ infer it:
 - **`unknown`** — neither was available. Recorded honestly, never guessed. `ra doctor` warns about
   it, and so does the first run in the process.
 
-`dirty` is `true` when the working tree had uncommitted changes, `false` when it did not, and
-`null` when nothing checked — a `git` run whose `git status` failed, or an `image` build. A `dirty`
-run's commit is a starting point, not an identity: the code that ran was that commit plus edits
-nobody recorded.
+`dirty` is `true` when the working tree had uncommitted changes, `false` when it did not — this is
+what an `image` build always records, since the baked SHA is by definition what was committed —
+and `null` only for a `git` run whose `git status` failed to answer. A `dirty` run's commit is a
+starting point, not an identity: the code that ran was that commit plus edits nobody recorded.
 
 ## Attributing a run to a build
 
