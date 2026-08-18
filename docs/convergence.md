@@ -529,7 +529,9 @@ and keep their gates (RI-001, RH-001).
 - **signal-stagnation:** the per-category `{blocking, major}` multiset is unchanged for `K`
   consecutive ticks (a *stuck signal*, not proven semantic repetition).
 - **cycle:** the `artifact_hash` sequence repeats with period ≤ `L` (byte-level).
-- **best-scoring version:** minimal `w_b·blocking + w_m·major + w_n·minor`; ties → earliest round.
+- **best-scoring version:** minimal `w_b·blocking + w_m·major + w_n·minor`, using each artifact's
+  latest triage (RC-002); after those rows are ordered by round, ties → **latest round**
+  (D-latest-round-tiebreak).
 
 ### Terminal statuses (RA-012, RC-001)
 
