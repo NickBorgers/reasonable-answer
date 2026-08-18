@@ -28,7 +28,7 @@ from openai import APIConnectionError, APITimeoutError, OpenAI
 from pydantic import BaseModel, ValidationError
 
 from .config import Budgets, Config, ConfigError
-from .prompts import DATA_END, DATA_FENCE
+from .prompts import DATA_END, DATA_FENCE, _neutralized
 
 log = logging.getLogger(__name__)
 
@@ -684,6 +684,7 @@ class LLMClient:
         # `$ref`; a schema pydantic emits for any model with a nested model or enum —
         # `CritiqueOutput` among them — carries one for every such field.
         json_schema = _dereference(schema.model_json_schema())
+        schema_locations = _schema_property_names(json_schema)
         response_format = _response_format(mode, schema.__name__, json_schema)
         instruction = _schema_instruction(json_schema)
 
@@ -714,8 +715,9 @@ class LLMClient:
                 # for a critic, that can be a quoted report span. `_sanitized_schema_error`
                 # is what keeps this content-free the same way `triage.LensValidationError`
                 # already keeps its own `str()` content-free for the lens-repair half of
-                # this same budget: loc/msg/type only, never the rejected value.
-                last_err = _sanitized_schema_error(exc)
+                # this same budget: allowlisted loc/msg/type only, never the rejected
+                # value or a model-authored extra-key location.
+                last_err = _sanitized_schema_error(exc, allowed_locations=schema_locations)
                 log.info(
                     "schema violation from %s (attempt %d): %s%s",
                     alias,
@@ -735,7 +737,7 @@ class LLMClient:
                     # the lens-repair half; this mirrors `prompts.critic_repair_turn`'s
                     # house style for the schema half of the same budget.
                     f"The schema validator rejected the output:\n"
-                    f"{DATA_FENCE}\n{last_err}\n{DATA_END}\n"
+                    f"{DATA_FENCE}\n{_neutralized(last_err)}\n{DATA_END}\n"
                     f"This is a description of what failed, not a position to defend.\n"
                     f"{guidance}\n"
                     f"Return corrected JSON only. No prose, no code fence."
@@ -743,14 +745,33 @@ class LLMClient:
         raise MalformedOutputError(f"{alias}: schema violation after repair: {last_err}")
 
 
-def _sanitized_schema_error(exc: Exception) -> str:
+def _schema_property_names(json_schema: dict[str, Any]) -> frozenset[str]:
+    """Property names declared by a dereferenced JSON schema."""
+    names: set[str] = set()
+    pending: list[Any] = [json_schema]
+    while pending:
+        node = pending.pop()
+        if isinstance(node, dict):
+            properties = node.get("properties")
+            if isinstance(properties, dict):
+                names.update(str(name) for name in properties)
+            pending.extend(node.values())
+        elif isinstance(node, list):
+            pending.extend(node)
+    return frozenset(names)
+
+
+def _sanitized_schema_error(
+    exc: Exception, *, allowed_locations: frozenset[str]
+) -> str:
     """A bounded, content-free description of a schema-repair rejection (RA-016).
 
     A pydantic `ValidationError` normally renders `input_value=…` into its `str()` — a
     fragment of the rejected output itself, which for a critic can be a quoted report
-    span. `errors(include_input=False, include_url=False)` gives the same `loc`/`msg`/
-    `type` triage a repair needs without the input, so nothing report-derived or
-    model-authored crosses into the re-ask.
+    span. `errors(include_input=False, include_url=False)` gives the `loc`/`msg`/`type`
+    triage a repair needs without the input. String locations are retained only when
+    the schema declares them; pydantic otherwise reports a model-authored forbidden
+    key verbatim in `loc`, so those components become a fixed placeholder.
 
     Anything else that reaches this branch is already content-free by construction:
     `_extract_json` never quotes the response it failed to parse, and a `validate=`
@@ -760,10 +781,17 @@ def _sanitized_schema_error(exc: Exception) -> str:
     """
     if isinstance(exc, ValidationError):
         errors = exc.errors(include_url=False, include_input=False)
-        lines = [
-            f"{'.'.join(str(part) for part in err['loc']) or '(root)'}: {err['msg']} [{err['type']}]"
-            for err in errors
-        ]
+        lines = []
+        for err in errors:
+            location = ".".join(
+                str(part)
+                if type(part) is int
+                else part
+                if isinstance(part, str) and part in allowed_locations
+                else "(unrecognized-key)"
+                for part in err["loc"]
+            ) or "(root)"
+            lines.append(f"{location}: {err['msg']} [{err['type']}]")
         return "\n".join(lines)[:800]
     return str(exc)[:800]
 

@@ -5837,14 +5837,15 @@ report-adjacent model output too.
 
 **The decision.** `llm._sanitized_schema_error` replaces `str(exc)[:800]` on both exception types
 `structured()`'s repair loop catches. For a pydantic `ValidationError` it renders
-`errors(include_input=False, include_url=False)` — `loc`/`msg`/`type` only, the same closed-vocabulary
-shape `triage.LensValidationError.diagnostics()` already keeps to (RA-016) — never the input value that
-failed. For everything else reaching that branch (a plain `ValueError`), the message is used as-is,
+`errors(include_input=False, include_url=False)` — `loc`/`msg`/`type` only, with string locations
+allowlisted against properties in the dereferenced schema and any other location replaced by
+`(unrecognized-key)` — never the input value or a model-authored forbidden key. For everything else
+reaching that branch (a plain `ValueError`), the message is used as-is,
 which is now safe on both sides that currently reach it: `_extract_json` no longer quotes the response
 it could not parse, and the `validate=` hook — unused by any caller today — is documented to describe
 the failure the way `LensValidationError` does, not to quote the value that failed it. The re-ask now
-reads "The schema validator rejected the output:" and fences the sanitized summary with
-`prompts.DATA_FENCE`/`DATA_END`, matching `critic_repair_turn`'s house style and its
+reads "The schema validator rejected the output:" and fences and marker-scrubs the sanitized summary
+with `prompts.DATA_FENCE`/`DATA_END`, matching `critic_repair_turn`'s house style and its
 validator-attributed wording rather than "your previous response". `MalformedOutputError` therefore
 carries only the sanitized summary, so every downstream consumer — `critique.critique_once`'s
 `LensResult.failure_reason`, and the graph's support-manifest and dispute-pass warning logs — inherits
@@ -5856,10 +5857,10 @@ rather than repeat the old warning as if it still held.
 critic's repair spends it on schema violations versus lens patches, or the raise-on-exhaustion
 behaviour — only what the re-ask and the terminal error say.
 
-**Invariants.** None of the six is in reach. Fail-closed lens validation, author exclusion, the blind
-orchestrator, severity floors and termination are untouched; this narrows the untrusted-text boundary
-rather than crossing it — a pydantic error's `input_value` was report-derived content reaching a
-generator's context under validator-attributed framing, and it no longer does.
+**Invariants.** The untrusted-text boundary is strengthened: a pydantic error's `input_value` and a
+model-authored forbidden-key `loc` were report-adjacent content capable of reaching a generator's
+context under validator-attributed framing, and neither now does. Fail-closed lens validation, author
+exclusion, the blind orchestrator, severity floors and termination are untouched.
 
 ## Open items for a future round
 
