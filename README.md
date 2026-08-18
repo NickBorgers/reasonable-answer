@@ -442,11 +442,15 @@ D-in-artifact-citations/D-retrieval-opt-in/D-source-verification/D-existence-vs-
 **Writer disputes (optional, off by default).** Set `disputes.enabled: true` and a writer that
 believes a fix-task is factually wrong can dispute it with evidence instead of falsifying the
 report to satisfy it. A citation dispute whose quote checks out against the cited page (with
-`verify_sources` on) is upheld mechanically; anything else goes to a fresh-context arbiter model
-that is neither the writer nor the critic that raised the finding, and that defaults to the
-finding when uncertain. Upheld disputes suppress the re-raised finding for the rest of the run
-(auditable in `events.jsonl`); everything else leaves the finding standing. See D-writer-disputes in
-[decisions.md](docs/decisions.md).
+`verify_sources` on) is upheld mechanically — but only when the evidence URL was cited by the
+**draft the finding was raised against**, captured as `defect_citation_scope` at triage time. A URL
+the disputing writer's own revision newly added to `## Sources` is excluded from both the
+mechanical check and the arbiter's evidence-fetch, so a writer cannot certify its own dispute at a
+page no critic ever had access to (D-dispute-evidence-prior-draft). Anything else goes to a
+fresh-context arbiter model that is neither the writer nor the critic that raised the finding, and
+that defaults to the finding when uncertain. Upheld disputes suppress the re-raised finding for the
+rest of the run (auditable in `events.jsonl`); everything else leaves the finding standing. See
+D-writer-disputes/D-dispute-evidence-prior-draft in [decisions.md](docs/decisions.md).
 
 A critic's quote fields (`claim_span`, `related_span`) are verified to be verbatim text from
 the artifact, so a critic cannot smuggle invented text to the next writer that way. Its

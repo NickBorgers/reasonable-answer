@@ -26,7 +26,7 @@ from reasonable_answer.config import (
     validate_roster_health,
 )
 from reasonable_answer.fetch import FetchedSource
-from reasonable_answer.graph import Runtime, _adjudicate, run
+from reasonable_answer.graph import Runtime, _adjudicate, _critique, _generate, _triage, run
 from reasonable_answer.schemas import (
     AdjudicationRecord,
     ArbiterVerdict,
@@ -795,3 +795,113 @@ def test_a_dispute_citing_a_url_the_prior_draft_cited_still_upholds_mechanically
     assert len(records) == 1
     assert records[0].verdict == "upheld" and records[0].method == "mechanical"
     assert fetcher.fetches == [GOOD_PAGE.url]
+
+
+def test_a_missing_citation_scope_fails_closed_never_treated_as_everything_cited(tmp_path):
+    """`defect_citation_scope` is read with `state.get(...) or []` in `_adjudicate` — the
+    shape a checkpoint written before this field existed would resume with. That fallback
+    must fail CLOSED: an empty scope must never be read as "every URL is cited", it must
+    read as "no URL is cited" — otherwise a resumed old run would be *more* permissive
+    than a fresh one, upholding disputes a fresh run correctly rejects. Same evidence URL
+    as the control test above (one the report genuinely cites) to isolate exactly this:
+    the only difference from that passing control is the missing key, and here it must
+    fall through to inconclusive rather than raise or auto-uphold."""
+    fetcher = FakeFetcher(pages={GOOD_PAGE.url: GOOD_PAGE})
+    defect = make_defect()
+    dispute = make_dispute()  # cites https://example.com/campaign-launch — genuinely valid
+
+    rt = _no_arbiter_runtime(tmp_path, fetcher)
+    state = {
+        "question": "Did the senator launch a campaign?",
+        "report": REPORT,
+        # no "defect_citation_scope" key at all
+        "pending_disputes": _pending(defect, dispute),
+        "adjudications": [],
+        "dispute_budget_remaining": 3,
+        "defect_provenance": _provenance_for(defect),
+        "round": 2,
+        "author_identity": "vendor-a/model-a",
+    }
+
+    result = _adjudicate(state, rt)  # must not raise
+
+    records = [AdjudicationRecord.model_validate(r) for r in result["adjudications"]]
+    assert len(records) == 1
+    # inconclusive, not mechanically upheld, and not silently swallowed either — it falls
+    # all the way through to the (absent, in this fixture) arbiter and is dismissed
+    assert records[0].method != "mechanical"
+    assert records[0].verdict != "upheld"
+    assert records[0].verdict == "dismissed" and records[0].method == "no_eligible_arbiter"
+    # never fetched: an empty/missing scope excludes every URL, including a genuinely
+    # cited one — "missing" is never "everything is cited"
+    assert fetcher.fetches == []
+
+
+def test_adjudicate_mechanical_treats_a_missing_scope_as_nothing_cited(tmp_path):
+    """The same fallback, pinned at the function `_adjudicate` delegates to: an empty
+    collection (what `state.get("defect_citation_scope") or []` produces for a resumed
+    old checkpoint) upholds nothing, for any URL, mechanical category or not."""
+    fetcher = FakeFetcher(pages={GOOD_PAGE.url: GOOD_PAGE})
+    assert (
+        dispute_mod.adjudicate_mechanical(make_dispute(), make_defect(), [], fetcher) is None
+    )
+    assert fetcher.fetches == []
+
+
+# ----------------------------------------------- _triage captures the citing draft's scope
+
+
+def _triage_runtime(tmp_path, report_fn) -> Runtime:
+    config = make_config(tmp_path)
+    client = FakeClient(
+        identities=IDENTITIES,
+        # Empty on purpose: this is about `defect_citation_scope`, which `_triage` sets
+        # unconditionally from `state["report"]`, independent of whether any issue was
+        # raised. Keeping critique clean also keeps `_elicit_disputes` a no-op on the
+        # next `_generate` (it requires non-empty `defects`), so nothing here reaches for
+        # the dispute channel this section is not testing.
+        critique_fn=lambda a, u: CritiqueOutput(issues=[]),
+        report_fn=report_fn,
+    )
+    return Runtime(
+        config=config,
+        client=client,
+        identities=client.resolve_identities(config.roster.all_aliases),
+        store=RunStore(config.runs_dir, "run-triage-scope"),
+    )
+
+
+def test_triage_captures_the_citation_scope_of_the_draft_it_just_critiqued(tmp_path):
+    """Direct coverage for `_triage`'s new line: drives real `_generate` -> `_critique` ->
+    `_triage` calls for two rounds, so `defect_citation_scope` comes from the actual node
+    rather than being hand-set on a fixture. Round 2's report adds a URL round 1's did
+    not; the assertion is that each round's captured scope tracks the draft *that round's
+    triage actually critiqued* — round 1's never sees the URL round 2 adds, and round 2's
+    does — which is exactly what `_adjudicate`'s prior-draft gate depends on
+    (D-dispute-evidence-prior-draft)."""
+    report_by_round = {1: REPORT, 2: REVISED_WITH_NEW_SOURCE}
+    rt = _triage_runtime(tmp_path, lambda n: report_by_round.get(n, REVISED_WITH_NEW_SOURCE))
+
+    state: dict = {"question": "Did the senator launch a campaign?", "round": 0}
+
+    # round 1: a real generate -> critique -> triage cycle over REPORT
+    # (`_generate` strips the completion, so compare stripped — the writer text is
+    # otherwise unchanged)
+    state = {**state, **_generate(state, rt)}
+    assert state["report"] == REPORT.strip()
+    state = {**state, **_critique(state, rt)}
+    triage1 = _triage(state, rt)
+    assert triage1["defect_citation_scope"] == fetch.extract_source_urls(REPORT)
+    assert NEW_URL not in triage1["defect_citation_scope"]
+    state = {**state, **triage1}
+
+    # round 2: another real cycle, now over the revision that adds NEW_URL
+    state = {**state, **_generate(state, rt)}
+    assert state["report"] == REVISED_WITH_NEW_SOURCE.strip()
+    state = {**state, **_critique(state, rt)}
+    triage2 = _triage(state, rt)
+    assert triage2["defect_citation_scope"] == fetch.extract_source_urls(REVISED_WITH_NEW_SOURCE)
+    assert NEW_URL in triage2["defect_citation_scope"]
+
+    # the two scopes differ — round 1's is not silently carried forward or stale
+    assert triage1["defect_citation_scope"] != triage2["defect_citation_scope"]
