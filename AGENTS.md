@@ -47,10 +47,12 @@ NO-GO from CI review.
 | [docs/ssrf-egress-isolation.md](./docs/ssrf-egress-isolation.md) | the infrastructure half of the fetch boundary |
 | [docs/ci-pipeline.md](./docs/ci-pipeline.md) | the agentic review pipeline and the merge gate |
 
-The six invariants CI checks — author exclusion, blind orchestrator, fail-closed lenses, severity
+Six of the invariants CI checks — author exclusion, blind orchestrator, fail-closed lenses, severity
 floors clamping up only, termination, untrusted text never reaching a generator as instruction —
-are stated in full in `.github/ci/prompts/resolve-issue.md` and audited by
-`.github/scripts/review/prompts/invariant.md`.
+are stated in full in `.github/ci/prompts/resolve-issue.md`. They are not the whole set:
+`.github/scripts/review/prompts/invariant.md` audits eleven numbered invariant rows (those six plus
+bias-category anchoring, dispute-adjudication blindness, identity/ownership, round/hash idempotent
+replay, and cross-model confirmation) plus a twelfth row for docs-as-spec drift.
 
 ## Decision identifiers
 
@@ -66,7 +68,10 @@ Duplicates — the same slug defined twice, in the prose-heading *or* the top-ta
 required `Decision Numbers` check (`scripts/validate-decision-numbers.sh`). Decisions are superseded
 in place, never deleted. The reviewer prompts describe the slug scheme rather than a numeric range,
 so adding a decision no longer requires widening any hand-written range;
-`tests/test_reviewer_prompt_ranges.py` now asserts every cited slug *exists* in the registry.
+`tests/test_reviewer_prompt_ranges.py` asserts that for the three reviewer prompts it covers
+(`invariant.md`, `docs.md`, `quality.md`). The repo-wide guarantee — every `D-<slug>` citation
+anywhere in the tree (docs, code, tests, config, README/AGENTS, all reviewer prompts) resolves to
+a slug the registry actually defines — is `tests/test_citation_resolution.py`.
 
 ## Commits and PRs
 

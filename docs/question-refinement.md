@@ -383,10 +383,13 @@ The design above is normative; this section maps it to where it landed, not to r
 7. `web/worker.py` / `store.py`: `refinement.json` writer (purgeable) +
    non-content `refinement` event in `events.jsonl`.
 8. Docs: `## D-question-refinement` section in `decisions.md` (problem / mechanism /
-   alternatives rejected / isolation accounting / known residuals), the
-   valid-ID allowlist in `.github/scripts/review/prompts/invariant.md` bumped
-   to `D-alternating-refine-game`–`D-question-refinement`, this file registered in `DESIGN.md`'s Document map, and a
-   cross-reference from `bias.md §4`.
+   alternatives rejected / isolation accounting / known residuals), this file registered in
+   `DESIGN.md`'s Document map, and a cross-reference from `bias.md §4`. (At the time this landed,
+   decisions still used a numeric scheme, and the valid-ID allowlist in
+   `.github/scripts/review/prompts/invariant.md` had to be bumped to cover the new decision's
+   range. Decisions are subject-slug-identified now (D-decision-slugs); the corresponding
+   guarantee is membership, not a range — see `tests/test_citation_resolution.py` and AGENTS.md's
+   "Decision identifiers" section.)
 9. Tests — what actually landed in this PR (`tests/test_refine.py`,
    `tests/test_refine_web.py`, `tests/test_report_store_llm.py`):
    - Service unit tests: schema + deterministic validation (each rule),

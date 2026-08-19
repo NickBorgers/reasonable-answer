@@ -14,7 +14,12 @@ the same contract. The requirement `fetch.py` places on *any* of them is the sam
 
 > On every host that runs the graph, the process must be able to reach the public
 > internet and the LLM proxy, and must **not** be able to reach the LAN, loopback,
-> link-local, or the tailnet.
+> link-local, or the tailnet — **except** for the LLM proxy itself, which is the one
+> deliberate exception when it happens to live at a tailnet address: a specific, pinned
+> host allow ahead of the tailnet-wide (CGNAT, `100.64.0.0/10`) deny, not a carve-out for
+> the range. The worked mechanism below sidesteps the question entirely by keeping the
+> proxy off the tailnet path altogether (dual-homed, `NO_PROXY`); a deployment whose proxy
+> genuinely sits behind a tailnet hostname needs the narrower, host-specific allow instead.
 
 ## Why the app needs this
 
@@ -115,7 +120,11 @@ visible_hostname egress-proxy
 
 > Note the deny list includes `100.64.0.0/10` (the tailnet / CGNAT range). Without it the
 > "allow all public" rule would let a fetch reach tailnet peers, since those are the SSRF
-> targets that matter most in a tailnet deployment.
+> targets that matter most in a tailnet deployment. This deny is why the LLM proxy is kept
+> off Squid entirely (dual-homed, `NO_PROXY`, above) rather than punched through this ACL: a
+> deployment that cannot dual-home it needs a host-specific `http_access allow` for that one
+> pinned proxy hostname, placed **before** `http_access deny tailscale_dst` — see the
+> contract note above.
 
 ## Compose sketch (illustrative)
 

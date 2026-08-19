@@ -31,11 +31,21 @@ unchanged.
   taxonomy, the guardrails, and what they deliberately will not do.
 - **[Social bias rules](bias.md)** — the three observable-text rules critics apply, and what a
   bias finding may not be.
+- **[Quality principles](quality-principles.md)** — the `QP<n>` evidence register the `quality`
+  CI reviewer audits pull requests against.
 
 ## Operating it
 
 - **[Authentication](authentication.md)** — who the web interface believes you are, and the
   proxy that has to be in front of it.
+- **[Deployment profile](deployment-profile.md)** — how the production instance is actually
+  configured, as distinct from what the repository ships.
+- **[Run provenance](run-provenance.md)** — which build produced a run, and how to compare runs
+  across a change.
+- **[Model evaluation](model-evaluation.md)** — the operator procedure for auditioning a
+  candidate model into a roster slot.
+- **[2026-08-10 audition record](model-evaluation-record-2026-08-10.md)** — the public source
+  record for the empirical claims in Model evaluation.
 - **[SSRF egress isolation](ssrf-egress-isolation.md)** — the infrastructure half of the fetch
   boundary: what the network must enforce that the application cannot.
 - **[CI and the review pipeline](ci-pipeline.md)** — what runs on a pull request, the agentic

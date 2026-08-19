@@ -10,7 +10,7 @@ The system fights **three different biases**, and they have different isolation 
 
 | bias | cause | isolation unit that fixes it | priority |
 |------|-------|------------------------------|----------|
-| **Social / context drift** — sycophancy, contextual drag, anchoring, in-session self-review | **shared context**: a peer's opinion, prior reasoning, or one's own earlier output in the same window | a **fresh, blind context window** per task — with one bounded exception, the in-call repair turn: a critic whose review fails validation is shown its own rejected field, fenced, and asked for a patch (D-repair-turn-context; [details under the threat model](#prompt-injection-threat-model-ra-010)) | **primary** |
+| **Social / context drift** — sycophancy, contextual drag, anchoring, in-session self-review | **shared context**: a peer's opinion, prior reasoning, or one's own earlier output in the same window | a **fresh, blind context window** per task — with one bounded exception, the in-call repair turn, which covers both halves of a critic's repair budget: a lens rejection is shown its own rejected field, fenced, and asked for a patch, while a schema rejection is shown a fenced, marker-scrubbed, content-free `loc`/`msg`/`type` summary of what failed — either way attributed to the validator, never as "your previous response" (D-repair-turn-context, D-validator-error-hygiene; [details under the threat model](#prompt-injection-threat-model-ra-010)) | **primary** |
 | **Correlated blind spots** — a model's systematic failure modes | the model itself; the same model repeats/misses the same error even in a fresh context | **model diversity** (distinct model families) | secondary |
 | **Social / content bias** — loaded framing, one-sided source selection, inherited presuppositions | **shared training-corpus and cultural priors** across every model in the roster, plus the question's own framing | **documented observable-text rules** ([bias.md](./bias.md)) enforced as lens categories, on top of decorrelated critic pools | tertiary |
 
@@ -88,7 +88,7 @@ flowchart TB
     end
     subgraph ARB["Arbiter (D-writer-disputes, opt-in) — fresh context, ≠ disputer, ≠ raiser"]
         Ain["SEES: one finding (depersonalized) + the paragraph it points at + question + the dispute (labelled interested-party argument) + fetched evidence page"]
-        Ano["NEVER: report body · any alias/identity · the lens · the round · run_id/hash · other findings"]
+        Ano["NEVER: report body · any alias/identity · the lens (name) · the round · run_id/hash · other findings<br/>CAVEAT: the finding's category IS in the prompt, and every category but the shared stylistic one names exactly one lens"]
     end
     subgraph CT["Controller (deterministic)"]
         CTin["SEES: ControllerInput (OrchestratorView + round/hashes/model-ids/budgets)"]
@@ -289,11 +289,16 @@ bound it:
   and every extra channel into a lens is a way for material to reach a scope with no use for it.
 - **The critic's output channel is unchanged.** Verification adds evidence, not a tool, so the
   critic gains no new way to emit anything. Its findings still pass through the same closed schema,
-  and the resulting defect list still reaches the writer **only as fenced untrusted data**
-  (RA-010/D-evidence-bearing-fields) — that fence, not span-anchoring, is what stops a page-persuaded critic from
-  reaching the writer as a command. (A `Defect` does carry free-text `rationale`/`instruction`, and
-  for evidence categories `related_span` is deliberately not verbatim-anchored, since it describes
-  a source rather than quoting the report. That channel is pre-existing and is not widened here.)
+  and the resulting defect list still reaches the writer **only as fenced, marker-scrubbed
+  untrusted data** (RA-010/D-evidence-bearing-fields) — that fence, not span-anchoring, is what
+  stops a page-persuaded critic from reaching the writer as a command. (A `Defect` does carry
+  free-text `rationale`/`instruction`, and for evidence categories `related_span` is deliberately
+  not verbatim-anchored, since it describes a source rather than quoting the report. That channel is
+  pre-existing and is not widened here. `writer_revision` marker-scrubs the question, the draft
+  report and the whole serialized FIX TASKS list — including `rationale`, `instruction` and
+  `related_span` — before any of it is fenced, so a critic cannot use an embedded end marker to
+  close the block early and have the remainder read as a writer instruction; D-fence-scrub-all-directions,
+  extending D-repair-fence-scrubbing from the repair turn to every fence the file builds.)
 - **Same fence, restated.** The untrusted-data note is repeated inside the fetched-pages block
   rather than relied on from the top of the prompt, given how much text sits between them. Every
   untrusted source entry is marker-scrubbed before the entries are joined inside that fence, so a
@@ -313,8 +318,12 @@ reach the writer as an instruction, and the controller still bounds termination.
 Mitigations, by boundary:
 - **Structured output everywhere** — critics emit only closed-enum categories; a critic
   literally cannot emit a free-form instruction that reaches the generator as a command.
-- **Data is delimited/quoted** in prompts; models are told report/critique text is data to
-  operate on, never instructions to obey.
+- **Data is delimited/quoted, and every delimiter is marker-scrubbed** in prompts; models are told
+  report/critique text is data to operate on, never instructions to obey, and an embedded literal
+  end-of-data marker cannot close a block early — `prompts._neutralized` is applied wherever
+  untrusted text is interpolated inside a `DATA_FENCE`/`DATA_END` block, writer-facing and
+  arbiter-facing exactly as much as critic-facing, not only at the repair turn
+  (D-fence-scrub-all-directions, extending D-repair-fence-scrubbing).
 - **Triage validates** every field against the schema before it becomes a defect-task or a
   count; an unknown category or invalid/over-length field **fails the entire lens** (fail-closed,
   RB-007) — nothing is silently dropped, so an adversarial critique can't collapse into a
@@ -332,7 +341,16 @@ Mitigations, by boundary:
   must be corrected from** are each fenced as untrusted data and marker-scrubbed, and the
   value is attributed to the validator, never to the critic; `triage.apply_repairs` drops
   any patch entry naming an issue or field other than the one the validator rejected, so
-  the channel's narrowness is enforced rather than requested (D-repair-turn-context). See
+  the channel's narrowness is enforced rather than requested (D-repair-turn-context). The
+  schema-repair half of the same budget — a rejection before lens validation ever runs, e.g.
+  malformed JSON or a field pydantic rejects outright — keeps the same two guarantees rather
+  than a weaker version of them: the re-ask is fenced, marker-scrubbed, and reads "the
+  schema validator rejected the output", never "your previous response". What it fences
+  is a bounded `loc`/`msg`/`type` summary
+  (`errors(include_input=False, include_url=False)`) whose string locations are limited
+  to fields declared by the schema; model-authored extra keys become a fixed placeholder.
+  It never uses a pydantic `ValidationError`'s default rendering, which echoes the
+  rejected value itself (D-validator-error-hygiene). See
   the exception noted in the drift table above, which this is the whole of. The original question,
   report and fetched-source block reused by that repair turn are marker-scrubbed at their initial
   construction too; protecting only the newly appended rejected value and excerpt would leave an
@@ -360,11 +378,17 @@ Mitigations, by boundary:
 *interested* one: the writer authoring a dispute has a direct stake in the verdict. Three things
 bound it. The dispute enters the arbiter's context fenced and explicitly labelled as an
 interested party's argument, never as fact. The arbiter's output channel is a closed two-field
-schema — one boolean plus a bounded `reason` that goes to the audit store only, so no free text
-authored under a dispute's influence ever reaches another model's context; the only writer-facing
-residue of the whole channel is the bare `Defect.adjudicated` boolean. And the mechanical path
-accepts evidence only from a URL the report already cites, so a writer cannot steer adjudication
-at a page the critics never had access to. The arbiter also runs identity-blind in both
+schema — one boolean plus a bounded `reason` that goes to the audit store only (the per-run
+`disputes/` content record, never `events.jsonl`), so no free text authored under a dispute's
+influence ever reaches another model's context; the only writer-facing residue of the whole
+channel is the bare `Defect.adjudicated` boolean. And the mechanical path, and the arbiter's own
+evidence-fetch, each accept evidence only from a URL cited by the draft the finding was **raised
+against** — `defect_citation_scope`, captured at the triage that minted the finding, before the
+disputing writer's next revision exists — never the writer's own revision
+(D-dispute-evidence-prior-draft). A writer that added a URL to its own revision's `## Sources` and
+then disputed from that URL would otherwise be certifying its own dispute at a page no critic ever
+had access to; gating on the prior draft's citations instead means a writer can only point at a
+source the critic saw, or could have seen. The arbiter also runs identity-blind in both
 directions: raising-critic identities are consumed by *eligibility selection* (deterministic
 code) and never interpolated into any prompt.
 
