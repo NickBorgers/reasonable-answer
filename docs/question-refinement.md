@@ -1,6 +1,6 @@
 # Question refinement — pre-run reframing suggestions
 
-> **Status:** Implemented; this is decision **D-question-refinement** in [decisions.md](./decisions.md).
+> **Status:** Implemented; this is decision **[D-question-refinement](./decisions/D-question-refinement.md)**.
 > The questions below are synthetic, each chosen to illustrate one framing
 > category; no private run content appears in this spec.
 > Revised 2026-07-25 after an adversarial design review (findings QR-001–017).
@@ -382,7 +382,8 @@ The design above is normative; this section maps it to where it landed, not to r
    DOM construction).
 7. `web/worker.py` / `store.py`: `refinement.json` writer (purgeable) +
    non-content `refinement` event in `events.jsonl`.
-8. Docs: `## D-question-refinement` section in `decisions.md` (problem / mechanism /
+8. Docs: the `## D-question-refinement` section — landed in `decisions.md`, and since
+   D-decision-per-file its own file, `docs/decisions/D-question-refinement.md` (problem / mechanism /
    alternatives rejected / isolation accounting / known residuals), this file registered in
    `DESIGN.md`'s Document map, and a cross-reference from `bias.md §4`. (At the time this landed,
    decisions still used a numeric scheme, and the valid-ID allowlist in

@@ -2,6 +2,12 @@
 # Re-merges the base branch into one PR branch, but only when the docs/decisions.md
 # append-only merge driver is the thing that makes that merge succeed (D-base-moved-resync).
 #
+# INERT since D-decision-per-file. That driver is retired — decisions are one file each, so
+# there is no shared insertion point to resolve — which means step 2 below can never differ
+# from step 1's no-driver baseline. Every PR therefore lands on `plain` or `conflicts`, both of
+# which push nothing. That is this script's own documented fallback, not a new behaviour, which
+# is why retiring the driver did not need to touch it.
+#
 # Why this exists at all. D-decisions-merge-driver registered the driver at every place the
 # *review pipeline* merges: review-fixer.yml's two sync sites and review-pipeline.yml's
 # inherit recreation. All three are reachable only from a review cycle. A PR that has

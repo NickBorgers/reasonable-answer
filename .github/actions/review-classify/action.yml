@@ -68,9 +68,17 @@ runs:
         #
         # This is an allowlist, which means it is wrong by default for anything new.
         # A new prompt-bearing or spec-bearing document must be added here.
+        #
+        # docs/decisions/*.md is a glob rather than 81 filenames, and that is the point:
+        # since D-decision-per-file every decision is its own file, so an enumeration here
+        # would be a shared insertion point every decision-bearing PR has to edit — the
+        # collision the split removed, reintroduced in the one place that would silently
+        # downgrade a spec change to "docs only" when someone forgot. D-spec-critical-coverage
+        # is the standing requirement this glob satisfies for the whole directory at once.
         is_spec_critical() {
           case "$1" in
             docs/DESIGN.md|docs/isolation.md|docs/convergence.md|docs/architecture.md|docs/decisions.md|docs/bias.md|docs/quality-principles.md) return 0 ;;
+            docs/decisions/*.md) return 0 ;;
             docs/ci-pipeline.md|docs/ci-setup.md) return 0 ;;
             docs/authentication.md) return 0 ;;
             docs/ssrf-egress-isolation.md|docs/run-provenance.md|docs/question-refinement.md) return 0 ;;

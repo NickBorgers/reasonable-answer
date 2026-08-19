@@ -318,5 +318,5 @@ calibration or restraint is taken away from the models entirely and given to cod
 | exactly what each agent can and cannot see | [isolation.md](./isolation.md) |
 | the bias rulebook | [bias.md](./bias.md) |
 | who can see which runs, and how to sign in | [authentication.md](./authentication.md) |
-| why each decision was made (and what reviews found) | [decisions.md](./decisions.md) |
+| why each decision was made (and what reviews found) | [decisions.md](./decisions.md), then `decisions/D-<slug>.md` for the decision itself |
 | running it | [README on GitHub](https://github.com/NickBorgers/reasonable-answer#readme) |

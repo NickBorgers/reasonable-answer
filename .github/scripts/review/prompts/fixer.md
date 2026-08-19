@@ -139,16 +139,18 @@ canonical wording, one pattern, no per-file improvisation.
 
 ## This project is spec-driven — the part most likely to trip you
 
-`docs/` is normative specification, not background reading. `docs/decisions.md` is a slug-identified
-decision log (each section is a `D-<slug>`) with finding tables (RA-*, RB-*, RC-*, RG-*). The invariant reviewer
-checks code against it.
+`docs/` is normative specification, not background reading. The decision log is slug-identified and
+split one file per decision: `docs/decisions/D-<slug>.md` defines `D-<slug>`, and the index
+`docs/decisions.md` carries the identifier scheme, the finding tables (RA-*, RB-*, RC-*, RG-*) and
+the RA-019 test matrix. The invariant reviewer checks code against it.
 
 That creates a trap. If a reviewer blocker asks you to change behaviour governed by an invariant,
 then fixing the code **without** updating `docs/` converts a caught problem into silent spec drift
 — and the invariant reviewer will block the next cycle for the change you just made.
 
 So: if a fix touches any of the invariants below, you must also update the corresponding `docs/*.md`
-and add a `docs/decisions.md` entry, and list what you touched in `docs_updated[]`. If you are not
+and add a decision entry — one new file, `docs/decisions/D-<slug>.md`, whose first line is
+`## D-<slug> — <title>` — and list what you touched in `docs_updated[]`. If you are not
 confident you can write that decision entry accurately, **skip the fix**. A skipped blocker returns
 to a human; an undocumented invariant change corrupts the spec.
 

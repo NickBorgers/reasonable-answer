@@ -13,6 +13,10 @@ uv sync --frozen 2>/dev/null || uv sync
 # docs/decisions.md conflict here gets the same append-only fast path (D-decisions-merge-driver).
 # The helper proves the driver runs before registering it — an unregistered driver is the
 # plain-git behaviour, a broken registered one is a conflict with no markers to see.
+#
+# Inert since D-decision-per-file: decisions are one file each, .gitattributes declares no merge
+# attribute, and git therefore never invokes the registered driver. Kept in step with the CI
+# registration sites so the whole stack is removed in one reviewable follow-up.
 ./scripts/register_decisions_driver.sh "$(pwd)"
 
 echo

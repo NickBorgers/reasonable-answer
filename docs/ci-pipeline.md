@@ -18,7 +18,7 @@ than reproducing that archaeology.
 | `ci-image.yml` | changes to `.github/ci/**`, manual | `ubuntu-latest` | builds the agent image and verifies every tool inside it runs |
 | `resolve-issue.yml` | issue opened/reopened/unlabeled, `/autoresolve` comment | `[self-hosted, homelab]` | an agent implements the issue and opens a PR |
 | `review-entry.yml` → `review-pipeline.yml` | PR events, `/review` | mixed | authorize → gather → reviewers → judge → finalize |
-| `sync-open-prs.yml` | push to `main` | `ubuntu-latest` | re-merges `main` into open PRs that only the `docs/decisions.md` merge driver can unblock (D-base-moved-resync) |
+| `sync-open-prs.yml` | push to `main` | `ubuntu-latest` | re-merged `main` into open PRs that only the `docs/decisions.md` merge driver could unblock (D-base-moved-resync). **Inert since D-decision-per-file retired the driver** — it still runs and still finds nothing to push |
 
 ## PR validation is secret-free, on purpose
 
@@ -32,21 +32,32 @@ must carry the `live` marker, and CI always passes `-m "not live"`.
 
 ## Decision identifiers are slugs, and duplicates are refused at the gate
 
-Each decision in [decisions.md](./decisions.md) is identified by a slug derived from its
-subject (`## D-source-verification`), coined by the authoring PR rather than allocated from a
-shared counter (D-decision-slugs supersedes D-decision-gate). Because a slug comes from the
-decision's own content, two concurrently-open PRs cannot pick the same identifier, so the
-merge-time collision the old numbering produced — two PRs racing for the same next-free number,
-each rename costing a repo-wide edit and a fresh review cycle — cannot arise.
-`scripts/validate-decision-numbers.sh` still runs at the gate, now guarding the one thing slugs
-do not prevent: the *same* slug defined twice. It reads **both** definition forms — the
-`## D-<slug> —` prose sections and the `| D-<slug> | … |` top-table rows — so a duplicate
-hiding in the table form (as four reused numbers once did) is caught, which the predecessor
-gate could not do. It is pure and offline — one file, no git, no network — so it fits the
-secret-free gate and is unit-tested by `tests/test_decision_numbers.py`, while
-`tests/test_citation_resolution.py` additionally fails any PR that cites a decision slug the
-registry does not define. The `tests` job skips docs-only PRs, so the collision check runs as
-its own path-filtered job to cover a PR that touches nothing but `decisions.md`.
+Each decision is identified by a slug derived from its subject (`D-source-verification`), coined
+by the authoring PR rather than allocated from a shared counter (D-decision-slugs supersedes
+D-decision-gate). Because a slug comes from the decision's own content, two concurrently-open PRs
+cannot pick the same identifier, so the merge-time collision the old numbering produced — two PRs
+racing for the same next-free number, each rename costing a repo-wide edit and a fresh review
+cycle — cannot arise.
+
+Since D-decision-per-file the *textual* collision is gone the same way. A decision is its own file,
+`docs/decisions/D-<slug>.md`, indexed by [decisions.md](./decisions.md); writing one adds a path and
+edits nothing, so two decision-bearing PRs are conflict-free by construction rather than reconciled
+by a merge driver after the fact. That is what makes a GitHub merge queue adoptable — a queue
+cannot run a repo-local merge driver — and it is why `.gitattributes` no longer declares one.
+
+`scripts/validate-decision-numbers.sh` still runs at the gate, guarding what slugs alone do not
+prevent. It reads **both** definition forms — the `## D-<slug> —` heading that opens each decision
+file and the `| D-<slug> | … |` index-table rows — so a duplicate hiding in the table form (as four
+reused numbers once did) is caught, which the predecessor gate could not do. It also enforces the
+directory's shape, since that is now what makes a slug's definition unambiguous: every entry is a
+regular file named `D-<slug>.md`, each opens with the matching `## D-<slug> — …` heading and holds
+exactly one, and no prose section is left behind in the index. It is pure and offline — one file and
+one directory, no git, no network — so it fits the secret-free gate and is unit-tested by
+`tests/test_decision_numbers.py`, while `tests/test_citation_resolution.py` additionally fails any
+PR that cites a decision slug the registry does not define. The `tests` job skips docs-only PRs, so
+the registry check runs as its own path-filtered job, covering `docs/decisions.md`,
+`docs/decisions/**` and the script itself — so a PR that adds nothing but a decision file is still
+gated.
 
 ## The review graph
 
@@ -283,10 +294,13 @@ it holds `contents: read`, so it could not push if it tried.
   underneath it: content, then `git merge origin/main`, inherited the prior verdict with no
   reviewer reading a line. The tree test is what a hand-resolved conflict cannot pass, and
   it is deliberately fail-closed — a merge that cannot be re-created cleanly is reviewed.
-  One conflict shape is an exception: `docs/decisions.md`'s insertion-point collision resolves
-  deterministically through a trusted merge driver run from `main`, not a judgement call, so
-  a merge that shape resolved does re-create cleanly and can still inherit — see "Syncing
-  with the base branch" below, D-decisions-merge-driver and D-decisions-merge-regions.
+  One conflict shape used to be an exception: `docs/decisions.md`'s insertion-point collision
+  resolved deterministically through a trusted merge driver run from `main`, not a judgement
+  call, so a merge that shape resolved re-created cleanly and could still inherit
+  (D-decisions-merge-driver, D-decisions-merge-regions). D-decision-per-file retired that
+  exception by removing the collision: decisions are separate files, so two of them no longer
+  conflict and there is nothing for a driver to resolve. The gate is back to one rule with no
+  carve-out — a resolved conflict is reviewed. See "Syncing with the base branch" below.
 
   **"The last reviewed SHA" is the commit a panel read, not the commit the cycle counter
   was recorded on (D-inherit-reviewed-anchor).** Those two differ exactly when the fixer
@@ -424,10 +438,21 @@ inherit test refuses it and the panel reads it. That is a deliberate narrowing o
 paragraph used to promise — a resolution is a judgement nobody has checked, and it is the
 one place arbitrary content can sit inside a correctly-shaped merge.
 
-**One conflict shape resolves deterministically enough to still inherit
-(D-decisions-merge-driver, D-decisions-merge-regions).** `docs/decisions.md`'s insertion-point
+**Retired: the one conflict shape that used to resolve deterministically enough to still
+inherit (D-decisions-merge-driver, D-decisions-merge-regions).** D-decision-per-file removed the
+collision this whole mechanism managed — decisions are one file each, so two decision-bearing
+PRs no longer touch a common line — and `.gitattributes` no longer declares the driver. The
+machinery described in the rest of this subsection therefore never executes: `git` does not
+consult a driver for a path with no `merge` attribute, and `sync_pr_with_base.sh` tries the
+no-driver merge first and pushes nothing unless the driver is what made the merge succeed.
+Deleting `scripts/merge_decisions.py`, `scripts/register_decisions_driver.sh`,
+`sync-open-prs.yml` and the two registration steps is a follow-up; the description below is
+retained because it is the record of what the registration steps still in those workflows do
+if anything ever re-declares the attribute.
+
+`docs/decisions.md`'s insertion-point
 collision — two PRs each adding a decision at the same anchor, which a three-way merge has no
-way to order — is common enough to carry its own merge driver
+way to order — was common enough to carry its own merge driver
 (`scripts/merge_decisions.py`), registered from the trusted `main` checkout in both this sync
 step and the inherit step's own recreation, never from the PR under review. Because both sides
 run the identical trusted, deterministic function on the same inputs, a merge that shape
@@ -505,15 +530,16 @@ a human — an agent may not resolve conflicts on code no reviewer cleared.
 The consequence is worth stating plainly: this does **not** rescue a PR that already
 conflicts with its base. Such a PR has no computable merge ref, so GitHub fires no
 `pull_request` event, PR Validation never runs, every guard refuses, and the sync-only pass
-it reaches then hits conflicts and blocks. Clearing a true conflict still takes a human
-merging the base in by hand (as #54 and #56 did) — with one exception, added later:
-`sync-open-prs.yml` clears regional `docs/decisions.md` collisions without a `pull_request`
-event at all, because it is triggered by the push to `main` rather than by anything happening
-on the PR (D-base-moved-resync, D-decisions-merge-regions). The trusted driver orders independently
-added decision sections when the shared sections and Open-items tail merge cleanly, including a
-non-last addition or an unrelated in-place edit on either side. Deleted or renamed sections,
-duplicate slugs, new non-decision headings, parse ambiguity, and real conflicts inside shared
-sections or the tail remain manual. What D-unguarded-sync fixes is the strictly larger,
+it reaches then hits conflicts and blocks. Clearing a true conflict takes a human merging the
+base in by hand (as #54 and #56 did). There used to be one exception — `sync-open-prs.yml`
+cleared regional `docs/decisions.md` collisions without a `pull_request` event at all, because
+it is triggered by the push to `main` rather than by anything happening on the PR
+(D-base-moved-resync, D-decisions-merge-regions). D-decision-per-file retired it, by making the
+collision it cleared impossible rather than by making it harder to clear: a decision is its own
+file, so the every-merge-invalidates-every-open-PR churn that workflow existed to absorb no
+longer happens. The workflow still runs on every push to `main` and now finds nothing to
+push — its own no-driver baseline step returns `plain` or `conflicts` for every PR, neither of
+which pushes anything. What D-unguarded-sync fixes is the strictly larger,
 non-conflicting case: a behind-the-base PR whose panel was guarded off for any reason gets
 its sync, becomes mergeable, earns its `pull_request` event, gets validated, and becomes
 reachable by a panel — see the residual below for why that is "reachable" and not "reviewed".
@@ -792,12 +818,17 @@ the pipeline rather than the change. A diff with no invariant surface is an `app
 says why, which is a real finding.
 
 **Spec-critical markdown is carved out of "docs-only".** `docs/DESIGN.md`,
-`isolation.md`, `convergence.md`, `architecture.md`, `decisions.md`, `bias.md`,
+`isolation.md`, `convergence.md`, `architecture.md`, `decisions.md`, every
+`decisions/D-<slug>.md`, `bias.md`,
 `quality-principles.md`, `ci-pipeline.md`, `ci-setup.md`, `authentication.md`,
 `ssrf-egress-isolation.md`, `run-provenance.md`, `question-refinement.md`, `AGENTS.md` /
 `CLAUDE.md`, and every prompt file are normative — the docs *are* the spec, and the prompts
 *are* the reviewers' instructions. That carve-out is an allowlist, so it is wrong by default
-for anything new: a new spec-bearing or prompt-bearing document must be added to it.
+for anything new: a new spec-bearing or prompt-bearing document must be added to it. The one
+entry that is a glob rather than a filename is `docs/decisions/*.md`, and deliberately: since
+D-decision-per-file each decision is its own file, so enumerating them would put a shared
+insertion point in the allowlist — the collision the split removed, in the one place a
+forgotten edit would silently downgrade a spec change to "docs only" (D-spec-critical-coverage).
 
 ## Permissions
 
