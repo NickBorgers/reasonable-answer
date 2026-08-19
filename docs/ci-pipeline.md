@@ -66,7 +66,8 @@ review-entry            authorize · fork-reject · resolve SHA · prior-GO chec
        ├─ judge         deterministic, from main, contents: read
        └─ finalize      labels · summary comment · merge gate · review/verdict +
                         review/verdict-anchor on the post-fix SHA, and review/cycle
-                        when a cycle was recorded to publish
+                        when the run has a count to publish — a recorded panel,
+                        cap-exhausted path, or inherited terminal path
 ```
 
 Roles run on different model families deliberately. This project's own design argues that

@@ -449,7 +449,10 @@ class Loop:
             f'  *"review-entry.yml/runs"*) cat "{self.stubs}/inflight" ;;\n'
             f'  *"/statuses"*)\n'
             f'    sha="$(printf "%s\\n" "$args" | grep -oE "[0-9a-f]{{40}}" | head -1)"\n'
-            f'    if [ -f "{self.stubs}/statuses-${{sha}}" ]; then\n'
+            f'    if [ -f "{self.stubs}/statuses-error-${{sha}}" ]; then\n'
+            f'      cat "{self.stubs}/statuses-error-${{sha}}" >&2\n'
+            f'      exit 1\n'
+            f'    elif [ -f "{self.stubs}/statuses-${{sha}}" ]; then\n'
             f'      cat "{self.stubs}/statuses-${{sha}}"\n'
             f'    else\n'
             f'      echo "[]"\n'
@@ -488,6 +491,9 @@ class Loop:
                         for ctx, at in entries]),
             encoding="utf-8",
         )
+
+    def statuses_error(self, sha: str, message: str) -> None:
+        (self.stubs / f"statuses-error-{sha}").write_text(f"{message}\n", encoding="utf-8")
 
     def cycle_recorded(self, sha: str, *, age: int, anchored: bool) -> None:
         entries = [("review/cycle", _iso(self.start - age))]
@@ -592,6 +598,36 @@ def test_an_unreadable_cycle_timestamp_does_not_wedge_the_loop(loop: Loop) -> No
     assert result.returncode == 0, result.stderr
     assert "unreadable review/cycle timestamp" in result.stdout + result.stderr
     assert "#7 (pr): synced" in result.stdout
+
+
+def test_a_status_api_failure_defers_the_pr(loop: Loop) -> None:
+    """An unanswered status query cannot prove that no cycle is finalizing, so the loop
+    fails closed and leaves the branch for the next base push rather than racing a panel."""
+    loop.statuses_error(_SHA, "status endpoint unavailable")
+
+    result = loop.run()
+
+    assert result.returncode == 0, result.stderr
+    assert "could not read the review statuses" in result.stderr
+    assert f"deferred — a recorded cycle on {_SHA} has no published verdict anchor yet" in result.stdout
+    assert loop.synced() == []
+    assert 600 <= loop.waited() <= 660
+
+
+def test_a_malformed_head_sha_does_not_defer_the_pr(loop: Loop) -> None:
+    """A malformed SHA cannot be queried or aged. Deferring it on every base push would be
+    unbounded, so the loop warns and preserves the pre-decision behaviour of attempting sync."""
+    malformed_sha = "not-a-commit-sha"
+    loop.candidates([(7, "pr", malformed_sha)])
+
+    result = loop.run()
+
+    assert result.returncode == 0, result.stderr
+    assert f"'{malformed_sha}' is not a commit SHA" in result.stderr
+    assert "#7 (pr): synced" in result.stdout
+    assert "deferred —" not in result.stdout
+    assert len(loop.synced()) == 1
+    assert loop.waited() == 0
 
 
 def test_a_review_run_in_flight_is_deferred(loop: Loop) -> None:
