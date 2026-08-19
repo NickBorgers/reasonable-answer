@@ -78,6 +78,17 @@ def test_duplicate_across_forms_fails(tmp_path: Path) -> None:
     assert "D-alpha" in r.stderr
 
 
+def test_duplicate_table_rows_only_fails(tmp_path: Path) -> None:
+    index = (
+        "| # | Decision | Rationale |\n"
+        "| D-alpha | first definition | r |\n"
+        "| D-alpha | second definition | r |\n"
+    )
+    r = run(write(tmp_path, index))
+    assert r.returncode == 1
+    assert "D-alpha is defined 2 times (files: 0, index table: 2)" in r.stderr
+
+
 def test_slug_prefix_is_not_a_duplicate(tmp_path: Path) -> None:
     # Distinct slugs that share a prefix are different decisions, not a collision.
     files = {

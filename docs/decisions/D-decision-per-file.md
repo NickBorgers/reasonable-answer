@@ -15,17 +15,20 @@ by construction, not by luck, and with no semantic disagreement behind it.
 
 Almost every PR here is agent-authored and most carry a decision, so the guaranteed conflict was the
 normal case rather than the exceptional one. Draining the eight-PR stack of 2026-08-18 measured what
-that costs (issue #188, and this is proposal D there):
+that costs ([issue #188][stack-post-mortem], and this is proposal D there):
 
 - Every merge to `main` invalidated every other open decision-bearing PR, so a stack of *n* needed a
   driver resync per PR per merge — O(n²) churn.
-- An unmergeable PR earned **zero CI, silently**: GitHub creates no `pull_request` workflow runs when
-  it cannot build the merge ref, so a conflicted PR could not even earn a verdict to inherit later.
-  Two PRs sat forty minutes with pushed fixes and no signal at all.
+- An unmergeable PR earned **zero CI, silently**: [GitHub documents][pull-request-conflicts] that
+  `pull_request` workflows do not run while a pull request has a merge conflict, so a conflicted PR
+  could not even earn a verdict to inherit later. Two PRs sat forty minutes with pushed fixes and no
+  signal at all.
 - Five of the eight ultimately required policy admin-merges for infrastructure verdicts.
-- A GitHub **merge queue was impossible**, because the queue cannot register a repo-local merge
-  driver. The queue is the platform primitive that would replace the hand-sequenced merge train
-  outright.
+- This repository could not adopt GitHub's **merge queue** while the shared anchor required its
+  repo-local driver. GitHub's documented flow creates a temporary merge group and only then runs
+  [`merge_group` checks][merge-queue-checks], whereas this driver became available only after a
+  checkout registered its command in local Git configuration. Removing the collision makes the
+  documented queue flow usable without that pre-merge repository hook.
 
 D-decisions-merge-driver, D-decisions-merge-regions and D-base-moved-resync are each correct and each
 made the collision cheaper to resolve. Together they are also the whole answer to the question of
@@ -33,6 +36,10 @@ whether managing this collision is worth it: three decisions, `scripts/merge_dec
 `scripts/register_decisions_driver.sh`, `scripts/sync_pr_with_base.sh`, `sync-open-prs.yml`, four
 registration sites, a carve-out in D-inherit-whole-range's tree-identity gate, and roughly 900 lines
 of test — all of it load-bearing infrastructure whose only job was compensating for one shared line.
+
+[stack-post-mortem]: https://github.com/NickBorgers/reasonable-answer/issues/188
+[pull-request-conflicts]: https://docs.github.com/en/actions/reference/workflows-and-actions/events-that-trigger-workflows#pull_request
+[merge-queue-checks]: https://docs.github.com/en/repositories/configuring-branches-and-merges-in-your-repository/configuring-pull-request-merges/managing-a-merge-queue#triggering-merge-group-checks-with-github-actions
 
 **The decision.** A decision is its own file: `docs/decisions/D-<slug>.md`, whose first line is the
 `## D-<slug> — …` heading it defines. `docs/decisions.md` keeps its name and becomes the registry
