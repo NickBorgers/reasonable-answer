@@ -64,8 +64,10 @@ review-entry            authorize · fork-reject · resolve SHA · prior-GO chec
        │                non-agentic, clean-merge-only sync pass when the panel was guarded
        │                off and the branch is behind the base (D-unguarded-sync)
        ├─ judge         deterministic, from main, contents: read
-       └─ finalize      labels · summary comment · merge gate · review/cycle +
-                        review/verdict + review/verdict-anchor on the post-fix SHA
+       └─ finalize      labels · summary comment · merge gate · review/verdict +
+                        review/verdict-anchor on the post-fix SHA, and review/cycle
+                        when the run has a count to publish — a recorded panel,
+                        cap-exhausted path, or inherited terminal path
 ```
 
 Roles run on different model families deliberately. This project's own design argues that
@@ -297,7 +299,8 @@ it holds `contents: read`, so it could not push if it tried.
   every fixer push that was not followed by another commit inherited its own pre-fix
   verdict, and the review → fix → re-review loop could not close. `review-finalize.yml`
   therefore writes a third status, `review/verdict-anchor`, whose state carries the verdict
-  (`success` = GO, `failure` = NO-GO) and whose description is the commit the verdict is
+  (`success` = GO, `failure` = NO-GO, `error` = an outcome that is not a judgement about the
+  change, below) and whose description is the commit the verdict is
   *about*; both tests measure from there and inherit the verdict from that same object
   (D-atomic-verdict-anchor). `review/verdict` remains a display/compatibility status, never a
   separately paired trust input. A cycle carrying no such anchor — one recorded before this
@@ -329,6 +332,41 @@ it holds `contents: read`, so it could not push if it tried.
   four guards refused, and the push that repaired validation arrived as cycle 2, where
   `fix_allowed` is already false — spending the PR's one automated fix attempt on a run
   that read nothing.
+
+  **And finalize honours that, rather than re-billing the same run one commit along
+  (D-nonjudgement-outcomes).** `review-finalize.yml` stamps `review/cycle` on the post-fix SHA
+  because on the fixer's path nothing else ever will — but it stamped it on *every* path,
+  including the ones `record-cycle` deliberately skipped, which is the same run being billed
+  by a different writer. It now takes a `cycle_recorded` input and stamps only when a cycle
+  was actually recorded. PR #186's resync (`e748c86`) is the observed case: no `record-cycle`
+  write, a fail-closed `pipeline_error` NO-GO, and a `cycle 2` published by finalize for a
+  panel that never ran.
+- **An inherited verdict costs nothing on the counter, and the cap cannot fire on one
+  (D-nonjudgement-outcomes).** A pure merge-from-base reads nothing, fixes nothing, and
+  re-publishes the verdict its anchor already carried; the counter therefore *holds* at the
+  cycle that verdict belongs to instead of advancing. Advancing it defeated the point of the
+  short-circuit — two resyncs after a cycle-1 panel reported "cycle 3" — and because the cap
+  is evaluated from the same output, `cap-exhausted` and `inherit` then both finalized on one
+  SHA and raced. PR #183's `4e9c6b6` carries the result: an inherited GO, and three seconds
+  later a cycle-cap NO-GO on identical content, which became the anchor every later resync
+  inherited. `gather` no longer reports `cap_exhausted` on an inherited run, and the
+  `cap-exhausted` job additionally requires `inherit != 'true'`, so the two paths are disjoint
+  twice over. Nothing about what the cap bounds is loosened: the panel, `record-cycle` and
+  `fix` are all gated on `inherit != 'true'`, so an inherited run cannot advance the
+  review → fix → push → review loop it would be billed for, and it cannot repeat without a
+  fresh push from outside.
+- **A non-judgement outcome is not an inheritable verdict (D-nonjudgement-outcomes).**
+  `cycle_capped` is a cost backstop — the comment this pipeline posts for it says so in those
+  words — and `pipeline_error` means the pipeline could not trust its own inputs. Both were
+  anchored as `failure`, indistinguishable from a panel's NO-GO, so the next pure-merge resync
+  re-stamped a flake as a judgement about the change: PR #182's `6af6acc` inherited a
+  `pipeline_error`, and PR #186 the same class on a PR that had cleared at cycle 1. They are
+  written into `review/verdict-anchor` as `error` instead, the state
+  D-atomic-verdict-anchor already reserves for "not an inheritable verdict", and the successor
+  gets a panel rather than a re-stamp. The display status and the merge gate still report
+  NO-GO, so the gate is not loosened — only what a later run may treat as somebody's
+  judgement. A PR whose cap is genuinely spent still converges to the terminal cap NO-GO and
+  waits for a human.
 - **`MAX_CYCLES: 2`** is now mostly a race-window backstop, not the review → fix → push →
   review loop breaker it once was. The fixer claims its own post-push SHA (see "The fixer
   claims its own SHA" below), so the `synchronize` event that push fires is normally
@@ -477,9 +515,22 @@ by `GITHUB_TOKEN` creates an approval-required run, while a personal access toke
 run automatically](https://docs.github.com/en/actions/how-tos/write-workflows/choose-when-workflows-run/trigger-a-workflow#triggering-a-workflow-from-a-workflow);
 without that automatic run the merge-gate status would not be republished on the new head. The
 merge is authored as `AGENT_COMMIT_EMAIL` so it does not read as a human answering the
-blockers and reset the cycle counter. A review run already in flight on the branch is waited
-for rather than raced — it performs the same merge itself, and the fixer discards a whole
-cycle's fixes if it finds the branch moved under it.
+blockers and reset the cycle counter.
+
+**It waits for the review pipeline rather than racing it, on two questions
+(D-resync-defers-to-finalize).** A run already in flight on the branch performs the same merge
+itself, and the fixer discards a whole cycle's fixes if it finds the branch moved under it. The
+second question is narrower and was the expensive one: has the last recorded cycle published
+its verdict yet? `record-cycle` writes `review/cycle` as soon as the panel has read the code,
+and `review/verdict-anchor` lands minutes later when finalize runs, so a merge pushed inside
+that window hands the successor's `gather` a cycle-recorded SHA carrying no anchor — and an
+anchor that cannot be verified is not an anchor, so the classifier fail-closes to a full
+five-role panel on a head whose only delta is this merge. A PR in either state is `deferred`,
+which joins the state names `sync_pr_with_base.sh` prints, and the next push to `main` retries
+it. Both waits share the one 10-minute deadline. The anchor wait is additionally bounded by the
+*age* of the cycle record (30 minutes): a run cancelled between the two writes leaves that pair
+on the head permanently, and a PR only this driver can unblock must not be walled off by a
+status nothing will ever complete.
 
 **The sync still runs when the panel was guarded off (D-unguarded-sync).** Every reviewer guard refusing
 normally means the fixer does not run either, because `fix` was gated on `record-cycle`
@@ -754,7 +805,10 @@ the fixer push's parent rather than the fixer push. Keeping both facts in one st
 load-bearing because concurrent finalizers can otherwise interleave separate writes into a
 verdict/anchor pair no run produced. `review/verdict` remains for display and compatibility;
 inheritance trusts only the combined object (D-inherit-reviewed-anchor,
-D-atomic-verdict-anchor).
+D-atomic-verdict-anchor). The state has three values, not two: `success` and `failure` are
+judgements a panel or an inherit decision stands behind, and `error` marks an outcome that is
+not a judgement about the change at all — the cycle-cap cost backstop, or a `pipeline_error` —
+which nothing may inherit (D-nonjudgement-outcomes).
 `cleanup-claim` (bottom of `review-pipeline.yml`) advances `review/pipeline` to a terminal
 state on both the reviewed SHA and the post-fix SHA for the same reason: a claim this run
 makes and never revisits would otherwise leak `pending` forever and block every future
