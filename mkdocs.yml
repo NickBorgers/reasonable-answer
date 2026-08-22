@@ -42,6 +42,16 @@ validation:
     anchors: warn
     unrecognized_links: warn
 
+# The one directory exempt from `omitted_files` above, and deliberately so. Each decision is
+# its own page under docs/decisions/ (D-decision-per-file). Requiring a `nav:` entry per
+# decision would put the shared insertion point back — here in mkdocs.yml instead of in
+# docs/decisions.md — and hand a merge queue a file that every decision-bearing PR edits.
+# These pages are still built, still linked from the index, still searched; they are just not
+# sidebar chapters. `omitted_files` stays strict for every other page, so a genuinely new
+# document still cannot ship unnavigable.
+not_in_nav: |
+  /decisions/*.md
+
 theme:
   name: material
   logo: assets/logo.png
@@ -88,8 +98,9 @@ markdown_extensions:
   - md_in_html
   - toc:
       permalink: true
-      # Keeps decisions.md's right-hand TOC at its ## D-headings plus one level, rather
-      # than a wall of every sub-heading in a ~6,000-line append-only log.
+      # Keeps a decision page's right-hand TOC at its ## D-heading plus one level, rather
+      # than a wall of every sub-heading. Applied site-wide, so it also bounds the long
+      # narrative pages (architecture.md, ci-pipeline.md).
       toc_depth: 3
       # GitHub-compatible slugs. Not byte-identical — a heading whose words are separated
       # by a spaced em-dash slugifies with one hyphen here and two on GitHub — but every
@@ -114,9 +125,10 @@ markdown_extensions:
 # and it lives outside docs_dir. index.md links out to it.
 #
 # decisions.md gets its own top-level entry, last and outside any group, under a nav title
-# that differs from its H1. At ~6,000 lines it is an append-only record rather than a chapter;
-# inside a group it would dwarf the sidebar. It is not split — README.md and DESIGN.md link
-# to it by filename.
+# that differs from its H1. It is the registry index — identifier scheme, finding tables, test
+# matrix, open items — and the entry point to docs/decisions/, whose per-decision pages are
+# covered by `not_in_nav` above rather than listed here (D-decision-per-file). README.md and
+# DESIGN.md link to the index by filename, which is why it kept that name through the split.
 nav:
   - Home: index.md
   - Start here:

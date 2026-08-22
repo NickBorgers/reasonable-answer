@@ -202,9 +202,15 @@ and the docs reviewer blocks on the first.
 - **[model-evaluation-record-2026-08-10.md](./model-evaluation-record-2026-08-10.md)** — the public
   operator record behind that procedure's empirical claims: corpus identity, repetitions and call
   counts, measured logic-lens metrics, host probes, schema incidents, and the manual spot-check.
-- **[decisions.md](./decisions.md)** — design decisions and how each adversarial review finding
-  was resolved, across the Codex review round (`RA-`/`RB-`/`RC-`/`RG-` prefixes) and every round
-  since.
+- **[decisions.md](./decisions.md)** — the decision-registry index: the slug identifier scheme, the
+  old-number mapping, how each adversarial review finding was resolved across the Codex review
+  round (`RA-`/`RB-`/`RC-`/`RG-` prefixes) and every round since, the RA-019 test matrix, and the
+  open items.
+- **[decisions/](./decisions/D-decision-per-file.md)** — one file per decision:
+  `docs/decisions/D-<slug>.md` defines `D-<slug>`, so a citation resolves to a path. The directory
+  is deliberately not enumerated here or in `mkdocs.yml`'s `nav` — a per-decision entry in either
+  would be a shared insertion point every decision-bearing PR has to edit, which is exactly what
+  D-decision-per-file removed.
 - **[question-refinement.md](./question-refinement.md)** — the edge-side, ambient
   pre-run reframing suggestions (D-question-refinement): what they are, the reframe taxonomy, and the
   provenance/retention mechanism.

@@ -14,14 +14,18 @@ finding killed the previous version. Your job is not "does this code look good" 
 diff preserve the design's safety properties, and if it changes one, did it change the spec too.**
 
 A blocker you cannot tie to a decision or finding ID is usually an opinion. Populate
-`decision_ref` on every `blocking_issues[]` entry. Valid IDs live in `docs/decisions.md`
-(decision slugs of the form `D-<slug>`, `RA-001`–`RA-020`, `RB-001`–`RB-010`, `RC-001`–`RC-007`, `RG-001`–`RG-004`) and in
-`docs/convergence.md` (`RD-002`, `RH-001`, `RI-001` — cited normatively there but **not** tabulated
-in `decisions.md`; citing them is fine, inventing new ones is not).
+`decision_ref` on every `blocking_issues[]` entry. Valid IDs live in the decision registry,
+which is an index plus one file per decision: slugs of the form `D-<slug>` are defined by
+`docs/decisions/D-<slug>.md` (so a citation resolves to a path — read the file, do not search),
+and the finding tables (`RA-001`–`RA-020`, `RB-001`–`RB-010`, `RC-001`–`RC-007`,
+`RG-001`–`RG-004`) are in the index `docs/decisions.md`. Also valid: `docs/convergence.md`
+(`RD-002`, `RH-001`, `RI-001` — cited normatively there but **not** tabulated in the registry;
+citing them is fine, inventing new ones is not).
 
 **Read before reviewing:** `docs/DESIGN.md`, `docs/isolation.md`, `docs/convergence.md`,
-`docs/architecture.md`, `docs/decisions.md`, `docs/bias.md`. Then read the modules the diff
-touches.
+`docs/architecture.md`, `docs/decisions.md`, `docs/bias.md`, plus the
+`docs/decisions/D-<slug>.md` files for the decisions the diff touches. Then read the modules the
+diff touches.
 
 ## The invariant checklist
 
@@ -40,7 +44,7 @@ Walk every row. A row is in play if the diff touches the listed surface.
 | 9 | **Bias categories stay observable-text-anchored.** The three social-bias categories (`one_sided_sourcing`, `loaded_language`, `unexamined_presupposition`) are governed by `docs/bias.md`: meanings describe observable text properties, never inferred intent; `loaded_language` floors at `minor`; the other two at `major`; the "what critics must NOT do" rules (no viewpoint quotas, no intent attribution, no both-sides demands) bound the category meanings and lens briefs. | `taxonomy.py` (`Category`, `SEVERITY_FLOOR`, `LENS_CATEGORIES`, `LENS_BRIEF`), `prompts.py::_CATEGORY_MEANING`, `docs/bias.md` | D-observable-categories, D-social-bias, RC-005 | A bias category's meaning or lens brief drifts toward intent inference or viewpoint quotas; a bias floor changes without a `docs/bias.md` change; `bias.md` and `SEVERITY_FLOOR`/`LENS_CATEGORIES` diverge. |
 | 10 | **Dispute adjudication is identity-blind and fail-closed toward the finding.** No alias, identity, lens, round, run_id or hash reaches an arbiter prompt; raiser identities feed only deterministic eligibility selection. Nothing is suppressed without an explicit `upheld` record; every inconclusive path (failed fetch, absent quote, no eligible arbiter, arbiter error, spent budget) leaves the finding standing; the registry rules each `(category, normalized span)` key at most once per run; with `disputes.enabled: false` prompts and transitions are byte-identical to a build without the feature. | `dispute.py`, `graph.py::_adjudicate` / `_elicit_disputes`, `triage.py::suppress`, `prompts.py` arbiter prompts | D-writer-disputes, RA-010, RB-008 | An identity/lens/round reaches an arbiter prompt; suppression happens without an `upheld` record; an inconclusive fetch is treated as refutation; the once-per-key rule is dropped; mechanical adjudication accepts a URL the report does not cite; the elicitation failure path becomes fatal. |
 | 11 | **Identity is resolved once, and a run belongs to someone.** Every web route refuses a request with no identity except `/healthz` and the `GET`s under `/runs/`, which are public by decision (D-id-as-credential) — holding a run id is the credential for reading that run, and no public route carries an owner's address; the resolution order is Access email (lower-cased) → Tailscale header → `auth.dev_identity` → refuse, and unset `dev_identity` means fail closed. A submission writes `owner.txt` before the `queued` event; `owner.txt` stays outside `CONTENT_DIRS`; an owner-less run is 404 on every per-run route and absent from every index. Reads are not owner-scoped, resume is. `owner` never enters `_run_fingerprint`, and `recover()` never filters by owner. | `web/identity.py`, `web/app.py` (auth middleware, `_require`, resume), `web/registry.py` (`owner`, `list(owner=)`), `web/worker.py::submit`, `store.py::RunStore.owner`, `config.py::AuthConfig` | D-identity-header, D-id-as-credential, D-bounded-submission, RC-007 | A route is added outside the middleware; `/healthz` is joined by another *path* exemption; the public rule stops being method-scoped, so a write under `/runs/` becomes reachable without an identity; a new `GET` under `/runs/` is added without updating `test_public_run_get_routes_are_the_expected_set`; a public route starts emitting an owner's address (the run-page byline, `summary.owner` in `audit.json`); a per-run read stops going through `_require`; an owner-less run becomes visible or gets an owner guessed for it; `owner.txt` moves into `CONTENT_DIRS`; `dev_identity` gains a boolean companion that can disagree with it; `recover()` starts filtering by owner; `owner` joins the resume fingerprint; the `<link rel="manifest">` loses `crossorigin="use-credentials"`, which is what keeps the credential-less manifest fetch reaching a gated route (D-installable-pwa). |
-| 12 | **Docs-as-spec drift.** *(the check that pays continuously)* | `docs/*.md` + `docs/decisions.md` | — | See below. |
+| 12 | **Docs-as-spec drift.** *(the check that pays continuously)* | `docs/*.md` + `docs/decisions.md` + `docs/decisions/*.md` | — | See below. |
 
 ## Row 12 — docs-as-spec drift (BLOCKING)
 
@@ -48,8 +52,9 @@ If the diff changes the **behavior** of any invariant in rows 1–11 and does **
 
 - update the corresponding normative statement in `docs/DESIGN.md` / `docs/isolation.md` /
   `docs/convergence.md` / `docs/architecture.md`, **and**
-- add or amend an entry in `docs/decisions.md` (a new `D-<slug>` for a deliberate design change, or
-  an amended finding row when a prior finding's resolution is being revised),
+- add or amend a decision entry (a new `docs/decisions/D-<slug>.md` file for a deliberate design
+  change, or an amended finding row in `docs/decisions.md` when a prior finding's resolution is
+  being revised),
 
 …that is **blocking**, severity `high`, `decision_ref` = the ID of the invariant the diff moved.
 Stable id: `inv-docs-drift-<n>`.

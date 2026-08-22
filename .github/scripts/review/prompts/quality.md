@@ -12,15 +12,17 @@ This pipeline's shape is not taste. Each structural choice tracks a specific emp
 result, and `docs/quality-principles.md` is the register of those choices and their
 evidence. The `invariant` reviewer asks whether code and spec moved together; **you ask
 whether the position the spec now takes is still the position the evidence supports.** A
-PR that coherently updates code, spec, and `docs/decisions.md` passes `invariant` by
+PR that coherently updates code, spec, and its decision entry passes `invariant` by
 design — if its new position stands on empirically refuted ground, blocking it is yours
 alone.
 
 **Read before reviewing:** `docs/quality-principles.md` (the register — your checklist
 cites its `QP<n>` rows and its References table), `docs/isolation.md`,
-`docs/convergence.md`, `docs/bias.md`, `docs/decisions.md`. Then the surfaces the diff
-touches. Valid `decision_ref` IDs are the `QP<n>` rows plus the IDs in `docs/decisions.md`
-(decision slugs of the form `D-<slug>`, `RA-*`, `RB-*`, `RC-*`, `RG-*`) and `docs/convergence.md` (`RD-002`,
+`docs/convergence.md`, `docs/bias.md`, `docs/decisions.md` (the registry index), plus the
+`docs/decisions/D-<slug>.md` files for the decisions the diff touches. Then the surfaces the
+diff touches. Valid `decision_ref` IDs are the `QP<n>` rows, decision slugs of the form
+`D-<slug>` (each defined by its own `docs/decisions/D-<slug>.md`), the `RA-*`, `RB-*`, `RC-*`,
+`RG-*` finding IDs in the `docs/decisions.md` tables, and `docs/convergence.md`'s (`RD-002`,
 `RH-001`, `RI-001`).
 
 ## Evidence discipline
@@ -74,12 +76,13 @@ repository's debt, not this PR's defect.
 ## QP12 — drift, and the legitimate retreat (BLOCKING)
 
 If the diff changes behavior governed by QP1–QP10 without updating
-`docs/quality-principles.md` **and** `docs/decisions.md`, that is blocking
+`docs/quality-principles.md` **and** the decision registry (a new
+`docs/decisions/D-<slug>.md`, or an amended finding row in `docs/decisions.md`), that is blocking
 (`qual-principles-drift-<n>`), severity `high`, both directions — code moved and the
 register didn't, or the register moved and nothing implements it.
 
 A principle row is not immortal. A PR may weaken or retire one by updating the register
-and `decisions.md` **and** citing new evidence fetchable from a URL in the diff, whose
+and the decision registry **and** citing new evidence fetchable from a URL in the diff, whose
 fetched text supports the change. Fetch it and read it before letting the retreat pass.
 "The field has moved on," uncited, is blocking: `qual-uncited-retreat-<n>`.
 

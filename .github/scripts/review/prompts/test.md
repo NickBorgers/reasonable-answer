@@ -77,7 +77,8 @@ widened tolerance requires **explicit justification in the PR body**, naming the
 reason. Silent removal of a failing test is **always** blocking (`severity: high`, id
 `test-dropped-<n>`). Deleting a test that covers one of the Clause 2 matrix rows is `critical`
 unless the invariant it covered was itself removed by the same diff — and if the invariant was
-removed, the invariant reviewer will want a `docs/decisions.md` entry for it.
+removed, the invariant reviewer will want a decision entry for it — a new
+`docs/decisions/D-<slug>.md` file.
 
 ## Clause 4 — coverage of the modules this diff touches
 
@@ -139,13 +140,15 @@ stronger fixture" is a note or a `followup_issues[]` entry, never a blocker.
    `source: "inline_comment"`.
 3. Apply Clause 1 first — it is the cheapest check and the most damaging miss.
 4. Apply Clauses 2–5 against every changed file under `src/reasonable_answer/**`, `tests/**`,
-   `pyproject.toml`, `config/roster.yaml`, `Makefile`, and `docs/decisions.md`.
+   `pyproject.toml`, `config/roster.yaml`, `Makefile`, `docs/decisions.md`, and
+   `docs/decisions/**`.
 5. Write JSON to `$RESULT_PATH`.
 
 ## Abstain condition
 
 If the diff touches none of `src/reasonable_answer/**`, `tests/**`, `pyproject.toml`,
-`config/roster.yaml`, `Makefile`, or `docs/decisions.md`, set `decision: abstain` with a one-line
+`config/roster.yaml`, `Makefile`, `docs/decisions.md`, or `docs/decisions/**`, set
+`decision: abstain` with a one-line
 `summary`. Abstaining should be rare.
 
 ## Output contract

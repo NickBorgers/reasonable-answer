@@ -1,1 +1,25 @@
-docs/decisions.md merge=decisions-append
+# Intentionally declares no merge driver.
+#
+# `docs/decisions.md merge=decisions-append` used to live here. Every decision-bearing PR
+# appended a section immediately before the same tail marker in that one file, so any two of
+# them conflicted on the same line; the driver (D-decisions-merge-driver, narrowed by
+# D-decisions-merge-regions) resolved that collision automatically.
+#
+# D-decision-per-file removed the collision instead of resolving it: a decision is now its own
+# file, docs/decisions/D-<slug>.md, so two decision-bearing PRs touch disjoint paths and merge
+# cleanly with no driver at all. The declaration is retired rather than merely left unused, for
+# two reasons:
+#
+#   * A GitHub merge queue — the point of the exercise — cannot register a repo-local merge
+#     driver, and neither can GitHub's own merge, mergeability check or auto-merge.
+#   * A declared driver that cannot start does not degrade to the no-driver baseline. Git marks
+#     the path `UU` with "ours" in the worktree and *no conflict markers*, which a later
+#     `git add -A` stages as resolved — silently dropping the base side of a normative spec
+#     file. Keeping a declaration that only some call sites can honor keeps that failure mode
+#     available for no remaining benefit.
+#
+# scripts/merge_decisions.py, scripts/register_decisions_driver.sh and the workflow steps that
+# call them go inert without this line rather than misbehaving: sync_pr_with_base.sh tries the
+# no-driver merge first and pushes nothing unless the driver is what made the merge succeed,
+# which it can no longer be. Deleting that machinery is a follow-up, not a silent side effect
+# of this file.

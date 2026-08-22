@@ -18,7 +18,7 @@ List every design invariant this change affects, or write `none`.
 
 The invariant reviewer diffs this list against the code, so an inaccurate list is worse
 than an empty one. If you changed an invariant, name the `docs/` files you updated and
-the `docs/decisions.md` entry you recorded.
+the `docs/decisions/D-<slug>.md` entry you recorded.
 -->
 
 none

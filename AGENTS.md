@@ -29,8 +29,8 @@ heavily commented and are the primary reference.
 
 This is the rule agents break most. Every safety property exists because a specific adversarial
 finding killed the previous version. Changing behavior means updating the matching `docs/*.md`
-**and** adding a `docs/decisions.md` entry in the same PR; silent drift is the top cause of a
-NO-GO from CI review.
+**and** adding a decision entry — one new file, `docs/decisions/D-<slug>.md` — in the same PR;
+silent drift is the top cause of a NO-GO from CI review.
 
 | document | what it governs |
 |---|---|
@@ -38,7 +38,8 @@ NO-GO from CI review.
 | [docs/architecture.md](./docs/architecture.md) | module layout and data flow |
 | [docs/isolation.md](./docs/isolation.md) | author exclusion, blind orchestrator, what may enter a context |
 | [docs/convergence.md](./docs/convergence.md) | the 14-rule controller table, termination, terminal statuses |
-| [docs/decisions.md](./docs/decisions.md) | the slug-identified decision log (`D-<slug>` sections) and adversarial findings |
+| [docs/decisions.md](./docs/decisions.md) | the decision-log index: identifier scheme, adversarial findings, test matrix, open items |
+| [docs/decisions/](./docs/decisions/) | one file per decision — `D-<slug>.md` defines `D-<slug>` |
 | [docs/quality-principles.md](./docs/quality-principles.md) | the `QP<n>` evidence register CI audits against |
 | [docs/bias.md](./docs/bias.md) | the observable-text social-bias rules |
 | [docs/authentication.md](./docs/authentication.md) | who the web interface believes you are |
@@ -56,16 +57,23 @@ replay, and cross-model confirmation) plus a twelfth row for docs-as-spec drift.
 
 ## Decision identifiers
 
-`docs/decisions.md` is the registry. Each decision is identified by a **slug derived from its
-subject** — `## D-<slug> — …` — not by a number from a shared counter (D-decision-slugs supersedes
-D-decision-gate). Coin a slug that describes the decision (`D-source-verification`, not an opaque number); two
-concurrently-open PRs cannot collide, because neither needs to know what the other chose. Append the
-new `## D-<slug> — …` section immediately **before** `## Open items for a future round`, which is
-the file's tail marker. Ordering is carried by position in the file, not by the identifier — so a
-slug never implies a sequence, and a range of slugs is meaningless (enumerate them instead).
+`docs/decisions.md` is the registry index; `docs/decisions/` holds the decisions themselves. Each
+decision is identified by a **slug derived from its subject** — not by a number from a shared counter
+(D-decision-slugs supersedes D-decision-gate). Coin a slug that describes the decision
+(`D-source-verification`, not an opaque number); two concurrently-open PRs cannot collide, because
+neither needs to know what the other chose.
 
-Duplicates — the same slug defined twice, in the prose-heading *or* the top-table form — fail the
-required `Decision Numbers` check (`scripts/validate-decision-numbers.sh`). Decisions are superseded
+**Write a decision as a new file: `docs/decisions/D-<slug>.md`, whose first line is
+`## D-<slug> — …`.** Add the file and edit nothing else — no insertion point, no index entry, no nav
+entry (`mkdocs.yml`'s `not_in_nav` covers the directory). That is the whole point: two
+decision-bearing PRs touch disjoint paths, so they are conflict-free by construction and a merge
+queue can build them (D-decision-per-file, which retires the `decisions-append` merge driver).
+There is **no ordering** — a slug never implies a sequence, a range of slugs is meaningless
+(enumerate them instead), and `git log --diff-filter=A -- docs/decisions/` is the real chronology.
+
+Duplicates — the same slug defined twice, in the prose-heading *or* the index-table form — fail the
+required `Decision Numbers` check (`scripts/validate-decision-numbers.sh`), which also refuses a
+filename that disagrees with the heading it contains. Decisions are superseded
 in place, never deleted. The reviewer prompts describe the slug scheme rather than a numeric range,
 so adding a decision no longer requires widening any hand-written range;
 `tests/test_reviewer_prompt_ranges.py` asserts that for the three reviewer prompts it covers
@@ -98,7 +106,10 @@ of falling back to a cold agent with no context.
 - **A new page under `docs/`** must be added to `nav:` in `mkdocs.yml`, to the document map in
   `docs/DESIGN.md`, and — if normative — to the `is_spec_critical` allowlist in
   `.github/actions/review-classify/action.yml`. `mkdocs build --strict` also fails on any relative
-  link that leaves `docs/`; link to root or `.github/` files by absolute URL.
+  link that leaves `docs/`; link to root or `.github/` files by absolute URL. **`docs/decisions/` is
+  the one exception and is meant to be**: `not_in_nav` and an `is_spec_critical` glob already cover
+  the whole directory, so a new `D-<slug>.md` needs no edit anywhere (D-decision-per-file). A
+  relative link out of it climbs one extra level — `../isolation.md`, not `./isolation.md`.
 - **Browser impersonation and stealth proxying are doctrine, not gaps.** The outbound user agent is
   fixed and the extraction provider's proxy mode is pinned; tests assert it.
 - **Ambiguous task → ask, don't guess.** Comment on the issue rather than opening a speculative PR.

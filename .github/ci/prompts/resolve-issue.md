@@ -18,8 +18,10 @@ The repository is checked out at `/workspace` on branch `${BRANCH_NAME}`, alread
 
 `docs/` is **normative specification, not background reading**. The design was hardened over
 multiple rounds of adversarial review; every safety property exists because a specific finding
-killed the previous version. `docs/decisions.md` is a slug-identified decision log (each section is a `D-<slug>`) with finding
-tables (RA-*, RB-*, RC-*, RG-*).
+killed the previous version. The decision log is slug-identified and split one file per decision:
+`docs/decisions/D-<slug>.md` defines `D-<slug>`, and the index `docs/decisions.md` carries the
+identifier scheme, the finding tables (RA-*, RB-*, RC-*, RG-*) and the RA-019 test matrix
+(D-decision-per-file).
 
 Read before touching code:
 
@@ -28,7 +30,8 @@ Read before touching code:
 | `docs/DESIGN.md` | what the system is and the toolchain |
 | `docs/isolation.md` | author exclusion, blind orchestrator, what may enter a model's context |
 | `docs/convergence.md` | the 14-rule controller decision table, termination, terminal statuses |
-| `docs/decisions.md` | every decision and adversarial finding, by ID |
+| `docs/decisions.md` | the registry index: identifier scheme, adversarial findings by ID, test matrix, open items |
+| `docs/decisions/D-<slug>.md` | one decision each — read the ones the issue cites |
 | `docs/architecture.md` | module layout and data flow |
 
 Then read the modules the issue touches:
@@ -52,7 +55,8 @@ src/reasonable_answer/
 
 These are the properties the review pipeline will check, so breaking one means your PR gets a
 NO-GO. If the issue genuinely requires changing one, that is allowed — but you must **also update
-the corresponding `docs/*.md` and add a `docs/decisions.md` entry recording the decision**. Silent
+the corresponding `docs/*.md` and add a decision entry — one new file,
+`docs/decisions/D-<slug>.md` — recording the decision**. Silent
 behavioral drift away from the spec is the single most likely reason your PR is rejected.
 
 - **Author exclusion** — no model ever critiques a report it authored, on any lens, enforced at

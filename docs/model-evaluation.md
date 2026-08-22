@@ -267,5 +267,5 @@ pointed at a roster that resolves the alias under test, and both spend real prox
 - [`scripts/dump_control_issues.py`](https://github.com/NickBorgers/reasonable-answer/blob/main/scripts/dump_control_issues.py)
   answers "what did a critic actually say when it flagged a sound control?" Run it whenever a
   candidate's `control_material_rate` looks marginal and you need to decide whether the noise is
-  the model's fault or the corpus's, before spending a `docs/decisions.md` entry on either
+  the model's fault or the corpus's, before spending a `docs/decisions/D-<slug>.md` entry on either
   conclusion.

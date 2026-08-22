@@ -124,8 +124,9 @@ code, and a stale claim is worse than none.
 ## This project is spec-driven
 
 `docs/` is normative. You already know this from writing the PR, but the trap is worth restating:
-changing behaviour governed by an invariant **without** updating `docs/*.md` and adding a
-`docs/decisions.md` entry converts a caught problem into silent spec drift, and the invariant
+changing behaviour governed by an invariant **without** updating `docs/*.md` and adding a decision
+entry — one new file, `docs/decisions/D-<slug>.md` — converts a caught problem into silent spec
+drift, and the invariant
 reviewer will block the next cycle for the change you just made. List anything you touch in
 `docs_updated[]`.
 
