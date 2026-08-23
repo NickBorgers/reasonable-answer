@@ -90,8 +90,12 @@ jobs:
               # off this list, the one test that would catch the next arithmetic slip in it
               # (issue #157) never runs on the PR that makes the slip.
               - '.github/workflows/review-reviewer.yml'
+            # docs/decisions/** is where decisions now live, one file each
+            # (D-decision-per-file), so a PR that adds only a decision file still gets the
+            # registry gate that used to be triggered by editing the single log.
             decisions:
               - 'docs/decisions.md'
+              - 'docs/decisions/**'
               - 'scripts/validate-decision-numbers.sh'
             # pyproject.toml and uv.lock are here because they pin MkDocs: a dependency
             # bump that breaks the site build should turn a PR red, not the post-merge
@@ -244,9 +248,11 @@ jobs:
     timeout-minutes: 30
     steps:
       # Default checkout on a pull_request is the merge ref — the PR merged into its base
-      # branch — so docs/decisions.md here is the file that will exist on main once this PR
-      # lands. A decision number defined twice in it is a collision that would otherwise
-      # reach main (issue #71).
+      # branch — so the registry here is the one that will exist on main once this PR lands.
+      # A slug defined twice across it is a collision that would otherwise reach main
+      # (issue #71). Since D-decision-per-file the check also enforces the directory's shape:
+      # one decision per file, named for the slug its heading defines. The job name is
+      # unchanged because it is a required status check.
       - uses: actions/checkout@v4
 
       - run: ./scripts/validate-decision-numbers.sh

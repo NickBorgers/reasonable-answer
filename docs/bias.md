@@ -3,7 +3,7 @@
 > **Status:** normative. This document governs the three social-bias categories in
 > `taxonomy.py` (`one_sided_sourcing`, `loaded_language`, `unexamined_presupposition`) and the
 > writer standards in `prompts.py::WRITER_SYSTEM`. A change to one side without the other is
-> docs-as-spec drift and blocks in review. See D-social-bias in [decisions.md](./decisions.md).
+> docs-as-spec drift and blocks in review. See [D-social-bias](./decisions/D-social-bias.md).
 
 ## 1. Scope: observable text properties only
 

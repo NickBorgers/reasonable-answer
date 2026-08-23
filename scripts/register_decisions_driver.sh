@@ -2,6 +2,13 @@
 # Registers the docs/decisions.md append-only merge driver — but only after proving the
 # exact command git will run actually works (D-decisions-merge-driver).
 #
+# INERT since D-decision-per-file. Decisions are one file each under docs/decisions/, so
+# .gitattributes declares no `merge` attribute for docs/decisions.md and git never consults
+# the driver this registers. The registration and its smoke test still succeed; they just no
+# longer affect any merge. Kept for one more cycle so removing the machinery — this script,
+# merge_decisions.py, sync-open-prs.yml and the two workflow registration steps — is a
+# reviewable deletion rather than a side effect of the split.
+#
 # Why the proof, rather than a bare `git config`: a merge driver that cannot START does not
 # degrade to the no-driver baseline. Git marks the path conflicted but leaves "ours" in the
 # worktree with NO conflict markers and the path only `UU` in the index. review-fixer.yml's

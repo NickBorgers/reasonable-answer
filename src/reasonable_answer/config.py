@@ -662,7 +662,7 @@ class AuditionConfig(BaseModel):
     enforce: bool = False
     cache_path: Path = Path(".ra-audition.json")
     max_age_days: int = Field(default=30, ge=1, le=365)
-    #: Critics are non-deterministic; docs/decisions.md already records minimax-m3
+    #: Critics are non-deterministic; the decision log already records minimax-m3
     #: probing differently across `ra doctor` runs. Single-shot auditioning would
     #: inherit exactly that flakiness and call it a capability measurement.
     repetitions: int = Field(default=3, ge=1, le=20)

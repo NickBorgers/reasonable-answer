@@ -55,8 +55,10 @@ unchanged.
 
 ## The record
 
-- **[Design decisions](decisions.md)** — every decision and every adversarial review that
-  produced it, in the order they happened.
+- **[Design decisions](decisions.md)** — the registry index: the identifier scheme, every
+  adversarial review that produced a decision, the test matrix and the open items. Each decision
+  itself is one page, `decisions/D-<slug>.md`, named for the slug it defines — for example
+  [D-decision-per-file](decisions/D-decision-per-file.md), which is why.
 
 ## Running it
 

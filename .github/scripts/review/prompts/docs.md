@@ -21,7 +21,12 @@ anything the diff made stale or inconsistent, in *either* direction.
 The doc set: `README.md`, `docs/index.md`, `docs/concepts.md`, `docs/DESIGN.md`,
 `docs/architecture.md`, `docs/isolation.md`, `docs/convergence.md`, `docs/bias.md`,
 `docs/question-refinement.md`, `docs/decisions.md`, `docs/ci-pipeline.md`, `docs/ci-setup.md`,
-`docs/ssrf-egress-isolation.md`, `docs/authentication.md`.
+`docs/ssrf-egress-isolation.md`, `docs/authentication.md`, and `docs/decisions/*.md` — one file
+per decision, named for the slug it defines (D-decision-per-file). Those decision pages are
+deliberately absent from `mkdocs.yml`'s `nav` and covered by its `not_in_nav` key instead, so
+row 4 below must not flag them as pages missing from the nav; every other page under `docs/`
+still must be there. A relative link out of a decision page needs one extra level —
+`../isolation.md`, not `./isolation.md`.
 
 Everything under `docs/` is also published as a static site by `.github/workflows/pages.yml`
 (MkDocs, configured by `mkdocs.yml` at the repository root). That adds two mechanical
@@ -37,7 +42,7 @@ Walk every lens that has surface in the diff.
 | 1 | **Cross-doc contradictions.** The diff updates one doc's description of a behavior. Find every other doc describing the *same* behavior and check they still agree — e.g. a roster-shape change touching `README.md`'s `config/roster.yaml` snippet must still match `docs/DESIGN.md`'s account of it, and vice versa. | Yes |
 | 2 | **Stale references.** A renamed or removed file, a dead relative link (`[x](./y.md)`), a gone `make` target, a CLI flag or subcommand no longer in `src/reasonable_answer/cli.py`, a config key no longer in `config/roster.yaml`, a workflow filename under `.github/workflows/` that changed. Check every relative link and every `make`/`uv run ra`/workflow-name mention in a changed doc. Also: a relative link in `docs/*.md` that leaves the `docs/` tree (`../README.md`, `../src/...`, `../.github/...`) breaks the strict site build, so it must be written as an absolute `https://github.com/NickBorgers/reasonable-answer/...` URL. | Yes |
 | 3 | **Doc↔runtime drift.** A doc describing runtime behavior — the roster shape, CLI usage, the run/output directory layout, Docker/volume setup, CI workflow behavior — must match the code or config it describes. Concrete pairs to check when the diff touches either side: README's `roster.yaml` snippet vs `config/roster.yaml` itself; the terminal-status table in `docs/convergence.md` vs the status literals actually produced (`src/reasonable_answer/controller.py`); `docs/ci-pipeline.md`'s workflow table vs `.github/workflows/*.yml` names and triggers; `docs/ci-setup.md` vs the secrets/env it walks through setting up. | Yes, when the diff touches the divergent surface |
-| 4 | **Index / map freshness.** A new doc, or a file newly spec-bearing, must appear in `docs/DESIGN.md`'s "Document map". If it is spec-critical (normative, not just descriptive), it also belongs in the `is_spec_critical` allowlist in `.github/actions/review-classify/action.yml` — flag that as a `followup_issues[]` entry if you can't confirm it was updated. A new file under `docs/` must also appear in `nav:` in `mkdocs.yml` — `mkdocs build --strict` fails otherwise, so `Docs Build` will already be red. | Blocking only when the file was **added by this PR**; otherwise `non_blocking_notes[]` |
+| 4 | **Index / map freshness.** A new doc, or a file newly spec-bearing, must appear in `docs/DESIGN.md`'s "Document map". If it is spec-critical (normative, not just descriptive), it also belongs in the `is_spec_critical` allowlist in `.github/actions/review-classify/action.yml` — flag that as a `followup_issues[]` entry if you can't confirm it was updated. A new file under `docs/` must also appear in `nav:` in `mkdocs.yml` — `mkdocs build --strict` fails otherwise, so `Docs Build` will already be red. **A new `docs/decisions/D-<slug>.md` is exempt from all three of these**: `not_in_nav` covers the directory, the `is_spec_critical` glob `docs/decisions/*.md` covers it, and the document map names the directory rather than each decision (D-decision-per-file). Requiring per-decision entries would put back the shared insertion point the split removed. | Blocking only when the file was **added by this PR**; otherwise `non_blocking_notes[]` |
 | 5 | **Mermaid validity.** Any mermaid block the diff **adds or modifies**: labels double-quoted; `<` inside a flowchart label written `&lt;`; no bare `;` inside a `sequenceDiagram` message. Note the asymmetry — inside a `sequenceDiagram` message, raw `&` is fine and `&amp;` breaks the parser; inside a flowchart label, `&amp;` is correct and is what the rest of this repo's diagrams use. | Blocking only when the block clearly cannot render |
 
 ## Deconfliction with `invariant`
@@ -121,8 +126,9 @@ Valid JSON conforming exactly to `.github/scripts/review/schema/reviewer-v1.json
   judge namespaces them as `docs/<id>` and tracks resolution by that key — renaming an id between
   cycles reads as a brand-new blocker and stalls the merge.
 - `decision_ref` may be `null` for a docs finding — most stale-link and cross-doc-contradiction
-  findings cite nothing in `docs/decisions.md`. Set it when a real decision or finding ID from
-  `docs/decisions.md` (decision slugs of the form `D-<slug>`, `RA-*`, `RB-*`, `RC-*`, `RG-*`) or `docs/convergence.md`
+  findings cite nothing in the decision registry. Set it when a real decision or finding ID from
+  the registry (decision slugs of the form `D-<slug>`, defined by `docs/decisions/D-<slug>.md`;
+  `RA-*`, `RB-*`, `RC-*`, `RG-*` from the `docs/decisions.md` finding tables) or `docs/convergence.md`
   (`RD-002`, `RH-001`, `RI-001`) is genuinely relevant.
 - Each blocker needs a matching `fix_suggestions[]` entry with the same `id`. Doc fixes are almost
   always `applicable: "manual"` — reserve `"mechanical"` for a literal rename or a dead-link

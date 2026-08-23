@@ -83,7 +83,7 @@ def _short(identity: str | None) -> str:
 
 #: The page's Content-Security-Policy, in one place so the test that pins it and the head
 #: that emits it cannot disagree. Every source here is argued for in the comment beside the
-#: meta tag and in D-installable-pwa; widening it is a decision that belongs in `docs/decisions.md`.
+#: meta tag and in D-installable-pwa; widening it is a decision that belongs in `docs/decisions/`.
 CSP = (
     "default-src 'none'; img-src 'self'; style-src 'unsafe-inline'; "
     "script-src 'self' 'unsafe-inline'; connect-src 'self'; manifest-src 'self'; "

@@ -2,6 +2,12 @@
 """Merge driver for docs/decisions.md (D-decisions-merge-regions, narrowing
 D-decisions-merge-driver).
 
+INERT since D-decision-per-file. Each decision is now its own file under docs/decisions/, so
+two decision-bearing PRs no longer collide on a shared insertion point and .gitattributes
+declares no `merge` attribute for docs/decisions.md. Git therefore never invokes this driver,
+whatever `git config` a workflow still writes. It is kept for one more cycle so the retirement
+is a reviewable deletion rather than a side effect of the split; nothing below has changed.
+
 Registered by .gitattributes (`docs/decisions.md merge=decisions-append`) plus
 `git config merge.decisions-append.driver 'python3 scripts/merge_decisions.py %O %A %B'`.
 Git substitutes %O/%A/%B with temp-file paths for the merge base, "ours", and "theirs";

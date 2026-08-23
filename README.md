@@ -98,7 +98,7 @@ and only its owner can resume a run.
 Because the header is not verified, anyone who can reach the port directly can claim to be any
 user. `ra serve` binds `127.0.0.1` by default and `compose.yaml` publishes only to loopback for
 that reason: keep the proxy the only way in. See [docs/authentication.md](docs/authentication.md)
-for the Cloudflare Access setup, and D-identity-header in [docs/decisions.md](docs/decisions.md) for what that
+for the Cloudflare Access setup, and [D-identity-header](docs/decisions/D-identity-header.md) for what that
 trade does and does not buy.
 
 Showing reports and critiques to a *human* does not weaken the isolation design — blindness is
@@ -118,7 +118,7 @@ so `make serve` does exercise the whole path locally.)
 
 The service worker caches the icons, the manifest and a small offline page — **and nothing else**.
 Runs are live data, so offline you get the offline page rather than a stale run status, and a run
-page is never stored on the device at all. See [D-installable-pwa](docs/decisions.md) for why that is a
+page is never stored on the device at all. See [D-installable-pwa](docs/decisions/D-installable-pwa.md) for why that is a
 structural property rather than a rule someone has to remember.
 
 The icons are the project logo. To use your own, replace the PNGs in
@@ -235,7 +235,7 @@ path-prefixing, not a relaxation. See D-base-path.
 the run page, the report, the exports, `audit.json`, the live stream — answers an
 unauthenticated caller, so the URL a reader is looking at is the one they can send to
 someone; every write stays behind the gate. Unset, it falls back to `RA_ROOT_PATH` and
-nothing changes. See [D-id-as-credential](./docs/decisions.md) and
+nothing changes. See [D-id-as-credential](./docs/decisions/D-id-as-credential.md) and
 [authentication.md](./docs/authentication.md).
 
 **To be told when a run finishes**, turn it on in the roster and supply a contact address in
@@ -277,7 +277,7 @@ ask the devices to re-subscribe. And **on an iPhone the app has to be on the hom
 first**: iOS gives push only to Home Screen web apps and only prompts in response to a direct tap
 ([WebKit, 2023](https://webkit.org/blog/13878/web-push-for-web-apps-on-ios-and-ipados/)), and a
 declined permission prompt can only be reset by deleting and reinstalling, so the button appears
-only once it can actually work. See [D-stop-notification](./docs/decisions.md).
+only once it can actually work. See [D-stop-notification](./docs/decisions/D-stop-notification.md).
 
 ## Configuration
 
@@ -438,8 +438,9 @@ is disclosed as a different document from the cited page. An entry counted as no
 checked is unverified, not suspect; a blocked or paywalled one was unreadable, not absent. A
 definitive not-found was independently checked and establishes that the cited page is absent. With
 verification off, whether a source supports the claim attached to it is unverified entirely. (See
-D-in-artifact-citations/D-retrieval-opt-in/D-source-verification/D-existence-vs-body/D-observed-source-coverage in
-[decisions.md](docs/decisions.md) and the evidence section of [convergence.md](docs/convergence.md).)
+D-in-artifact-citations/D-retrieval-opt-in/D-source-verification/D-existence-vs-body/D-observed-source-coverage
+under [docs/decisions/](docs/decisions/) — one file per decision, named for its slug — and the
+evidence section of [convergence.md](docs/convergence.md).)
 
 **Writer disputes (optional, off by default).** Set `disputes.enabled: true` and a writer that
 believes a fix-task is factually wrong can dispute it with evidence instead of falsifying the
@@ -452,7 +453,8 @@ page no critic ever had access to (D-dispute-evidence-prior-draft). Anything els
 fresh-context arbiter model that is neither the writer nor the critic that raised the finding, and
 that defaults to the finding when uncertain. Upheld disputes suppress the re-raised finding for the
 rest of the run (auditable in `events.jsonl`); everything else leaves the finding standing. See
-D-writer-disputes/D-dispute-evidence-prior-draft in [decisions.md](docs/decisions.md).
+[D-writer-disputes](docs/decisions/D-writer-disputes.md) and
+[D-dispute-evidence-prior-draft](docs/decisions/D-dispute-evidence-prior-draft.md).
 
 A critic's quote fields (`claim_span`, `related_span`) are verified to be verbatim text from
 the artifact, so a critic cannot smuggle invented text to the next writer that way. Its

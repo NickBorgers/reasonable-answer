@@ -99,7 +99,7 @@ class SourceOutcome(str, Enum):
     shape and utterly different facts, and collapsing them is what forced
     :mod:`.prompts` to tell the evidence critic to disregard *every* failed fetch —
     discarding the one case where verification could actually catch a fabricated
-    citation (D-source-verification, docs/decisions.md).
+    citation (D-source-verification, docs/decisions/).
 
     `error` keeps the human-readable tail; this carries the machine decision. Two
     fields, two jobs.

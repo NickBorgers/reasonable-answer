@@ -274,7 +274,7 @@ search:
 #   delivery:
 #     enabled: false
 
-# Writer dispute channel (D-writer-disputes, docs/decisions.md). Lets a writer challenge a fix-task
+# Writer dispute channel (D-writer-disputes, docs/decisions/). Lets a writer challenge a fix-task
 # it believes is factually wrong instead of falsifying the report to satisfy it —
 # the failure mode of run-75eb136b9bfb, where critics with stale knowledge demanded
 # "corrections" of true recent dates. Adjudication is mechanical-first (the cited
