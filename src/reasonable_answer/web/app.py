@@ -235,27 +235,53 @@ def create_app(
         skip=lambda: set(worker.active()),
     )
 
-    @asynccontextmanager
-    async def lifespan(_: FastAPI):
-        # A bad or schema-incapable refine alias must fail here, at boot, not on some
-        # user's first pause after typing (D-question-refinement) -- so this runs before recovery, which is
-        # itself allowed to enqueue real work.
-        refiner.start()
-        # Recovery lives here rather than in RunWorker.__init__ so that constructing a
-        # worker stays inert — tests build one directly and should not have the previous
-        # process's leftovers enqueued underneath them.
-        worker.recover(registry)
-        sweeper.start()
-        yield
-        # uvicorn installs its own SIGTERM handler inside `uvicorn.run()`, which would
-        # overwrite anything we registered first, so the signal reaches us here instead:
-        # uvicorn's handler sets should_exit, which unwinds into lifespan shutdown.
-        shutdown.request_stop("lifespan")
+    def stop_background(reason: str) -> None:
+        """Unwind everything `create_app` and the startup half above set running.
+
+        Shared by the two ways this process stops, because the failed-boot one used not
+        to exist and that is the whole of D-failed-boot-exits: the worker's threads are
+        deliberately non-daemon, so leaving them running does not merely leak — it holds
+        the interpreter open past `sys.exit` and the container never dies.
+        """
+        shutdown.request_stop(reason)
         worker.shutdown()
         refiner.shutdown()
         # The sweeper shares the stop flag, so it is already unwinding; join it on the
         # same grace budget rather than leaving a non-daemon thread behind.
         sweeper.join(timeout=shutdown.grace_seconds() * 0.5)
+
+    @asynccontextmanager
+    async def lifespan(_: FastAPI):
+        try:
+            # A bad or schema-incapable refine alias must fail here, at boot, not on some
+            # user's first pause after typing (D-question-refinement) -- so this runs
+            # before recovery, which is itself allowed to enqueue real work.
+            refiner.start()
+            # Recovery lives here rather than in RunWorker.__init__ so that constructing a
+            # worker stays inert — tests build one directly and should not have the previous
+            # process's leftovers enqueued underneath them.
+            worker.recover(registry)
+            sweeper.start()
+        except BaseException:
+            # Startup failed, so `yield` never happens and Starlette never runs the
+            # shutdown half below — but `create_app` started the worker's threads before
+            # this hook was ever called, and they are non-daemon by design. Nobody else
+            # will stop them, and `threading._shutdown()` waits on them without a
+            # deadline, so an unhandled failure here is the difference between a
+            # container that restarts and one that sits up forever with nothing bound to
+            # its port (D-failed-boot-exits).
+            try:
+                stop_background("failed startup")
+            except Exception:
+                # Never mask the refusal that is the actual news; a teardown that cannot
+                # finish is what `shutdown.exit_process` is the backstop for.
+                log.exception("teardown after a failed startup did not complete")
+            raise
+        yield
+        # uvicorn installs its own SIGTERM handler inside `uvicorn.run()`, which would
+        # overwrite anything we registered first, so the signal reaches us here instead:
+        # uvicorn's handler sets should_exit, which unwinds into lifespan shutdown.
+        stop_background("lifespan")
 
     app = FastAPI(title="reasonable-answer", docs_url=None, redoc_url=None, lifespan=lifespan)
     app.state.config = config

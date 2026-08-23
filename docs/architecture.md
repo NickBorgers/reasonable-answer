@@ -219,6 +219,38 @@ Deadlines nest, all derived from `RA_SHUTDOWN_GRACE_SECONDS`: the platform's
 SIGTERM-to-SIGKILL budget contains uvicorn's connection drain, which contains the
 worker's wait for a node boundary.
 
+### Not surviving: a boot that fails closed must exit (D-failed-boot-exits)
+
+Startup is fail-closed — an unreachable proxy, a schema-incapable refine alias or a
+missing credential refuses the boot rather than serving degraded — and **failing closed
+is a decision to die, which is not complete until the process is gone.** Only an exit
+reaches the platform: `restart: unless-stopped` restarts a container that *exits*, and a
+hung one is indistinguishable from a healthy one at the process level. Two rules make
+that hold, at the two levels where it once did not:
+
+* **A lifespan whose startup half raises unwinds what it started.** `create_app()`
+  constructs the worker — and starts its non-daemon threads — before the hook runs, and
+  Starlette never runs the shutdown half of a startup that raised. So the startup half
+  tears down on failure (the same bounded `request_stop` → `worker.shutdown()` →
+  `refiner.shutdown()` → `sweeper.join()` the SIGTERM path uses) and then re-raises.
+  Without it, one idle worker thread holds the interpreter open through `sys.exit`,
+  because `threading._shutdown()` joins non-daemon threads with **no** deadline — the
+  2026-08-23 incident, where the container logged `Application startup failed. Exiting.`
+  and then stayed up for twenty-two minutes with nothing bound to its port.
+* **Leaving is bounded, like every join.** `shutdown.exit_process` ends `ra serve` on
+  every path. It is a no-op when nothing is stranded; a non-daemon thread still alive
+  once uvicorn has returned has already outlived its own budget, so it is named in a
+  WARNING and not waited for. Failing to exit must not depend on which component
+  refused.
+
+A fail-closed boot exits **3** (uvicorn's own `STARTUP_FAILURE`), any other fatal boot
+exits 1, and the graceful SIGTERM path is unchanged at 143. Nothing here retries or
+backs off: the supervisor already does that, and it can see the whole container. This is
+distinct from the in-run `deferred` path above (D-deferred-not-abandoned), which keeps a
+*serving* process up across the same outage; queued work is equally safe either way,
+because the boot teardown is the same `shutdown()` that leaves jobs on disk for
+`recover()`.
+
 ## Structural isolation of the orchestrator (RA-002, RB-004, RB-008)
 
 ```mermaid
