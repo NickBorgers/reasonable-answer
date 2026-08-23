@@ -705,6 +705,19 @@ def test_a_failed_boot_leaves_queued_work_owed_rather_than_consumed(config):
         assert Registry(config.runs_dir).summary(queued).question == "Owed after a failed boot?"
 
 
+def test_a_failed_boot_keeps_the_original_refusal_when_teardown_also_fails(config, caplog):
+    class RefusesAndFailsToStop(_RefusesToStart):
+        def shutdown(self) -> None:
+            raise RuntimeError("refiner teardown failed")
+
+    worker = RunWorker(config, max_concurrent=1, runner=lambda *a, **k: {})
+    caplog.set_level("ERROR", logger="reasonable_answer.web.app")
+
+    with _boot_and_fail(config, worker, RefusesAndFailsToStop()):
+        assert "teardown after a failed startup did not complete" in caplog.text
+        assert "refiner teardown failed" in caplog.text
+
+
 def test_an_ordinary_exit_is_left_alone():
     """`exit_process` is a backstop, not a policy: with nothing stranded it returns, and
     the caller leaves normally with atexit handlers and buffered output intact. A daemon
@@ -757,6 +770,59 @@ def test_a_thread_that_ignored_its_join_budget_does_not_get_to_veto_the_exit(tmp
 
 
 # --------------------------------------------------------------------- the CLI
+
+
+@pytest.mark.parametrize(
+    ("outcome", "expected_status"),
+    [("return", 0), ("system-exit-none", 0), ("system-exit-message", 1)],
+)
+def test_serve_maps_every_non_crash_uvicorn_outcome(config, monkeypatch, outcome, expected_status):
+    import uvicorn
+    from typer.testing import CliRunner
+
+    from reasonable_answer import cli, web
+
+    def run(*args, **kwargs):
+        if outcome == "system-exit-none":
+            raise SystemExit
+        if outcome == "system-exit-message":
+            raise SystemExit("uvicorn refused")
+
+    statuses = []
+    monkeypatch.setattr(cli.Config, "load", lambda _: config)
+    monkeypatch.setattr(web, "create_app", lambda *args, **kwargs: object())
+    monkeypatch.setattr(uvicorn, "run", run)
+    monkeypatch.setattr(shutdown, "exit_process", statuses.append)
+
+    result = CliRunner().invoke(cli.app, ["serve"])
+
+    assert result.exit_code == expected_status
+    assert statuses == [expected_status]
+
+
+def test_serve_logs_and_reraises_a_non_system_exit_crash(config, monkeypatch, caplog):
+    import uvicorn
+    from typer.testing import CliRunner
+
+    from reasonable_answer import cli, web
+
+    def crash(*args, **kwargs):
+        raise RuntimeError("uvicorn crashed")
+
+    statuses = []
+    monkeypatch.setattr(cli.Config, "load", lambda _: config)
+    monkeypatch.setattr(web, "create_app", lambda *args, **kwargs: object())
+    monkeypatch.setattr(uvicorn, "run", crash)
+    monkeypatch.setattr(shutdown, "exit_process", statuses.append)
+    caplog.set_level("ERROR", logger="reasonable_answer.cli")
+
+    result = CliRunner().invoke(cli.app, ["serve"])
+
+    assert result.exit_code == 1
+    assert isinstance(result.exception, RuntimeError)
+    assert "serve: fatal error during startup" in caplog.text
+    assert "uvicorn crashed" in caplog.text
+    assert statuses == [1]
 
 
 def test_a_failed_boot_exits_nonzero_instead_of_logging_that_it_did(config, tmp_path):

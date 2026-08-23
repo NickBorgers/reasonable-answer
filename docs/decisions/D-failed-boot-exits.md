@@ -12,9 +12,9 @@ typing `docker restart`.
 
 The issue ([#192][issue]) read the gap as "something below the lifespan boundary swallows the
 failure" and proposed `sys.exit(1)` after uvicorn returns. That diagnosis is wrong in a way worth
-recording, because the obvious fix does nothing: uvicorn already calls `sys.exit(3)` of its own
-accord when `server.started` is false. `SystemExit` was raised, and it was not caught. The process
-still did not die.
+recording, because the obvious fix does nothing: uvicorn 0.51.0 defines startup failure as status 3
+and [calls `sys.exit(STARTUP_FAILURE)` when `server.started` is false][uvicorn-startup]. `SystemExit`
+was raised, and it was not caught. The process still did not die.
 
 **It is the threads.** `create_app()` constructs `RunWorker` before the lifespan hook ever runs, and
 `RunWorker.__init__` starts its drain threads immediately, **non-daemon by deliberate choice** — a
@@ -22,11 +22,14 @@ daemon thread is truncated wherever it happens to be at interpreter exit, which 
 mid-node kill the checkpointer design exists to avoid. That choice is safe only under a premise the
 module states in a comment: `shutdown()` is always called, and it is bounded.
 
-A lifespan whose startup half raises breaks that premise. `yield` never happens, so Starlette never
-runs the shutdown half, so `worker.shutdown()` is never called — and `threading._shutdown()` joins
-non-daemon threads **with no deadline**. One idle `ra-worker-0` polling an empty queue every 500 ms
-is enough. `sys.exit(3)` unwinds the main thread and then blocks forever, which is exactly what the
-logs showed: the fatal line printed, and nothing after it.
+A lifespan whose startup half raises breaks that premise. In Starlette 1.3.1 the lifespan context is
+entered before startup is marked complete, and an exception from that entry goes directly to the
+startup-failed branch rather than the successful shutdown path ([source][starlette-lifespan]).
+`yield` never happens, so `worker.shutdown()` is never called — and CPython 3.14's exit-time thread
+shutdown [joins each non-daemon thread with timeout `-1`][cpython-thread-shutdown]. One idle
+`ra-worker-0` polling an empty queue every 500 ms is enough. `sys.exit(3)` unwinds the main thread
+and then blocks forever, which is exactly what the logs showed: the fatal line printed, and nothing
+after it.
 
 This is the failure mode `restart: unless-stopped` cannot help with. Docker restarts a container
 that *exits*; a hung one is indistinguishable from a working one at the process level, and the
@@ -104,3 +107,6 @@ refine service that cannot reach the proxy logs `Application startup failed` and
 well inside the timeout that used to expire.
 
 [issue]: https://github.com/NickBorgers/reasonable-answer/issues/192
+[uvicorn-startup]: https://github.com/Kludex/uvicorn/blob/e4d0b05eb8c6459b7ba27ad13a2c2f4f8d4ece50/uvicorn/main.py#L611-L629
+[starlette-lifespan]: https://github.com/Kludex/starlette/blob/8ebffd0678570ddd5d5bb11c6f3c3c7fd4682ab9/starlette/routing.py#L629-L654
+[cpython-thread-shutdown]: https://github.com/python/cpython/blob/323c59a5e348347be2ce2b7ea55fcb30bf68b2d3/Modules/_threadmodule.c#L2351-L2389

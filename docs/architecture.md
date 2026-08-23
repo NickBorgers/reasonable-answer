@@ -230,13 +230,16 @@ that hold, at the two levels where it once did not:
 
 * **A lifespan whose startup half raises unwinds what it started.** `create_app()`
   constructs the worker — and starts its non-daemon threads — before the hook runs, and
-  Starlette never runs the shutdown half of a startup that raised. So the startup half
-  tears down on failure (the same bounded `request_stop` → `worker.shutdown()` →
-  `refiner.shutdown()` → `sweeper.join()` the SIGTERM path uses) and then re-raises.
-  Without it, one idle worker thread holds the interpreter open through `sys.exit`,
-  because `threading._shutdown()` joins non-daemon threads with **no** deadline — the
-  2026-08-23 incident, where the container logged `Application startup failed. Exiting.`
-  and then stayed up for twenty-two minutes with nothing bound to its port.
+  Starlette 1.3.1 routes an exception while entering the lifespan context through its
+  startup-failed branch rather than its successful shutdown path
+  ([source][starlette-lifespan]). So the startup half tears down on failure (the same
+  bounded `request_stop` → `worker.shutdown()` → `refiner.shutdown()` → `sweeper.join()`
+  the SIGTERM path uses) and then re-raises. Without it, one idle worker thread holds the
+  interpreter open through uvicorn 0.51.0's [`sys.exit(STARTUP_FAILURE)` path][uvicorn-startup],
+  because CPython joins each non-daemon thread with timeout `-1`
+  ([source][cpython-thread-shutdown]) — the 2026-08-23 incident, where the container logged
+  `Application startup failed. Exiting.` and then stayed up for twenty-two minutes with
+  nothing bound to its port.
 * **Leaving is bounded, like every join.** `shutdown.exit_process` ends `ra serve` on
   every path. It is a no-op when nothing is stranded; a non-daemon thread still alive
   once uvicorn has returned has already outlived its own budget, so it is named in a
@@ -250,6 +253,10 @@ distinct from the in-run `deferred` path above (D-deferred-not-abandoned), which
 *serving* process up across the same outage; queued work is equally safe either way,
 because the boot teardown is the same `shutdown()` that leaves jobs on disk for
 `recover()`.
+
+[uvicorn-startup]: https://github.com/Kludex/uvicorn/blob/e4d0b05eb8c6459b7ba27ad13a2c2f4f8d4ece50/uvicorn/main.py#L611-L629
+[starlette-lifespan]: https://github.com/Kludex/starlette/blob/8ebffd0678570ddd5d5bb11c6f3c3c7fd4682ab9/starlette/routing.py#L629-L654
+[cpython-thread-shutdown]: https://github.com/python/cpython/blob/323c59a5e348347be2ce2b7ea55fcb30bf68b2d3/Modules/_threadmodule.c#L2351-L2389
 
 ## Structural isolation of the orchestrator (RA-002, RB-004, RB-008)
 
