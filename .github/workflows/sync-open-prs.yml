@@ -116,7 +116,7 @@ jobs:
                           --jq '.[]
                                 | select(.draft == false)
                                 | select(.head.repo.full_name == env.REPO)
-                                | "\(.number) \(.head.ref)"')"; then
+                                | "\(.number) \(.head.ref) \(.head.sha)"')"; then
             echo "::warning::could not list the open PRs targeting ${BASE_REF}; nothing was resynced"
             exit 0
           fi
@@ -143,22 +143,104 @@ jobs:
             echo "${answer}"
           }
 
+          # Whether a cycle has been recorded on the head but its verdict is not published
+          # yet, which is the second way this workflow can race a review (D-resync-defers-to-finalize).
+          # `record-cycle` writes `review/cycle` as soon as the panel has read the code;
+          # `review/verdict-anchor` lands minutes later, when finalize runs. A merge pushed
+          # inside that window hands the successor's `gather` a cycle-recorded SHA carrying no
+          # anchor, and an anchor that cannot be verified is not an anchor — the classifier
+          # fail-closes to a full five-role panel on a head whose only delta is this merge
+          # (D-inherit-reviewed-anchor). So the anchor is worth the same wait as a run in
+          # flight, for the same reason: the cost of waiting is one push to ${BASE_REF}, and
+          # the cost of not waiting is a panel.
+          #
+          # Bounded by the age of the cycle record rather than by the wait alone. A run
+          # cancelled between the two writes leaves that pair on the head permanently, and a
+          # PR that only this driver can unblock must not be walled off by a status that will
+          # never be completed. Past the grace the resync proceeds, which is the pre-decision
+          # baseline and strands nobody.
+          ANCHOR_GRACE=1800
+          finalizing() {
+            local payload cycle_at anchors recorded_at age
+            # The head SHA comes from the same listing as the branch name, so this should not
+            # fire — but a question asked about a non-SHA gets an API error, and an API error
+            # here means "wait", which would be a PR deferred on every push forever.
+            if [[ ! "$1" =~ ^[0-9a-f]{40}$ ]]; then
+              echo "::warning::'$1' is not a commit SHA; not waiting on a cycle it cannot be asked about" >&2
+              echo 0
+              return
+            fi
+            if ! payload="$(gh api "repos/${REPO}/commits/$1/statuses" 2>&1)"; then
+              echo "::warning::could not read the review statuses on $1: ${payload}" >&2
+              echo 1
+              return
+            fi
+            cycle_at="$(printf '%s' "${payload}" \
+              | jq -r '[.[] | select(.context == "review/cycle")] | sort_by(.created_at) | last | .created_at // ""')"
+            anchors="$(printf '%s' "${payload}" \
+              | jq -r '[.[] | select(.context == "review/verdict-anchor")] | length')"
+            if [ -z "${cycle_at}" ] || [ "${anchors}" -gt 0 ]; then
+              echo 0
+              return
+            fi
+            # A timestamp that will not parse cannot be aged, and an unbounded wait is the one
+            # outcome this grace exists to prevent — so it reads as abandoned rather than as
+            # fresh. Its own arithmetic would otherwise abort the whole step under `set -e`.
+            if ! recorded_at="$(date -d "${cycle_at}" +%s 2>/dev/null)"; then
+              echo "::warning::unreadable review/cycle timestamp '${cycle_at}' on $1; not waiting on it" >&2
+              echo 0
+              return
+            fi
+            age=$(( $(date +%s) - recorded_at ))
+            if [ "${age}" -ge "${ANCHOR_GRACE}" ]; then
+              echo "$1 has carried an unfinalized cycle for ${age}s; treating it as abandoned" >&2
+              echo 0
+              return
+            fi
+            echo 1
+          }
+
+          # The one reason a PR is left for a later push, or the empty string when it is ready
+          # to merge. Both branches are questions about the review pipeline, and both are
+          # re-asked after every sleep, because either can clear while the loop waits.
+          defer_reason() {
+            if [ "$(inflight "$1")" -gt 0 ]; then
+              echo "a review run is in flight"
+            elif [ "$(finalizing "$2")" -gt 0 ]; then
+              echo "a recorded cycle on $2 has no published verdict anchor yet"
+            fi
+          }
+
           # One deadline for the whole loop, not per PR: waiting is worth a few minutes in
           # total, never a multiple of however many PRs happen to be open.
           WAIT_DEADLINE=$(( $(date +%s) + 600 ))
           SYNCED=0
+          DEFERRED=0
 
           for entry in "${CANDIDATES[@]}"; do
             [ -n "${entry}" ] || continue
             NUM="${entry%% *}"
-            REF="${entry#* }"
+            REST="${entry#* }"
+            REF="${REST%% *}"
+            HEAD_SHA="${REST##* }"
 
-            while [ "$(date +%s)" -lt "${WAIT_DEADLINE}" ] && [ "$(inflight "${REF}")" -gt 0 ]; do
-              echo "#${NUM} (${REF}): a review run is in flight; waiting for it"
+            # Asked first, and re-asked after every sleep — never once more than that. Both
+            # halves of the question cost an API call, and a PR that is ready pays for one
+            # round of them.
+            while :; do
+              REASON="$(defer_reason "${REF}" "${HEAD_SHA}")"
+              [ -n "${REASON}" ] || break
+              [ "$(date +%s)" -lt "${WAIT_DEADLINE}" ] || break
+              echo "#${NUM} (${REF}): ${REASON}; waiting"
               sleep 30
             done
-            if [ "$(inflight "${REF}")" -gt 0 ]; then
-              echo "::warning::#${NUM} (${REF}) still has a review run in flight; leaving the sync to that run"
+            if [ -n "${REASON}" ]; then
+              # `deferred` joins the state names `sync_pr_with_base.sh` prints, and like all
+              # of them it is a PR left exactly as it already was. Not a warning: a PR this
+              # workflow declined to touch is the pre-decision baseline, and annotating every
+              # push to ${BASE_REF} for one would be noise about nothing having changed.
+              echo "#${NUM} (${REF}): deferred — ${REASON}; the next push to ${BASE_REF} retries"
+              DEFERRED=$((DEFERRED + 1))
               continue
             fi
 
@@ -178,4 +260,4 @@ jobs:
             fi
           done
 
-          echo "Resynced ${SYNCED} PR(s) that only the decisions merge driver could unblock."
+          echo "Resynced ${SYNCED} PR(s) that only the decisions merge driver could unblock; deferred ${DEFERRED}."
