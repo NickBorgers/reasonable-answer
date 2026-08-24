@@ -27,6 +27,7 @@ from .taxonomy import Lens
 
 app = typer.Typer(add_completion=False, help="reasonable-answer — isolation-pipeline report refiner")
 console = Console()
+log = logging.getLogger(__name__)
 
 #: Top-level modules that only the `web` extra installs. An ImportError naming one of
 #: these means "not installed"; anything else means the web layer itself is broken.
@@ -313,16 +314,51 @@ def serve(
             f"proxy that sets them"
         )
     console.print(f"serving on http://{host}:{port}  (runs dir: {config.runs_dir})")
-    # Deadlines nest: the platform's SIGTERM-to-SIGKILL budget contains uvicorn's
-    # connection drain, which contains the worker's wait for a node boundary. Deriving
-    # all three from one number keeps them in that order when the platform is retuned;
-    # three independent constants would eventually invert without anyone noticing.
-    uvicorn.run(
-        create_app(config, max_concurrent=concurrent),
-        host=host,
-        port=port,
-        timeout_graceful_shutdown=int(shutdown.grace_seconds() * 0.8),
-    )
+    # Pessimistic default, so that every way out of the `try` below that is not an
+    # orderly return reports a failure (D-failed-boot-exits). A boot that dies has to be
+    # distinguishable from one that served and was asked to stop: the container's
+    # `restart: unless-stopped` is the only thing that retries a transient dependency
+    # outage, and it needs the process to actually leave.
+    status = 1
+    try:
+        # Deadlines nest: the platform's SIGTERM-to-SIGKILL budget contains uvicorn's
+        # connection drain, which contains the worker's wait for a node boundary. Deriving
+        # all three from one number keeps them in that order when the platform is retuned;
+        # three independent constants would eventually invert without anyone noticing.
+        uvicorn.run(
+            create_app(config, max_concurrent=concurrent),
+            host=host,
+            port=port,
+            timeout_graceful_shutdown=int(shutdown.grace_seconds() * 0.8),
+        )
+    except SystemExit as exc:
+        # uvicorn calls `sys.exit(3)` itself when the lifespan startup hook raised, which
+        # is exactly how a fail-closed boot is meant to end. Carry its status through
+        # rather than inventing one: `None` is Python's own "exit 0", and a non-int code
+        # is a message rather than a status, which this path has to turn into a number.
+        if exc.code is None:
+            status = 0
+        elif isinstance(exc.code, int):
+            status = exc.code
+        else:
+            status = 1
+    except Exception:
+        # Logged here rather than left to typer's handler, because `exit_process` below
+        # may not return to it — and a boot that died with no explanation in the
+        # container log is the thing this whole change exists to stop. A Ctrl-C is not an
+        # `Exception`, so it stays out of the log and still leaves through the `finally`.
+        log.exception("serve: fatal error during startup")
+        raise
+    else:
+        status = 0
+    finally:
+        # After uvicorn returns, every bounded join this process knows how to do has been
+        # done. Anything still alive would be waited on with no deadline at interpreter
+        # exit, which is how a fail-closed boot became a container that logged "Exiting."
+        # and then stayed up (D-failed-boot-exits).
+        shutdown.exit_process(status)
+    if status:
+        raise typer.Exit(code=status)
 
 
 @app.command()

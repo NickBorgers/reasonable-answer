@@ -2,13 +2,17 @@
 
 The process is continuously deployed: SIGTERM, a grace window, then SIGKILL, none of
 it under its own control. These tests cover the two halves of surviving that — stopping
-somewhere resumable, and picking the work back up on the next boot.
+somewhere resumable, and picking the work back up on the next boot — and the case where
+surviving is the wrong answer: a boot that fails closed has to *leave*, because the
+platform's restart policy is what retries the outage (D-failed-boot-exits).
 """
 
 from __future__ import annotations
 
+import sys
 import threading
 import time
+from contextlib import contextmanager
 
 import pytest
 from conftest import WEB_IDENTITY, web_client
@@ -620,7 +624,246 @@ def test_a_real_signal_reaches_the_stop_flag():
         signal.signal(signal.SIGTERM, original)
 
 
+# ------------------------------------------------------- not surviving a boot
+#
+# The other direction (D-failed-boot-exits). Everything above is about a process that
+# has to come back; these are about one that has to *leave*, so that the platform's
+# restart policy is what retries a transient dependency outage. A boot that logs
+# "Exiting." and then does not exit is worse than a crash: it is a container docker
+# reports as `Up` with nothing listening on its port.
+
+
+class _RefusesToStart:
+    """A refine service that cannot reach the proxy, as on 2026-08-23.
+
+    `RefinementService.start()` is the first thing the lifespan calls and the only
+    fail-closed startup check that reaches the network, so this is the real shape of
+    the incident rather than a stand-in for it.
+    """
+
+    def __init__(self) -> None:
+        self.stopped = False
+
+    def start(self) -> None:
+        raise ConfigError("fail closed: cannot reach the LiteLLM proxy: HTTP Error 502: Bad Gateway")
+
+    def shutdown(self) -> None:
+        self.stopped = True
+
+
+@contextmanager
+def _boot_and_fail(config, worker, refiner):
+    """Drive the lifespan to its refusal, hand back control to assert on the wreckage,
+    and only then guarantee the threads are gone.
+
+    The `finally` is not belt-and-braces, and its placement after the `yield` is the
+    whole point: without the fix these threads *are* stranded, and a stranded non-daemon
+    thread hangs pytest's own interpreter exit. A regression has to fail the assertion
+    loudly rather than wedge the suite — but the net must not close before the
+    assertion, or it would tidy up the very evidence.
+    """
+    from fastapi.testclient import TestClient
+
+    try:
+        with (
+            pytest.raises(ConfigError),
+            TestClient(create_app(config, worker=worker, refiner=refiner)),
+        ):
+            pass  # pragma: no cover - startup raises before the body runs
+        yield
+    finally:
+        worker.shutdown(timeout=5.0)
+
+
+def test_a_failed_boot_stops_the_threads_that_would_otherwise_hold_the_process_open(config):
+    """Starlette never runs the shutdown half of a lifespan whose startup raised, but
+    `create_app` has already started the worker's threads by then — and they are
+    non-daemon on purpose, so nobody stopping them means CPython waits on them at
+    interpreter exit with no deadline. That is the whole bug: `sys.exit` never lands."""
+    refiner = _RefusesToStart()
+    worker = RunWorker(config, max_concurrent=2, runner=lambda *a, **k: {})
+    # The premise. If these were daemons the strand would be harmless and the fix
+    # pointless — see `RunWorker.__init__` for why they are not.
+    assert worker._threads and not any(t.daemon for t in worker._threads)
+
+    with _boot_and_fail(config, worker, refiner):
+        assert not [t for t in worker._threads if t.is_alive()]
+        assert not [
+            t for t in threading.enumerate() if t.name.startswith(("ra-worker", "ra-retention"))
+        ]
+        assert refiner.stopped
+
+
+def test_a_failed_boot_leaves_queued_work_owed_rather_than_consumed(config):
+    """Dying at boot must cost nothing. The teardown is the same bounded `shutdown()`
+    the SIGTERM path uses, which leaves queued jobs on disk for the next process —
+    so the restart that this exit finally allows picks the work back up."""
+    worker = RunWorker(config, max_concurrent=1, runner=lambda *a, **k: {})
+    queued = worker.submit("Owed after a failed boot?", identity=WEB_IDENTITY)
+
+    with _boot_and_fail(config, worker, _RefusesToStart()):
+        assert Registry(config.runs_dir).summary(queued).question == "Owed after a failed boot?"
+
+
+def test_a_failed_boot_keeps_the_original_refusal_when_teardown_also_fails(config, caplog):
+    class RefusesAndFailsToStop(_RefusesToStart):
+        def shutdown(self) -> None:
+            raise RuntimeError("refiner teardown failed")
+
+    worker = RunWorker(config, max_concurrent=1, runner=lambda *a, **k: {})
+    caplog.set_level("ERROR", logger="reasonable_answer.web.app")
+
+    with _boot_and_fail(config, worker, RefusesAndFailsToStop()):
+        assert "teardown after a failed startup did not complete" in caplog.text
+        assert "refiner teardown failed" in caplog.text
+
+
+def test_an_ordinary_exit_is_left_alone():
+    """`exit_process` is a backstop, not a policy: with nothing stranded it returns, and
+    the caller leaves normally with atexit handlers and buffered output intact. A daemon
+    thread does not count as stranded — the interpreter drops it rather than waiting.
+
+    The first assertion is also a guard. `exit_process` really does end this process when
+    something lingers, so a leaked thread from an earlier test has to fail here loudly
+    rather than `os._exit(0)` out of the middle of the suite and report a green run.
+    """
+    idle = threading.Event()
+    daemon = threading.Thread(target=idle.wait, name="ra-daemon-probe", daemon=True)
+    daemon.start()
+    try:
+        assert shutdown.lingering_threads() == []
+        assert shutdown.exit_process(0) is None  # it returned, so nothing was killed
+    finally:
+        idle.set()
+        daemon.join(timeout=5)
+
+
+def test_a_thread_that_ignored_its_join_budget_does_not_get_to_veto_the_exit(tmp_path):
+    """The behaviour only a real process can show. A non-daemon thread that outlives
+    every bounded join is exactly what held the incident's container open; waiting on
+    it buys nothing the join did not already try for, so the exit stops waiting.
+
+    Offline: a subprocess of this interpreter, no network and no proxy.
+    """
+    import subprocess
+
+    program = tmp_path / "strand.py"
+    program.write_text(
+        "import logging, threading, time\n"
+        "from reasonable_answer import shutdown\n"
+        # Configured rather than left to logging's last-resort handler, so the assertion
+        # below is about our WARNING and not about a stdlib fallback.
+        "logging.basicConfig(level=logging.WARNING)\n"
+        "stuck = threading.Thread(target=lambda: time.sleep(600), name='ra-stuck', daemon=False)\n"
+        "stuck.start()\n"
+        "shutdown.exit_process(3)\n"
+        "raise AssertionError('exit_process returned with a thread still stranded')\n"
+    )
+    started = time.monotonic()
+    result = subprocess.run(
+        [sys.executable, str(program)], capture_output=True, text=True, timeout=30
+    )
+
+    assert result.returncode == 3  # uvicorn's startup-failure status, carried through
+    assert time.monotonic() - started < 30  # not the stranded thread's 600s
+    assert "ra-stuck" in result.stderr  # and it said which thread it stopped waiting for
+
+
 # --------------------------------------------------------------------- the CLI
+
+
+@pytest.mark.parametrize(
+    ("outcome", "expected_status"),
+    [("return", 0), ("system-exit-none", 0), ("system-exit-message", 1)],
+)
+def test_serve_maps_every_non_crash_uvicorn_outcome(config, monkeypatch, outcome, expected_status):
+    import uvicorn
+    from typer.testing import CliRunner
+
+    from reasonable_answer import cli, web
+
+    def run(*args, **kwargs):
+        if outcome == "system-exit-none":
+            raise SystemExit
+        if outcome == "system-exit-message":
+            raise SystemExit("uvicorn refused")
+
+    statuses = []
+    monkeypatch.setattr(cli.Config, "load", lambda _: config)
+    monkeypatch.setattr(web, "create_app", lambda *args, **kwargs: object())
+    monkeypatch.setattr(uvicorn, "run", run)
+    monkeypatch.setattr(shutdown, "exit_process", statuses.append)
+
+    result = CliRunner().invoke(cli.app, ["serve"])
+
+    assert result.exit_code == expected_status
+    assert statuses == [expected_status]
+
+
+def test_serve_logs_and_reraises_a_non_system_exit_crash(config, monkeypatch, caplog):
+    import uvicorn
+    from typer.testing import CliRunner
+
+    from reasonable_answer import cli, web
+
+    def crash(*args, **kwargs):
+        raise RuntimeError("uvicorn crashed")
+
+    statuses = []
+    monkeypatch.setattr(cli.Config, "load", lambda _: config)
+    monkeypatch.setattr(web, "create_app", lambda *args, **kwargs: object())
+    monkeypatch.setattr(uvicorn, "run", crash)
+    monkeypatch.setattr(shutdown, "exit_process", statuses.append)
+    caplog.set_level("ERROR", logger="reasonable_answer.cli")
+
+    result = CliRunner().invoke(cli.app, ["serve"])
+
+    assert result.exit_code == 1
+    assert isinstance(result.exception, RuntimeError)
+    assert "serve: fatal error during startup" in caplog.text
+    assert "uvicorn crashed" in caplog.text
+    assert statuses == [1]
+
+
+def test_a_failed_boot_exits_nonzero_instead_of_logging_that_it_did(config, tmp_path):
+    """The regression, end to end at the process boundary — the only place the bug was
+    ever visible. `ra serve` fails closed, uvicorn logs `Application startup failed.
+    Exiting.`, and the process must then actually be gone, because `restart:
+    unless-stopped` cannot restart a container that never exits.
+
+    Offline: `RefinementService.start` is replaced before the app is built, so nothing
+    here opens a socket to a proxy.
+    """
+    import subprocess
+
+    import yaml
+
+    roster = tmp_path / "roster.yaml"
+    roster.write_text(
+        yaml.safe_dump({"roster": config.roster.model_dump(), "runs_dir": str(config.runs_dir)})
+    )
+    program = tmp_path / "boot.py"
+    program.write_text(
+        "import sys\n"
+        "from reasonable_answer.config import ConfigError\n"
+        "from reasonable_answer.web.refine import RefinementService\n"
+        "def refuses(self):\n"
+        "    raise ConfigError('fail closed: cannot reach the LiteLLM proxy: "
+        "HTTP Error 502: Bad Gateway')\n"
+        "RefinementService.start = refuses\n"
+        "from reasonable_answer.cli import app\n"
+        f"app(['serve', '--port', '0', '-c', {str(roster)!r}])\n"
+    )
+    # A generous ceiling on a boot that fails in its first startup step, not a budget:
+    # post-fix the process is gone in a couple of seconds. Before the fix it never
+    # returned at all, and this is what turns that into a failed test rather than a
+    # wedged suite — so it is deliberately short enough to be cheap when it fires.
+    result = subprocess.run(
+        [sys.executable, str(program)], capture_output=True, text=True, timeout=30
+    )
+
+    assert result.returncode != 0
+    assert "Application startup failed" in result.stderr
 
 
 def test_a_paused_cli_run_exits_130_and_says_how_to_resume(config, monkeypatch, tmp_path):
