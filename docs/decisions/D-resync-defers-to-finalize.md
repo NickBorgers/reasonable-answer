@@ -15,9 +15,9 @@ moment.
 
 **The decision.** A PR is `deferred` when either question about the review pipeline is still
 open: a run is in flight on its branch, or its head carries a `review/cycle` with no
-`review/verdict-anchor` published yet. `deferred` joins the state names
-`scripts/sync_pr_with_base.sh` prints, and like all of them it leaves the PR exactly as it
-already was; the next push to the base branch retries it. Both waits share the one existing
+`review/verdict-anchor` published yet. `deferred` is reported by `sync-open-prs.yml` before it
+calls `scripts/sync_pr_with_base.sh`, distinct from the states the script prints; it leaves the
+PR exactly as it already was, and the next push to the base branch retries it. Both waits share the one existing
 10-minute deadline for the whole loop, so waiting still costs minutes in total rather than a
 multiple of however many PRs are open.
 

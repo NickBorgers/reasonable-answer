@@ -551,8 +551,8 @@ and `review/verdict-anchor` lands minutes later when finalize runs, so a merge p
 that window hands the successor's `gather` a cycle-recorded SHA carrying no anchor — and an
 anchor that cannot be verified is not an anchor, so the classifier fail-closes to a full
 five-role panel on a head whose only delta is this merge. A PR in either state is `deferred`,
-which joins the state names `sync_pr_with_base.sh` prints, and the next push to `main` retries
-it. Both waits share the one 10-minute deadline. The anchor wait is additionally bounded by the
+a state reported by `sync-open-prs.yml` before it calls `sync_pr_with_base.sh`; the next push to
+`main` retries it. Both waits share the one 10-minute deadline. The anchor wait is additionally bounded by the
 *age* of the cycle record (30 minutes): a run cancelled between the two writes leaves that pair
 on the head permanently, and a PR only this driver can unblock must not be walled off by a
 status nothing will ever complete.

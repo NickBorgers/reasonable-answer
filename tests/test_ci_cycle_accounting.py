@@ -181,6 +181,12 @@ def test_an_inherited_verdict_holds_the_counter(bench: Bench, script: str) -> No
     assert bench.run(script, prior=1)["cycle"] == "2"
 
 
+def test_an_inherited_verdict_never_publishes_cycle_zero(bench: Bench, script: str) -> None:
+    inherited = bench.run(script, prior=0, inherit="true")
+    assert inherited["cycle"] == "1"
+    assert inherited["cap_exhausted"] == "false"
+
+
 def test_an_inherited_verdict_is_never_capped(bench: Bench, script: str) -> None:
     """The cap bounds review → fix → push → review, and an inherited run runs no stage of it.
 
