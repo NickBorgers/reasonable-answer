@@ -508,13 +508,7 @@ def render_run_progress(
 
 def _round_card(r: RoundSnapshot, lens_names: list[str]) -> str:
     lenses = "\n".join(_lens_row(r, name) for name in lens_names)
-    counts = (
-        f'<span class="count blocking">{r.blocking} blocking</span>'
-        f'<span class="count major">{r.major} major</span>'
-        f'<span class="count minor">{r.minor} minor</span>'
-        if (r.blocking or r.major or r.minor)
-        else '<span class="count clean">no material issues</span>'
-    )
+    counts = _counts_summary(r)
     decision = (
         f'<div class="decision"><span class="rule">rule {r.rule}</span>'
         f'<span class="action">{esc(r.action)}</span>'
@@ -533,6 +527,24 @@ def _round_card(r: RoundSnapshot, lens_names: list[str]) -> str:
   <div class="lenses">{lenses}</div>
   <div class="round-foot">{counts}{decision}</div>
 </li>"""
+
+
+def _counts_summary(r: RoundSnapshot) -> str:
+    """The round's issue tally — three distinct states, not two.
+
+    A round with zero counts can mean either "reviewed and clean" or "not reviewed yet" (the
+    counts stay at their dataclass default of 0 until triage runs). Those must read differently:
+    only `r.triaged` licenses "no material issues".
+    """
+    if r.blocking or r.major or r.minor:
+        return (
+            f'<span class="count blocking">{r.blocking} blocking</span>'
+            f'<span class="count major">{r.major} major</span>'
+            f'<span class="count minor">{r.minor} minor</span>'
+        )
+    if r.triaged:
+        return '<span class="count clean">no material issues</span>'
+    return '<span class="count pending">not yet evaluated</span>'
 
 
 def _lens_row(r: RoundSnapshot, lens: str) -> str:
@@ -1385,6 +1397,7 @@ table.runs { width: 100%; border-collapse: collapse; }
 .count.blocking { color: var(--bad); font-weight: 600; }
 .count.major { color: var(--warn); font-weight: 600; }
 .count.clean { color: var(--good); font-weight: 600; }
+.count.pending { opacity: .55; }
 .decision { margin-left: auto; display: flex; gap: .5rem; align-items: baseline; font-size: .8rem; }
 .rule {
   font-family: ui-monospace, monospace; background: var(--chip); padding: .1rem .4rem;
