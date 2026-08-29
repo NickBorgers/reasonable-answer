@@ -254,9 +254,19 @@ jobs:
           if [[ ! "$LAST_REVIEWED_SHA" =~ ^[0-9a-f]{40}$ ]]; then
             review_normally "${PRIOR_CYCLE_SHA} carries no valid review/verdict-anchor, so what it recorded a cycle for cannot be established"
           fi
+          #
+          # `error` is the state review-finalize.yml writes for an outcome that is not a
+          # judgement about the change — the cycle-cap cost backstop, and a `pipeline_error`
+          # the judge fail-closed because it could not trust its own inputs
+          # (D-nonjudgement-outcomes). Neither is a verdict anybody issued, so neither is
+          # inheritable: re-stamping one walls a PR off from the gate on the strength of a
+          # flake, which is what happened to PR #182 and PR #186. Reviewing instead converges
+          # — the panel that runs produces a real verdict, or the cap answers for a PR that
+          # genuinely spent its budget.
           case "$verdict_state" in
             success) INHERITED_VERDICT=GO ;;
             failure) INHERITED_VERDICT=NO-GO ;;
+            error) review_normally "${PRIOR_CYCLE_SHA}'s review/verdict-anchor records a non-judgement outcome, which is not a verdict to inherit" ;;
             *) review_normally "${PRIOR_CYCLE_SHA} carries no inheritable verdict in review/verdict-anchor" ;;
           esac
 
@@ -349,6 +359,7 @@ jobs:
         env:
           SHA: ${{ inputs.reviewed_sha }}
           PRIOR: ${{ steps.prior.outputs.cycle }}
+          INHERIT: ${{ steps.inherit.outputs.inherit }}
         run: |
           set -euo pipefail
 
@@ -376,8 +387,37 @@ jobs:
             cycle=1
           fi
 
+          # An inherited verdict spends no cycle, so it may not be billed one
+          # (D-nonjudgement-outcomes). This run reads nothing, fixes nothing and publishes the
+          # verdict the anchor it inherited from already carried — the whole point of the
+          # short-circuit is that routinely resyncing a long-lived branch must not walk it
+          # into the cap. Advancing the counter here did exactly that: two resyncs after a
+          # cycle-1 panel reached "cycle 3", and because the cap is evaluated on the same
+          # output, `cap-exhausted` and `inherit` then both finalized on one SHA and raced —
+          # observed on PR #182 (6af6acc) and PR #183 (4e9c6b6), where the cost-backstop
+          # NO-GO landed last and buried an inherited GO under a verdict the cap comment
+          # itself calls "not a judgement about the change".
+          #
+          # Holding the count does not loosen what the cap bounds. MAX_CYCLES bounds the
+          # review → fix → push → review loop, and no stage of it runs on this path: the
+          # panel, `record-cycle` and `fix` are all gated on `inherit != 'true'`, so an
+          # inherited run cannot advance the loop it would be billed for. Nor can it repeat
+          # without outside help — every inherited run needs a fresh push whose only content
+          # is a merge of a base branch somebody else moved.
+          if [ "$INHERIT" = "true" ]; then
+            # `prior` is never 0 on this path — inheriting requires a recorded cycle to
+            # inherit from — but a counter that reads 0 would be a worse thing to publish
+            # than one that reads 1 if that ever stopped being true.
+            if [ "$prior" -gt 0 ]; then
+              cycle="$prior"
+            else
+              cycle=1
+            fi
+            echo "gather: inheriting a prior verdict; holding the cycle counter at ${cycle}"
+          fi
+
           cap_exhausted=false
-          if [ "$cycle" -gt "${MAX_CYCLES}" ]; then
+          if [ "$cycle" -gt "${MAX_CYCLES}" ] && [ "$INHERIT" != "true" ]; then
             cap_exhausted=true
             echo "gather: cycle ${cycle} exceeds cap ${MAX_CYCLES}"
           fi
@@ -390,8 +430,14 @@ jobs:
           # cycle it creates is capped. That lands unexamined agent-written code on the
           # branch and reports it as progress, which is worse than returning the blockers
           # to a human intact.
+          #
+          # An inherited run is excluded outright, and not only because `fix` is already
+          # gated on `inherit != 'true'`: with the counter held at the inherited cycle
+          # (above), the arithmetic alone would say a fix is affordable on a run that has no
+          # findings to fix and no panel behind it.
           fix_allowed=false
-          if [ "$cap_exhausted" = "false" ] && [ "$cycle" -lt "${MAX_CYCLES}" ]; then
+          if [ "$cap_exhausted" = "false" ] && [ "$cycle" -lt "${MAX_CYCLES}" ] \
+             && [ "$INHERIT" != "true" ]; then
             fix_allowed=true
           fi
 
@@ -699,14 +745,32 @@ jobs:
       cycle: ${{ needs.gather.outputs.cycle }}
       verdict: ${{ needs.judge.outputs.verdict }}
       category: ${{ needs.judge.outputs.category }}
+      # Whether a cycle was actually recorded for this run, which is what licenses finalize
+      # to stamp `review/cycle` on the post-fix SHA. `record-cycle` is skipped exactly when
+      # no reviewer's guard cleared, and "a run that reviewed nothing does not consume a
+      # cycle" is the property that deferred that write in the first place — finalize
+      # stamping the counter anyway billed the very runs the deferral exempts, including the
+      # sync-only path this file's own comment says costs nothing (D-nonjudgement-outcomes).
+      cycle_recorded: ${{ needs.record-cycle.result == 'success' }}
       skip_verdict_artifact: false
     secrets:
       WORKFLOW_PAT: ${{ secrets.WORKFLOW_PAT }}
 
+  # Mutually exclusive with `inherit` below, and stated here rather than left to `gather`'s
+  # arithmetic. Both jobs finalize, and finalize publishes the verdict, the anchor and the
+  # merge gate — so two of them on one SHA is a race whose winner is whichever API write
+  # lands last. PR #183's resync SHA 4e9c6b6 carries both outcomes for that reason: an
+  # inherited GO at 13:52:53 and a cycle-cap NO-GO three seconds later, on identical content
+  # (D-nonjudgement-outcomes). `gather` no longer reports `cap_exhausted` on an inherited
+  # run, which closes it upstream; this condition is what keeps the two paths disjoint even
+  # if that ever regresses.
   cap-exhausted:
     name: Finalize (cycle cap)
     needs: gather
-    if: always() && needs.gather.result == 'success' && needs.gather.outputs.cap_exhausted == 'true'
+    if: |
+      always() && needs.gather.result == 'success' &&
+      needs.gather.outputs.cap_exhausted == 'true' &&
+      needs.gather.outputs.inherit != 'true'
     uses: ./.github/workflows/review-finalize.yml
     with:
       pr_number: ${{ inputs.pr_number }}
@@ -717,6 +781,10 @@ jobs:
       cycle: ${{ needs.gather.outputs.cycle }}
       verdict: 'NO-GO'
       category: cycle_capped
+      # The cap is a real terminal state keyed to the counter, so the SHA keeps saying which
+      # count it died on. What the cap does not get to do is pass itself off as a verdict:
+      # `cycle_capped` anchors as a non-judgement, and nothing inherits it.
+      cycle_recorded: true
       # There is no verdict artifact on this path. An unconditional download would fail
       # the job before it applies labels or writes the merge-gate status, leaving the PR
       # with no verdict at all — worse than the NO-GO it was trying to report.
@@ -738,6 +806,11 @@ jobs:
       cycle: ${{ needs.gather.outputs.cycle }}
       verdict: ${{ needs.gather.outputs.inherited_verdict }}
       category: inherited
+      # The cycle here is the one the inherited verdict belongs to, held rather than advanced
+      # (see `Compute cycle`), so stamping it keeps the new head self-describing without
+      # billing a cycle nothing spent: the next resync finds this SHA one hop away with a
+      # verdict anchor naming it, instead of walking the chain for the last recorded cycle.
+      cycle_recorded: true
       skip_verdict_artifact: true
     secrets:
       WORKFLOW_PAT: ${{ secrets.WORKFLOW_PAT }}

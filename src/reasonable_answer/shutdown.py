@@ -17,13 +17,19 @@ Two knobs come from the platform, because the platform owns them:
   instead of silently inverting a hardcoded constant.
 * ``RA_RESUME_ON_BOOT`` — set to 0 to stop the boot-time auto-resume, for an operator
   debugging a crash loop.
+
+The other direction — *not* surviving — is here too. Every join in this package is
+bounded, and ``exit_process`` is what makes leaving bounded as well, so that a process
+which has decided to die actually does (D-failed-boot-exits).
 """
 
 from __future__ import annotations
 
+import contextlib
 import logging
 import os
 import signal
+import sys
 import threading
 
 log = logging.getLogger(__name__)
@@ -75,6 +81,57 @@ def grace_seconds() -> float:
 
 def resume_on_boot() -> bool:
     return os.environ.get("RA_RESUME_ON_BOOT", "1").strip().lower() not in ("0", "false", "no")
+
+
+def lingering_threads() -> list[str]:
+    """Non-daemon threads, other than this one, still alive right now."""
+    current = threading.current_thread()
+    return sorted(
+        t.name
+        for t in threading.enumerate()
+        if t is not current and t.is_alive() and not t.daemon
+    )
+
+
+def exit_process(code: int) -> None:
+    """Leave the process with ``code``, whatever is still running (D-failed-boot-exits).
+
+    The worker and sweeper threads are non-daemon on purpose — a daemon thread is
+    truncated wherever it happens to be at interpreter exit, which is the mid-node kill
+    the whole design avoids. The price is that CPython's exit joins them **without a
+    deadline**, so any one of them that outlives its own bounded join silently converts
+    ``sys.exit`` into hanging forever.
+
+    That is not hypothetical. A fail-closed boot — the proxy unreachable, so
+    ``RefinementService.start`` raises — logged uvicorn's ``Application startup failed.
+    Exiting.`` and then sat up for twenty-two minutes with nothing bound to port 8080,
+    healthcheck failing on every interval and ``RestartCount=0``, because one idle
+    ``ra-worker-0`` was enough to hold the interpreter open. `restart: unless-stopped`
+    cannot help a container that never exits, so recovery needed a human.
+
+    Called at the end of ``ra serve`` on every path, and a no-op on the ordinary one:
+    by then the lifespan has already joined everything on its grace budget, so there is
+    nothing left and the caller exits normally with atexit handlers and buffers intact.
+    The hard exit is reserved for the case where a thread ignored that budget, where
+    waiting longer buys nothing that the bounded join did not already try for.
+    """
+    lingering = lingering_threads()
+    if not lingering:
+        return
+    log.warning(
+        "exiting with status %d while %s still running; not waiting for %s",
+        code,
+        ", ".join(lingering),
+        "them" if len(lingering) > 1 else "it",
+    )
+    # `os._exit` runs no atexit handler and flushes nothing, so flush by hand first —
+    # the warning above is the only record of why this process died abruptly.
+    logging.shutdown()
+    for stream in (sys.stdout, sys.stderr):
+        # A closed or broken stream must not be the thing that stops the exit.
+        with contextlib.suppress(Exception):
+            stream.flush()
+    os._exit(code)
 
 
 def install_handlers() -> None:
