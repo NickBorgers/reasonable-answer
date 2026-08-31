@@ -759,6 +759,54 @@ def test_a_failed_lens_is_visible_in_the_timeline(config, identities):
     assert any(e and e.failed for e in evidence)
 
 
+def test_every_round_in_a_completed_run_is_triaged(config, identities, fake_client):
+    """Every round in a run that reached a terminal state went through triage — the pending
+    state below is only reachable while a run is still in flight."""
+    run_graph(config, question="Timeline?", seed=REPORT, run_id="run-triaged", client=fake_client)
+    timeline = Registry(config.runs_dir).timeline("run-triaged")
+
+    assert timeline
+    assert all(r.triaged for r in timeline)
+
+
+# ------------------------------------------------------------------ round card
+
+
+def test_a_round_awaiting_triage_reads_as_not_yet_evaluated():
+    """Before triage runs, blocking/major/minor sit at their 0 default — the same value a
+    genuinely clean round has. Untriaged must not be misread as clean (the bug this guards)."""
+    from reasonable_answer.web.registry import RoundSnapshot
+    from reasonable_answer.web.render import _round_card
+
+    round_card = _round_card(RoundSnapshot(round=1, writer="writer-a"), lens_names=[])
+
+    assert "not yet evaluated" in round_card
+    assert "no material issues" not in round_card
+
+
+def test_a_triaged_clean_round_reads_as_no_material_issues():
+    from reasonable_answer.web.registry import RoundSnapshot
+    from reasonable_answer.web.render import _round_card
+
+    round_card = _round_card(RoundSnapshot(round=1, writer="writer-a", triaged=True), lens_names=[])
+
+    assert "no material issues" in round_card
+    assert "not yet evaluated" not in round_card
+
+
+def test_a_triaged_round_with_findings_shows_counts_not_a_verdict():
+    from reasonable_answer.web.registry import RoundSnapshot
+    from reasonable_answer.web.render import _round_card
+
+    round_card = _round_card(
+        RoundSnapshot(round=1, writer="writer-a", triaged=True, blocking=2), lens_names=[]
+    )
+
+    assert "2 blocking" in round_card
+    assert "no material issues" not in round_card
+    assert "not yet evaluated" not in round_card
+
+
 # -------------------------------------------------------------------- worker
 
 

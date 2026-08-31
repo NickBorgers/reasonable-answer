@@ -69,6 +69,7 @@ class RoundSnapshot:
     major: int = 0
     minor: int = 0
     cleared: dict[str, int] = field(default_factory=dict)
+    triaged: bool = False
     rule: int | None = None
     action: str | None = None
     note: str = ""
@@ -377,6 +378,7 @@ class Registry:
             elif kind == "triage":
                 snapshot = rounds.setdefault(current, RoundSnapshot(round=current))
                 snapshot.cleared = event.get("cleared", {}) or {}
+                snapshot.triaged = True
             elif kind == "control":
                 snapshot = rounds.setdefault(current, RoundSnapshot(round=current))
                 snapshot.rule = event.get("rule")
