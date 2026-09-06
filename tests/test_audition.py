@@ -16,6 +16,7 @@ import pytest
 import yaml
 from fakes import structured_with_repair
 
+import reasonable_answer
 from reasonable_answer import audition, prompts
 from reasonable_answer.config import (
     AuditionConfig,
@@ -29,7 +30,11 @@ from reasonable_answer.schemas import CritiqueOutput, LensResult, RawIssue, Stru
 from reasonable_answer.taxonomy import LENS_CATEGORIES, Category, Lens, Severity
 from reasonable_answer.triage import clean_records
 
-CORPUS = Path(__file__).parent / "fixtures" / "audition"
+#: The shipped corpus, read through the module constant rather than a path of this
+#: test's own. The corpus is a package file (D-packaged-audition-corpus), so a test
+#: that rebuilt the path from `tests/` would keep passing in a checkout while the
+#: installed package it is meant to cover had no corpus at all.
+CORPUS = audition.DEFAULT_FIXTURE_DIR
 
 
 def issue(
@@ -64,6 +69,56 @@ def result(lens: Lens, *issues: RawIssue, failed: bool = False) -> LensResult:
 
 
 # ------------------------------------------------------------------ fixtures
+
+
+def test_the_corpus_ships_inside_the_package_not_beside_it():
+    """D-packaged-audition-corpus. `ra audition` has to work off an install.
+
+    The corpus used to live at `tests/fixtures/audition`, one level above the package —
+    a path that exists only in a source checkout. The runtime image copies `src/` and
+    `config/` and never `tests/`, and an installed wheel has no sibling `tests/` at all,
+    so the documented way to deploy this system was also the one way `ra audition` could
+    not run: it failed on "fixture corpus not found" with no path inside the deployment
+    that would have worked.
+
+    Asserting the *location* rather than merely that the corpus loads is the point. A
+    test that only called `load_fixtures()` would have passed throughout the whole bug,
+    because pytest always runs from a checkout.
+    """
+    package_root = Path(reasonable_answer.__file__).resolve().parent
+    assert audition.DEFAULT_FIXTURE_DIR.is_dir(), "the default corpus path does not exist"
+    assert audition.DEFAULT_FIXTURE_DIR.is_relative_to(package_root), (
+        f"{audition.DEFAULT_FIXTURE_DIR} sits outside the package at {package_root}: "
+        "an install without the source tree would find nothing there"
+    )
+
+
+def test_the_packaging_surfaces_that_carry_the_corpus_still_carry_it():
+    """The two builds that have to contain the corpus, checked where they are declared.
+
+    Neither is observable from a checkout — pytest reads the source tree directly, so it
+    would notice neither a wheel that dropped the corpus nor an image that never copied
+    it. `scripts/smoke-test-image.sh` loads the corpus inside the built image, which is
+    the end-to-end proof; this is the same requirement stated cheaply, next to the
+    reason, and before a 3-minute image build.
+    """
+    repo_root = Path(__file__).resolve().parents[1]
+
+    # The wheel: hatchling copies everything under the packaged directory, which is how
+    # `web/static/` and its icons already travel. So the corpus ships iff it lives there.
+    packaged = repo_root / "src" / "reasonable_answer"
+    pyproject = (repo_root / "pyproject.toml").read_text(encoding="utf-8")
+    assert 'packages = ["src/reasonable_answer"]' in pyproject
+    assert audition.DEFAULT_FIXTURE_DIR.is_relative_to(packaged)
+
+    # The image: `src/` into the build stage, `/app/src` into the runtime stage. The
+    # corpus rides along with the code that reads it and needs no COPY of its own —
+    # which is exactly why `.dockerignore` may keep excluding `tests` wholesale.
+    dockerfile = (repo_root / "Dockerfile").read_text(encoding="utf-8")
+    assert "COPY src/ ./src/" in dockerfile, "the build stage no longer copies the package"
+    assert "COPY --from=build /app/src /app/src" in dockerfile, (
+        "the runtime stage no longer copies the package, so the image has no corpus"
+    )
 
 
 def test_shipped_corpus_loads_and_covers_both_directions():

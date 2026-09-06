@@ -205,7 +205,8 @@ regress quietly. Three consequences worth knowing:
   relative to the working directory (`/data`), which is read-only. Run it from a checkout with
   `make audition`, or point `audition.cache_path` at `/data/runs/.ra-audition.json` in the mounted
   roster. *Reading* the cache — all that `ra doctor` and the roster eligibility checks do — is
-  unaffected.
+  unaffected. The fixture corpus the command measures against does ship in the image
+  (D-packaged-audition-corpus), so where the cache lands is the only thing left to arrange.
 - **`ra export -o <path>`** must write somewhere under `/data/runs`.
 - **`search.token_file`** is likewise `/data`-relative, so it is unreadable here. That was already
   true (the file is not in the image) and nothing depends on it: the env var wins by design, and

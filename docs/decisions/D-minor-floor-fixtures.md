@@ -3,7 +3,7 @@
 Found by adversarial review of the audition harness after D-control-soundness, and confirmed by a
 second reviewer through direct simulation of `grade`.
 
-**The problem.** `tests/fixtures/audition/loaded-language-01` planted a `loaded_language` defect.
+**The problem.** `src/reasonable_answer/fixtures/audition/loaded-language-01` planted a `loaded_language` defect.
 Every detection credit in `audition.grade` requires `_is_material` — severity at or above `major`
 after the floor clamp — because that is what triage counts and what a report would ever be revised
 for. `loaded_language` floors at **minor**, deliberately and for a good reason (D-social-bias): it
@@ -21,7 +21,7 @@ force a revision. A fixture whose planted defect no run would ever act on cannot
 grades a critic's fitness for runs.
 
 **Decision.** The fixture is re-planted as `overstated_claim` and renamed
-`tests/fixtures/audition/overstated-claim-02`. `-02` rather than `-01`: D-category-coverage landed
+`src/reasonable_answer/fixtures/audition/overstated-claim-02`. `-02` rather than `-01`: D-category-coverage landed
 concurrently and independently claimed `overstated-claim-01` for its own fixture (a vitamin-D
 report restated from a hedged, subgroup-concentrated effect into a flat "prevents"). Two
 `overstated_claim` fixtures at `tier: moderate` is not redundant coverage — different domains and a

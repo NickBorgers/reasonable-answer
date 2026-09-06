@@ -82,8 +82,15 @@ from .taxonomy import (
     counts_for_convergence,
 )
 
-#: Fixture corpus shipped with the source tree.
-DEFAULT_FIXTURE_DIR = Path(__file__).resolve().parent.parent.parent / "tests" / "fixtures" / "audition"
+#: Fixture corpus, shipped **inside the package** rather than beside it. It used to live
+#: at `tests/fixtures/audition`, which resolves only in a source checkout: the runtime image
+#: copies `src/` and `config/` and never `tests/` (`.dockerignore` excludes it), and an
+#: installed wheel has no sibling `tests/` at all, so `ra audition` on the published image
+#: died on "fixture corpus not found" with no path inside the deployment that would work
+#: (D-packaged-audition-corpus). The corpus is the measurement instrument the audition *is*,
+#: not test data about it, so it travels with the code that reads it — the same reason
+#: `web/static/` and `_default_roster.yaml` are package files.
+DEFAULT_FIXTURE_DIR = Path(__file__).resolve().parent / "fixtures" / "audition"
 
 #: A detection may sit this many paragraphs away from the planted locus and still
 #: count. Paragraph indexing is genuinely ambiguous at section boundaries and across
