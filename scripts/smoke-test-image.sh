@@ -103,11 +103,11 @@ if [ "$code" != "403" ]; then
 fi
 echo "    ok"
 
-# The icons, the manifest and the service worker are the only non-Python files the app
-# serves, so they are the only thing here that can be lost by a packaging change. pytest
-# runs from a checkout and would never notice; this is the check that would. Fetched with
-# an identity header, which is what the tunnel or `tailscale serve` supplies in a real
-# deployment — the check above is the one that proves the gate is still there.
+# The icons, the manifest and the service worker are the non-Python files the app
+# *serves*, so they are among the things here that can be lost by a packaging change.
+# pytest runs from a checkout and would never notice; this is the check that would.
+# Fetched with an identity header, which is what the tunnel or `tailscale serve` supplies
+# in a real deployment — the check above is the one that proves the gate is still there.
 echo "==> Installable-app assets shipped in the image"
 AS_SMOKE=(-H "Tailscale-User-Login: smoke@example.invalid")
 if ! curl -fsS "${AS_SMOKE[@]}" "http://127.0.0.1:${PORT}/manifest.webmanifest" |
@@ -122,6 +122,26 @@ for path in /sw.js /offline.html /static/icons/icon-512.png /static/icons/apple-
   fi
 done
 echo "    ok"
+
+# The other non-Python payload, and the one that is not served over HTTP: the audition
+# fixture corpus. `ra audition` is how a deployer measures whether their rostered critics
+# can actually perform their lens, and it is useless if the corpus only exists in a source
+# checkout — which is exactly what shipped until D-packaged-audition-corpus, because the
+# corpus lived under `tests/` and the image copies `src/` and `config/` only. Loading it
+# rather than stat-ing the directory is deliberate: `load_fixtures` validates every
+# manifest, so a half-copied corpus fails here instead of at the deployer's first
+# audition. No proxy, no credential and no network are touched — the grader is a pure
+# function and this call never leaves the process.
+echo "==> Audition fixture corpus shipped in the image"
+if ! docker run --rm --entrypoint python "$IMAGE" -c \
+  'from reasonable_answer.audition import load_fixtures
+c = load_fixtures()
+assert len(c.fixtures) >= 20, len(c.fixtures)
+print("    %d fixtures, corpus %s" % (len(c.fixtures), c.corpus_hash))'; then
+  echo "The audition corpus did not make it into the image, or failed to validate." >&2
+  echo "\`ra audition\` is a dead end for anyone running this image (D-packaged-audition-corpus)." >&2
+  exit 1
+fi
 
 echo "==> Runs as a non-root user"
 uid="$(docker run --rm --entrypoint id "$IMAGE" -u)"

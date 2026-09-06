@@ -53,7 +53,11 @@ what produced one of the three infrastructure bugs below.
    (`config.py`'s `Config.load` honors `$RA_CONFIG` first, ahead of the checkout's default
    search path).
 5. **Run the audition**, filtered to the one lens and one alias under test:
-   `ra audition --lens <lens> --alias <candidate>`. Read `schema_failures` in the output before any
+   `ra audition --lens <lens> --alias <candidate>`. A checkout is not required — the fixture
+   corpus ships inside the package, so the command works from an install or the published image
+   too (D-packaged-audition-corpus); see the cache-path note in
+   [the README's read-only-rootfs section](https://github.com/NickBorgers/reasonable-answer/blob/main/README.md)
+   before running it in a container. Read `schema_failures` in the output before any
    other metric (below). If a verdict is reused from cache when you expected a fresh measurement,
    pass `--force`.
 6. **Interpret the verdict** against the thresholds and the instability caveat below, and decide
