@@ -64,7 +64,14 @@ def client(config, fake_client):
     worker.shutdown()
 
 
-def _drain(worker, timeout: float = 5.0) -> None:
+#: How long a barrier below waits before calling the worker stuck. Not a budget for the
+#: work — the barriers wait exactly as long as the work takes — but a deadlock backstop,
+#: so a worker that never marks a job done fails the test that submitted it instead of
+#: running out the job's own 45-minute limit with no output.
+_STUCK_AFTER_SECONDS = 120.0
+
+
+def _drain(worker, timeout: float = _STUCK_AFTER_SECONDS) -> None:
     """Block until the worker has finished every queued job.
 
     Waits on the queue's own `join()` rather than polling `active()`: `_drain` marks a job
@@ -76,26 +83,64 @@ def _drain(worker, timeout: float = 5.0) -> None:
     assert done.wait(timeout), "worker did not drain in time"
 
 
-def _wait_for_final(config, run_id: str, timeout: float = 20.0) -> dict:
-    registry = Registry(config.runs_dir)
-    deadline = time.time() + timeout
-    while time.time() < deadline:
-        final = registry.final(run_id)
-        if final:
-            return final
-        time.sleep(0.1)
-    raise AssertionError(f"run {run_id} did not finish within {timeout}s")
+def _wait_for_final(target, run_id: str, timeout: float = _STUCK_AFTER_SECONDS) -> dict:
+    """The run's final record, waited for on the worker's own barrier.
+
+    `target` is whichever handle the test already holds — a `TestClient` or the app
+    itself. Both reach the same `app.state`, which is where the worker to wait on and the
+    `runs_dir` to read live, so no caller has to thread a second handle through.
+
+    This polled `registry.final()` against a 20-second stopwatch until
+    D-test-waits-are-barriers, and the stopwatch was racing the app's own teardown rather
+    than the run. `queue.join()` returns exactly when the job is marked done, which is
+    after the final record is written, so a slow runner now makes a wait slower rather
+    than red.
+
+    The `_stopping` check is the other half, and it is the half that failed in CI: leaving
+    a `web_client` context runs the app's shutdown, which stops the worker, and a run still
+    mid-graph is then paused at its next node boundary and never writes a final record at
+    all. A wait placed after that teardown could only ever pass by beating it — which the
+    fake proxy did locally and did not on a loaded runner, so `PR Validation Required` went
+    red, every reviewer guard refused the SHA, and the panel published a NO-GO on a change
+    nothing had read (PR #197). Waiting on the queue there would hang instead: `shutdown()`
+    leaves its wake-up sentinels unfinished, so `join()` never returns. Say so at once
+    rather than at the backstop.
+    """
+    app = getattr(target, "app", target)
+    worker = app.state.worker
+    assert not worker._stopping.is_set(), (
+        f"{run_id} is being waited for after the app shut down, which stops the worker and "
+        "pauses any run still mid-graph without a final record. Move the wait inside the "
+        "client's `with`, where the run it is waiting for is still allowed to finish."
+    )
+    _drain(worker, timeout)
+    registry = Registry(app.state.config.runs_dir)
+    final = registry.final(run_id)
+    assert final is not None, (
+        f"the worker finished every job but {run_id} left no final record; "
+        f"its trail was: {_event_trail(registry, run_id)}"
+    )
+    return final
+
+
+def _event_trail(registry: Registry, run_id: str, keep: int = 5) -> str:
+    """The tail of a run's own event stream, so a failure above says what the run did
+    instead of only that it did not finish."""
+    path = registry.dir(run_id) / "events.jsonl"
+    if not path.exists():
+        return f"no {path}"
+    return " | ".join(path.read_text().splitlines()[-keep:]) or "(no events)"
 
 
 # ------------------------------------------------------------------- submit
 
 
-def test_submitting_a_question_starts_a_run_and_redirects(client, config):
+def test_submitting_a_question_starts_a_run_and_redirects(client):
     response = client.post("/runs", data={"question": "Is it so?"}, follow_redirects=False)
     assert response.status_code == 303
     run_id = response.headers["location"].rsplit("/", 1)[-1]
 
-    final = _wait_for_final(config, run_id)
+    final = _wait_for_final(client, run_id)
     assert final["terminal_status"] in ("accepted", "converged_unconfirmed")
 
 
@@ -218,10 +263,10 @@ def test_a_cross_site_resume_is_refused(client):
 # --------------------------------------------------------------------- pages
 
 
-def test_the_index_lists_finished_runs(client, config):
+def test_the_index_lists_finished_runs(client):
     response = client.post("/runs", data={"question": "Listed question?"}, follow_redirects=False)
     run_id = response.headers["location"].rsplit("/", 1)[-1]
-    _wait_for_final(config, run_id)
+    _wait_for_final(client, run_id)
 
     page = client.get("/")
     assert page.status_code == 200
@@ -229,10 +274,10 @@ def test_the_index_lists_finished_runs(client, config):
     assert run_id in page.text
 
 
-def test_the_run_page_shows_the_roster_that_actually_reviewed(client, config, identities):
+def test_the_run_page_shows_the_roster_that_actually_reviewed(client, identities):
     response = client.post("/runs", data={"question": "Which critics?"}, follow_redirects=False)
     run_id = response.headers["location"].rsplit("/", 1)[-1]
-    _wait_for_final(config, run_id)
+    _wait_for_final(client, run_id)
 
     page = client.get(f"/runs/{run_id}").text
     for lens in ("logic", "evidence", "completeness"):
@@ -252,17 +297,17 @@ def test_a_traversal_run_id_is_rejected_not_served(client):
         assert client.get(f"/runs/{bad}").status_code in (404, 400)
 
 
-def test_report_markdown_is_served_only_once_it_exists(client, config):
+def test_report_markdown_is_served_only_once_it_exists(client):
     response = client.post("/runs", data={"question": "Report ready?"}, follow_redirects=False)
     run_id = response.headers["location"].rsplit("/", 1)[-1]
-    _wait_for_final(config, run_id)
+    _wait_for_final(client, run_id)
 
     markdown = client.get(f"/runs/{run_id}/report.md")
     assert markdown.status_code == 200
     assert "# Answer" in markdown.text
 
 
-def test_the_report_is_rendered_not_shown_as_raw_markdown(client, config):
+def test_the_report_is_rendered_not_shown_as_raw_markdown(client):
     """A reader gets HTML; `report.md` stays the escape hatch for the source.
 
     The copy control is the one sanctioned exception — it carries the markdown in an
@@ -271,7 +316,7 @@ def test_the_report_is_rendered_not_shown_as_raw_markdown(client, config):
     """
     response = client.post("/runs", data={"question": "Rendered?"}, follow_redirects=False)
     run_id = response.headers["location"].rsplit("/", 1)[-1]
-    _wait_for_final(config, run_id)
+    _wait_for_final(client, run_id)
 
     page = client.get(f"/runs/{run_id}/report")
     assert page.status_code == 200
@@ -318,27 +363,27 @@ def test_report_tables_are_wrapped_in_a_horizontal_scroller(config):
     assert "table-scroll" not in to_html("A paragraph, a [link](https://example.org).\n")
 
 
-def test_the_runs_table_carries_the_labels_the_card_layout_needs(client, config):
+def test_the_runs_table_carries_the_labels_the_card_layout_needs(client):
     """Below 34rem the header row is hidden and each row becomes a card, so every cell
     that is not self-describing needs its own label. Deleting these attributes degrades
     the phone layout with nothing else failing, so pin them."""
     response = client.post("/runs", data={"question": "Labelled?"}, follow_redirects=False)
     run_id = response.headers["location"].rsplit("/", 1)[-1]
-    _wait_for_final(config, run_id)
+    _wait_for_final(client, run_id)
 
     page = client.get("/").text
     for label in ("rounds", "started", "id"):
         assert f'data-label="{label}"' in page
 
 
-def test_a_finished_run_points_at_the_report_instead_of_repeating_it(client, config):
+def test_a_finished_run_points_at_the_report_instead_of_repeating_it(client):
     """The report is rendered in exactly one place, so the URL someone copies while
     reading it shows a recipient the same thing. The run page links there, states the
     verdict, and is otherwise the pipeline trail — which no longer folds away, because
     there is no report above it to outrank it."""
     response = client.post("/runs", data={"question": "Which comes first?"}, follow_redirects=False)
     run_id = response.headers["location"].rsplit("/", 1)[-1]
-    _wait_for_final(config, run_id)
+    _wait_for_final(client, run_id)
 
     page = client.get(f"/runs/{run_id}").text
     assert f'href="/runs/{run_id}/report">Read the report</a>' in page
@@ -348,24 +393,24 @@ def test_a_finished_run_points_at_the_report_instead_of_repeating_it(client, con
     assert "Review record" in page  # the verdict still travels with the run page
 
 
-def test_the_run_page_offers_no_downloads(client, config):
+def test_the_run_page_offers_no_downloads(client):
     """Taking the report away is offered where the report is. Six buttons on the run
     page was the duplication this removed."""
     response = client.post("/runs", data={"question": "Anything to download?"}, follow_redirects=False)
     run_id = response.headers["location"].rsplit("/", 1)[-1]
-    _wait_for_final(config, run_id)
+    _wait_for_final(client, run_id)
 
     page = client.get(f"/runs/{run_id}").text
     for path in ("export.md", "export.html", "report.md"):
         assert f"/runs/{run_id}/{path}" not in page
 
 
-def test_the_report_page_carries_the_audit_trail_link(client, config):
+def test_the_report_page_carries_the_audit_trail_link(client):
     """`/report` is the page that gets shared, and a verdict a recipient cannot check is
     not much of a claim — so the audit trail is reachable from it, not only from the run."""
     response = client.post("/runs", data={"question": "Checkable?"}, follow_redirects=False)
     run_id = response.headers["location"].rsplit("/", 1)[-1]
-    _wait_for_final(config, run_id)
+    _wait_for_final(client, run_id)
 
     page = client.get(f"/runs/{run_id}/report").text
     assert f'href="/runs/{run_id}/audit.json"' in page
@@ -373,25 +418,25 @@ def test_the_report_page_carries_the_audit_trail_link(client, config):
     assert f'href="/runs/{run_id}/export.html"' in page
 
 
-def test_report_md_stays_reachable_but_unlinked(client, config):
+def test_report_md_stays_reachable_but_unlinked(client):
     """The raw shipped artifact keeps its route — anything that hashes or diffs a report
     wants it — but as a button beside `Download .md` it offered what looked like the same
     file minus the review record, which is the thing that must stay attached (D-verdict-attached)."""
     response = client.post("/runs", data={"question": "Still there?"}, follow_redirects=False)
     run_id = response.headers["location"].rsplit("/", 1)[-1]
-    _wait_for_final(config, run_id)
+    _wait_for_final(client, run_id)
 
     assert client.get(f"/runs/{run_id}/report.md").status_code == 200
     for url in (f"/runs/{run_id}", f"/runs/{run_id}/report"):
         assert f'href="/runs/{run_id}/report.md"' not in client.get(url).text
 
 
-def test_run_status_is_labelled_for_a_stranger(client, config):
+def test_run_status_is_labelled_for_a_stranger(client):
     """A shared report reaches someone who has never seen this vocabulary. `accepted` on
     its own is a marker; it needs to say what it is describing and what it means."""
     response = client.post("/runs", data={"question": "What does that mean?"}, follow_redirects=False)
     run_id = response.headers["location"].rsplit("/", 1)[-1]
-    final = _wait_for_final(config, run_id)
+    final = _wait_for_final(client, run_id)
     meaning = STATUS_MEANING[final["terminal_status"]]
 
     for url in (f"/runs/{run_id}", f"/runs/{run_id}/report"):
@@ -433,23 +478,23 @@ def test_a_report_that_contains_html_is_rendered_as_text_not_markup(config, iden
         worker.shutdown()
 
 
-def test_audit_json_exposes_the_whole_event_stream(client, config):
+def test_audit_json_exposes_the_whole_event_stream(client):
     response = client.post("/runs", data={"question": "Audit?"}, follow_redirects=False)
     run_id = response.headers["location"].rsplit("/", 1)[-1]
-    _wait_for_final(config, run_id)
+    _wait_for_final(client, run_id)
 
     audit = client.get(f"/runs/{run_id}/audit.json").json()
     kinds = {e["kind"] for e in audit["events"]}
     assert {"startup", "generate", "critique", "triage", "control", "finalize"} <= kinds
 
 
-def test_audit_json_names_the_build_every_stage_ran_on(client, config):
+def test_audit_json_names_the_build_every_stage_ran_on(client):
     """D-run-build-stamp: the machine-readable surface is what an agent comparing runs
     across a change actually reads, so the stamp has to survive the whole path from
     `queued` to `final.json` without anyone re-serialising it by hand."""
     response = client.post("/runs", data={"question": "Which build?"}, follow_redirects=False)
     run_id = response.headers["location"].rsplit("/", 1)[-1]
-    _wait_for_final(config, run_id)
+    _wait_for_final(client, run_id)
 
     audit = client.get(f"/runs/{run_id}/audit.json").json()
     build = audit["final"]["build"]
@@ -533,7 +578,7 @@ def test_every_read_of_a_run_is_public_and_every_write_stays_gated(config, fake_
             follow_redirects=False,
         )
         run_id = resp.headers["location"].rsplit("/", 1)[-1]
-        _wait_for_final(config, run_id)
+        _wait_for_final(c, run_id)
 
         # Every read of the run, all 403 before #80. The page itself is the one that
         # matters: it is the URL in the address bar.
@@ -593,7 +638,7 @@ def test_a_public_run_page_names_nobody(config, fake_client):
             follow_redirects=False,
         )
         run_id = resp.headers["location"].rsplit("/", 1)[-1]
-        _wait_for_final(config, run_id)
+        _wait_for_final(c, run_id)
 
         assert WEB_IDENTITY not in c.get(f"/runs/{run_id}").text
         assert WEB_IDENTITY not in c.get(f"/runs/{run_id}/report").text
@@ -624,7 +669,7 @@ def test_run_urls_are_emitted_at_the_public_base(config, fake_client, monkeypatc
         location = resp.headers["location"]
         assert location.startswith("/runs/")
         run_id = location.rsplit("/", 1)[-1]
-        _wait_for_final(config, run_id)
+        _wait_for_final(c, run_id)
 
         page = c.get(f"/runs/{run_id}").text
         # Reads are public...
@@ -663,8 +708,13 @@ def test_a_public_run_page_names_icons_a_stranger_can_actually_fetch(
             resp = signed_in.post(
                 "/runs", data={"question": "Does it have a favicon?"}, follow_redirects=False
             )
-        run_id = resp.headers["location"].rsplit("/", 1)[-1]
-        _wait_for_final(config, run_id)
+            run_id = resp.headers["location"].rsplit("/", 1)[-1]
+            # Inside the client's own `with`, because leaving it runs the app's shutdown,
+            # and that stops the worker: a run still mid-graph is asked to pause at its
+            # next node boundary and never writes a final record. Waiting out here worked
+            # only while the fake proxy kept every run shorter than the teardown that was
+            # racing it (D-test-waits-are-barriers).
+            _wait_for_final(signed_in, run_id)
 
         with web_client(app, identity=None) as anon:
             for path in (f"/runs/{run_id}", f"/runs/{run_id}/report"):
@@ -764,7 +814,7 @@ def test_ask_this_again_starts_a_new_run_owned_by_whoever_asked(config, fake_cli
     with _running_app(config, fake_client) as app, web_client(app) as c:
         resp = c.post("/runs", data={"question": "Again?"}, follow_redirects=False)
         run_id = resp.headers["location"].rsplit("/", 1)[-1]
-        _wait_for_final(config, run_id)
+        _wait_for_final(c, run_id)
 
         # The button is on the page once the run has stopped.
         assert "Ask this again" in c.get(f"/runs/{run_id}").text
@@ -773,7 +823,7 @@ def test_ask_this_again_starts_a_new_run_owned_by_whoever_asked(config, fake_cli
         assert again.status_code == 303
         new_id = again.headers["location"].rsplit("/", 1)[-1]
         assert new_id != run_id
-        _wait_for_final(config, new_id)
+        _wait_for_final(c, new_id)
 
         registry = Registry(config.runs_dir)
         assert registry.question(new_id) == registry.question(run_id)
@@ -1272,7 +1322,7 @@ def test_a_url_seed_is_fetched_converted_and_becomes_round_one(client, config, m
     )
     assert response.status_code == 303
     run_id = response.headers["location"].rsplit("/", 1)[-1]
-    _wait_for_final(config, run_id)
+    _wait_for_final(client, run_id)
 
     # The store holds the converted markdown, not the HTML that was fetched.
     seed = Registry(config.runs_dir).seed(run_id)
@@ -1303,7 +1353,7 @@ def test_pasted_html_is_converted_rather_than_shown_to_critics_raw(client, confi
         follow_redirects=False,
     )
     run_id = response.headers["location"].rsplit("/", 1)[-1]
-    _wait_for_final(config, run_id)
+    _wait_for_final(client, run_id)
     assert Registry(config.runs_dir).seed(run_id).startswith("# Pasted")
 
 
@@ -1802,13 +1852,13 @@ def test_the_offline_page_stands_alone(client):
     assert "/runs" not in response.text
 
 
-def test_a_run_page_is_never_cacheable(client, config):
+def test_a_run_page_is_never_cacheable(client):
     """The same rule as the service worker's, restated at the HTTP layer — an installed
     standalone app leans on the browser cache and the back-forward cache much harder than
     a tab does."""
     response = client.post("/runs", data={"question": "Stale?"}, follow_redirects=False)
     run_id = response.headers["location"].rsplit("/", 1)[-1]
-    _wait_for_final(config, run_id)
+    _wait_for_final(client, run_id)
 
     assert client.get(f"/runs/{run_id}").headers["cache-control"] == "no-store"
     assert client.get(f"/runs/{run_id}/progress").headers["cache-control"] == "no-store"
@@ -1829,7 +1879,7 @@ def test_the_head_advertises_the_installable_app(client):
     assert "viewport-fit=cover" in page
 
 
-def test_every_page_links_out_to_the_published_docs(client, config):
+def test_every_page_links_out_to_the_published_docs(client):
     """The link lives in the shared shell, so someone who arrives on a shared run link —
     never having seen the landing page — still has a route to the explanation.
 
@@ -1838,7 +1888,7 @@ def test_every_page_links_out_to_the_published_docs(client, config):
     run's id to an off-origin host in the Referer header."""
     response = client.post("/runs", data={"question": "Documented?"}, follow_redirects=False)
     run_id = response.headers["location"].rsplit("/", 1)[-1]
-    _wait_for_final(config, run_id)
+    _wait_for_final(client, run_id)
 
     expected = '<a class="docs" href="https://nickborgers.github.io/reasonable-answer/" rel="noreferrer">'
     for url in ("/", f"/runs/{run_id}", f"/runs/{run_id}/report"):
@@ -1857,7 +1907,7 @@ def test_the_header_does_not_claim_a_sourcing_level_it_cannot_know(client):
     assert "consensus-reviewed" not in header
 
 
-def test_the_csp_admits_the_manifest_and_the_worker_and_nothing_off_origin(client, config):
+def test_the_csp_admits_the_manifest_and_the_worker_and_nothing_off_origin(client):
     """Pinned as an exact literal on purpose. Widening this policy is a decision recorded
     in docs/decisions.md (D-installable-pwa), not a tidy-up — so it should not be possible to widen it
     without a test turning red and asking why."""
@@ -1868,14 +1918,14 @@ def test_the_csp_admits_the_manifest_and_the_worker_and_nothing_off_origin(clien
     )
     response = client.post("/runs", data={"question": "Policy?"}, follow_redirects=False)
     run_id = response.headers["location"].rsplit("/", 1)[-1]
-    _wait_for_final(config, run_id)
+    _wait_for_final(client, run_id)
 
     for url in ("/", f"/runs/{run_id}", f"/runs/{run_id}/report"):
         page = client.get(url).text
         assert f'content="{expected}"' in page, url
 
 
-def test_service_worker_registration_is_guarded_and_cannot_break_the_live_script(client, config):
+def test_service_worker_registration_is_guarded_and_cannot_break_the_live_script(client):
     """Two things at once. The guard is what keeps a plain-http tailnet address silent
     instead of throwing a SecurityError; the semicolon is what stops `})()` followed by
     `(function` from parsing as a call and taking the live stream down with it."""
@@ -1892,7 +1942,7 @@ def test_service_worker_registration_is_guarded_and_cannot_break_the_live_script
         # without it, `})()` followed by `(function` parses as a single call expression.
         assert re.search(r"\}\)\(\);\s*\(function", script), script
 
-    _wait_for_final(config, run_id)
+    _wait_for_final(client, run_id)
     # The registration is on every page, live or not — an installed app is entered from
     # whichever page the user last had open.
     assert "isSecureContext" in client.get("/").text
@@ -2656,7 +2706,7 @@ def test_the_run_page_stays_entirely_under_the_prefix(config, fake_client):
     with _prefixed_client(config, fake_client) as c:
         response = c.post("/runs", data={"question": "A prefixed run?"}, follow_redirects=False)
         run_id = response.headers["location"].rsplit("/", 1)[-1]
-        _wait_for_final(config, run_id)
+        _wait_for_final(c, run_id)
 
         for path in (f"/runs/{run_id}", f"/runs/{run_id}/report"):
             page = c.get(path).text
