@@ -25,7 +25,9 @@ The container is `read_only: true` with
 is published on `127.0.0.1:8080` only; reachability comes from the edge in front of it.
 
 Two doors, split by prefix: `RA_ROOT_PATH` gates the application, `RA_PUBLIC_ROOT_PATH` serves the
-shareable `/runs/` reads. The edge must route `/runs/` path-preserving for that split to hold.
+shareable `/runs/` reads. The edge must route `/runs/` path-preserving for that split to hold, and
+`/static/icons/` with it — the icons are named from the public base so an anonymous reader's tab
+icon resolves (D-public-icons).
 
 ## Inbound authentication
 
@@ -39,8 +41,9 @@ by the edge, in this order:
 
 `resolve_identity()` lowercases the value, bounds it, rejects control characters, and returns it as
 both the run owner and the rate-limit key. Enforcement is HTTP middleware, so a request with no
-identity gets a bare `403` before routing. Two exemptions: `/healthz`, and **every `GET` under
-`/runs/`**, which is anonymous by design (D-id-as-credential — holding the run id is the credential). `POST` to a
+identity gets a bare `403` before routing. Three exemptions: `/healthz`; **every `GET` under
+`/runs/`**, which is anonymous by design (D-id-as-credential — holding the run id is the credential);
+and `GET /static/icons/<name>`, the shipped artwork a public run page names (D-public-icons). `POST` to a
 public read path is still refused.
 
 The consequence worth internalizing: **the security boundary is the deployment, not the code.**
