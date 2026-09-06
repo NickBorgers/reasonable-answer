@@ -47,7 +47,9 @@ too, but `None` is an ordinary value here rather than a refusal.
 **The URL in the address bar has to be the shareable one, so the app emits two bases.** The edge
 gates `/app/` with Cloudflare Access and leaves `/runs/` open. A run page emitted under
 `/app/runs/<id>` is therefore a link only a signed-in person can open, no matter what the
-middleware allows. `RA_ROOT_PATH` keeps the gated surface — the index, form actions, the app shell;
+middleware allows. `RA_ROOT_PATH` keeps the gated surface — the index, form actions, and the
+installable half of the app shell (the manifest, service worker and offline page); D-public-icons
+later moved the fixed shipped icon links and their `GET` route to the public surface.
 `RA_PUBLIC_ROOT_PATH` carries the reader-facing surface — the run page, everything linked from it,
 the SSE stream, and the `303` a submission lands on. Setting `RA_PUBLIC_ROOT_PATH=/` in production
 puts every run URL at the origin root. Unset, it falls back to `RA_ROOT_PATH`, so a single-door

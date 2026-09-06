@@ -89,11 +89,12 @@ round 2   writer deepseek-v4-flash
 **Callers are identified by a header, and it is trusted rather than verified.** It comes from
 whatever fronts the app — `Cf-Access-Authenticated-User-Email` from Cloudflare Access, or the
 `Tailscale-User-*` headers from `tailscale serve` — and a request carrying neither is refused on
-every route but `/healthz` and the `GET`s under `/runs/`, which are public for served runs carrying
-an `owner.txt` record: holding a run id is the credential for reading that run, so a finished report
-can be shared with anyone (D-id-as-credential). Ownerless run directories return 404. Every write
-still needs an identity. Runs belong to whoever submitted them: your index shows only your own runs,
-and only its owner can resume a run.
+every route but `/healthz`, the `GET`s under `/runs/`, and `GET /static/icons/<name>`. Run reads are
+public for served runs carrying an `owner.txt` record: holding a run id is the credential for reading
+that run, so a finished report can be shared with anyone (D-id-as-credential). The fixed icon route
+serves only the repository's public artwork (D-public-icons). Ownerless run directories return 404.
+Every write still needs an identity. Runs belong to whoever submitted them: your index shows only
+your own runs, and only its owner can resume a run.
 
 Because the header is not verified, anyone who can reach the port directly can claim to be any
 user. `ra serve` binds `127.0.0.1` by default and `compose.yaml` publishes only to loopback for
@@ -219,11 +220,11 @@ the running code is whatever the host's working tree held — not the digest-ver
 No database, no broker, no GPU, no model weights — all inference goes through the proxy.
 
 **Behind a reverse proxy that strips a path prefix** (e.g. Cloudflare Access serving the app
-under `/app` while `/` stays a public landing page), set `RA_ROOT_PATH=/app`. Every
-app-internal URL the app emits — links, redirects, form actions, the PWA manifest, the live
-stream and the service worker — then carries the prefix and stays same-origin, so nothing
-escapes back to the root. The one deliberate exception is the static "how this works" link in
-the header, which points off-origin at the published docs site; it is navigation only, carries
+under `/app` while `/` stays a public landing page), set `RA_ROOT_PATH=/app`. Gated
+app-internal URLs — links, redirects, form actions, the PWA manifest and the service worker —
+then carry the prefix and stay same-origin. Reader-facing run URLs and icon links instead use
+`RA_PUBLIC_ROOT_PATH` when configured. The other deliberate exception is the static "how this
+works" link in the header, which points off-origin at the published docs site; it is navigation only, carries
 `rel="noreferrer"` so following it never hands a run id to that host, and fetches nothing, so
 the CSP is unaffected. The app
 still receives the stripped path, so the proxy is the ordinary
@@ -232,11 +233,15 @@ it serves at the origin root exactly as before. The CSP is unchanged: this is pu
 path-prefixing, not a relaxation. See D-base-path.
 
 **To let a finished run be shared with anyone**, add `RA_PUBLIC_ROOT_PATH=/` and route
-`/runs/` to the app path-preserving, without Access in front. Every `GET` under `/runs/` —
+both `/runs/` and `/static/icons/` to the app path-preserving, without Access in front. Every
+`GET` under `/runs/` —
 the run page, the report, the exports, `audit.json`, the live stream — answers an
 unauthenticated caller, so the URL a reader is looking at is the one they can send to
 someone; every write stays behind the gate. Unset, it falls back to `RA_ROOT_PATH` and
-nothing changes. See [D-id-as-credential](./docs/decisions/D-id-as-credential.md) and
+nothing changes. The icon prefix serves only the fixed shipped artwork named by those pages; the
+manifest, service worker and offline page remain under `RA_ROOT_PATH` and require identity. See
+[D-id-as-credential](./docs/decisions/D-id-as-credential.md),
+[D-public-icons](./docs/decisions/D-public-icons.md), and
 [authentication.md](./docs/authentication.md).
 
 **To be told when a run finishes**, turn it on in the roster and supply a contact address in

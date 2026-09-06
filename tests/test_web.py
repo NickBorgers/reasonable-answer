@@ -677,6 +677,63 @@ def test_run_urls_are_emitted_at_the_public_base(config, fake_client, monkeypatc
         assert f'action="/app/runs/{run_id}/again"' in page
 
 
+def test_a_public_run_page_names_icons_a_stranger_can_actually_fetch(
+    config, fake_client, monkeypatch
+):
+    """The icons follow the reader's door, and the route answers without an identity
+    (D-public-icons). Emitted under `RA_ROOT_PATH` they were a subresource the edge
+    bounces and the browser never complains about — a blank tab on every shared report.
+
+    Both halves are asserted here because neither works alone: an href at the public base
+    whose route still demanded an identity would only move the `403` from the edge into
+    the app."""
+    monkeypatch.setenv("RA_ROOT_PATH", "/app")
+    monkeypatch.setenv("RA_PUBLIC_ROOT_PATH", "/")
+    with _running_app(config, fake_client) as app:
+        with web_client(app) as signed_in:
+            resp = signed_in.post(
+                "/runs", data={"question": "Does it have a favicon?"}, follow_redirects=False
+            )
+        run_id = resp.headers["location"].rsplit("/", 1)[-1]
+        _wait_for_final(config, run_id)
+
+        with web_client(app, identity=None) as anon:
+            for path in (f"/runs/{run_id}", f"/runs/{run_id}/report"):
+                page = anon.get(path).text
+                assert page, path
+                assert '<link rel="icon" href="/static/icons/favicon.svg"' in page, path
+                assert '<link rel="icon" href="/static/icons/icon-192.png"' in page, path
+                assert '<link rel="apple-touch-icon" href="/static/icons/apple-touch-icon.png">' in page
+                # Nothing the reader needs is left under the gated prefix...
+                assert "/app/static/icons/" not in page, path
+                # ...and the icons they were pointed at are really there for them.
+                for name in ("favicon.svg", "icon-192.png", "apple-touch-icon.png"):
+                    assert anon.get(f"/static/icons/{name}").status_code == 200, name
+
+            # Installability is a signed-in affordance and stays one: the manifest is
+            # still named under the gate, and still refused without an identity.
+            page = anon.get(f"/runs/{run_id}").text
+            assert 'href="/app/manifest.webmanifest"' in page
+            assert anon.get("/manifest.webmanifest").status_code == 403
+
+    # The gated index is one page too, and it names the same one icon URL: two would mean
+    # every browser caching the artwork twice.
+    with _running_app(config, fake_client) as app, web_client(app) as c:
+        assert '<link rel="icon" href="/static/icons/favicon.svg"' in c.get("/").text
+
+
+def test_one_door_leaves_the_icons_exactly_where_they_were(config, fake_client, monkeypatch):
+    """`RA_PUBLIC_ROOT_PATH` unset falls back to `RA_ROOT_PATH`, which is what keeps dev,
+    the tailnet and every single-door deployment byte-identical (D-base-path's empty-string
+    join identity, restated for the icons)."""
+    monkeypatch.setenv("RA_ROOT_PATH", "/app")
+    monkeypatch.delenv("RA_PUBLIC_ROOT_PATH", raising=False)
+    with _running_app(config, fake_client) as app, web_client(app) as c:
+        page = c.get("/").text
+    assert '<link rel="icon" href="/app/static/icons/favicon.svg"' in page
+    assert '<link rel="apple-touch-icon" href="/app/static/icons/apple-touch-icon.png">' in page
+
+
 def test_the_stream_ends_when_a_run_stops_without_a_final(config, monkeypatch):
     """A run that stopped without writing `final.json` — a crash, or `abandoned` — used to
     hold the poll loop open forever: the exit condition wanted a final that would never
@@ -1622,22 +1679,60 @@ def test_the_tailscale_display_name_is_not_an_identity(config):
 # ------------------------------------------------------- installable-app assets
 
 
-def test_the_app_shell_is_behind_the_same_gate_as_everything_else(owned):
-    """The manifest, the worker and the icons are routes like any other: no identity, no
-    asset (D-identity-header). Nothing about them is secret, but an exemption list is a thing that
-    grows, and `/healthz` stays the only entry on it.
+def test_the_installable_half_of_the_shell_stays_behind_the_gate(owned):
+    """The manifest and the worker are routes like any other: no identity, no asset
+    (D-identity-header). Installing the app is a signed-in affordance — a manifest is
+    fetched with credentials *omitted* by default, which is why the link carries
+    `crossorigin="use-credentials"` (D-installable-pwa), and a worker is persistent
+    client-side execution on a header-authenticated interface.
 
-    The cost of that is paid in the `<head>`, not here: a manifest is fetched with
-    credentials *omitted* by default, so `crossorigin="use-credentials"` on the link is
-    what keeps the app installable (D-installable-pwa) once its manifest needs an identity."""
+    The icons are the exception, and they are asserted separately below (D-public-icons):
+    they are the one part of the shell an anonymous reader can *see* missing."""
     app, _ = owned
     with web_client(app, identity=None) as c:
         for path in ("/manifest.webmanifest", "/sw.js", "/offline.html"):
             assert c.get(path).status_code == 403, path
-        assert c.get("/static/icons/icon-512.png").status_code == 403
-        # The one exemption, and the reason it exists: the container's own healthcheck
-        # runs inside the container with no header to attach.
+        # The container's own healthcheck runs inside the container with no header to
+        # attach, so it answers anonymously too.
         assert c.get("/healthz").status_code == 200
+
+
+def test_the_icons_answer_an_anonymous_reader(owned):
+    """A public run page names the icons (D-public-icons), so gating them made every
+    anonymous reader's tab icon a `403` no browser reports. They carry no run, no
+    identity and no token cost — they are the artwork committed in this repository."""
+    app, _ = owned
+    with web_client(app, identity=None) as c:
+        for name in ("favicon.svg", "icon-192.png", "icon-512.png", "apple-touch-icon.png"):
+            response = c.get(f"/static/icons/{name}")
+            assert response.status_code == 200, name
+            assert response.headers["cache-control"] == "public, max-age=604800"
+        # A name outside the table is a miss like any other, anonymously as much as
+        # signed in: it indexes a dictionary, it is never joined onto a path. The
+        # exemption therefore hands an anonymous caller no reach it did not already have
+        # — the parametrized traversal test below covers the rest of these names.
+        assert c.get("/static/icons/nope.png").status_code == 404
+        assert c.get("/static/icons/%2e%2e%2fapp.py").status_code != 200
+        # Method-scoped, exactly like the `/runs/` rule: a POST to a public read path is
+        # refused before it reaches routing.
+        assert c.post("/static/icons/favicon.svg").status_code == 403
+
+
+def test_the_public_static_routes_are_the_expected_set(owned):
+    """The twin of `test_public_run_get_routes_are_the_expected_set`: the icon prefix is a
+    prefix, so a second route under `/static/` would be public the day it is written. This
+    enumerates the route table and fails when that set changes (D-public-icons)."""
+    app, _ = owned
+    public = {
+        route.path
+        for route in app.routes
+        if "GET" in getattr(route, "methods", set())
+        and route.path.startswith(assets.ICONS_PREFIX)
+    }
+    assert public == {"/static/icons/{name}"}
+    # The prefix covers the whole of `/static/`, so nothing else can drift underneath it.
+    everything = {getattr(route, "path", "") for route in app.routes}
+    assert not {p for p in everything if p.startswith("/static/")} - public
 
 
 def test_the_manifest_names_only_icons_that_are_actually_served(client):
