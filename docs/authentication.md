@@ -14,15 +14,16 @@ Two proxies are supported, checked in this order:
 
 A request carrying neither is refused with `403` on every route except `/healthz` — the
 container healthcheck runs inside the container with nothing in front of it to attach a
-header — and every `GET` under `/runs/`, which is the public read surface (D-id-as-credential,
-[below](#sharing-a-run-publicly)). `Tailscale-User-Name` sits beside the login header and
+header — every `GET` under `/runs/`, which is the public read surface (D-id-as-credential,
+[below](#sharing-a-run-publicly)), and `GET /static/icons/<name>`, which those public
+pages name (D-public-icons). `Tailscale-User-Name` sits beside the login header and
 is deliberately **not** read: it carries a display name, which is a different namespace
 from the address Access reports.
 
-**Installing the app needs the manifest fetch to carry your session.** The app shell —
-`manifest.webmanifest`, `sw.js`, `offline.html`, the icons — is gated like every other
-route, and a browser fetches a *manifest* with credentials omitted by default even
-same-origin. So the `<link rel="manifest">` this app emits carries
+**Installing the app needs the manifest fetch to carry your session.** The installable
+half of the app shell — `manifest.webmanifest`, `sw.js`, `offline.html` — is gated like
+every other route (the icons are not, since a public run page names them: D-public-icons),
+and a browser fetches a *manifest* with credentials omitted by default even same-origin. So the `<link rel="manifest">` this app emits carries
 `crossorigin="use-credentials"`; without it the fetch arrives at Access with no
 `CF_Authorization` cookie, gets bounced at the edge, and the only symptom is that the
 install prompt quietly never appears. If you front this with something other than Access
@@ -122,7 +123,8 @@ the sign-in. So the URL a reader is looking at is the URL they can send to someo
 | reads of a run | `GET /runs/<id>`, `/report`, `/report.md`, `/export.md`, `/export.html`, `/audit.json`, `/progress`, `/stream` | **not required** |
 | writes | `POST /runs`, `/runs/<id>/again`, `/runs/<id>/resume`, `/refine`, `/push/subscribe`, `/push/unsubscribe` | required |
 | the index | `GET /`, `GET /runs-table` | required (both are per-viewer lists) |
-| the app shell | `manifest.webmanifest`, `sw.js`, `offline.html`, icons | required |
+| the icons | `GET /static/icons/<name>` | **not required** (a public run page names them — D-public-icons) |
+| the rest of the app shell | `manifest.webmanifest`, `sw.js`, `offline.html` | required |
 | healthcheck | `GET /healthz` | not required |
 
 The rule is method-scoped: a `POST` to a public read path is refused before it reaches
@@ -146,17 +148,22 @@ RA_PUBLIC_ROOT_PATH=/      # run pages and everything linked from them — open
 
 With this pair, submitting a question lands the browser on `https://<host>/runs/<id>`,
 which is directly shareable, while the header, the submit form and **Ask this again** all
-point back into `/app/`. The edge must route `/runs/` to the app **path-preserving** —
-no rewrite to a specific file — and apply Access to `/app/` only. See the
-`host-config-as-code` repo for that half.
+point back into `/app/`. The edge must route `/runs/` **and `/static/icons/`** to the app
+**path-preserving** — no rewrite to a specific file — and apply Access to `/app/` only.
+The icons are on that list because every page names them from `RA_PUBLIC_ROOT_PATH`
+(D-public-icons); an edge that routes only `/runs/` leaves them a 404 for everyone,
+including signed-in callers. See the `host-config-as-code` repo for that half.
 
 `RA_PUBLIC_ROOT_PATH` unset falls back to `RA_ROOT_PATH`, so a single-door deployment —
 dev, or the tailnet — emits exactly the URLs it did before.
 
-Two caveats for a strictly-scoped edge: the app shell is emitted from `RA_ROOT_PATH`, so
-a stranger's browser cannot fetch the favicon or the manifest from a public run page. The
-page renders fine — those fetches fail silently and the service-worker registration
-already swallows its own error — you just get a default tab icon. And `RA_MAX_LIVE_STREAMS`
+Two caveats for a strictly-scoped edge. The **manifest and the service worker** are still
+emitted from `RA_ROOT_PATH`, so a stranger's browser cannot fetch them from a public run
+page: the page renders fine — the fetch fails silently and the service-worker registration
+already swallows its own error — the app is simply not installable for someone who cannot
+sign in, which is the intent (D-installable-pwa, D-public-icons). The icons no longer share
+that fate; they are named from `RA_PUBLIC_ROOT_PATH` and served without an identity, so an
+anonymous reader gets the real tab icon. And `RA_MAX_LIVE_STREAMS`
 (default 32) caps how many progress streams may be open at once across everybody, since
 an anonymous route makes an open connection something a stranger can start; past the cap
 `/stream` answers `503` and the page still works on reload.

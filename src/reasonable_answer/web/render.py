@@ -123,10 +123,18 @@ def render_layout(
     live: bool = False,
     copyable: bool = False,
     base_path: str = "",
+    public_base: str | None = None,
     extra_css: str = "",
     extra_script: str = "",
     push: str = "",
 ) -> str:
+    # The icons are the one part of the app shell a *reader* needs, so they are named from
+    # `public_base` rather than `base_path` (D-public-icons). Every page here is reachable
+    # through the reader-facing door, and an icon named under the gated prefix is a
+    # subresource an anonymous browser is refused and then drops silently. Unset — dev, the
+    # tailnet, any single-door deployment — falls back to `base_path`, so every byte of
+    # every page is what it was.
+    icon_base = base_path if public_base is None else public_base
     # `push` is the VAPID public key, non-empty only when notifications are on *and* the
     # caller is signed in. It lives in the shell rather than on the index because an
     # installed standalone app has no browser chrome and no way to navigate back to a
@@ -183,10 +191,16 @@ def render_layout(
      which would put the clock on top of the header. -->
 <meta name="apple-mobile-web-app-status-bar-style" content="default">
 <meta name="apple-mobile-web-app-title" content="reasonable-answer">
-<link rel="icon" href="{base_path}/static/icons/favicon.svg" type="image/svg+xml">
-<link rel="icon" href="{base_path}/static/icons/icon-192.png" sizes="192x192" type="image/png">
+<!-- `icon_base`, not `base_path`: the icons are the shell's reader-facing part, so they
+     follow the same door the run page and its links do (D-public-icons). Under the gated
+     prefix they are an anonymous reader's only broken subresource — the browser reports
+     nothing and the tab keeps its default icon — and the route itself is anonymous for
+     the same reason. The manifest below deliberately stays gated: installing is a
+     signed-in affordance, and it is fetched with credentials. -->
+<link rel="icon" href="{icon_base}/static/icons/favicon.svg" type="image/svg+xml">
+<link rel="icon" href="{icon_base}/static/icons/icon-192.png" sizes="192x192" type="image/png">
 <!-- iOS ignores the manifest's icons for the home screen and reads this one. -->
-<link rel="apple-touch-icon" href="{base_path}/static/icons/apple-touch-icon.png">
+<link rel="apple-touch-icon" href="{icon_base}/static/icons/apple-touch-icon.png">
 <!-- `crossorigin="use-credentials"` because a manifest is the one subresource a browser
      fetches with credentials *omitted* by default, even same-origin. Every route but
      `/healthz` now needs an identity (D-identity-header), and through Cloudflare Access the fetch has
@@ -342,6 +356,7 @@ def render_index(
         "reasonable-answer",
         body,
         base_path=base_path,
+        public_base=public_base,
         extra_css=REFINE_CSS if config.refine.enabled else "",
         # Unconditional, unlike refine and push: this is not a feature to opt into but the
         # repair of a staleness the installed app cannot fix by hand (D-self-refreshing-index).
@@ -490,6 +505,7 @@ def render_run(
         body,
         live=summary.is_live,
         base_path=base_path,
+        public_base=public_base,
         # The page you land on after starting a run, so it is where the offer belongs most
         # (D-header-optin). Empty for an anonymous reader of a shared link, who has no runs to be told
         # about and could not subscribe if they tried.
@@ -734,6 +750,7 @@ def render_report(
         body,
         copyable=True,
         base_path=base_path,
+        public_base=public_base,
         push=vapid_key,
     )
 

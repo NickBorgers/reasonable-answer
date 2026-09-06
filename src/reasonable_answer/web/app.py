@@ -12,6 +12,9 @@ Design notes worth keeping in mind while reading:
   written yet — the failure mode of a per-route call is a new handler that forgets to
   make it. The exemption is method-scoped, so a new *write* is gated by default and
   only a new *read* under `/runs/` inherits the public rule (D-id-as-credential).
+  The icons under `/static/icons/` are exempt too, because a public run page names
+  them and a favicon nobody may fetch is a 403 the browser never reports
+  (D-public-icons); the rest of the app shell stays gated.
 * **Ownership is per run and scopes the index, not each read.** You see your own runs
   listed; anyone who holds a run id can read that run, signed in or not — holding the
   id is the credential. Sharing a link is the intended way to show someone a report.
@@ -80,7 +83,7 @@ _UNAUTHENTICATED_PATHS = frozenset({"/healthz"})
 #: The rule is **method-scoped**, and that is what keeps it narrow: every route that
 #: spends tokens or changes state is a POST, so `POST /runs` (submit — no trailing slash,
 #: so it does not match), `POST /runs/{id}/resume` and `POST /runs/{id}/again` all fall
-#: through to the identity check unchanged, as do `/` and the app-shell assets. Matched
+#: through to the identity check unchanged, as do `/` and the rest of the app shell. Matched
 #: against the same `request.url.path` the proxy has already stripped `RA_ROOT_PATH` from,
 #: exactly as `_UNAUTHENTICATED_PATHS` is (D-base-path). An owner-less run still 404s via
 #: `_require`, so nothing that was unreadable before becomes readable here.
@@ -89,6 +92,21 @@ _UNAUTHENTICATED_PATHS = frozenset({"/healthz"})
 #: `tests/test_web.py::test_public_run_get_routes_are_the_expected_set` enumerates the
 #: route table and fails on a new one, so widening this is a deliberate edit.
 _PUBLIC_GET_PREFIX = "/runs/"
+
+#: The icon bytes, readable without an identity for exactly one reason: a public run page
+#: names them, so gating them makes every anonymous reader's tab icon a 403 the browser
+#: never reports (D-public-icons). They are the artwork this repository ships — a fixed,
+#: five-entry table resolved at startup (`web/assets.py`), no run data, no identity, no
+#: token cost, and `Cache-Control: public` already.
+#:
+#: Narrower than it looks: this is the *whole* of `/static/`, and the rest of the shell —
+#: `manifest.webmanifest`, `sw.js`, `offline.html` — stays gated, because installing the
+#: app is a signed-in affordance and the manifest is fetched with credentials. Like the
+#: rule above it is method-scoped and matched against the already-stripped path.
+_PUBLIC_ICON_PREFIX = static_assets.ICONS_PREFIX
+
+#: The two public read prefixes, in the form `str.startswith` takes.
+_PUBLIC_GET_PREFIXES = (_PUBLIC_GET_PREFIX, _PUBLIC_ICON_PREFIX)
 
 log = logging.getLogger(__name__)
 
@@ -306,7 +324,9 @@ def create_app(
         because those are opt-in and this must not be: the cost of forgetting is an
         open route onto other people's seed material. Every handler below can assume
         `request.state.viewer` is a real identity — except the GETs under `/runs/`,
-        which are public (D-id-as-credential) and where it may be None.
+        which are public (D-id-as-credential) and where it may be None, and the icon
+        route, which a public run page names and which reads no request state at all
+        (D-public-icons).
 
         `HTTPException` is not available here — it is raised past the exception
         middleware that would turn it into a response — so the refusal is returned
@@ -315,8 +335,9 @@ def create_app(
         """
         if request.url.path in _UNAUTHENTICATED_PATHS:
             return await call_next(request)
-        if request.method == "GET" and request.url.path.startswith(_PUBLIC_GET_PREFIX):
-            # Reading a run is public (D-id-as-credential). The identity is still resolved rather than
+        if request.method == "GET" and request.url.path.startswith(_PUBLIC_GET_PREFIXES):
+            # Reading a run is public (D-id-as-credential), and so are the icons that run
+            # page names (D-public-icons). The identity is still resolved rather than
             # forced to None, because the same page is reachable through the gated door
             # too and a viewer we happen to know is not worth throwing away — but None is
             # an ordinary value here, not a refusal, so every handler under `/runs/` must
@@ -836,6 +857,8 @@ def create_app(
     def icon(name: str) -> Response:
         # `name` indexes a fixed table; it is never joined onto a path. Traversal, encoded
         # separators and absolute paths are therefore misses like any other unknown name.
+        # The only route in the shell that answers an anonymous caller (D-public-icons):
+        # it takes no `Request`, reads no viewer, and returns bytes fixed at startup.
         return _asset_response(assets.icons.get(name), "public, max-age=604800")
 
     return app
