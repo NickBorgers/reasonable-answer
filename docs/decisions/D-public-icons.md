@@ -13,8 +13,8 @@ app.
 [authentication.md](../authentication.md) recorded this as an accepted caveat ("you just get a
 default tab icon"). It reads differently once a public page is the *normal* way a report is seen:
 a shared run page is the artifact this system exists to hand to someone, and it arrives without
-the mark that says whose it is. Nothing reports the failure — a favicon that 403s is silent in
-every browser — so the only signal is a blank tab, and the workaround it provoked downstream was
+the mark that says whose it is. The deployment described in the originating issue showed the
+default tab icon with no error in the page itself, and the workaround it provoked downstream was
 an nginx `sub_filter` rewriting the hardcoded path back out of the HTML, which is a rule that
 breaks quietly the day the asset is renamed.
 
@@ -50,20 +50,17 @@ ever appears under the icon prefix, so widening this is an edit with a test to u
 **The edge has to route it.** This is the one real cost, and it is a deployment change, not a code
 one: on a two-door deployment the edge must route `/static/icons/` to the app path-preserving and
 ungated, exactly as it already routes `/runs/`. Until it does, the icons 404 for *everyone*,
-signed in or not, because the app now names one URL for them rather than two. One URL is the point
-— two would mean each browser caching the artwork twice and the gated copy differing from the
-public one for no reason — so the requirement is stated in
+signed in or not, because the app now names one URL for them rather than two. One canonical URL
+also avoids maintaining gated and public names for identical artwork, so the requirement is stated
+in
 [authentication.md](../authentication.md) and
 [deployment-profile.md](../deployment-profile.md) beside the `/runs/` one it sits next to.
 
 **What is deliberately left alone.** The service worker still precaches the icons under
-`base_path`, not the public base, and that is correct rather than an oversight: a worker
-registered with scope `base_path + '/'` never sees a fetch outside that scope, so precaching the
-public URLs would fill a cache that can never answer. The consequence is bounded and cosmetic — an
-installed app that is offline shows the offline page without its favicon — and the precache list
-is still the same fixed set with no run URL in it, so D-installable-pwa's inclusion-allowlist
-property is untouched. The manifest's own icon `src`es likewise stay under `base_path`, next to
-the manifest that names them.
+`base_path`, not the public base. That preserves the existing installable shell as one gated unit:
+the worker, its offline page, the manifest and the manifest's icon `src` values all remain under
+`base_path`. The precache list is still the same fixed set with no run URL in it, so
+D-installable-pwa's inclusion-allowlist property is untouched.
 
 **Invariants.** No pipeline invariant is in reach: this is URL generation and one route's
 authentication in the web layer, which is a window onto the audit trail and touches no model
