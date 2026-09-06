@@ -91,15 +91,29 @@ def _wait_for_final(target, run_id: str, timeout: float = _STUCK_AFTER_SECONDS) 
     `runs_dir` to read live, so no caller has to thread a second handle through.
 
     This polled `registry.final()` against a 20-second stopwatch until
-    D-test-waits-are-barriers. That is a race with nothing bounding the other side: a run
-    is only *typically* instant here because the proxy is fake, and on a loaded runner one
-    such wait timed out, reddened `PR Validation Required`, and left the reviewer guards
-    skipping the whole five-reviewer panel — a NO-GO on a change nothing had read (PR
-    #197). `queue.join()` returns exactly when the job is marked done, which is after the
-    final record is written, so a slow runner now makes this slower rather than red.
+    D-test-waits-are-barriers, and the stopwatch was racing the app's own teardown rather
+    than the run. `queue.join()` returns exactly when the job is marked done, which is
+    after the final record is written, so a slow runner now makes a wait slower rather
+    than red.
+
+    The `_stopping` check is the other half, and it is the half that failed in CI: leaving
+    a `web_client` context runs the app's shutdown, which stops the worker, and a run still
+    mid-graph is then paused at its next node boundary and never writes a final record at
+    all. A wait placed after that teardown could only ever pass by beating it — which the
+    fake proxy did locally and did not on a loaded runner, so `PR Validation Required` went
+    red, every reviewer guard refused the SHA, and the panel published a NO-GO on a change
+    nothing had read (PR #197). Waiting on the queue there would hang instead: `shutdown()`
+    leaves its wake-up sentinels unfinished, so `join()` never returns. Say so at once
+    rather than at the backstop.
     """
     app = getattr(target, "app", target)
-    _drain(app.state.worker, timeout)
+    worker = app.state.worker
+    assert not worker._stopping.is_set(), (
+        f"{run_id} is being waited for after the app shut down, which stops the worker and "
+        "pauses any run still mid-graph without a final record. Move the wait inside the "
+        "client's `with`, where the run it is waiting for is still allowed to finish."
+    )
+    _drain(worker, timeout)
     registry = Registry(app.state.config.runs_dir)
     final = registry.final(run_id)
     assert final is not None, (
@@ -694,8 +708,13 @@ def test_a_public_run_page_names_icons_a_stranger_can_actually_fetch(
             resp = signed_in.post(
                 "/runs", data={"question": "Does it have a favicon?"}, follow_redirects=False
             )
-        run_id = resp.headers["location"].rsplit("/", 1)[-1]
-        _wait_for_final(config, run_id)
+            run_id = resp.headers["location"].rsplit("/", 1)[-1]
+            # Inside the client's own `with`, because leaving it runs the app's shutdown,
+            # and that stops the worker: a run still mid-graph is asked to pause at its
+            # next node boundary and never writes a final record. Waiting out here worked
+            # only while the fake proxy kept every run shorter than the teardown that was
+            # racing it (D-test-waits-are-barriers).
+            _wait_for_final(signed_in, run_id)
 
         with web_client(app, identity=None) as anon:
             for path in (f"/runs/{run_id}", f"/runs/{run_id}/report"):
