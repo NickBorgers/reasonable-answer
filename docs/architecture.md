@@ -35,6 +35,16 @@ cluster; invented publishers would plant fabrication as a second, easier defect.
 citation mechanics and the fixed cluster, while source support remains a fetched-text review
 obligation because a regex cannot establish what a paper says.
 
+Being the instrument rather than test prose is also where the corpus lives:
+`src/reasonable_answer/fixtures/audition/`, inside the package, shipped by every wheel and present
+in the runtime image because it copies `src/`. Until D-packaged-audition-corpus it sat under
+`tests/`, a path that resolves only in a source checkout — so the deployer running the published
+image, the one D-critic-audition exists to serve, was the one person who could not run
+`ra audition` at all.
+`--fixtures` overrides the location; there is deliberately no search path behind it, because
+`corpus_hash` is the identity of the measurement and a fallback chain would let two corpora answer
+to one command.
+
 The diagram below shows a minimal roster for clarity; generator selection is round-robin among
 writers excluding the current artifact's author, preserving `critic(Rₙ) ≠ generator(Rₙ)`.
 
