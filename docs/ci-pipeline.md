@@ -177,6 +177,40 @@ Note what this cannot protect against: a reviewer artifact is validated against 
 the schema, so a PR that admits a new field does not help its own reviewers. The fix has to be on
 main before the field stops killing artifacts.
 
+### A transient failure is not a verdict (D-reviewer-retry-transient)
+
+The panel is all-or-nothing at the judge: every selected role must be present, so **one
+reviewer dying fails the whole cycle closed**. That is the right direction — a missing
+reviewer must never read as consent — but it means the cost of a provider hiccup is not one
+reviewer, it is a `pipeline_error` NO-GO the PR did not earn plus a five-reviewer re-read.
+PR #196 paid it for `API Error: 400` two turns into the `invariant` role: forty seconds and
+$0.34 into a run that had read nothing yet.
+
+So a reviewer gets **one retry**, and the retry is bounded by what is safe to repeat rather
+than by how badly the pipeline wants an artifact:
+
+- **Only a read-only caller opts in.** `max_attempts` defaults to 1 on
+  `review-agent-run`; the reviewer workflow is the only caller that passes 2. The fixer, the
+  resolver and the author all push, open a PR, or carry a resumable session, so a second
+  invocation there is not a repeat of the first — it starts on a tree the first one already
+  changed.
+- **A resumed session is never retried**, whatever the caller asked for. `run-in-container.sh`
+  deliberately contains a failed resume by exiting 0 with a sentinel so the cold fallback
+  runs; retrying at the container boundary would race that handoff.
+- **Only a fast failure is retried** — inside `retry_within_seconds`, default 600. A
+  deadline-shaped failure has already spent the job's budget and is the one a second identical
+  attempt would most likely repeat, so it is left to fail. One fast failure plus one full
+  attempt still fits the reviewer job's 45-minute bound.
+- **The retry starts clean.** Any partial result JSON from the dead attempt is removed first,
+  so the judge can never read a half-written artifact, and the failed transcript is kept
+  beside it as `<role>-attempt1-output.log` — the diagnostics survive even when the retry
+  goes green and the job is not marked failed.
+
+Nothing here loosens the gate. A retry buys one more attempt, never a pass: if it also fails
+the role is still absent and the judge still fails the cycle closed.
+`tests/test_ci_agent_retry.py` extracts the composite's `Run agent` shell and drives it
+against a fake `docker`, pinning each refusal above as well as the retry itself.
+
 ### The judge fails closed
 
 [`aggregate.mjs`](https://github.com/NickBorgers/reasonable-answer/blob/main/.github/scripts/review/aggregate.mjs) returns NO-GO rather than
