@@ -1,16 +1,15 @@
 ## D-pipeline-error-names-its-cause — the fail-closed verdict says what stopped the panel
 
-**The problem.** `pipeline_error` is the verdict for "the judge could not trust its inputs", and its
-most common shape is that no reviewer artifact exists. The judge can see the empty directory. It
-cannot see why, because a guard that refuses produces no artifact and leaves no trace in anything the
-verdict reads — so the verdict described the symptom, `no reviewer artifacts (reviews skipped?)`, and
-the published comment added that this is "usually a reviewer or orchestration bug".
+**The problem.** `pipeline_error` is the verdict for "the judge could not trust its inputs". When no
+reviewer artifact exists, the judge can see the empty directory. It cannot see why, because a guard
+that refuses produces no artifact and leaves no trace in anything the verdict reads — so the verdict
+described the symptom, `no reviewer artifacts (reviews skipped?)`, and the published comment
+suggested a reviewer or orchestration bug.
 
-Both sentences point away from the answer. The usual cause is a fact a guard read and logged one job
-upstream: `PR Validation Required` was red on the reviewed SHA, so every guard refused. PR #197 is
-the worked example — one flaky test reddened validation, five guards refused, and the comment
-proposed a reviewer or orchestration bug. Recovering the truth took a walk back through four jobs'
-logs.
+In the motivating PR #197 incident, both sentences pointed away from the observed cause: a guard had
+read and logged one job upstream that `PR Validation Required` was red on the reviewed SHA, so every
+guard refused. One flaky test reddened validation, five guards refused, and the comment proposed a
+reviewer or orchestration bug. Recovering the truth took a walk back through four jobs' logs.
 
 That cost is not one-off. Every reader pays it again, and it grows: Actions logs expire, so a
 `pipeline_error` older than the retention window is not diagnosable at all — the one artifact that

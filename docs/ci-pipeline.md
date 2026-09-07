@@ -224,8 +224,10 @@ reviewer was skipped — each reviewer's Guard concluded `ok=false`, e.g. becaus
 Validation failed on the reviewed SHA — no reviewer artifact is uploaded, and
 `download-artifact` leaves the `reviewer-artifacts` directory wholly absent rather than
 empty. `judge.mjs` treats that as a `pipeline_error` NO-GO (`pipeline could not trust its
-inputs: no reviewer artifacts (reviews skipped?)`) instead of letting `readdirSync` die
-with a raw `ENOENT`. The distinction matters operationally: a crash publishes no verdict,
+inputs`). When guards supply refusal reasons, the verdict's `reasons[]` names their deduplicated
+reasons; when no reasons are supplied, it falls back to `no reviewer artifacts (reviews
+skipped?)`. This happens instead of letting `readdirSync` die with a raw `ENOENT`. The distinction
+matters operationally: a crash publishes no verdict,
 so the merge gate stays un-green with nothing to say why and the cycle burns silently,
 whereas a NO-GO verdict is recorded on the SHA and the finalize comment can explain it.
 
@@ -288,17 +290,16 @@ it holds `contents: read`, so it could not push if it tried.
 
 ### A `pipeline_error` names its own cause (D-pipeline-error-names-its-cause)
 
-A `pipeline_error` is the fail-closed verdict for "the judge could not trust its inputs", and its
-most common shape is that no reviewer artifact exists at all. The judge can see that the directory
-is empty; it cannot see *why*, because a guard that refuses produces no artifact and leaves no trace
-in anything the verdict reads. So the verdict used to describe what it found — `no reviewer
-artifacts (reviews skipped?)` — and the comment added that this is "usually a reviewer or
-orchestration bug".
+A `pipeline_error` is the fail-closed verdict for "the judge could not trust its inputs". When no
+reviewer artifact exists, the judge can see that the directory is empty; it cannot see *why*,
+because a guard that refuses produces no artifact and leaves no trace in anything the verdict
+reads. So the verdict used to describe what it found — `no reviewer artifacts (reviews skipped?)`
+— and the comment suggested a reviewer or orchestration bug.
 
-Both were misdirection. The usual cause is a fact a guard already read and logged one job upstream:
-`PR Validation Required` was red on the reviewed SHA, so every guard refused. Recovering that meant
-walking back through four jobs' logs, and Actions logs expire — a `pipeline_error` older than the
-retention window is no longer diagnosable at all.
+In the motivating PR #197 incident, both pointed away from the observed cause: a guard had already
+read and logged one job upstream that `PR Validation Required` was red on the reviewed SHA, so every
+guard refused. Recovering that meant walking back through four jobs' logs, and Actions logs expire
+— a `pipeline_error` older than the retention window is no longer diagnosable at all.
 
 The guard's reason now travels with the refusal: **guard output → the reviewer workflow's
 `skip_reason` → the pipeline's judge call → `GUARD_SKIP_REASONS` in the judge's environment.** The
