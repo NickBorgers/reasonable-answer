@@ -6,16 +6,11 @@ that refuses produces no artifact and leaves no trace in anything the verdict re
 described the symptom, `no reviewer artifacts (reviews skipped?)`, and the published comment
 suggested a reviewer or orchestration bug.
 
-In the motivating PR #197 incident, both sentences pointed away from the observed cause: a guard had
-read and logged one job upstream that `PR Validation Required` was red on the reviewed SHA, so every
-guard refused. One flaky test reddened validation, five guards refused, and the comment proposed a
-reviewer or orchestration bug. Recovering the truth took a walk back through four jobs' logs.
-
-That cost is not one-off. Every reader pays it again, and it grows: Actions logs expire, so a
-`pipeline_error` older than the retention window is not diagnosable at all — the one artifact that
-outlives them is the comment, which was the thing pointing the wrong way. The reasoning is the same
-as D-reviewer-retry-transient and D-test-waits-are-barriers: this pipeline's failures are read by
-someone later, and a message that guesses wrong is more expensive than one that says less.
+The generic text cannot distinguish the guard conditions already represented by the workflow: a
+failed or non-success validation gate, a timeout, a superseded head, a fork, or an untrusted author.
+The guard has that structured state when it refuses, while the judge does not unless the workflow
+carries it forward. Reporting the state the guard read is more precise than guessing which component
+failed from the absence of an artifact.
 
 **The decision.** The guard's own words travel with the refusal, and the verdict prints them.
 

@@ -296,10 +296,10 @@ because a guard that refuses produces no artifact and leaves no trace in anythin
 reads. So the verdict used to describe what it found — `no reviewer artifacts (reviews skipped?)`
 — and the comment suggested a reviewer or orchestration bug.
 
-In the motivating PR #197 incident, both pointed away from the observed cause: a guard had already
-read and logged one job upstream that `PR Validation Required` was red on the reviewed SHA, so every
-guard refused. Recovering that meant walking back through four jobs' logs, and Actions logs expire
-— a `pipeline_error` older than the retention window is no longer diagnosable at all.
+The generic text cannot distinguish the refusal conditions the guard already represents: a failed
+or non-success validation gate, a timeout, a superseded head, a fork, or an untrusted author. The
+guard has that state when it refuses, so carrying it to the judge lets the verdict report the known
+condition instead of guessing from the missing artifact.
 
 The guard's reason now travels with the refusal: **guard output → the reviewer workflow's
 `skip_reason` → the pipeline's judge call → `GUARD_SKIP_REASONS` in the judge's environment.** The
