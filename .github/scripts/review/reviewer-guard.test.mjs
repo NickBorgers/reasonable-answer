@@ -58,11 +58,17 @@ const GUARD = new AsyncFunction("github", "context", "core", "process", "setTime
  * `gate(poll)` returns the `PR Validation Required` check run as the API would report it on
  * that poll (1-based), or null for "the check is not there yet".
  */
-async function runGuard({ gate, headSha = SHA, headRepo = "NickBorgers/reasonable-answer" } = {}) {
+async function runGuard({
+  gate,
+  headSha = SHA,
+  headRepo = "NickBorgers/reasonable-answer",
+  authorAssociation = "OWNER",
+} = {}) {
   const polls = [];
   const sleeps = [];
   const logs = { info: [], warning: [], failed: [] };
   let ok;
+  let reason;
 
   const github = {
     rest: {
@@ -70,7 +76,7 @@ async function runGuard({ gate, headSha = SHA, headRepo = "NickBorgers/reasonabl
         get: async () => ({
           data: {
             head: { sha: headSha, repo: { full_name: headRepo } },
-            author_association: "OWNER",
+            author_association: authorAssociation,
           },
         }),
       },
@@ -93,6 +99,7 @@ async function runGuard({ gate, headSha = SHA, headRepo = "NickBorgers/reasonabl
       setFailed: (m) => logs.failed.push(m),
       setOutput: (name, value) => {
         if (name === "ok") ok = value;
+        if (name === "reason") reason = value;
       },
     },
     { env: { PR_NUMBER: "156", REVIEWED_SHA: SHA } },
@@ -102,7 +109,7 @@ async function runGuard({ gate, headSha = SHA, headRepo = "NickBorgers/reasonabl
     },
   );
 
-  return { ok, polls: polls.length, sleeps, logs };
+  return { ok, reason, polls: polls.length, sleeps, logs };
 }
 
 const passing = { name: "PR Validation Required", status: "completed", conclusion: "success" };
@@ -201,4 +208,67 @@ test("a fork PR fails the job before the wait begins", async () => {
   assert.equal(ok, "false");
   assert.equal(polls, 0);
   assert.match(logs.failed.join("\n"), /fork PR/);
+});
+
+// ─── D-pipeline-error-names-its-cause: every refusal says why, in words a comment can print ───
+//
+// A guard that refuses produces no artifact, so by the time the judge runs, the refusal has
+// left no trace anywhere the verdict can reach — which is why `pipeline_error` used to
+// describe the empty directory it found rather than the red gate that caused it. These pin
+// that each refusal carries its own reason out of the job, and that clearing carries none.
+
+test("a red gate's reason names the conclusion it read", async () => {
+  const failed = { name: "PR Validation Required", status: "completed", conclusion: "failure" };
+  const { reason } = await runGuard({ gate: () => failed });
+  assert.match(reason, /PR Validation Required concluded 'failure'/);
+});
+
+test("a non-success conclusion is named as itself, not flattened to 'failure'", async () => {
+  const cancelled = { name: "PR Validation Required", status: "completed", conclusion: "cancelled" };
+  const { reason } = await runGuard({ gate: () => cancelled });
+  assert.match(reason, /concluded 'cancelled'/);
+});
+
+test("a timeout's reason says it waited rather than that it read a red gate", () => {
+  assert.match(timedOut.reason, /did not complete/);
+  assert.doesNotMatch(timedOut.reason, /concluded/);
+});
+
+test("a superseded SHA's reason names the head that replaced it", async () => {
+  const { reason } = await runGuard({ gate: () => passing, headSha: "b".repeat(40) });
+  assert.match(reason, /no longer the PR head/);
+  assert.match(reason, /bbbbbbb/);
+});
+
+test("an untrusted author is refused, and the reason names the association", async () => {
+  // The last of the guard's five refusals, and the one this harness could not reach until
+  // `authorAssociation` became a parameter: the stub answered OWNER for every caller, so
+  // the branch was unexercised for `ok` as well as for `reason`.
+  const { ok, polls, reason, logs } = await runGuard({
+    gate: () => passing,
+    authorAssociation: "CONTRIBUTOR",
+  });
+  assert.equal(ok, "false");
+  assert.equal(polls, 0, "an untrusted author is refused before the wait begins");
+  assert.equal(logs.failed.length, 1, "an untrusted author fails the job, like a fork");
+  assert.match(reason, /CONTRIBUTOR/);
+  assert.match(reason, /not trusted/);
+});
+
+test("a trusted association still clears, so the refusal is about trust and not about reading the field", async () => {
+  for (const association of ["OWNER", "MEMBER", "COLLABORATOR"]) {
+    const { ok } = await runGuard({ gate: () => passing, authorAssociation: association });
+    assert.equal(ok, "true", `${association} must clear the guard`);
+  }
+});
+
+test("a fork's reason names the fork", async () => {
+  const { reason } = await runGuard({ gate: () => passing, headRepo: "someone/fork" });
+  assert.match(reason, /someone\/fork/);
+});
+
+test("a guard that clears carries no reason at all", async () => {
+  const { ok, reason } = await runGuard({ gate: () => passing });
+  assert.equal(ok, "true");
+  assert.equal(reason, undefined, "an empty line is what the judge drops; a stale one it would print");
 });
