@@ -215,6 +215,13 @@ jobs:
           llm_proxy_base_url: ${{ vars.LLM_PROXY_BASE_URL }}
           llm_proxy_openai_base_url: ${{ vars.LLM_PROXY_OPENAI_BASE_URL }}
           llm_proxy_api_key: ${{ vars.AI_API_KEY || 'fake-key' }}
+          # A reviewer is the one role a second identical invocation is a true repeat of:
+          # it pushes nothing, its comment is published in a later step, and a failed
+          # attempt's artifact is deleted before the retry starts. The panel is
+          # all-or-nothing at the judge — one missing role fail-closes the whole cycle —
+          # so paying for one more reviewer beats re-reading with five
+          # (D-reviewer-retry-transient).
+          max_attempts: '2'
 
       # Validated against main's schema, not the PR's. A PR that widened the schema to
       # let its own reviewer emit something unexpected would be validating against its
