@@ -78,6 +78,55 @@ function reviewer(role, decision, blocking_issues = []) {
   };
 }
 
+// ─────────── D-pipeline-error-names-its-cause: the verdict says what stopped the panel ───────────
+
+test("a pipeline_error names the guards' own reason instead of the empty directory", () => {
+  const ws = workspace();
+  // The PR #197 shape: one flaky test reddened PR Validation, so all five guards refused
+  // with the same fact about the same SHA.
+  const reason = "PR Validation Required concluded 'failure' on the reviewed SHA";
+  const r = runJudge(ws, {
+    EXPECTED_ROLES: JSON.stringify(["invariant", "docs"]),
+    GUARD_SKIP_REASONS: `${reason}\n${reason}\n\n${reason}\n`,
+  });
+
+  assert.equal(r.verdict.category, "pipeline_error");
+  const reasons = r.verdict.reasons.join("\n");
+  assert.match(reasons, /PR Validation Required concluded 'failure'/);
+  // One fact about one SHA, said once — not five copies, and not the old wording that sent
+  // the reader to the reviewers and the orchestrator.
+  assert.equal(reasons.match(/PR Validation Required/g).length, 1);
+  assert.doesNotMatch(reasons, /reviews skipped\?/i);
+});
+
+test("distinct guard reasons are all named, so a mixed refusal is not reported as one cause", () => {
+  const ws = workspace();
+  const r = runJudge(ws, {
+    EXPECTED_ROLES: JSON.stringify(["invariant", "docs"]),
+    GUARD_SKIP_REASONS:
+      "PR Validation Required concluded 'failure' on the reviewed SHA\n" +
+      "the reviewed SHA is no longer the PR head (now 1a2b3c4)\n",
+  });
+
+  const reasons = r.verdict.reasons.join("\n");
+  assert.match(reasons, /PR Validation Required concluded 'failure'/);
+  assert.match(reasons, /no longer the PR head/);
+});
+
+test("with no reasons supplied the verdict still says what is true", () => {
+  // A caller that cannot supply them — an older pipeline, or a refusal shape that set
+  // none — must get the generic wording rather than an empty claim about a cause.
+  const ws = workspace();
+  const r = runJudge(ws, {
+    EXPECTED_ROLES: JSON.stringify(["invariant"]),
+    GUARD_SKIP_REASONS: "\n  \n",
+  });
+
+  assert.equal(r.verdict.verdict, "NO-GO");
+  assert.equal(r.verdict.category, "pipeline_error");
+  assert.match(r.verdict.reasons.join("\n"), /no reviewer artifacts/i);
+});
+
 // ───────────────────── issue #37: the reviewer directory never appeared ─────────────────────
 
 test("absent reviewer directory -> NO-GO pipeline_error, does not crash (issue #37)", () => {

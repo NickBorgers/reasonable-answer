@@ -51,6 +51,13 @@ and unaddressed blocker ids are derived mechanically from the same structured re
 artifacts under QP8. The added verdict field changes how the finalize comment classifies findings for
 display, not the GO/NO-GO boundary; no LLM prose or ordinal judgment enters either classification.
 
+**Application — a `pipeline_error` names its cause (D-pipeline-error-names-its-cause).** The reviewer
+guards' refusal reasons are carried to the judge and rendered into the verdict's `reasons[]`. They are
+*output only*: no branch reads them, the GO/NO-GO boundary, the category and the fail-closed direction
+are unchanged, and the aggregation QP8 governs is untouched. The strings are composed from the guard's
+own API reads — a check conclusion, a head SHA, a repo name, an author association — never from PR
+prose, so nothing a pull request writes reaches a verdict through this path.
+
 **Application — resumed-agent stall bounds (D-resume-stall-guard).** The resumed fixer remains under
 the unchanged outer agent timeout, while a 3-minute first-output deadline and a 10-minute
 between-output deadline add earlier bounds for silent attempts. Both idle deadlines route to the

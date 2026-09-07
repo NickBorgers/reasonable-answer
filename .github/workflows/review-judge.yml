@@ -23,6 +23,16 @@ on:
         description: 'JSON array of the roles the classifier selected'
         required: true
         type: string
+      guard_skip_reasons:
+        description: >
+          Newline-separated reasons the reviewer guards refused, one per role and blank for
+          each that cleared. The judge renders them into a `pipeline_error` verdict so it
+          names its cause rather than the shape of the failure
+          (D-pipeline-error-names-its-cause). Optional: a caller that cannot supply them
+          gets the old generic wording, not a broken run.
+        required: false
+        default: ''
+        type: string
     secrets:
       WORKFLOW_PAT:
         required: true
@@ -98,6 +108,7 @@ jobs:
           REVIEWER_DIR: reviewer-artifacts
           VERDICT_OUTPUT_PATH: verdict-${{ inputs.reviewed_sha }}.json
           EXPECTED_ROLES: ${{ inputs.roles }}
+          GUARD_SKIP_REASONS: ${{ inputs.guard_skip_reasons }}
           FIX_RESULT_PATH: fixer-artifact/fixer-result.json
         run: node .github/scripts/review/judge.mjs
 

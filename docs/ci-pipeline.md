@@ -286,6 +286,40 @@ Two further properties make the judge trustworthy, and both are structural rathe
 conventional: it checks out **`main`**, so a PR cannot modify the code that judges it, and
 it holds `contents: read`, so it could not push if it tried.
 
+### A `pipeline_error` names its own cause (D-pipeline-error-names-its-cause)
+
+A `pipeline_error` is the fail-closed verdict for "the judge could not trust its inputs", and its
+most common shape is that no reviewer artifact exists at all. The judge can see that the directory
+is empty; it cannot see *why*, because a guard that refuses produces no artifact and leaves no trace
+in anything the verdict reads. So the verdict used to describe what it found — `no reviewer
+artifacts (reviews skipped?)` — and the comment added that this is "usually a reviewer or
+orchestration bug".
+
+Both were misdirection. The usual cause is a fact a guard already read and logged one job upstream:
+`PR Validation Required` was red on the reviewed SHA, so every guard refused. Recovering that meant
+walking back through four jobs' logs, and Actions logs expire — a `pipeline_error` older than the
+retention window is no longer diagnosable at all.
+
+The guard's reason now travels with the refusal: **guard output → the reviewer workflow's
+`skip_reason` → the pipeline's judge call → `GUARD_SKIP_REASONS` in the judge's environment.** The
+pipeline is the only stage that can collect all five, so it collects them there. The judge
+deduplicates — five guards refusing over one red gate is one fact about one SHA, not five — and
+names the set in the verdict's `reasons[]`, which the comment renders under **Why**.
+
+Two properties are deliberate:
+
+- **A caller that supplies no reasons still gets the old sentence.** The input is optional and the
+  fallback is the generic wording, so a refusal shape that sets no reason produces a verdict that is
+  vague rather than one that claims a cause it does not have.
+- **Distinct reasons are all named.** Guards can refuse for different reasons in the same run — a
+  moved head and a red gate — and a verdict naming only the first would be a new way to mislead.
+
+Nothing about the gate changes: the verdict, the category and the fail-closed direction are what
+they were. Only the sentence differs. `reviewer-guard.test.mjs` pins that each refusal carries its
+reason and that a cleared guard carries none; `judge.test.mjs` pins the rendering and the fallback;
+`tests/test_ci_pipeline_error_cause.py` pins the wire between them, which every other test would
+pass without.
+
 ### Cycle control
 
 - **GO is terminal.** A commit already carrying a successful merge gate is not

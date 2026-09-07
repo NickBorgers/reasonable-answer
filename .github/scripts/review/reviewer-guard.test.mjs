@@ -63,6 +63,7 @@ async function runGuard({ gate, headSha = SHA, headRepo = "NickBorgers/reasonabl
   const sleeps = [];
   const logs = { info: [], warning: [], failed: [] };
   let ok;
+  let reason;
 
   const github = {
     rest: {
@@ -93,6 +94,7 @@ async function runGuard({ gate, headSha = SHA, headRepo = "NickBorgers/reasonabl
       setFailed: (m) => logs.failed.push(m),
       setOutput: (name, value) => {
         if (name === "ok") ok = value;
+        if (name === "reason") reason = value;
       },
     },
     { env: { PR_NUMBER: "156", REVIEWED_SHA: SHA } },
@@ -102,7 +104,7 @@ async function runGuard({ gate, headSha = SHA, headRepo = "NickBorgers/reasonabl
     },
   );
 
-  return { ok, polls: polls.length, sleeps, logs };
+  return { ok, reason, polls: polls.length, sleeps, logs };
 }
 
 const passing = { name: "PR Validation Required", status: "completed", conclusion: "success" };
@@ -201,4 +203,45 @@ test("a fork PR fails the job before the wait begins", async () => {
   assert.equal(ok, "false");
   assert.equal(polls, 0);
   assert.match(logs.failed.join("\n"), /fork PR/);
+});
+
+// ─── D-pipeline-error-names-its-cause: every refusal says why, in words a comment can print ───
+//
+// A guard that refuses produces no artifact, so by the time the judge runs, the refusal has
+// left no trace anywhere the verdict can reach — which is why `pipeline_error` used to
+// describe the empty directory it found rather than the red gate that caused it. These pin
+// that each refusal carries its own reason out of the job, and that clearing carries none.
+
+test("a red gate's reason names the conclusion it read", async () => {
+  const failed = { name: "PR Validation Required", status: "completed", conclusion: "failure" };
+  const { reason } = await runGuard({ gate: () => failed });
+  assert.match(reason, /PR Validation Required concluded 'failure'/);
+});
+
+test("a non-success conclusion is named as itself, not flattened to 'failure'", async () => {
+  const cancelled = { name: "PR Validation Required", status: "completed", conclusion: "cancelled" };
+  const { reason } = await runGuard({ gate: () => cancelled });
+  assert.match(reason, /concluded 'cancelled'/);
+});
+
+test("a timeout's reason says it waited rather than that it read a red gate", () => {
+  assert.match(timedOut.reason, /did not complete/);
+  assert.doesNotMatch(timedOut.reason, /concluded/);
+});
+
+test("a superseded SHA's reason names the head that replaced it", async () => {
+  const { reason } = await runGuard({ gate: () => passing, headSha: "b".repeat(40) });
+  assert.match(reason, /no longer the PR head/);
+  assert.match(reason, /bbbbbbb/);
+});
+
+test("a fork's reason names the fork", async () => {
+  const { reason } = await runGuard({ gate: () => passing, headRepo: "someone/fork" });
+  assert.match(reason, /someone\/fork/);
+});
+
+test("a guard that clears carries no reason at all", async () => {
+  const { ok, reason } = await runGuard({ gate: () => passing });
+  assert.equal(ok, "true");
+  assert.equal(reason, undefined, "an empty line is what the judge drops; a stale one it would print");
 });

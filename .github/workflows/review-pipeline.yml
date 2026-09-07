@@ -715,6 +715,17 @@ jobs:
       reviewed_sha: ${{ inputs.reviewed_sha }}
       cycle: ${{ needs.gather.outputs.cycle }}
       roles: ${{ needs.gather.outputs.roles }}
+      # Every guard's refusal, newline-separated, so a `pipeline_error` can say what
+      # actually stopped the panel. Collected here because this is the only place that can
+      # see all five: a guard that refuses produces no artifact, so by the judge the
+      # refusal has left no trace but this string (D-pipeline-error-names-its-cause).
+      # A cleared guard contributes an empty line, which the judge drops.
+      guard_skip_reasons: |
+        ${{ needs.review-invariant.outputs.skip_reason }}
+        ${{ needs.review-docs.outputs.skip_reason }}
+        ${{ needs.review-security.outputs.skip_reason }}
+        ${{ needs.review-test.outputs.skip_reason }}
+        ${{ needs.review-quality.outputs.skip_reason }}
     secrets:
       WORKFLOW_PAT: ${{ secrets.WORKFLOW_PAT }}
 
