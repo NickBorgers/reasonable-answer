@@ -294,7 +294,7 @@ roster:
   writers: [mistral-large-3, deepseek-v4-flash, nemotron-3-ultra]   # models that author reports
   orchestrator: gemma4-small                                       # blind referee (optional; default writers[0])
   critics:
-    logic:        [mistral-large-3, glm-5.2]
+    logic:        [mistral-large-3, gemma4, glm-5.2]
     evidence:     [glm-5.2, gemma4]
     completeness: [gemma4, glm-5.2]
 ```

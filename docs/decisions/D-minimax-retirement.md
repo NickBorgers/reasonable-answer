@@ -1,5 +1,10 @@
 ## D-minimax-retirement — a critic unfit on every lens it holds leaves the roster
 
+*(The logic-pool composition and ordering below describe the state this decision established and
+are superseded by D-logic-third-family: `gemma4` was measured `fit` on logic and added at position
+2, so the pool is now `[mistral-large-3, gemma4, glm-5.2]` and author exclusion no longer thins the
+lens to one family. The measurement and retirement rationale stand.)*
+
 **The measurement.** The public source record is
 [PR #162](https://github.com/NickBorgers/reasonable-answer/pull/162), whose body records the audit
 dates, extraction modes, metrics, call counts, and per-issue spot-check result stated here. Three
@@ -22,15 +27,17 @@ return an honest clean does not converge a run: every invented material issue bl
 and burns a revision round, and at position 2 inside `review.depth: 2` it read every draft.
 
 **The decision.** `minimax-m3` leaves both critic pools. It was critic-only, so it leaves the
-roster. Both pools keep two families: logic is `[mistral-large-3, glm-5.2]` (Mistral + Zhipu),
-evidence is `[glm-5.2, gemma4]` (Zhipu + Google), so `validate_roster_health`'s strong-`accepted`
-requirement holds on every lens.
+roster. At the time, both pools kept two families: logic was `[mistral-large-3, glm-5.2]`
+(Mistral + Zhipu),
+evidence was `[glm-5.2, gemma4]` (Zhipu + Google), so `validate_roster_health`'s
+strong-`accepted` requirement held on every lens.
 
 **Ordering, by the D-completeness-pool-noise rule — the pass acts on position 1's silence.**
 Logic leads with its only measured `fit`, `mistral-large-3` (0.94 sensitivity, 0.08 invented per
 control), with `marginal` `glm-5.2` (1.00 sensitivity, 0.75 invented) behind it. The cost is
-stated rather than hidden: mistral also writes, so on rounds it authors, exclusion thins the
-logic pool to `glm-5.2` alone. Evidence has no `fit` to lead with — both survivors are marginal —
+stated rather than hidden: mistral also writes, so on rounds it authored, exclusion thinned the
+logic pool to `glm-5.2` alone (closed by D-logic-third-family). Evidence has no `fit` to lead with —
+both survivors are marginal —
 so the higher-sensitivity model (`glm-5.2`, 0.92 against `gemma4`'s 0.50) takes position 1,
 because a position-1 *miss* is the failure the run acts on when everything else is equal-noise.
 

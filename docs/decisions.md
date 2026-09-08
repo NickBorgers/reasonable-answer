@@ -286,43 +286,35 @@ extension:
   roster ban. D-writer-failure-class declined to tighten the probe for that reason and that
   reasoning still holds. What a representative probe should exercise, and what it should cost every
   startup, needs its own evidence before it is a decision rather than a guess.
-- A third **logic**-lens family — the search this item used to ask for has been run, and it
-  returned nothing (D-writer-failure-class surfaced the survey; the gap itself is the fit-first cost
-  stated in D-minimax-retirement). The 2026-08-10/11 audition measured eight candidates on the
-  logic lens against the shipped fixture corpus and the shipped `max_control_material_rate: 1.00`:
-  seven produced an interpretable verdict, spanning six vendors and both weight classes, and **none
-  of them was a second `fit`**. `qwen/qwen3.5-397b-a17b` — the candidate this item nominated, and
-  the one that fits every paper criterion at 397B/A17B, Apache 2.0, ~200GB at 4-bit and a genuinely
-  new family — was added to the proxy, provider-pinned, and graded `unfit` at 1.21 invented material
-  issues per sound control. The rates, the corpus identity and the one void run are in the
-  [operator record](./model-evaluation-record-2026-08-10.md#recorded-slot-results); the procedure,
-  including the three infrastructure bugs that cost a wasted round, is in
-  [model-evaluation.md](./model-evaluation.md). Extend that record rather than restarting the
-  survey.
-  Two things the survey does support, stated no more strongly than it earns. First, seven candidates
-  produced interpretable logic-lens verdicts and none of them was a second `fit`, so the
-  `roster_limited` warning on every round `mistral-large-3` authors is not a gap that this search
-  closed. That is a result about the seven models tried on the date they were tried; it is **not** a
-  claim that the sample exhausts what is purchasable, and a later search may well find a candidate
-  this one did not reach. Second, among those seven the failures were failures of *precision* rather
-  than of detection: each had 1.00 lens sensitivity and perfect `obvious`-tier recall. That is a
-  pattern worth knowing before the next attempt, not a reason to rule one out.
+- A new roster-wide family measured for the **logic** lens, beyond reuse. The `roster_limited`
+  defect this item was
+  written about is closed (D-logic-third-family): `gemma4` — already this roster's
+  evidence/completeness critic — graded `fit` on logic (0.00 invented material issues per sound
+  control, 1.00 obvious sensitivity) and now holds position 2, so the pool no longer thins to one
+  family on rounds `mistral-large-3` authors. That is reuse, not the new vendor this item
+  originally asked for. QP2's per-lens requirement is restored: logic grows from two families to
+  three, and retains two eligible cross-family witnesses after `mistral-large-3` authors. The open
+  concern is instead portfolio concentration, since `gemma4` already carries the other two lenses.
 
-  Two other routes are worth recording alongside a further search, not in place of it: a materially
-  different pool — weights that were not purchasable in 2026-08, or a self-hosted candidate outside
-  the ~450GB ceiling — or a materially different approach to the lens itself, such as a rubric that
-  scores precision on hedged prose differently. Each is its own decision.
-  Still true from the original survey and worth keeping: `nvidia/nemotron-3-super-120b-a12b`
-  (120B/A12B, open weights *and* training data, post-trained for tool calling, ~35GB at 4-bit) as a
-  cheap tool-competent **writer**, in `nemotron`'s existing family; and `moonshotai/kimi-k2.6`, a
-  genuinely new family excluded by the same ~450GB arithmetic as `kimi-k3`, at ~594GB INT4. Also
-  unchanged: `llama-4-scout` returned 0 issues on all 6 evidence calls of run-d5934276fafd,
-  `qwen3.7-max`'s weights are closed, and `deepseek-v4-pro` and `kimi-k3` are excluded by the
-  arithmetic.
-  These are **logic-lens verdicts only**. A critic's noise rate is lens-specific, and this roster is
-  the proof: `mistral-large-3` is `fit` on logic and `unfit` on completeness
-  (D-completeness-pool-noise). Nothing measured here transfers to the two items below, neither of
-  which was measured in that session.
+  The 2026-08-10/11 survey's result stands unchanged and is still the relevant record for a
+  genuinely new family: eight candidates were tried, seven produced interpretable verdicts spanning
+  six vendors and both weight classes, and **none graded `fit`** — each failed on precision
+  (invented material issues on sound controls), not on recall (every interpretable candidate had
+  1.00 `obvious`-tier sensitivity). `qwen/qwen3.5-397b-a17b`, the candidate that fit every paper
+  criterion, graded `unfit` at 1.21 invented per control. `nvidia/nemotron-3-super-120b-a12b` was
+  subsequently measured on this lens too (2026-09-06/07, D-logic-third-family) and also graded
+  unfit — 0.36 schema failure rate, over the gate, so no sensitivity or noise number was even
+  computed; the candidate itself remains open as a **writer**, which was its original nomination
+  and is unaffected by this critic-lens result. `llama-4-scout`, `qwen3.7-max`, `deepseek-v4-pro`,
+  and `kimi-k3`/`kimi-k2.6` remain excluded for the reasons already on record (0 issues on all 6
+  evidence calls of run-d5934276fafd; closed weights; ~450GB arithmetic respectively).
+
+  Full denominators for both rounds:
+  [2026-08-10/11 record](./model-evaluation-record-2026-08-10.md#recorded-slot-results),
+  [2026-09-06/07 follow-up](./model-evaluation-record-2026-08-10.md#follow-up-measurement--2026-09-0607-d-logic-third-family).
+  A later search may still find a genuinely new `fit` family; extend that record rather than
+  restarting the survey, per [model-evaluation.md](./model-evaluation.md). These are **logic-lens
+  verdicts only** and do not transfer to the two evidence/completeness items below.
 
 - Audition a replacement evidence-lens candidate (D-minimax-retirement). The lens now runs two
   `marginal` critics, and `gemma4`'s 0.50 sensitivity sits below the warn line; the roster needs a

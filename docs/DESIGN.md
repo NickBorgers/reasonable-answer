@@ -51,7 +51,7 @@ token, so active-parameter counts do not reduce this):
 | `deepseek-v4-flash` | 284B/A13B | ~145GB | yes — writer |
 | `minimax-m3` | 230B/A10B | ~115GB | no — loads, but retired: unfit on both its lenses across three audits (D-minimax-retirement) |
 | `gemma4-small` | 26B-A4B q8 | ~28GB | yes — orchestrator |
-| `gemma4` | 31B dense | ~16GB | yes — evidence, completeness |
+| `gemma4` | 31B dense | ~16GB | yes — logic, evidence, completeness |
 
 **Residency policy:** pin the two Gemmas (~44GB — the orchestrator plus a critic body) and swap
 the rest through one large slot. `glm-5.2` at ~375GB plus the pinned pair is ~419GB, inside

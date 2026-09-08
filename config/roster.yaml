@@ -49,13 +49,32 @@ roster:
   # reviews stagnate rather than converge. It was critic-only, so it leaves the roster.
   critics:
     # Ordered fit-first (D-completeness-pool-noise precedent): mistral-large-3 is the
-    # lens's only measured `fit` (0.94 sensitivity, 0.08 invented per control) and the
-    # pass acts on position 1's silence. glm-5.2 (marginal: 1.00 sensitivity, 0.75
-    # invented) backs it. mistral also writes, so on rounds it authors the pool thins
-    # to glm-5.2 alone — the price of fit-first here; two families (Mistral + Zhipu)
-    # keep a strong `accepted` reachable on every other round.
+    # lens's only measured `fit` at position 1 (0.94 sensitivity, 0.08 invented per
+    # control) and the pass acts on position 1's silence.
+    #
+    # gemma4 added at position 2 (D-logic-third-family, 2026-09-06/07): the price of
+    # fit-first stated above used to be that mistral also writes, so on rounds it
+    # authors the pool thinned to glm-5.2 alone — one family, below the two a strong
+    # `accepted` needs (`roster_limited`). The 2026-08-10/11 survey
+    # (docs/model-evaluation-record-2026-08-10.md) tried eight candidates for a
+    # new roster-wide family measured for logic and found none fit; this measurement instead
+    # auditioned models already trusted elsewhere in the roster. `gemma4` graded
+    # `fit`: 0.00 invented material issues per sound control (0/24), 1.00 obvious
+    # sensitivity (3/3) — cleaner on this lens than `mistral-large-3` itself. Two other
+    # candidates were auditioned alongside it and both graded `unfit`:
+    # `qwen3.8-27b` (1.62 invented per control) and `nemotron-3-super-120b-a12b`
+    # (0.36 schema failure rate, over the 0.2 gate — not measurable). See
+    # docs/decisions/D-logic-third-family.md for the full record, including why this
+    # restores QP2 within logic but leaves roster-wide portfolio concentration.
+    #
+    # glm-5.2 (marginal: 1.00 sensitivity, 0.75 invented) now sits at position 3, the
+    # rule-8 reserve on rounds mistral-large-3 does not author — fit-first ordering
+    # puts the two measured-`fit` critics in the front-loaded pair. On rounds
+    # mistral-large-3 DOES author, the eligible pair becomes {gemma4, glm-5.2} — two
+    # families, closing the gap the comment above used to end on.
     logic:
       - mistral-large-3
+      - gemma4             # critic-only: added 2026-09-06/07, see D-logic-third-family
       - glm-5.2            # critic-only: highest GPQA of any shipped open model
     # Both survivors are marginal (glm-5.2: 0.92 sensitivity / 0.42 invented; gemma4:
     # 0.50 sensitivity / 0.12 invented) — the higher-sensitivity model leads because a
