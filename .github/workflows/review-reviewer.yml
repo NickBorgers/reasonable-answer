@@ -45,6 +45,12 @@ on:
           errored — read as "did not review", the direction that costs a retry rather than
           silently spending the PR's only fix attempt.
         value: ${{ jobs.guard.outputs.ok }}
+      skip_reason:
+        description: >
+          Why the guard refused, or empty when it cleared. Surfaced so a `pipeline_error`
+          verdict can name its own cause instead of describing the shape of the failure
+          (D-pipeline-error-names-its-cause).
+        value: ${{ jobs.guard.outputs.reason }}
     secrets:
       WORKFLOW_PAT:
         required: true
@@ -75,6 +81,11 @@ jobs:
     timeout-minutes: 15
     outputs:
       ok: ${{ steps.authorize.outputs.ok }}
+      # Why this guard refused, in the reviewer's own words. Empty when it cleared. The
+      # judge renders it into the NO-GO comment, because "no reviewer artifacts (reviews
+      # skipped?)" sent every reader to the reviewers and the orchestrator when the cause
+      # was a red PR Validation the guard had already read (D-pipeline-error-names-its-cause).
+      reason: ${{ steps.authorize.outputs.reason }}
     steps:
       - name: Re-verify origin, author, and validation status
         id: authorize
@@ -98,16 +109,19 @@ jobs:
             // permissions bypassed and the runner sits on a private tailnet.
             if (pr.head.repo.full_name !== repoFullName) {
               core.setFailed(`Refusing to review a fork PR on self-hosted infrastructure: ${pr.head.repo.full_name}`);
+              core.setOutput('reason', `the head is a fork (${pr.head.repo.full_name}), which may not run on self-hosted infrastructure`);
               return core.setOutput('ok', 'false');
             }
             if (!allowed.has(pr.author_association)) {
               core.setFailed(`Refusing to review a PR from an untrusted author: ${pr.author_association}`);
+              core.setOutput('reason', `the PR author's association (${pr.author_association}) is not trusted to spend a review`);
               return core.setOutput('ok', 'false');
             }
             // The reviewed SHA must still be the PR head. If the branch moved on, the
             // agent would burn a run on code that is already superseded.
             if (pr.head.sha !== sha) {
               core.warning(`Reviewed SHA ${sha} is no longer PR head (${pr.head.sha}); skipping.`);
+              core.setOutput('reason', `the reviewed SHA is no longer the PR head (now ${pr.head.sha.slice(0, 7)})`);
               return core.setOutput('ok', 'false');
             }
 
@@ -149,6 +163,7 @@ jobs:
                   return core.setOutput('ok', 'true');
                 }
                 core.warning(`PR Validation concluded '${gate.conclusion}'; skipping review until it passes.`);
+                core.setOutput('reason', `PR Validation Required concluded '${gate.conclusion}' on the reviewed SHA`);
                 return core.setOutput('ok', 'false');
               }
               // No sleep after the last poll: there is nothing left to wait for, and
@@ -161,6 +176,7 @@ jobs:
             // of the count is one more place the arithmetic goes stale unnoticed.
             const waited = ((POLL_ATTEMPTS - 1) * POLL_INTERVAL_MS) / 60000;
             core.warning(`PR Validation did not complete within ${POLL_ATTEMPTS} polls over ${waited} minutes; skipping review.`);
+            core.setOutput('reason', `PR Validation Required did not complete within ${waited} minutes on the reviewed SHA`);
             core.setOutput('ok', 'false');
 
   review:
@@ -215,6 +231,13 @@ jobs:
           llm_proxy_base_url: ${{ vars.LLM_PROXY_BASE_URL }}
           llm_proxy_openai_base_url: ${{ vars.LLM_PROXY_OPENAI_BASE_URL }}
           llm_proxy_api_key: ${{ vars.AI_API_KEY || 'fake-key' }}
+          # A reviewer is the one role a second identical invocation is a true repeat of:
+          # it pushes nothing, its comment is published in a later step, and a failed
+          # attempt's artifact is deleted before the retry starts. The panel is
+          # all-or-nothing at the judge — one missing role fail-closes the whole cycle —
+          # so paying for one more reviewer beats re-reading with five
+          # (D-reviewer-retry-transient).
+          max_attempts: '2'
 
       # Validated against main's schema, not the PR's. A PR that widened the schema to
       # let its own reviewer emit something unexpected would be validating against its

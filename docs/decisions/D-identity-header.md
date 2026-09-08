@@ -51,8 +51,15 @@ asserts both halves: `/` with no header is a 403, and the shell is there once a 
 
 > Superseded in part by **D-id-as-credential**, which serves every `GET` under `/runs/` without an identity. The
 > reasoning above is why that is a method-scoped rule with a route-table test rather than a second
-> entry in `_UNAUTHENTICATED_PATHS` — which still holds `/healthz` alone. The app shell stays gated
-> exactly as argued here.
+> entry in `_UNAUTHENTICATED_PATHS` — which still holds `/healthz` alone.
+>
+> Superseded in part again by **D-public-icons**, which serves `GET /static/icons/<name>` without an
+> identity, for the reason this section declined to: once a public run page *names* the icons, the
+> exemption is not "these files hold nothing private" but "an anonymous reader is pointed at a
+> subresource they are then refused, silently." It is a method-scoped prefix with a route-table
+> test of its own, like D-id-as-credential and unlike a second `_UNAUTHENTICATED_PATHS` entry. The
+> installable half of the shell — the manifest, the worker, the offline page — stays gated exactly
+> as argued here, and the `crossorigin="use-credentials"` half of this section is untouched.
 
 **`auth.dev_identity` is the single knob, and its unset state is the safe one.** Set (via the
 roster or `$RA_DEV_IDENTITY`), it supplies an identity to requests with no header, which is what

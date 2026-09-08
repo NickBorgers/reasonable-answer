@@ -177,6 +177,40 @@ Note what this cannot protect against: a reviewer artifact is validated against 
 the schema, so a PR that admits a new field does not help its own reviewers. The fix has to be on
 main before the field stops killing artifacts.
 
+### A transient failure is not a verdict (D-reviewer-retry-transient)
+
+The panel is all-or-nothing at the judge: every selected role must be present, so **one
+reviewer dying fails the whole cycle closed**. That is the right direction — a missing
+reviewer must never read as consent — but it means the cost of a provider hiccup is not one
+reviewer, it is a `pipeline_error` NO-GO the PR did not earn plus a five-reviewer re-read.
+PR #196 paid it for `API Error: 400` two turns into the `invariant` role: forty seconds and
+$0.34 into a run that had read nothing yet.
+
+So a reviewer gets **one retry**, and the retry is bounded by what is safe to repeat rather
+than by how badly the pipeline wants an artifact:
+
+- **Only a read-only caller opts in.** `max_attempts` defaults to 1 on
+  `review-agent-run`; the reviewer workflow is the only caller that passes 2. The fixer, the
+  resolver and the author all push, open a PR, or carry a resumable session, so a second
+  invocation there is not a repeat of the first — it starts on a tree the first one already
+  changed.
+- **A resumed session is never retried**, whatever the caller asked for. `run-in-container.sh`
+  deliberately contains a failed resume by exiting 0 with a sentinel so the cold fallback
+  runs; retrying at the container boundary would race that handoff.
+- **Only a fast failure is retried** — inside `retry_within_seconds`, default 600. A
+  deadline-shaped failure has already spent the job's budget and is the one a second identical
+  attempt would most likely repeat, so it is left to fail. One fast failure plus one full
+  attempt still fits the reviewer job's 45-minute bound.
+- **The retry starts clean.** Any partial result JSON from the dead attempt is removed first,
+  so the judge can never read a half-written artifact, and the failed transcript is kept
+  beside it as `<role>-attempt1-output.log` — the diagnostics survive even when the retry
+  goes green and the job is not marked failed.
+
+Nothing here loosens the gate. A retry buys one more attempt, never a pass: if it also fails
+the role is still absent and the judge still fails the cycle closed.
+`tests/test_ci_agent_retry.py` extracts the composite's `Run agent` shell and drives it
+against a fake `docker`, pinning each refusal above as well as the retry itself.
+
 ### The judge fails closed
 
 [`aggregate.mjs`](https://github.com/NickBorgers/reasonable-answer/blob/main/.github/scripts/review/aggregate.mjs) returns NO-GO rather than
@@ -190,8 +224,10 @@ reviewer was skipped — each reviewer's Guard concluded `ok=false`, e.g. becaus
 Validation failed on the reviewed SHA — no reviewer artifact is uploaded, and
 `download-artifact` leaves the `reviewer-artifacts` directory wholly absent rather than
 empty. `judge.mjs` treats that as a `pipeline_error` NO-GO (`pipeline could not trust its
-inputs: no reviewer artifacts (reviews skipped?)`) instead of letting `readdirSync` die
-with a raw `ENOENT`. The distinction matters operationally: a crash publishes no verdict,
+inputs`). When guards supply refusal reasons, the verdict's `reasons[]` names their deduplicated
+reasons; when no reasons are supplied, it falls back to `no reviewer artifacts (reviews
+skipped?)`. This happens instead of letting `readdirSync` die with a raw `ENOENT`. The distinction
+matters operationally: a crash publishes no verdict,
 so the merge gate stays un-green with nothing to say why and the cycle burns silently,
 whereas a NO-GO verdict is recorded on the SHA and the finalize comment can explain it.
 
@@ -251,6 +287,39 @@ reviewer is now a fail-closed `pipeline_error`.
 Two further properties make the judge trustworthy, and both are structural rather than
 conventional: it checks out **`main`**, so a PR cannot modify the code that judges it, and
 it holds `contents: read`, so it could not push if it tried.
+
+### A `pipeline_error` names its own cause (D-pipeline-error-names-its-cause)
+
+A `pipeline_error` is the fail-closed verdict for "the judge could not trust its inputs". When no
+reviewer artifact exists, the judge can see that the directory is empty; it cannot see *why*,
+because a guard that refuses produces no artifact and leaves no trace in anything the verdict
+reads. So the verdict used to describe what it found — `no reviewer artifacts (reviews skipped?)`
+— and the comment suggested a reviewer or orchestration bug.
+
+The generic text cannot distinguish the refusal conditions the guard already represents: a failed
+or non-success validation gate, a timeout, a superseded head, a fork, or an untrusted author. The
+guard has that state when it refuses, so carrying it to the judge lets the verdict report the known
+condition instead of guessing from the missing artifact.
+
+The guard's reason now travels with the refusal: **guard output → the reviewer workflow's
+`skip_reason` → the pipeline's judge call → `GUARD_SKIP_REASONS` in the judge's environment.** The
+pipeline is the only stage that can collect all five, so it collects them there. The judge
+deduplicates — five guards refusing over one red gate is one fact about one SHA, not five — and
+names the set in the verdict's `reasons[]`, which the comment renders under **Why**.
+
+Two properties are deliberate:
+
+- **A caller that supplies no reasons still gets the old sentence.** The input is optional and the
+  fallback is the generic wording, so a refusal shape that sets no reason produces a verdict that is
+  vague rather than one that claims a cause it does not have.
+- **Distinct reasons are all named.** Guards can refuse for different reasons in the same run — a
+  moved head and a red gate — and a verdict naming only the first would be a new way to mislead.
+
+Nothing about the gate changes: the verdict, the category and the fail-closed direction are what
+they were. Only the sentence differs. `reviewer-guard.test.mjs` pins that each refusal carries its
+reason and that a cleared guard carries none; `judge.test.mjs` pins the rendering and the fallback;
+`tests/test_ci_pipeline_error_cause.py` pins the wire between them, which every other test would
+pass without.
 
 ### Cycle control
 

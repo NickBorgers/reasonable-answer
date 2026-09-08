@@ -37,6 +37,8 @@ const REVIEWER_DIR = process.env.REVIEWER_DIR;
 const VERDICT_OUTPUT_PATH = process.env.VERDICT_OUTPUT_PATH;
 // JSON array of the roles the classifier selected for this diff.
 const EXPECTED_ROLES = process.env.EXPECTED_ROLES;
+// Newline-separated guard refusals, one line per role and blank for each that cleared.
+const GUARD_SKIP_REASONS = process.env.GUARD_SKIP_REASONS;
 
 if (!REVIEWER_DIR || !VERDICT_OUTPUT_PATH) {
   console.error("judge.mjs: REVIEWER_DIR and VERDICT_OUTPUT_PATH must be set");
@@ -112,12 +114,43 @@ if (FIX_RESULT_PATH && existsSync(FIX_RESULT_PATH)) {
 // fail-closed pipeline error it is, with a reason the finalize comment can render, rather
 // than leaning on the generic empty-set message: the operator needs the hint that the
 // reviews were skipped, not just that the set was empty.
+// What the guards said, deduplicated and in a stable order. All five usually refuse for the
+// same reason — a red gate is one fact about one SHA — so the honest rendering is the set,
+// not five copies of one sentence. Order is by first appearance rather than sorted: with a
+// single distinct reason the two are identical, and with several the reader is better served
+// by the order the panel is listed in than by the alphabet.
+const guardSkipReasons = [
+  ...new Set(
+    (GUARD_SKIP_REASONS ?? "")
+      .split("\n")
+      .map((line) => line.trim())
+      .filter(Boolean),
+  ),
+];
+
 let verdict;
 if (!reviewerDirExists) {
+  // Name the cause, not the shape of the failure. "no reviewer artifacts (reviews
+  // skipped?)" described what the judge could see — an empty directory — and sent every
+  // reader to the reviewers and the orchestrator. Its actual cause is normally a fact one
+  // job upstream already knew and logged: PR Validation was red on the reviewed SHA, so
+  // every guard refused. Reading that took a walk back through four jobs' logs, and CI
+  // logs expire (D-pipeline-error-names-its-cause).
+  //
+  // The fallback is deliberately the old sentence: a caller that supplies no reasons, or a
+  // refusal shape that somehow set none, still gets a verdict that says what is true rather
+  // than an empty claim about a cause.
   verdict = {
     verdict: "NO-GO",
     category: "pipeline_error",
-    reasons: ["pipeline could not trust its inputs: no reviewer artifacts (reviews skipped?)"],
+    reasons: guardSkipReasons.length
+      ? [
+          "no reviewer read this commit: " +
+            (guardSkipReasons.length === 1
+              ? `every reviewer's guard refused because ${guardSkipReasons[0]}`
+              : `the reviewer guards refused — ${guardSkipReasons.join("; ")}`),
+        ]
+      : ["pipeline could not trust its inputs: no reviewer artifacts (reviews skipped?)"],
     unaddressed_blocker_ids: [],
     // Same shape as every aggregate() return: the finalize comment reads this field
     // unconditionally, and this path is reached when things are already broken.

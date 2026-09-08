@@ -105,6 +105,28 @@ inputs:
       the shared .review-output directory.
     required: false
     default: ''
+  max_attempts:
+    description: >
+      How many times to invoke the agent before failing the step, when the previous
+      invocation failed *fast* (see `retry_within_seconds`).
+
+      Default 1 — no retry — because a retry is only safe for a caller whose invocation
+      leaves nothing behind. That is exactly the reviewers: they are read-only, publish
+      their comment in a later step, and a failed attempt's artifact is deleted before
+      the next one runs. The fixer, the resolver and the author all push, create a PR, or
+      carry a resumable session, so a second invocation there is not a repeat of the first
+      and they stay at 1 (D-reviewer-retry-transient).
+    required: false
+    default: '1'
+  retry_within_seconds:
+    description: >
+      Only a failure that happened within this many seconds is retried, so a retry cannot
+      overrun the calling job's own timeout: the agent's inner deadline is
+      `timeout_minutes`, so one fast failure plus one full attempt still fits the 45-minute
+      reviewer job, while a deadline-shaped failure — the expensive kind, and the kind a
+      second identical attempt would most likely repeat — is never retried at all.
+    required: false
+    default: '600'
 
 outputs:
   output_artifact:
@@ -273,6 +295,10 @@ runs:
         WORKSPACE_FOLDER: ${{ inputs.workspace_folder }}
         SESSION_HOST_DIR: ${{ inputs.session_host_dir }}
         AGENT: ${{ inputs.agent }}
+        ROLE: ${{ inputs.role }}
+        RESULT_BASENAME: ${{ inputs.result_basename }}
+        MAX_ATTEMPTS: ${{ inputs.max_attempts }}
+        RETRY_WITHIN_SECONDS: ${{ inputs.retry_within_seconds }}
       run: |
         set -euo pipefail
 
@@ -303,18 +329,73 @@ runs:
         #   file. The bind-mounted .git is owned by the runner uid while the container
         #   runs as uid 1000, so without this every `git diff` inside the container
         #   fails with "detected dubious ownership" and the agent burns turns on it.
-        docker run --rm \
-          --network host \
-          --workdir /workspace \
-          -v "$WORKSPACE_HOST:/workspace" \
-          -v "$CONTAINER_SCRIPT:/run-in-container.sh:ro" \
-          "${session_mount[@]}" \
-          --env-file "$CI_AGENT_ENV_FILE" \
-          -e GIT_CONFIG_COUNT=1 \
-          -e GIT_CONFIG_KEY_0=safe.directory \
-          -e GIT_CONFIG_VALUE_0=/workspace \
-          "$CI_AGENT_IMAGE" \
-          -lc '/run-in-container.sh'
+        # A transient provider error is not a verdict, and it should not cost a panel.
+        #
+        # One reviewer dying takes the whole cycle with it: the judge requires every
+        # selected role to be present and fail-closes to `pipeline_error` when one is
+        # missing, so the PR gets a NO-GO nobody reviewed and the next read costs five
+        # reviewers, not one. PR #196 lost a cycle to `API Error: 400` two turns in — 40
+        # seconds and $0.34 of a run that had read nothing yet (D-reviewer-retry-transient).
+        #
+        # Retry only what is safe to repeat, and only when repeating is cheap:
+        #
+        # * `MAX_ATTEMPTS` is 1 for every caller that pushes, opens a PR, or holds a
+        #   resumable session. Only the read-only reviewers opt in, so a second invocation
+        #   is always a repeat of an attempt that left nothing behind.
+        # * A resume is never retried whatever the caller asked for. `run-in-container.sh`
+        #   deliberately contains a failed resume by exiting 0 with a sentinel so the cold
+        #   fallback runs; re-running it here would race that handoff rather than help it.
+        # * Only a failure inside `RETRY_WITHIN_SECONDS` is retried, so a deadline-shaped
+        #   failure — the one a second identical attempt would most likely repeat, and the
+        #   one that has already spent the job's budget — is left to fail.
+        #
+        # The failed attempt's transcript is kept beside the retry's under an `-attemptN-`
+        # name, so the diagnostics artifact still shows what went wrong even when the retry
+        # succeeds and the job is green. Any partial result JSON is removed first: the next
+        # attempt must not be able to inherit a half-written artifact from the last.
+        attempts="${MAX_ATTEMPTS:-1}"
+        if [ -n "$SESSION_HOST_DIR" ]; then
+          attempts=1
+        fi
+
+        OUT_DIR="${WORKSPACE_HOST}/.review-output"
+        ARTIFACT_BASE="${RESULT_BASENAME:-$ROLE}"
+
+        rc=0
+        for attempt in $(seq 1 "$attempts"); do
+          started=$SECONDS
+          rc=0
+          docker run --rm \
+            --network host \
+            --workdir /workspace \
+            -v "$WORKSPACE_HOST:/workspace" \
+            -v "$CONTAINER_SCRIPT:/run-in-container.sh:ro" \
+            "${session_mount[@]}" \
+            --env-file "$CI_AGENT_ENV_FILE" \
+            -e GIT_CONFIG_COUNT=1 \
+            -e GIT_CONFIG_KEY_0=safe.directory \
+            -e GIT_CONFIG_VALUE_0=/workspace \
+            "$CI_AGENT_IMAGE" \
+            -lc '/run-in-container.sh' || rc=$?
+
+          [ "$rc" -eq 0 ] && break
+          [ "$attempt" -lt "$attempts" ] || break
+
+          elapsed=$((SECONDS - started))
+          if [ "$elapsed" -ge "${RETRY_WITHIN_SECONDS:-600}" ]; then
+            echo "::warning::review-agent-run: ${ROLE} failed after ${elapsed}s (exit ${rc}); too slow to retry within the job's budget"
+            break
+          fi
+
+          echo "::warning::review-agent-run: ${ROLE} failed after ${elapsed}s (exit ${rc}); retrying (attempt $((attempt + 1))/${attempts})"
+          if [ -f "${OUT_DIR}/${ARTIFACT_BASE}-output.log" ]; then
+            mv "${OUT_DIR}/${ARTIFACT_BASE}-output.log" "${OUT_DIR}/${ARTIFACT_BASE}-attempt${attempt}-output.log"
+          fi
+          rm -f "${OUT_DIR}/${ARTIFACT_BASE}-result.json"
+          sleep 15
+        done
+
+        exit "$rc"
 
     - name: Reset workspace ownership
       # The container writes as uid 1000; the runner is a different uid. Those files

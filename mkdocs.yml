@@ -9,7 +9,7 @@
 #
 #   * `docs_dir: docs` is the entire allow-list, and it is load-bearing. This repository
 #     also contains Markdown under `.github/` (agent prompts full of ${VAR} placeholders),
-#     under `tests/fixtures/audition/` (seeded-defect fixtures), and — locally — under
+#     under `src/reasonable_answer/fixtures/audition/` (seeded-defect fixtures), and — locally — under
 #     `.claude/worktrees/`, which holds complete clones of this repository and is hidden by
 #     `.git/info/exclude` rather than `.gitignore`: invisible to git, plainly visible to
 #     anything that walks the filesystem. Scoping the build to one directory means none of

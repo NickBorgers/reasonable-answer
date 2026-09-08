@@ -39,8 +39,14 @@ esac
       echo
       ;;
     pipeline_error)
-      echo "> The pipeline could not trust its own inputs, so it failed closed. This is"
-      echo "> usually a reviewer or orchestration bug rather than a problem with the change."
+      # Points at the reason rather than guessing at it. The old wording named "a reviewer
+      # or orchestration bug" as the usual cause, which was a guess the pipeline had no
+      # need to make: the judge now carries the guard's own words, and the `Why` list below
+      # renders them. Guessing wrong is expensive — the cause is most often a red PR
+      # Validation on the reviewed SHA, and readers sent to the reviewers instead walked
+      # back through four jobs' logs to find it (D-pipeline-error-names-its-cause).
+      echo "> The pipeline could not trust its own inputs, so it failed closed. This is not a"
+      echo "> judgement about the change; the reason below says what stopped the panel."
       echo
       ;;
     inherited)
