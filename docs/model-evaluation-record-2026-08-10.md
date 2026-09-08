@@ -108,3 +108,60 @@ failures to two serving-path problems rather than to the model's logic judgement
 The application-side schema-shape correction is recorded in
 [PR #172](https://github.com/NickBorgers/reasonable-answer/pull/172). Deployment state remains a
 separate prerequisite, so the recorded sonnet verdict is void rather than a model-quality result.
+
+## Follow-up measurement — 2026-09-06/07 (D-logic-third-family)
+
+This is an extension of the record above, not a restart of the survey — same corpus, same lens,
+per the instruction in [model-evaluation.md](./model-evaluation.md). Where the 2026-08-10/11
+survey looked for a genuinely new fourth family and found none `fit`, this round instead
+auditioned candidates already present or already excluded elsewhere in the roster's own
+reasoning: `gemma4` (this roster's evidence/completeness critic), and two logic-lens candidates
+the original open item had already named as "still true" — `qwen3.8-27b` (successor to the
+closed-weight `qwen3.7-max` the open item excluded) and `nemotron-3-super-120b-a12b` (the item's
+own nominated cheap tool-competent candidate, not previously audited on this lens).
+
+### Measurement identity
+
+Identical to the identity stated above, restated because it is what makes this an extension and
+not a new survey: corpus hash `9c248e1d249ad301`, lens `logic`, `repetitions: 3`, 42 attempted
+calls per complete slot (24 control calls), `sources=None`, threshold
+`max_control_material_rate: 1.00`, `max_schema_failure_rate: 0.2`.
+
+### Recorded slot results
+
+| model | vendor | weights | control material rate | obvious sensitivity | schema failure rate | verdict |
+|---|---|---|---:|---:|---:|---|
+| `gemma4` | Google | open | 0.00 (0/24) | 1.00 (3/3) | 0.00 (0/42) | fit |
+| `qwen3.8-27b` | Alibaba | open | 1.62 (39/24) | 1.00 (3/3) | 0.00 (0/42) | unfit |
+| `nemotron-3-super-120b-a12b` | NVIDIA | open | not interpreted | not interpreted | 0.36 (15/42) | void; not measurable |
+
+All three vendors are open-weight. `gemma4` and `qwen3.8-27b` both cleared the schema-failure gate
+cleanly (below 0.2) and both found every `obvious`-tier planted defect (3/3) — consistent with the
+2026-08-10/11 finding that recall on this tier is not the scarce property. They diverge entirely
+on precision: `gemma4` returned zero material issues across 24 sound-control reviews, while
+`qwen3.8-27b` invented 39 across the same 24, a 1.62 rate against the 1.00 ceiling — closer to the
+noise profile of the 2026-08-10/11 survey's `unfit` candidates than to `mistral-large-3`'s 0.08.
+
+`nemotron-3-super-120b-a12b` failed the schema gate before any judgement metric was computed: 15
+of 42 calls (0.36) did not return a gradable review, and one owed fixture
+(`conceptual-conflation-01`) produced no gradable review across any of its 3 repetitions
+(`uncovered_fixtures`), which independently forces `unfit` regardless of the rate
+(D-audition-failure-coverage). Per-call latencies for this slot ran unusually high, several
+clustering near the 900s `budgets.timeout_seconds` ceiling — consistent with upstream congestion
+on this alias rather than a judgement failure, and consistent with the same alias's writer sibling
+(`nemotron-3-ultra`) recording `unreachable`/rate-limited failures via the deployment's `ra doctor`
+around the same dates. This verdict is a statement about serving reliability on the dates
+measured, not about judgment quality — the same distinction the sonnet schema-failure incident
+above draws, though the fix in that case was an application bug and no comparable root cause was
+investigated here.
+
+### What this does not establish
+
+Three candidates is not the eight of the original survey, and this round did not re-attempt a
+new-vendor search — it deliberately measured reuse and near-miss candidates instead, for the
+reasons D-logic-third-family states. It is not evidence that a fourth, genuinely new family
+remains unreachable; it answers a narrower question (does closing the immediate `roster_limited`
+gap require finding one) in the negative for now. It is also not an evidence-lens or
+completeness-lens measurement for any of the three models: `gemma4`'s `fit` verdict here is
+logic-lens-specific, exactly as the original record's closing caveat states for its own
+candidates.

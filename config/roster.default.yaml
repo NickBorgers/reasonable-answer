@@ -44,6 +44,7 @@ roster:
   critics:
     logic:
       - mistral-large-3
+      - gemma4
       - glm-5.2
     evidence:
       - glm-5.2

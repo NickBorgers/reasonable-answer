@@ -161,15 +161,45 @@ def test_minimax_m3_is_retired_from_every_critic_pool(path: Path) -> None:
 def test_the_logic_pool_leads_with_the_audited_fit_critic(path: Path) -> None:
     """D-minimax-retirement, ordering half — same rule as D-completeness-pool-noise:
     the pass acts on position 1's silence, so the lens's only measured `fit`
-    (`mistral-large-3`, 0.94 sensitivity / 0.08 invented per control) leads and the
-    `marginal` `glm-5.2` (1.00 sensitivity / 0.75 invented) backs it. On rounds
-    mistral-large-3 authors, exclusion thins the pool to glm-5.2 alone — accepted as
-    the cost of fit-first; the evidence ordering below makes the same trade the other
-    way (no `fit` exists there, so the higher-sensitivity marginal leads).
+    (`mistral-large-3`, 0.94 sensitivity / 0.08 invented per control) leads.
+    `evidence` makes the opposite trade (no `fit` exists there, so the
+    higher-sensitivity marginal leads).
     """
     roster = Config.load(path).roster
-    assert roster.critics_for(Lens.LOGIC) == ["mistral-large-3", "glm-5.2"]
+    assert roster.critics_for(Lens.LOGIC)[0] == "mistral-large-3"
     assert roster.critics_for(Lens.EVIDENCE) == ["glm-5.2", "gemma4"]
+
+
+@pytest.mark.parametrize("path", [DEFAULT_ROSTER, DEPLOYMENT_ROSTER])
+def test_the_logic_pool_has_a_third_family_closing_the_author_exclusion_gap(
+    path: Path,
+) -> None:
+    """D-logic-third-family. `mistral-large-3` writes, so on rounds it authors,
+    exclusion used to thin `logic` to `glm-5.2` alone — one family, below the two a
+    strong `accepted` needs (`roster_limited`, D-minimax-retirement's ordering note).
+
+    `gemma4` was auditioned against the shipped fixture corpus for this lens and
+    graded `fit`: 0.00 material issues invented per sound control (0/24), 1.00
+    obvious sensitivity (3/3) — the two hardcoded gates a threshold cannot move
+    (D-obvious-per-lens) both cleared with room. Two other candidates measured
+    alongside it graded `unfit`: `qwen3.8-27b` (1.62 invented per control) and
+    `nemotron-3-super-120b-a12b` (0.36 schema failure rate, over the 0.2 gate — not
+    measurable). See docs/decisions/D-logic-third-family.md and
+    docs/model-evaluation-record-2026-08-10.md's follow-up section for the full
+    record.
+
+    Fit-first ordering (D-completeness-pool-noise's rule) puts `gemma4` ahead of the
+    `marginal` `glm-5.2`: both measured-`fit` critics front-load on an ordinary round,
+    and `glm-5.2` becomes the rule-8 reserve. On a round `mistral-large-3` authors,
+    the eligible pair is `{gemma4, glm-5.2}` — two families, which is the gap this
+    closes.
+    """
+    roster = Config.load(path).roster
+    logic = roster.critics_for(Lens.LOGIC)
+    assert logic == ["mistral-large-3", "gemma4", "glm-5.2"]
+    # gemma4 is critic-only everywhere; author exclusion can never remove it, so the
+    # pair left after excluding mistral-large-3 is always exactly {gemma4, glm-5.2}.
+    assert "gemma4" not in roster.writers
 
 
 def test_the_two_rosters_name_the_same_models(

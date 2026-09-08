@@ -158,6 +158,16 @@ critic when `mistral-large-3` authored the report, so that lens cannot supply th
 required for strong acceptance on those rounds. Fit-first ordering applies QP8's deterministic
 audition verdicts and measured sensitivity to roster position; no LLM prose grades the roster.
 
+**Application — a reused family closes a roster_limited gap, at a stated QP2 cost
+(D-logic-third-family).** `gemma4` joins the logic pool as a measured `fit` (0.00 invented per
+control, 1.00 obvious sensitivity), fixing the gap D-minimax-retirement's ordering note left open:
+author exclusion previously thinned logic to one eligible family whenever `mistral-large-3`
+authored. QP8 governs the addition itself — `gemma4` was auditioned against the shipped fixture
+corpus alongside two candidates that graded `unfit`, and no LLM prose entered the verdict. QP2 is
+not fully restored: `gemma4` already reviews evidence and completeness, so this is a reused family,
+not the genuinely new one the standing open item asked for, and the trade-off is stated rather than
+hidden in the decision record.
+
 **Application — writer failure classes (D-writer-failure-class).** Recording a `failure_class` on
 each failed attempt makes repeated failure modes countable without interpreting provider prose.
 The token is derived from an exception type and status code, so no LLM assessment enters it, and it
