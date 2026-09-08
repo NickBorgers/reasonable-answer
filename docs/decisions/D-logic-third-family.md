@@ -1,4 +1,4 @@
-## D-logic-third-family — a reused family, not a new one, closes the logic-lens gap
+## D-logic-third-family — a roster-reused family closes the logic-lens gap
 
 **The gap.** D-minimax-retirement's ordering note stated the cost plainly rather than hiding it:
 `logic`'s critic pool was `[mistral-large-3, glm-5.2]`, and `mistral-large-3` also writes, so on
@@ -33,14 +33,16 @@ a statement about serving reliability, not judgment quality. `gemma4` cleared ev
 zero invented material issues across 24 control runs, and perfect recall on the `obvious` tier — the
 two hardcoded floors `judge()` will not move regardless of threshold tuning (D-obvious-per-lens).
 
-**This is reuse, not a new family — stated as a cost, not hidden.** QP2 (`config/quality-principles.md`)
-holds that a same-family witness added to a pool adds correlated errors, not independence.
-`gemma4` was already this roster's evidence and completeness critic before this change; adding it to
-logic does not introduce the fourth vendor the closed open item was looking for, and the roster's
-per-lens family count (QP2's actual enforcement surface, via `critic_slate`/`lens_statuses`) does not
-grow. What it does buy: `roster_limited` on logic goes from "true every round `mistral-large-3`
-authors" to "not true on any round", because `gemma4` is critic-only and author exclusion can never
-remove it. A month of searching for a new family found nothing that clears the noise gate; a family
+**This is roster reuse, not a new roster-wide family — stated as a cost, not hidden.** QP2
+(`docs/quality-principles.md`) requires cross-family witnesses within each critic slate. Adding
+Google's `gemma4` grows logic from two families (Mistral + Zhipu) to three (Mistral + Google +
+Zhipu), and restores the two eligible cross-family witnesses QP2 requires after
+`mistral-large-3` authors. `gemma4` was already this roster's evidence and completeness critic,
+however, so the change does not add the fourth roster-wide vendor the open item was seeking; that
+separate portfolio-concentration cost remains. `roster_limited` on logic therefore goes from
+"true every round `mistral-large-3` authors" to "not true on any round", because `gemma4` is
+critic-only and author exclusion can never remove it. A month of searching for a new family found
+nothing that clears the noise gate; a family
 already measured safe on two other lenses clearing it on a third is a materially different and much
 cheaper claim than "the search that failed to find a new family should keep running before this gap
 gets fixed at all."
@@ -61,5 +63,5 @@ completeness-lens open items — no evidence-lens measurement exists for any of 
 audited here, and their logic verdicts do not predict one (the same caveat the 2026-08-10/11 record
 states for its own candidates). It also does not claim the search for a genuinely new logic-lens
 family should stop; it records that reuse was the cheaper, immediately-available fix for the
-specific defect measured (author exclusion emptying the pool), and leaves QP2's fuller restoration —
-a fourth, actually-new family — as future work, not as solved.
+specific defect measured (author exclusion emptying the pool). QP2's per-lens requirement is
+restored; adding a fourth, roster-wide family remains a separate portfolio-diversity goal.

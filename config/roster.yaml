@@ -57,7 +57,7 @@ roster:
     # authors the pool thinned to glm-5.2 alone — one family, below the two a strong
     # `accepted` needs (`roster_limited`). The 2026-08-10/11 survey
     # (docs/model-evaluation-record-2026-08-10.md) tried eight candidates for a
-    # genuinely new third family and found none fit; this measurement instead
+    # new roster-wide family measured for logic and found none fit; this measurement instead
     # auditioned models already trusted elsewhere in the roster. `gemma4` graded
     # `fit`: 0.00 invented material issues per sound control (0/24), 1.00 obvious
     # sensitivity (3/3) — cleaner on this lens than `mistral-large-3` itself. Two other
@@ -65,7 +65,7 @@ roster:
     # `qwen3.8-27b` (1.62 invented per control) and `nemotron-3-super-120b-a12b`
     # (0.36 schema failure rate, over the 0.2 gate — not measurable). See
     # docs/decisions/D-logic-third-family.md for the full record, including why this
-    # is reuse rather than a new family and what that costs QP2.
+    # restores QP2 within logic but leaves roster-wide portfolio concentration.
     #
     # glm-5.2 (marginal: 1.00 sensitivity, 0.75 invented) now sits at position 3, the
     # rule-8 reserve on rounds mistral-large-3 does not author — fit-first ordering

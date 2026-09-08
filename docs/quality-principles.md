@@ -167,21 +167,23 @@ fit-first order applies QP8's deterministic audition verdict to roster position;
 an LLM's prose assessment as a control decision.
 
 **Application — critic retirement and ordering (D-minimax-retirement).** Removing a critic graded
-unfit on both of its lenses leaves logic with Mistral and Zhipu witnesses and evidence with Zhipu and
-Google witnesses, preserving QP2 family diversity. Author exclusion thins logic to one eligible
-critic when `mistral-large-3` authored the report, so that lens cannot supply the two clean families
-required for strong acceptance on those rounds. Fit-first ordering applies QP8's deterministic
+unfit on both of its lenses left logic with Mistral and Zhipu witnesses and evidence with Zhipu and
+Google witnesses, preserving QP2 family diversity. Author exclusion thinned logic to one eligible
+critic when `mistral-large-3` authored the report, so that lens could not supply the two clean families
+required for strong acceptance on those rounds (closed by D-logic-third-family, below). Fit-first
+ordering applies QP8's deterministic
 audition verdicts and measured sensitivity to roster position; no LLM prose grades the roster.
 
-**Application — a reused family closes a roster_limited gap, at a stated QP2 cost
+**Application — a roster-reused family closes a roster_limited gap
 (D-logic-third-family).** `gemma4` joins the logic pool as a measured `fit` (0.00 invented per
 control, 1.00 obvious sensitivity), fixing the gap D-minimax-retirement's ordering note left open:
 author exclusion previously thinned logic to one eligible family whenever `mistral-large-3`
 authored. QP8 governs the addition itself — `gemma4` was auditioned against the shipped fixture
-corpus alongside two candidates that graded `unfit`, and no LLM prose entered the verdict. QP2 is
-not fully restored: `gemma4` already reviews evidence and completeness, so this is a reused family,
-not the genuinely new one the standing open item asked for, and the trade-off is stated rather than
-hidden in the decision record.
+corpus alongside two candidates that graded `unfit`, and no LLM prose entered the verdict. The
+addition grows logic from two families to three and restores QP2's two eligible cross-family
+witnesses after Mistral authors. Because `gemma4` already reviews evidence and completeness, it
+does not add a new roster-wide family; that separate portfolio-concentration trade-off is stated in
+the decision record.
 
 **Application — writer failure classes (D-writer-failure-class).** Recording a `failure_class` on
 each failed attempt makes repeated failure modes countable without interpreting provider prose.

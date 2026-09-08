@@ -286,13 +286,15 @@ extension:
   roster ban. D-writer-failure-class declined to tighten the probe for that reason and that
   reasoning still holds. What a representative probe should exercise, and what it should cost every
   startup, needs its own evidence before it is a decision rather than a guess.
-- A genuinely new **logic**-lens family, beyond reuse. The `roster_limited` defect this item was
+- A new roster-wide family measured for the **logic** lens, beyond reuse. The `roster_limited`
+  defect this item was
   written about is closed (D-logic-third-family): `gemma4` — already this roster's
   evidence/completeness critic — graded `fit` on logic (0.00 invented material issues per sound
   control, 1.00 obvious sensitivity) and now holds position 2, so the pool no longer thins to one
   family on rounds `mistral-large-3` authors. That is reuse, not the new vendor this item
-  originally asked for: QP2's fuller restoration is not reached, since `gemma4` already carries the
-  other two lenses and the roster's per-lens family count does not grow.
+  originally asked for. QP2's per-lens requirement is restored: logic grows from two families to
+  three, and retains two eligible cross-family witnesses after `mistral-large-3` authors. The open
+  concern is instead portfolio concentration, since `gemma4` already carries the other two lenses.
 
   The 2026-08-10/11 survey's result stands unchanged and is still the relevant record for a
   genuinely new family: eight candidates were tried, seven produced interpretable verdicts spanning
