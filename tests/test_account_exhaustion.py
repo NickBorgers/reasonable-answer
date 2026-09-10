@@ -16,7 +16,9 @@ from pathlib import Path
 
 import pytest
 from fakes import FakeClient
+from typer.testing import CliRunner
 
+from reasonable_answer import cli
 from reasonable_answer.graph import (
     DEFERRAL_CODES,
     REFUSAL_CODES,
@@ -152,6 +154,57 @@ def test_a_lens_another_critic_reviewed_does_not_defer(identities, config, tmp_p
     assert any(not r["failed"] for r in results)
     # An account refusal is not evidence about the alias.
     assert out["critic_strikes"].get("logic-spec", 0) == 0
+
+
+def test_a_lens_reviewed_on_a_prior_pass_does_not_defer(identities, config, tmp_path):
+    """A rule-2 retry carries completed reviews from the prior pass; a newly refused
+    critic is then only a depth shortfall, not an account-level deferral."""
+    client = FakeClient(identities=identities, critique_fn=_clean, report_fn=lambda n: REPORT)
+    rt = Runtime(config=config, client=client, identities=identities,
+                 store=RunStore(tmp_path, "run-carried-review"))
+    state = {
+        "question": "Is it so?",
+        "report": REPORT,
+        "artifact_hash": "h" * 64,
+        "author_identity": "external/seed",
+        "pending_lenses": ["logic"],
+        "run_date": "2026-09-10",
+    }
+    state |= _critique(state, rt)
+    prior_completed = sum(not result["failed"] for result in state["lens_results"]["logic"])
+
+    def refused(alias, _user):
+        raise _refusal(alias)
+
+    client.critique_fn = refused
+    state |= _critique(state, rt)
+
+    results = state["lens_results"]["logic"]
+    assert sum(not result["failed"] for result in results) == prior_completed
+    assert results[-1]["failure_class"] == "http_402"
+
+
+# ------------------------------------------------------------------ the CLI
+
+
+def test_a_direct_cli_account_refusal_exits_75_and_says_how_to_resume(
+    config, monkeypatch, tmp_path
+):
+    import yaml
+
+    roster = tmp_path / "roster.yaml"
+    roster.write_text(yaml.safe_dump({"roster": config.roster.model_dump()}))
+
+    def deferred(cfg, **kwargs):
+        raise ProviderAccountExhausted("the provider account refused the run", "run-cli")
+
+    monkeypatch.setattr(cli, "run_graph", deferred)
+    result = CliRunner().invoke(cli.app, ["run", "-q", "Is it so?", "-c", str(roster)])
+
+    assert result.exit_code == 75
+    assert "deferred:" in result.output
+    assert "top up the provider account" in result.output
+    assert "run-cli" in result.output
 
 
 # ------------------------------------------------------------------ the worker

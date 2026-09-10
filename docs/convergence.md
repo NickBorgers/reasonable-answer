@@ -608,12 +608,12 @@ sees it, the checkpoint stays at the last completed node, and the worker writes 
 the closed reason `provider_account` under the same cap. Rules 1 and 3 still fire for every other
 failure.
 
-This is a property of `RunWorker._drain`, not of `StartupRefused`. A direct `ra run` calls
-`build_runtime` itself and has no registry lifecycle to move: the CLI catches the same
-`ConfigError` it always did, prints `fail closed:` with the full diagnostic message, and
-exits `2`. No `deferred` event is written and no run reaches a lifecycle state, because
-there is nothing to recover — the operator is standing right there, which is precisely the
-difference the deferral exists to paper over when nobody is.
+Startup validation deferral is a property of `RunWorker._drain`, not of `StartupRefused`. A
+direct `ra run` calls `build_runtime` itself and has no registry lifecycle to move: when startup
+validation raises `ConfigError`, the CLI prints `fail closed:` with the full diagnostic message
+and exits `2`. By contrast, a mid-run `ProviderAccountExhausted` is resumable: the direct CLI
+prints `deferred:` with the run id and resume command, and exits `75` (`EX_TEMPFAIL`). It writes no
+`deferred` event and moves no registry lifecycle state; those are worker responsibilities.
 
 ## Lifecycle state machine
 
