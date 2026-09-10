@@ -81,6 +81,15 @@ class LensResult(BaseModel):
     artifact_author_identity: str
     failed: bool = False
     failure_reason: str | None = None
+    #: A short, stable token naming how a failed review failed: the call layer's own
+    #: `ModelCallError.failure_class` (`timeout`, `http_502`, `http_402`, ...),
+    #: `schema_violation` when the critic answered outside the schema after its repairs, or
+    #: `unstaffed` when no eligible critic existed. `failure_reason` quotes the provider and
+    #: cannot be grouped; this can. The graph routes on it — a critic whose *calls* keep
+    #: failing is sidelined (D-failing-critic-sidelined), an account refusal defers the run
+    #: (D-credit-exhaustion-defers). None on success, and on results checkpointed before
+    #: the field existed.
+    failure_class: str | None = None
     issues: list[RawIssue] = Field(default_factory=list)
     attempt: int = 1
     confirm_state: bool = False

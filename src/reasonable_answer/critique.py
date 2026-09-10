@@ -115,10 +115,18 @@ def critique_once(
         )
     except (ModelCallError, MalformedOutputError, ValidationError) as exc:
         reason = str(exc)[:400]
+        # A call that never returned is a different defect from a model that answered
+        # outside the schema, and only the first says anything about the alias's health
+        # (D-failing-critic-sidelined).
+        failure_class = (
+            exc.failure_class if isinstance(exc, ModelCallError) else "schema_violation"
+        )
         log.warning(
             "lens %s failed on %s (critic %s): %s", lens.value, artifact_hash[:12], alias, reason
         )
-        return base.model_copy(update={"failed": True, "failure_reason": reason})
+        return base.model_copy(
+            update={"failed": True, "failure_reason": reason, "failure_class": failure_class}
+        )
 
     return base.model_copy(update={"issues": output.issues})
 

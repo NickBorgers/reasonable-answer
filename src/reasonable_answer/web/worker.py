@@ -26,7 +26,7 @@ from typing import TYPE_CHECKING, Any
 from .. import shutdown
 from ..build import build_identity
 from ..config import Config
-from ..graph import GracefulStop, ResumeMismatch, StartupRefused
+from ..graph import GracefulStop, ProviderAccountExhausted, ResumeMismatch, StartupRefused
 from ..graph import run as run_graph
 from ..store import RunStore, UnsafeRunId, safe_run_dir
 
@@ -446,7 +446,13 @@ class RunWorker:
                     "abandoned", reason="question, seed, roster or budgets changed since this run started"
                 )
                 outcome = ("abandoned", False)
-            except StartupRefused as exc:
+            except (StartupRefused, ProviderAccountExhausted) as exc:
+                # A provider account that refused to pay mid-run lands here too
+                # (D-credit-exhaustion-defers): it has read the run, unlike a startup
+                # refusal, but what it says is still about the deployment — every run on
+                # that account would stop at the same balance — and the checkpoint holds
+                # everything up to the node it interrupted.
+                #
                 # Startup validation refused before a token was spent, and before
                 # anything about *this* run was read: no reachable writer, a lens with no
                 # reachable critic, an unreachable proxy (D-deferred-not-abandoned).

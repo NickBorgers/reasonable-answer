@@ -200,6 +200,13 @@ class Registry:
             # Distinguished from the crash below because the cause is outside the run and
             # outside the user's reach: nothing about this run is wrong, the models it
             # needs were unreachable (D-deferred-not-abandoned).
+            if events[-1].get("reason") == "provider_account":
+                # Mid-run, and a different fix: nobody restarts a provider, somebody tops
+                # up an account (D-credit-exhaustion-defers).
+                return (
+                    "interrupted",
+                    "the model provider account ran out of credit; it retries automatically",
+                )
             return "interrupted", "the model roster was unreachable; it retries automatically"
         # Anything else means the process vanished mid-node. The checkpointer makes that
         # resumable rather than lost.

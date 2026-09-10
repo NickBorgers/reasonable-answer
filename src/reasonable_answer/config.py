@@ -753,6 +753,14 @@ class ReviewConfig(BaseModel):
     depth: int = Field(default=2, ge=1, le=4)
     #: Per-lens overrides, keyed by lens name. Absent lenses use `depth`.
     per_lens: dict[str, int] = Field(default_factory=dict)
+    #: Consecutive critique passes in which a critic's every call failed before it is
+    #: sidelined from every critic pool for the rest of the run (D-failing-critic-sidelined).
+    #: A pass counts only when the alias returned no usable review at all and the failure
+    #: was the call's — a timeout, a 5xx, an empty completion — never a schema violation.
+    #: 0 disables it. Deliberately here and not under `budgets`: `_run_fingerprint` hashes
+    #: `budgets`, so a new field there would make every paused run look like changed
+    #: inputs at the deploy that shipped it.
+    critic_strike_limit: int = Field(default=2, ge=0, le=20)
 
     @model_validator(mode="after")
     def _check(self) -> ReviewConfig:

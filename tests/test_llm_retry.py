@@ -27,11 +27,13 @@ from pydantic import BaseModel, ConfigDict
 from reasonable_answer import prompts
 from reasonable_answer.config import Budgets, Config, ConfigError, ProxyConfig, Roster
 from reasonable_answer.llm import (
+    ACCOUNT_FAILURE_CLASS,
     LLMClient,
     MalformedOutputError,
     ModelCallError,
     PermanentCallError,
     ProbeIncomplete,
+    ProviderAccountError,
 )
 from reasonable_answer.triage import LensValidationError, ViolationCode
 
@@ -247,6 +249,34 @@ def test_a_permanent_failure_is_not_retried(tmp_path, status):
 
     assert calls["n"] == 1
     assert slept == []
+
+
+def test_an_account_refusal_is_not_retried(tmp_path):
+    """D-credit-exhaustion-defers. A 402 is the account, not the moment: a backoff measured in
+    seconds cannot outwait a balance someone has to top up, and every retry reserves credit
+    again. `run-81212fcbf68f` spent three attempts per writer inside five seconds on one."""
+    client, slept = make_client(tmp_path)
+    create, calls = _raising(_with_status(402))
+    _install(client, create)
+
+    with pytest.raises(ProviderAccountError) as caught:
+        client.complete("writer-a", system="s", user="u")
+
+    assert calls["n"] == 1
+    assert slept == []
+    assert caught.value.failure_class == ACCOUNT_FAILURE_CLASS == "http_402"
+
+
+def test_an_account_refusal_is_still_a_model_call_error_and_not_a_permanent_one(tmp_path):
+    """Every existing `except ModelCallError` keeps catching it; it is not `PermanentCallError`,
+    whose meaning — the request is wrong — is not what a 402 says."""
+    client, _ = make_client(tmp_path)
+    create, _ = _raising(_with_status(402))
+    _install(client, create)
+
+    with pytest.raises(ModelCallError) as caught:
+        client.complete("writer-a", system="s", user="u")
+    assert not isinstance(caught.value, PermanentCallError)
 
 
 def test_a_permanent_failure_is_still_a_model_call_error(tmp_path):

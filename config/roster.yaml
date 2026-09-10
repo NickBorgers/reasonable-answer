@@ -406,6 +406,12 @@ review:
   depth: 2
   # Per-lens overrides, e.g. `per_lens: {evidence: 3}`. Absent lenses use `depth`.
   per_lens: {}
+  # A critic whose calls fail — timeout, 5xx, empty completion, never a schema slip — on
+  # this many consecutive critique passes is dropped from every critic pool for the rest
+  # of the run, unless the roster could not staff a lens without it
+  # (D-failing-critic-sidelined). 2026-09-04..09, glm-5.3 failed 46 of 66 critique calls
+  # and was drawn again on every draft, each failure three 300s timeouts. 0 disables.
+  critic_strike_limit: 2
 
 # How a writer is asked to apply a defect list (D-scoped-revision). Both settings below are
 # the code defaults and are spelled out here because they are the knob you reach for

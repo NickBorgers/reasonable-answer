@@ -32,7 +32,14 @@ from . import report as report_mod
 from .build import build_identity
 from .config import Config, ConfigError, Roster, validate_roster_health
 from .controller import acceptance_state, decide, detect_cycle
-from .llm import LLMClient, MalformedOutputError, ModelCallError, ProbeIncomplete
+from .llm import (
+    ACCOUNT_FAILURE_CLASS,
+    LLMClient,
+    MalformedOutputError,
+    ModelCallError,
+    ProbeIncomplete,
+    ProviderAccountError,
+)
 from .schemas import (
     AdjudicationRecord,
     CleanRecord,
@@ -99,6 +106,15 @@ class State(TypedDict, total=False):
     #: every rule-2 retry instead of freezing on one fallback model (mirrors the
     #: `writer_rotation` idiom).
     critique_rounds: dict[str, int]
+    #: alias -> consecutive critique passes in which every call it made failed at the call
+    #: layer (D-failing-critic-sidelined). Whole-run, NOT reset on generation: the point is
+    #: to notice an alias that fails on every draft, which a per-artifact counter never can.
+    critic_strikes: dict[str, int]
+    #: Aliases removed from every critic pool for the rest of the run, in the order they
+    #: were sidelined. Read through `_critic_roster`, which is the only place a pool is
+    #: narrowed and which falls back to the configured pools if narrowing would leave the
+    #: roster unable to staff a lens.
+    sidelined_critics: list[str]
     clean_records: list[dict]
     defects: list[dict]
     #: Observed source-verification coverage, keyed by artifact hash — what the evidence
@@ -224,6 +240,34 @@ class StartupRefused(ConfigError):
 #: trail can enumerate the possibilities, and no provider- or deployment-authored string
 #: can reach it by accident.
 REFUSAL_CODES = ("startup_refused", "roster_unreachable")
+
+
+class ProviderAccountExhausted(RuntimeError):
+    """A node could not finish because the provider account refused to pay for it.
+
+    The mid-run sibling of `StartupRefused`, and deferred by the worker for the same
+    reason (D-credit-exhaustion-defers): a 402 is a fact about the deployment, so rendering
+    `aborted` on the run it happened to interrupt would record a verdict about the report
+    that nobody reached. Raised out of the node rather than returned as `fatal`, so the
+    controller never sees it and the checkpoint stays at the last completed node — the
+    resume re-runs exactly the work the refusal stopped.
+
+    Not a `StartupRefused`: that type's whole claim is that nothing about the run was read
+    yet, and here a run is half-way through. `code` joins the same closed vocabulary for
+    the same audience reason — the message names aliases and quotes the provider, and
+    belongs in the container log, never in `events.jsonl`.
+    """
+
+    code = "provider_account"
+
+    def __init__(self, message: str, run_id: str) -> None:
+        super().__init__(message)
+        self.run_id = run_id
+
+
+#: Every `reason` a `deferred` event may carry: the startup refusals plus a mid-run
+#: account refusal. Closed for the reason `REFUSAL_CODES` is.
+DEFERRAL_CODES = (*REFUSAL_CODES, ProviderAccountExhausted.code)
 
 
 def build_runtime(
@@ -680,6 +724,8 @@ def _intake(state: State, rt: Runtime) -> dict:
         "lens_results": {},
         "used_critics": {},
         "critique_rounds": {},
+        "critic_strikes": {},
+        "sidelined_critics": [],
         "clean_records": [],
         "defects": [],
         "polish_used": 0,
@@ -871,6 +917,7 @@ def _generate(state: State, rt: Runtime) -> dict:
     alias = ""
     completion = None
     last_failure = ""
+    account_refused = False
     for offset in range(attempts):
         if offset > 0:
             rt.client.backoff_between_writer_attempts(offset)
@@ -894,6 +941,7 @@ def _generate(state: State, rt: Runtime) -> dict:
         except ModelCallError as exc:
             last_failure = f"generator {alias} failed: {exc}"
             failure_class = getattr(exc, "failure_class", "call_failed")
+            account_refused = account_refused or isinstance(exc, ProviderAccountError)
         else:
             if reply.text.strip():
                 completion = reply
@@ -918,6 +966,17 @@ def _generate(state: State, rt: Runtime) -> dict:
         log.warning("writer attempt %d/%d: %s", offset + 1, attempts, last_failure)
 
     if completion is None:
+        if account_refused:
+            # Any refusal, not every one: once the account has said it cannot pay, the
+            # other failures in this walk are as likely to be its side effects as their
+            # own defects, and a deferral that turns out unnecessary costs a restart while
+            # an abort that should have been a deferral costs the run
+            # (D-credit-exhaustion-defers).
+            raise ProviderAccountExhausted(
+                f"run '{rt.store.run_id}': every writer attempt failed and the provider "
+                f"account refused at least one; last: {last_failure}",
+                rt.store.run_id,
+            )
         return {"fatal": True, "fatal_reason": f"every eligible writer failed; last: {last_failure}"}
 
     identity = rt.identities[alias]
@@ -1410,6 +1469,7 @@ def _critique_one(
             artifact_author_identity=author_identity,
             failed=True,
             failure_reason=str(exc)[:400],
+            failure_class="unstaffed",
             attempt=attempt,
         )
 
@@ -1540,6 +1600,148 @@ class _CritiqueSlot:
     unstaffed_reason: str | None = None
 
 
+#: `LensResult.failure_class` values that say nothing about whether an alias can answer
+#: a call: the model answered outside the schema, nobody was eligible, or the *account*
+#: refused (which fails every alias on it alike, and defers the run instead).
+_NOT_ALIAS_HEALTH = frozenset({"schema_violation", "unstaffed", ACCOUNT_FAILURE_CLASS})
+
+
+def _sidelined_roster(rt: Runtime, sidelined: list[str]) -> Roster:
+    """The attempt's roster with `sidelined` removed from every critic pool — or a
+    `ConfigError` if what is left could not staff the game (D-failing-critic-sidelined).
+
+    Writers and the orchestrator are left alone: a critic slot that keeps timing out
+    says nothing about the same alias's drafting, and the writer walk already rotates
+    past a failing author on its own budget (D-provider-retry). `validate_roster_health`
+    is the gate for the reason D-degraded-roster gave — it already is the definition of a
+    viable roster — so sidelining can never leave a lens without an eligible non-author.
+    """
+    if not sidelined:
+        return rt.config.roster
+    dropped = set(sidelined)
+    roster = rt.config.roster
+    critics = {lens: [a for a in pool if a not in dropped] for lens, pool in roster.critics.items()}
+    reduced = roster.model_copy(update={"critics": critics})
+    validate_roster_health(rt.config.model_copy(update={"roster": reduced}), rt.identities)
+    return reduced
+
+
+def _critic_roster(state: State, rt: Runtime) -> Roster:
+    """The roster every critic-eligibility question in a pass is asked of.
+
+    One function, used for drawing slates *and* for `lens_statuses`, because the two must
+    agree: a slate drawn without an alias while clearance still counted it as eligible
+    would leave a lens waiting on a witness that will never be asked. Narrowing through
+    the same pools `roster_limited` is computed from is also what keeps sidelining honest
+    — a lens thinned to one family reaches `weak_met` and `converged_unconfirmed`, never
+    `accepted`, exactly as a degraded startup does.
+
+    Re-validated on every call rather than once when the alias was sidelined, because a
+    resumed attempt may start under a roster that startup has itself degraded
+    (D-degraded-roster); if that combination can no longer staff a lens, the configured
+    pools win and the failing alias gets asked again. More reviewers is the safe side.
+    """
+    try:
+        return _sidelined_roster(rt, list(state.get("sidelined_critics") or []))
+    except ConfigError as exc:
+        log.warning("sidelined critics restored: the roster cannot staff a lens without them (%s)", exc)
+        return rt.config.roster
+
+
+def _record_strikes(state: State, rt: Runtime, fresh: list[LensResult]) -> tuple[dict[str, int], list[str]]:
+    """Count this pass against each critic, and sideline the ones that keep failing.
+
+    A pass is a strike for an alias when every review it attempted in the pass failed at
+    the call layer; any completed review clears its count. Per *pass*, not per call, so
+    one alias serving three lenses in one bad minute is one strike rather than three, and
+    the outcome does not depend on the order the pool returned results in.
+
+    The production shape this exists for (2026-09-04..09): `glm-5.3` failed 46 of its 66
+    critique calls, 39 of them as three 300-second timeouts in a row, and was drawn again
+    on every draft because `used_critics` — the only record of who had reviewed — resets
+    with each generation. Its failures never tripped rule 2, since the lens's other critic
+    completed, so the run paid fifteen minutes per lens per round for a second witness it
+    never got.
+    """
+    limit = rt.config.review.critic_strike_limit
+    strikes = dict(state.get("critic_strikes") or {})
+    sidelined = list(state.get("sidelined_critics") or [])
+
+    completed: set[str] = set()
+    excused: set[str] = set()
+    struck: dict[str, str] = {}
+    for result in fresh:
+        if result.critic_alias == "(none)":
+            continue
+        if not result.failed:
+            completed.add(result.critic_alias)
+        elif result.failure_class and result.failure_class not in _NOT_ALIAS_HEALTH:
+            struck[result.critic_alias] = result.failure_class
+        else:
+            # The alias answered at least once this pass, if outside the schema: that is
+            # not a pass in which its calls failed, so it neither strikes nor clears.
+            excused.add(result.critic_alias)
+    for alias in completed:
+        strikes[alias] = 0
+    counted = struck.keys() - completed - excused
+    for alias in counted:
+        strikes[alias] = strikes.get(alias, 0) + 1
+
+    if limit <= 0:
+        return strikes, sidelined
+    for alias in sorted(counted):
+        if strikes[alias] < limit or alias in sidelined:
+            continue
+        try:
+            _sidelined_roster(rt, [*sidelined, alias])
+        except ConfigError as exc:
+            log.warning(
+                "critic %s failed %d passes running but stays: the roster cannot staff a lens "
+                "without it (%s)",
+                alias,
+                strikes[alias],
+                exc,
+            )
+            continue
+        sidelined.append(alias)
+        log.warning(
+            "critic %s sidelined for the rest of the run after %d failing passes (last: %s)",
+            alias,
+            strikes[alias],
+            struck[alias],
+        )
+        rt.store.event(
+            "critic_sidelined",
+            critic=rt.identities.get(alias, alias),
+            strikes=strikes[alias],
+            failure_class=struck[alias],
+        )
+    return strikes, sidelined
+
+
+def _defer_if_account_refused(rt: Runtime, results: dict[str, list[dict]], fresh: list[LensResult]) -> None:
+    """Raise `ProviderAccountExhausted` when the account refusing is why a lens has no review.
+
+    Only a lens left with no completed review counts: at depth 2 the other critic may have
+    answered from a different account, and that lens is as reviewed as any other depth
+    shortfall. Without this, a refusing account fails the lens in seconds (402 is not
+    retried), rule 2 spends a critique attempt re-asking a model on the same account, and
+    twelve attempts later rule 3 aborts a run nothing was wrong with
+    (D-credit-exhaustion-defers).
+    """
+    refused = {r.lens.value for r in fresh if r.failed and r.failure_class == ACCOUNT_FAILURE_CLASS}
+    if not refused:
+        return
+    reviewed = {lens for lens, group in results.items() if any(not r["failed"] for r in group)}
+    reviewed |= {r.lens.value for r in fresh if not r.failed}
+    if stranded := sorted(refused - reviewed):
+        raise ProviderAccountExhausted(
+            f"run '{rt.store.run_id}': the provider account refused the only critics of "
+            f"{', '.join(stranded)}",
+            rt.store.run_id,
+        )
+
+
 def _critic_slots(state: State, rt: Runtime, pending: list[Lens]) -> list[_CritiqueSlot]:
     """The full slate this pass will run, across every pending lens.
 
@@ -1569,7 +1771,7 @@ def _critic_slots(state: State, rt: Runtime, pending: list[Lens]) -> list[_Criti
         wanted = max(1, depth - len(completed.get(lens.value, set())))
         try:
             slate = roles.critic_slate(
-                rt.config.roster,
+                _critic_roster(state, rt),
                 rt.identities,
                 lens,
                 author_identity,
@@ -1631,6 +1833,7 @@ def _critique(state: State, rt: Runtime) -> dict:
                 artifact_author_identity=author_identity,
                 failed=True,
                 failure_reason=slot.unstaffed_reason,
+                failure_class="unstaffed",
                 attempt=slot.attempt,
             )
             return result.model_copy(update={"confirm_state": True}) if confirming else result
@@ -1651,31 +1854,42 @@ def _critique(state: State, rt: Runtime) -> dict:
     # Bounded by `max_concurrency` exactly as before — review depth multiplies the
     # number of calls a pass makes, not the load it puts on the proxy at any instant.
     with ThreadPoolExecutor(max_workers=rt.config.budgets.max_concurrency) as pool:
-        for result in pool.map(work, slots):
-            # Appended, never replaced: at depth > 1 a lens holds several independent
-            # reviews of the same artifact, and a failed one stays on the record so the
-            # audit trail shows what was attempted. Only completed reviews are counted
-            # (triage skips failures), so a lingering failure can neither add an issue
-            # nor mint a clean record.
-            results.setdefault(result.lens.value, []).append(result.model_dump(mode="json"))
-            used.setdefault(result.lens.value, set()).add(result.critic_identity)
-            rounds[result.lens.value] = rounds.get(result.lens.value, 0) + 1
-            rt.store.critique(artifact_hash, result.lens.value, result.attempt, result)
-            rt.store.event(
-                "critique",
-                lens=result.lens.value,
-                critic=result.critic_identity,
-                artifact_hash=artifact_hash,
-                failed=result.failed,
-                failure_reason=result.failure_reason,
-                issues=len(result.issues),
-            )
+        fresh = list(pool.map(work, slots))
 
+    # Before anything from this pass is recorded: a deferral re-runs the whole pass on
+    # resume, and an audit trail holding this attempt's critiques as well as the resumed
+    # one's would show one pass as two.
+    _defer_if_account_refused(rt, results, fresh)
+
+    for result in fresh:
+        # Appended, never replaced: at depth > 1 a lens holds several independent
+        # reviews of the same artifact, and a failed one stays on the record so the
+        # audit trail shows what was attempted. Only completed reviews are counted
+        # (triage skips failures), so a lingering failure can neither add an issue
+        # nor mint a clean record.
+        results.setdefault(result.lens.value, []).append(result.model_dump(mode="json"))
+        used.setdefault(result.lens.value, set()).add(result.critic_identity)
+        rounds[result.lens.value] = rounds.get(result.lens.value, 0) + 1
+        rt.store.critique(artifact_hash, result.lens.value, result.attempt, result)
+        rt.store.event(
+            "critique",
+            lens=result.lens.value,
+            critic=result.critic_identity,
+            artifact_hash=artifact_hash,
+            failed=result.failed,
+            failure_reason=result.failure_reason,
+            failure_class=result.failure_class,
+            issues=len(result.issues),
+        )
+
+    strikes, sidelined = _record_strikes(state, rt, fresh)
     return {
         "lens_results": results,
         "used_critics": {k: sorted(v) for k, v in used.items()},
         "critique_rounds": rounds,
         "source_coverage": coverage_by_artifact,
+        "critic_strikes": strikes,
+        "sidelined_critics": sidelined,
     }
 
 
@@ -1724,7 +1938,7 @@ def _triage(state: State, rt: Runtime) -> dict:
     records = existing + fresh
 
     status = roles.lens_statuses(
-        cfg.roster,
+        _critic_roster(state, rt),
         rt.identities,
         state["author_identity"],
         artifact_hash,
@@ -1866,7 +2080,7 @@ def _control(state: State, rt: Runtime) -> dict:
     artifact_hash = state.get("artifact_hash", "")
 
     status = roles.lens_statuses(
-        cfg.roster,
+        _critic_roster(state, rt),
         rt.identities,
         author_identity,
         artifact_hash,
