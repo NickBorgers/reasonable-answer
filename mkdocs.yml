@@ -147,6 +147,7 @@ nav:
       - Run provenance: run-provenance.md
       - Model evaluation: model-evaluation.md
       - 2026-08-10 audition record: model-evaluation-record-2026-08-10.md
+      - 2026-09-08 glm-5.3 audit record: model-evaluation-record-2026-09-08-glm-5.3.md
       - SSRF egress isolation: ssrf-egress-isolation.md
       - CI and the review pipeline: ci-pipeline.md
       - CI setup: ci-setup.md

@@ -46,6 +46,8 @@ unchanged.
   candidate model into a roster slot.
 - **[2026-08-10 audition record](model-evaluation-record-2026-08-10.md)** — the public source
   record for the empirical claims in Model evaluation.
+- **[2026-09-08 glm-5.3 audit record](model-evaluation-record-2026-09-08-glm-5.3.md)** — the public
+  source record for why `glm-5.2` stays pinned over `glm-5.3`.
 - **[SSRF egress isolation](ssrf-egress-isolation.md)** — the infrastructure half of the fetch
   boundary: what the network must enforce that the application cannot.
 - **[CI and the review pipeline](ci-pipeline.md)** — what runs on a pull request, the agentic
