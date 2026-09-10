@@ -72,6 +72,16 @@ roster:
     # puts the two measured-`fit` critics in the front-loaded pair. On rounds
     # mistral-large-3 DOES author, the eligible pair becomes {gemma4, glm-5.2} — two
     # families, closing the gap the comment above used to end on.
+    #
+    # Pinned to 5.2, not bumped to 5.3 (2026-09-08/09 version-currency audit,
+    # docs/model-evaluation-record-2026-09-08-glm-5.3.md): 5.3 measured genuinely
+    # unfit here — 81% schema-failure rate, almost entirely hard ~900s timeouts on
+    # the real critique-shaped call, reproduced even pinned to a single
+    # 99.96%-uptime host (Cloudflare via scripts/host_probe.py), so this is not a
+    # bad-routing artifact worth re-pinning around. completeness measured
+    # marginal/clean on 5.3; evidence was never cleanly measured (first attempt
+    # confounded by an OpenRouter credit exhaustion, not a model result). Do not
+    # re-bump this alias without re-running that audition.
     logic:
       - mistral-large-3
       - gemma4             # critic-only: added 2026-09-06/07, see D-logic-third-family
@@ -80,6 +90,8 @@ roster:
     # 0.50 sensitivity / 0.12 invented) — the higher-sensitivity model leads because a
     # position-1 miss is the one the run acts on. This is the thinnest lens; the open
     # item is auditioning a replacement candidate, not reshuffling these two.
+    # glm-5.2 pinned here too, not bumped to 5.3 — see the logic pool's comment
+    # above; this lens's own 5.3 measurement was inconclusive (credit exhaustion).
     evidence:
       - glm-5.2            # critic-only: lowest hallucination of the open frontier
       - gemma4
@@ -97,6 +109,10 @@ roster:
     # corpus, which is the decorrelation cost of removing a critic that could not return
     # an honest clean. The `fit` model leads because the pass reaches position 1 first,
     # and it is that critic's silence the run acts on.
+    # glm-5.2 pinned here too, not bumped to 5.3 — measured marginal/clean on this
+    # lens (0.46 invented per control, 50% lens sensitivity) but not swapped in
+    # given the unfit logic-lens result for the same snapshot; see the logic
+    # pool's comment above.
     completeness:
       - gemma4
       - glm-5.2
