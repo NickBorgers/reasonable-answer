@@ -202,6 +202,9 @@ and the docs reviewer blocks on the first.
 - **[model-evaluation-record-2026-08-10.md](./model-evaluation-record-2026-08-10.md)** — the public
   operator record behind that procedure's empirical claims: corpus identity, repetitions and call
   counts, measured logic-lens metrics, host probes, schema incidents, and the manual spot-check.
+- **[model-evaluation-record-2026-09-08-glm-5.3.md](./model-evaluation-record-2026-09-08-glm-5.3.md)**
+  — the public operator record behind the `glm-5.3` version-bump comments in `config/roster.yaml`:
+  why `glm-5.2` stays pinned, measured on every lens it holds a slot on.
 - **[decisions.md](./decisions.md)** — the decision-registry index: the slug identifier scheme, the
   old-number mapping, how each adversarial review finding was resolved across the Codex review
   round (`RA-`/`RB-`/`RC-`/`RG-` prefixes) and every round since, the RA-019 test matrix, and the
