@@ -471,6 +471,19 @@ model — so it must not be the first response to a fixable quoting slip. When t
 eligible critics is exhausted, successive attempts rotate through it rather than re-asking
 the model that just failed.
 
+Rotation only spreads retries within one artifact, because `used_critics` resets with every
+generation. A critic whose **calls** keep failing across drafts is handled separately
+(D-failing-critic-sidelined): a pass in which every review an alias attempted failed at the call
+layer (`LensResult.failure_class` is a `ModelCallError` class — not `schema_violation`,
+`unstaffed` or `http_402`) is a strike, a completed review clears the count, and at
+`review.critic_strike_limit` consecutive strikes (default 2) the alias is removed from every
+critic pool for the rest of the run and a `critic_sidelined` event is written. It is never
+sidelined if `validate_roster_health` would refuse the roster without it. Slates *and*
+`lens_statuses` read the narrowed pools through `_critic_roster`, so a lens thinned to one
+family is `roster_limited` and can end only `converged_unconfirmed` — the same verdict as a
+startup that never had the alias (D-degraded-roster). No rule changes: sidelining changes who is
+asked, never how many passes the budgets allow.
+
 | 3 | `lenses_failed > 0` **and** no budget | **aborted** (cannot complete a review) |
 | 4 | `round < min_ticks` | **continue** (generate) — never accept before `min_ticks` |
 | 5 | `round ≥ hard_cap` **and** `blocking > 0` | **needs_human_review** |
@@ -558,7 +571,7 @@ and keep their gates (RI-001, RH-001).
 | `converged_unconfirmed` | every lens at least weakly-cleared, but ≥1 lens is `roster_limited` (only one eligible non-author model) — the record names the under-reviewed dimension |
 | `exhausted_unresolved` | cap/stagnation reached with only non-blocking issues, or clean-but-unconfirmed at cap; returned **with annotations** |
 | `needs_human_review` | cap/stagnation/cycle reached with **blocking** issues present |
-| `aborted` | either a fatal writer failure (empty writer pool or every eligible writer attempt failed), or a failed-lens path that reaches rule 3 after rule 2 cannot recover it (including zero eligible non-author critics or exhausted malformed/incomplete-review repairs); a provider unreachable at *startup* degrades the roster or defers the attempt instead — D-degraded-roster |
+| `aborted` | either a fatal writer failure (empty writer pool or every eligible writer attempt failed), or a failed-lens path that reaches rule 3 after rule 2 cannot recover it (including zero eligible non-author critics or exhausted malformed/incomplete-review repairs); a provider unreachable at *startup* degrades the roster or defers the attempt instead — D-degraded-roster; a provider *account* that refuses to pay mid-run (HTTP 402) defers the run instead of reaching rule 1 or 3 — D-credit-exhaustion-defers |
 
 A known-unacceptable artifact is **never** labeled `accepted` or `converged_unconfirmed`.
 
@@ -587,12 +600,20 @@ themselves capped by `max_deferred_attempts`, generously and separately from
 configuration nobody is coming to fix, and the run is `abandoned` like any other recovery
 gave up on, rather than deferring silently forever.
 
-This is a property of `RunWorker._drain`, not of `StartupRefused`. A direct `ra run` calls
-`build_runtime` itself and has no registry lifecycle to move: the CLI catches the same
-`ConfigError` it always did, prints `fail closed:` with the full diagnostic message, and
-exits `2`. No `deferred` event is written and no run reaches a lifecycle state, because
-there is nothing to recover — the operator is standing right there, which is precisely the
-difference the deferral exists to paper over when nobody is.
+**A provider account that cannot pay defers mid-run too** (D-credit-exhaustion-defers). A 402 is
+not retried (`ProviderAccountError`). When every writer attempt failed and one was an account
+refusal, or when an account refusal is why a lens holds no completed review, the node raises
+`ProviderAccountExhausted` instead of returning `fatal` or a failed lens: the controller never
+sees it, the checkpoint stays at the last completed node, and the worker writes `deferred` with
+the closed reason `provider_account` under the same cap. Rules 1 and 3 still fire for every other
+failure.
+
+Startup validation deferral is a property of `RunWorker._drain`, not of `StartupRefused`. A
+direct `ra run` calls `build_runtime` itself and has no registry lifecycle to move: when startup
+validation raises `ConfigError`, the CLI prints `fail closed:` with the full diagnostic message
+and exits `2`. By contrast, a mid-run `ProviderAccountExhausted` is resumable: the direct CLI
+prints `deferred:` with the run id and resume command, and exits `75` (`EX_TEMPFAIL`). It writes no
+`deferred` event and moves no registry lifecycle state; those are worker responsibilities.
 
 ## Lifecycle state machine
 

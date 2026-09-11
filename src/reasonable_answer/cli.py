@@ -18,7 +18,7 @@ from .audition import Assignment as Assignment_t
 from .build import build_identity
 from .config import Config, ConfigError, validate_roster_health
 from .export import export_html, export_markdown
-from .graph import GracefulStop
+from .graph import GracefulStop, ProviderAccountExhausted
 from .graph import run as run_graph
 from .llm import LLMClient, ProbeIncomplete
 from .store import CorruptRun, UnsafeRunId, expired_runs, read_run
@@ -117,6 +117,13 @@ def run(
         console.print(f"\n[yellow]paused:[/yellow] {exc}")
         console.print(f"resume it with: [bold]ra run --run-id {exc.run_id} -q '{question}'[/bold]")
         raise typer.Exit(code=130) from exc
+    except ProviderAccountExhausted as exc:
+        # Resumable like a pause, and not a verdict (D-credit-exhaustion-defers). 75 is
+        # EX_TEMPFAIL: the operator's fix is outside the run, and retrying later works.
+        console.print(f"\n[yellow]deferred:[/yellow] {exc}")
+        console.print("top up the provider account, then resume it with: "
+                      f"[bold]ra run --run-id {exc.run_id} -q '{question}'[/bold]")
+        raise typer.Exit(code=75) from exc
 
     status = final.get("terminal_status", "aborted")
     colour = {

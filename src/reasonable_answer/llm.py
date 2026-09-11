@@ -98,14 +98,42 @@ class PermanentCallError(ModelCallError):
         super().__init__(message, failure_class=failure_class)
 
 
+#: The `failure_class` of a call the provider *account* refused. Named once, here, because
+#: the graph routes on it (D-credit-exhaustion-defers) and a typo in either place would
+#: silently turn a deferral back into an abort.
+ACCOUNT_FAILURE_CLASS = "http_402"
+
+
+class ProviderAccountError(ModelCallError):
+    """The provider account behind the proxy refused to pay for the request.
+
+    OpenRouter answers 402 when the balance cannot cover a request — outright, or once the
+    credit reserved for requests already in flight is counted. That is a fact about the
+    deployment, not about the alias or the request: every alias billed to the same account
+    fails identically until someone tops it up, which takes minutes to hours, not the
+    seconds a retry budget spans. On 2026-09-09 `run-81212fcbf68f` spent three attempts
+    per writer inside five seconds on exactly this and aborted at round 5
+    (D-credit-exhaustion-defers). Still a `ModelCallError`, so every existing `except`
+    keeps catching it; the subclass tells `_create` not to retry and tells the graph to
+    defer the run rather than render a verdict on it.
+    """
+
+    def __init__(self, message: str, *, failure_class: str = ACCOUNT_FAILURE_CLASS) -> None:
+        super().__init__(message, failure_class=failure_class)
+
+
 class ProbeIncomplete(ConfigError):
     """The probe did not establish whether the alias has the capability."""
 
 
 #: HTTP statuses where the fault is in the request, not the moment. 408 (timeout) and
 #: 429 (rate limit) are deliberately absent — those are exactly what backoff is for,
-#: and so is every 5xx.
+#: and so is every 5xx. 402 is absent too, for the opposite reason: it is neither the
+#: request nor the moment but the account, and has its own status set below.
 _PERMANENT_STATUSES = frozenset({400, 401, 403, 404, 413, 422})
+
+#: HTTP statuses that mean the provider account cannot pay (D-credit-exhaustion-defers).
+_ACCOUNT_STATUSES = frozenset({402})
 
 #: Ceiling on a server-supplied `Retry-After`. A provider asking us to wait ten minutes
 #: has effectively failed the call; the caller's own rotation is the better move.
@@ -519,6 +547,10 @@ class LLMClient:
             except Exception as exc:  # transport / provider error
                 last = exc
                 log.warning("call to %s failed (attempt %d): %s", alias, attempt + 1, exc)
+                if _status_of(exc) in _ACCOUNT_STATUSES:
+                    # A backoff measured in seconds cannot outwait a balance someone has
+                    # to top up, and every retry reserves credit again while it waits.
+                    raise ProviderAccountError(f"{alias}: {exc}") from exc
                 if _permanent(exc):
                     # Spending the rest of the budget re-sending a request the provider
                     # has already judged malformed just delays the caller's rotation to

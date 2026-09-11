@@ -237,6 +237,12 @@ def test_an_out_of_range_default_depth_fails_closed(depth):
         ReviewConfig(depth=depth)
 
 
+@pytest.mark.parametrize("limit", [-1, 21])
+def test_an_out_of_range_critic_strike_limit_fails_closed(limit):
+    with pytest.raises(ValidationError):
+        ReviewConfig(critic_strike_limit=limit)
+
+
 # ---------------------------------------------------- eligibility is not spent for depth
 
 

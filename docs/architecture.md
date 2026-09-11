@@ -220,6 +220,12 @@ Shortening the grace period wastes work; it does not corrupt anything.
   absent one — uncapped, a permanently misconfigured roster would accumulate runs that
   defer on every boot and never reach a terminal state anyone would notice. Exhausting it
   writes the same `abandoned` event as the resume cap.
+* **A provider account that refuses to pay mid-run is deferred the same way**
+  (D-credit-exhaustion-defers). `_generate` (every writer attempt failed, one with a 402) and
+  `_critique` (a 402 is why a lens has no completed review) raise `ProviderAccountExhausted`
+  rather than returning a fatal state, so no verdict is recorded and the checkpoint stays at the
+  last completed node. The worker catches it beside `StartupRefused` and writes `deferred` with
+  the closed reason `provider_account` (`DEFERRAL_CODES`); `ra run` exits 75.
 * **A roster change invalidates every in-flight run.** `_run_fingerprint` covers the
   roster and budgets, so a deploy that also ships a new `config/roster.yaml` will refuse
   to resume runs started under the old one. That refusal is correct — it lands them in
@@ -418,6 +424,15 @@ carried no headings is accepted with a warning; the warning rides the run's exis
   per attempt in the `startup` event's `unreachable_aliases`, and deliberately stays out of
   `_run_fingerprint`, which keeps hashing the *configured* roster — otherwise a provider's recovery
   would read as changed inputs and trip `ResumeMismatch` at the moment the run could finally finish.
+- **Failing critic sidelined (D-failing-critic-sidelined):** the run keeps a whole-run strike count
+  per critic alias — a critique pass in which every review the alias attempted failed at the call
+  layer is a strike, a completed review resets it — and at `review.critic_strike_limit` (default 2)
+  removes the alias from every critic pool for the rest of the run, recording `critic_sidelined`.
+  `validate_roster_health` gates it, so no lens is ever left unstaffable, and `_critic_roster`
+  feeds both slate drawing and `lens_statuses`, so a thinned lens is `roster_limited` and cannot
+  reach `accepted`. `LensResult.failure_class` (also on the `critique` event) is what the count
+  reads; schema violations, unstaffed slots and account refusals do not count. The limit lives
+  under `review`, not `budgets`, to stay out of `_run_fingerprint`.
 - **Writer-pool depth (D-provider-retry):** author exclusion applies to writers too, so the pool the *next* draft
   may come from is `writers \ {author(Rₙ)}`. Size the pool for **≥2 eligible writers on a revision
   round** — i.e. at least three writers — or one flaky response is an aborted run rather than a
@@ -435,7 +450,9 @@ carried no headings is accepted with a warning; the warning rides the run's exis
 - **Transient-failure posture (D-provider-retry):** every retry waits — exponential with jitter, bounded by
   `budgets.retry_backoff_seconds` / `retry_backoff_max_seconds`, and a provider's own `Retry-After`
   wins where it sends one. Failures whose status says the *request* is wrong (400/401/403/404/413/
-  422) raise `PermanentCallError` immediately instead of consuming the budget. A completion is never
+  422) raise `PermanentCallError` immediately instead of consuming the budget. A 402 — the provider
+  account cannot pay — raises `ProviderAccountError` immediately too, and the graph defers the run
+  on it rather than failing a writer or a lens (D-credit-exhaustion-defers). A completion is never
   empty: an agentic loop that ends on a tool call gets exactly one further toolless round asking for
   prose, and raises if that is empty too, so no caller can mistake a stalled loop for a model that
   wrote nothing. A tool whose own budget is spent is withdrawn from subsequent rounds rather than
