@@ -49,7 +49,8 @@ losing it looks like.
 
 **Decision, part one: scope the edit.** `revision.mode: patch` (the default) tells the writer to change
 only the paragraphs a fix task names in its locus, plus whatever a task's instruction explicitly
-requires elsewhere, and to return every other paragraph **byte-identical**. The output shape is
+requires elsewhere. D-claim-scoped-patch subsequently made every passage that restates a claim the
+task fixes part of that licence; unrelated text remains **byte-identical**. The output shape is
 unchanged — still the whole document, because the artifact hash is taken over the whole document and
 every downstream reader wants a complete report. What changes is the licence to re-render text nobody
 complained about. `revision.mode: rewrite` reproduces the previous prompt byte for byte, so the two are

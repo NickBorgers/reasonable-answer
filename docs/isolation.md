@@ -173,10 +173,10 @@ keeps the generator's context small, preserving #6.
 
 ### Scoping the edit is not narrowing the review (D-scoped-revision)
 
-Under `revision.mode: patch` a revision changes only the paragraphs a fix task named and returns the
-rest byte-identical, instead of re-rendering the whole document every round. **No principle above
-moves.** The distinction that matters is between *who edits* and *who reviews*, and only the first is
-scoped:
+Under `revision.mode: patch` a revision changes only the paragraphs a fix task named and passages
+that restate a claim the task fixes, and returns unrelated text byte-identical instead of re-rendering
+the whole document every round (D-claim-scoped-patch). **No principle above moves.** The distinction
+that matters is between *who edits* and *who reviews*, and only the first is scoped:
 
 - Every critic still receives the **whole** rendered artifact, in a fresh blind context, every tick.
   Untouched prose is not unreviewed prose. #1 through #6 are untouched, and #7 — `critic(Rn) ≠
