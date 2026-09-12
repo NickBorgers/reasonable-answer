@@ -267,6 +267,55 @@ def test_patch_mode_measures_scope_without_rejecting_anything(identities, tmp_pa
     assert not [e for e in _events(cfg, final) if e["kind"] == "generate_failed"]
 
 
+def test_patch_mode_wires_claim_spans_into_restatement_measurement(identities, tmp_path, roster):
+    """A triaged defect's claim span reaches the generate event's scope measurement."""
+    cfg = Config(
+        roster=roster,
+        budgets=Budgets(min_ticks=2, hard_cap=4),
+        runs_dir=tmp_path / "runs",
+    )
+    claim = "A repeated claim that is presented as fully supported by the available evidence."
+    qualified = "The available evidence offers qualified support for the repeated claim."
+    report = f"""# Answer
+
+{claim}
+
+## Detail
+
+{claim}
+
+## Sources
+
+[1] A real-looking source.
+"""
+
+    def repeated_claim(_alias, user) -> CritiqueOutput:
+        return CritiqueOutput(
+            issues=[
+                uncited().model_copy(
+                    update={
+                        "category": LENS_CATEGORY[lens_of(user)],
+                        "claim_span": claim,
+                    }
+                )
+            ]
+        )
+
+    client = make_client(identities, critique_fn=repeated_claim)
+    client.report_fn = lambda _n: report.replace(claim, qualified)
+    final = run(cfg, question="Is it so?", seed=report, client=client)
+
+    revisions = [
+        e
+        for e in _events(cfg, final)
+        if e["kind"] == "generate" and "changed_paragraphs" in e
+    ]
+    assert revisions
+    assert revisions[0]["in_scope"] == 1
+    assert revisions[0]["restated"] == 1
+    assert revisions[0]["out_of_scope"] == 0
+
+
 def test_the_first_draft_carries_no_scope_measurement(identities, tmp_path, roster):
     """Absent means "not applicable", never "in scope" — the A/B must not average the
     first draft, a polish pass, or a rule-13 rewrite into the out-of-scope rate."""

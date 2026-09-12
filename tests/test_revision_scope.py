@@ -13,7 +13,7 @@ and fix tasks routinely ask for one.
 
 from __future__ import annotations
 
-from reasonable_answer.report import revision_scope
+from reasonable_answer.report import RESTATEMENT_MIN_WORDS, restates, revision_scope
 from reasonable_answer.schemas import StructuralRef
 
 BEFORE = """## Conclusion
@@ -45,6 +45,7 @@ def test_an_in_scope_edit_is_counted_in_scope():
     assert scope.as_event_fields() == {
         "changed_paragraphs": 1,
         "in_scope": 1,
+        "restated": 0,
         "out_of_scope": 0,
         "defect_loci_untouched": 0,
     }
@@ -135,6 +136,7 @@ def test_an_unchanged_document_reports_nothing_changed():
     assert scope.as_event_fields() == {
         "changed_paragraphs": 0,
         "in_scope": 0,
+        "restated": 0,
         "out_of_scope": 0,
         "defect_loci_untouched": 1,
     }
@@ -163,6 +165,98 @@ def test_several_tasks_each_resolved_in_place():
     assert scope.as_event_fields() == {
         "changed_paragraphs": 2,
         "in_scope": 2,
+        "restated": 0,
         "out_of_scope": 0,
         "defect_loci_untouched": 0,
     }
+
+
+# ------------------------------------------ restated claims (D-claim-scoped-patch)
+
+# The frame restates a claim in the conclusion, the key findings and the body. A task
+# names one locus; the fix has to land on all three or the report contradicts itself.
+RESTATED = """## Conclusion
+
+EMALS's power conversion efficiency is projected to reach roughly 90%, far exceeding steam.
+
+## Key findings
+
+Its power conversion efficiency is projected to reach roughly 90%, far exceeding steam [1].
+
+Launch variability is lower on EMALS than on steam catapults [2].
+
+## Analysis
+
+Power conversion efficiency is projected to reach roughly 90%, far exceeding steam [1].
+
+## Sources
+
+[1] https://example.org/emals
+[2] https://example.org/launch
+"""
+
+SPAN = "power conversion efficiency is projected to reach roughly 90%, far exceeding steam"
+
+
+def test_a_fix_carried_to_every_copy_of_the_claim_is_restated_not_out_of_scope():
+    """The task named the body paragraph (S3.P1). The writer qualified the claim there
+    and in both restatements — the conclusion and the key finding — which is exactly
+    what the patch licence now asks for, and must not read as a re-roll."""
+    after = RESTATED.replace("projected to reach roughly 90%", "projected by [1] to reach roughly 90%")
+    scope = revision_scope(RESTATED, after, [ref(3, 1)], [SPAN])
+    assert scope.as_event_fields() == {
+        "changed_paragraphs": 3,
+        "in_scope": 1,
+        "restated": 2,
+        "out_of_scope": 0,
+        "defect_loci_untouched": 0,
+    }
+    assert scope.restated == (ref(1, 1), ref(2, 1))
+
+
+def test_a_changed_paragraph_that_shares_only_the_topic_is_still_out_of_scope():
+    """S2.P2 is about EMALS too, and shares vocabulary with the span; it does not
+    restate the claim, so rewording it is the re-roll the measurement exists to see."""
+    after = RESTATED.replace(
+        "Launch variability is lower on EMALS than on steam catapults [2].",
+        "EMALS launches with less variability than steam catapults do [2].",
+    )
+    scope = revision_scope(RESTATED, after, [ref(3, 1)], [SPAN])
+    assert scope.as_event_fields()["restated"] == 0
+    assert scope.out_of_scope == (ref(2, 2),)
+
+
+def test_without_claim_spans_the_report_is_what_it_was():
+    """`claim_spans` defaults empty, so every existing caller and every pre-existing
+    audit number keeps its meaning: nothing is ever `restated` unless spans are given."""
+    after = RESTATED.replace("projected to reach roughly 90%", "projected by [1] to reach roughly 90%")
+    with_spans = revision_scope(RESTATED, after, [ref(3, 1)], [SPAN])
+    without = revision_scope(RESTATED, after, [ref(3, 1)])
+    assert without.restated == ()
+    assert set(without.out_of_scope) == set(with_spans.restated)
+    assert without.changed == with_spans.changed
+
+
+def test_restatement_is_matched_on_the_previous_text_not_the_revised_one():
+    """A paragraph that did not carry the claim before the revision and carries it
+    after is new text about the claim, not a copy the fix was carried to."""
+    after = RESTATED.replace(
+        "Launch variability is lower on EMALS than on steam catapults [2].",
+        "Its power conversion efficiency is projected to reach roughly 90%, far exceeding steam [2].",
+    )
+    scope = revision_scope(RESTATED, after, [ref(3, 1)], [SPAN])
+    assert scope.restated == ()
+    assert scope.out_of_scope == (ref(2, 2),)
+
+
+def test_restates_needs_a_run_of_words_not_shared_vocabulary():
+    assert RESTATEMENT_MIN_WORDS == 8
+    # A verbatim copy, and a copy whose subject and punctuation changed.
+    assert restates("Its power conversion efficiency is projected to reach roughly 90%!", SPAN)
+    # The same words in a different order share vocabulary and nothing else.
+    assert not restates("roughly 90% is the projected efficiency of power conversion; far, exceeding", SPAN)
+    # A short span must match whole.
+    assert restates("The tunnel moves trust.", "moves trust")
+    assert not restates("The tunnel moves nothing.", "moves trust")
+    # Nothing restates an empty span.
+    assert not restates("anything at all", "")

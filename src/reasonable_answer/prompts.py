@@ -410,7 +410,7 @@ WRITER_REWRITE_CLOSE = (
     "Return the complete revised report in Markdown — the whole document, not a diff."
 )
 
-#: Closing instruction for `revision.mode: patch` (D-scoped-revision).
+#: Closing instruction for `revision.mode: patch` (D-scoped-revision, D-claim-scoped-patch).
 #:
 #: The output shape is unchanged — still the whole document, because the artifact hash
 #: is taken over the whole document and every downstream reader (critics, loci, the
@@ -421,6 +421,19 @@ WRITER_REWRITE_CLOSE = (
 #:
 #: "Byte-identical" is stated in those words deliberately: "keep the meaning" or "leave
 #: it substantially unchanged" licenses exactly the paraphrase this is trying to stop.
+#:
+#: The unit of a fix is the **claim**, not the paragraph (D-claim-scoped-patch). The
+#: report frame restates each load-bearing claim up to three times — `## Conclusion`,
+#: `## Key findings`, and the section that argues it — and a fix task names only the one
+#: locus its critic quoted. Under the paragraph-only licence the writer qualified,
+#: re-cited or removed the claim at that locus and was forbidden to touch its copies, so
+#: the next pass found the unfixed copies *and* a report that now disagreed with itself
+#: (an `overstated_claim` at one locus against a caveat at another, a
+#: `conceptual_conflation` between a body that distinguishes two mechanisms and a
+#: conclusion that still lumps them). Every restatement of a fixed claim is therefore in
+#: scope, and the byte-identical rule applies to everything else. The placeholder and
+#: heading rules close two more ways a patch chain was observed to decay: a section
+#: reduced to "(No changes required.)", and headings renumbered or dropped.
 WRITER_PATCH_CLOSE = (
     "Revise by editing, not by rewriting. Change only the paragraphs a fix task names "
     "in its locus, plus anything a task's instruction explicitly requires you to touch "
@@ -428,6 +441,16 @@ WRITER_PATCH_CLOSE = (
     "paragraph must come back **byte-identical** to the draft above — do not reword it, "
     "do not re-order it, do not 'improve' it, and do not restructure sections that no "
     "task mentions. You may add a paragraph, or split one, where a task requires it.\n\n"
+    "The unit of a fix is the claim, not the paragraph. The conclusion, the key findings "
+    "and the body restate the same claims, and a task names only one of the places a "
+    "claim appears. When a task qualifies, weakens, re-cites or removes a claim, make "
+    "the same change in every other passage that restates that claim, so the report "
+    "does not say two different things about it. Those restatement edits are in scope; "
+    "nothing else is.\n\n"
+    "Reproduce every paragraph you are not editing in full. Never stand in for a "
+    "paragraph or a section with a placeholder, an ellipsis, or a note such as "
+    "'(unchanged)' or '(no changes required)'. Keep every heading's text exactly as it "
+    "is: do not number, renumber, drop, or merge sections.\n\n"
     "Text you did not write is not text to be fixed: rewriting a passage no task names "
     "only puts a fresh defect where there was none.\n\n"
     "Return the complete revised report in Markdown — the whole document, not a diff."

@@ -116,15 +116,20 @@ class ScopeReport:
     changed: tuple[StructuralRef, ...]
     out_of_scope: tuple[StructuralRef, ...]
     untouched_defect_loci: tuple[StructuralRef, ...]
+    #: Changed paragraphs no task named whose previous text restated a flagged claim —
+    #: the edits D-claim-scoped-patch licenses, counted apart from `out_of_scope` so
+    #: the number that means "re-rolled text nobody complained about" keeps meaning it.
+    restated: tuple[StructuralRef, ...] = ()
 
     @property
     def in_scope_count(self) -> int:
-        return len(self.changed) - len(self.out_of_scope)
+        return len(self.changed) - len(self.out_of_scope) - len(self.restated)
 
     def as_event_fields(self) -> dict[str, int]:
         return {
             "changed_paragraphs": len(self.changed),
             "in_scope": self.in_scope_count,
+            "restated": len(self.restated),
             "out_of_scope": len(self.out_of_scope),
             "defect_loci_untouched": len(self.untouched_defect_loci),
         }
@@ -142,6 +147,42 @@ def _scope_key(text: str) -> str:
     return re.sub(r"\s+", " ", text).strip()
 
 
+#: The shortest run of consecutive words a paragraph must share with a flagged claim to
+#: count as restating it. Restatements in this pipeline are near-verbatim — the frame
+#: asks for the same finding in the conclusion, the key findings and the body, and
+#: writers copy — so a long common run is the signature, and eight words is longer than
+#: any stock phrase ("in the United States, the number of") while shorter than the
+#: claim spans critics quote in practice, which run a sentence. A span with fewer words
+#: must match whole.
+RESTATEMENT_MIN_WORDS = 8
+
+_WORD = re.compile(r"[^\W_]+", re.UNICODE)
+
+
+def _words(text: str) -> list[str]:
+    return [w.lower() for w in _WORD.findall(text)]
+
+
+def restates(paragraph: str, claim_span: str) -> bool:
+    """Whether `paragraph` restates the claim quoted in `claim_span` (D-claim-scoped-patch).
+
+    Compared on words — lower-cased, punctuation dropped — because a restatement
+    changes the subject ("Its efficiency" for "EMALS's efficiency"), a tense or a
+    comma while carrying the claim across verbatim. Longest common *run*, not shared
+    vocabulary: two paragraphs about the same topic share words, only a restatement
+    shares a sentence.
+    """
+    span = _words(claim_span)
+    if not span:
+        return False
+    para = _words(paragraph)
+    need = min(RESTATEMENT_MIN_WORDS, len(span))
+    match = difflib.SequenceMatcher(None, span, para, autojunk=False).find_longest_match(
+        0, len(span), 0, len(para)
+    )
+    return match.size >= need
+
+
 def _ref(p: Paragraph) -> StructuralRef:
     return StructuralRef(section=p.section, paragraph=p.paragraph)
 
@@ -150,6 +191,7 @@ def revision_scope(
     previous: str,
     revised: str,
     defect_loci: Iterable[StructuralRef],
+    claim_spans: Iterable[str] = (),
 ) -> ScopeReport:
     """Which paragraphs of `previous` the revision changed, and which were in scope.
 
@@ -162,13 +204,25 @@ def revision_scope(
     An insertion is attributed to the paragraphs it sits *between*, and counts as in
     scope when either neighbour was named by a task: "add a sentence acknowledging X"
     is very often honoured as a new paragraph next to the one that was flagged.
+
+    A changed paragraph no task named, whose *previous* text restated one of the
+    `claim_spans` (D-claim-scoped-patch), is `restated` rather than `out_of_scope`: the
+    patch licence asks the writer to carry a fix to every copy of the claim, and the
+    measurement has to be able to tell that from re-rolling text nobody complained
+    about. Matching is against the old text, because that is where the copy was; what
+    the writer turned it into is not the question. With no spans given the report is
+    exactly what it was.
     """
     old = parse(previous).paragraphs
     new = parse(revised).paragraphs
     loci = {(r.section, r.paragraph) for r in defect_loci}
+    spans = [span for span in claim_spans if span]
 
     def in_scope(p: Paragraph) -> bool:
         return (p.section, p.paragraph) in loci
+
+    def restated(p: Paragraph) -> bool:
+        return any(restates(p.text, span) for span in spans)
 
     matcher = difflib.SequenceMatcher(
         a=[_scope_key(p.text) for p in old],
@@ -178,6 +232,7 @@ def revision_scope(
 
     changed: list[StructuralRef] = []
     out_of_scope: list[StructuralRef] = []
+    restated_refs: list[StructuralRef] = []
     touched: set[tuple[int, int]] = set()
 
     for tag, i1, i2, _j1, _j2 in matcher.get_opcodes():
@@ -202,6 +257,8 @@ def revision_scope(
             changed.append(_ref(p))
             if in_scope(p):
                 touched.add((p.section, p.paragraph))
+            elif restated(p):
+                restated_refs.append(_ref(p))
             else:
                 out_of_scope.append(_ref(p))
 
@@ -212,4 +269,5 @@ def revision_scope(
         changed=tuple(changed),
         out_of_scope=tuple(out_of_scope),
         untouched_defect_loci=tuple(untouched),
+        restated=tuple(restated_refs),
     )

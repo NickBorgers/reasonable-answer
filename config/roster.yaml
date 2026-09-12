@@ -431,8 +431,9 @@ review:
 # decorrelation layer is the critic roster (docs/isolation.md), not the rewrite.
 #
 # `scope_check: warn` records what the revision actually touched on the `generate`
-# event (`changed_paragraphs`, `in_scope`, `out_of_scope`, `defect_loci_untouched`) and
-# never rejects a draft — a rejection would burn one of three `writer_attempts`.
+# event (`changed_paragraphs`, `in_scope`, `restated`, `out_of_scope`,
+# `defect_loci_untouched`) and never rejects a draft — a rejection would burn one of
+# three `writer_attempts`.
 revision:
   mode: patch
   scope_check: warn

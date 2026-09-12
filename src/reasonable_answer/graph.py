@@ -809,7 +809,14 @@ def _scope_fields(
     """
     if cfg.revision.scope_check == "off" or not previous or polish or full_rewrite:
         return {}
-    scope = report_mod.revision_scope(previous, text, [d.locus for d in defects])
+    scope = report_mod.revision_scope(
+        previous,
+        text,
+        [d.locus for d in defects],
+        # A copy of a flagged claim is in scope (D-claim-scoped-patch); the spans are
+        # what lets the measurement tell a carried fix from a re-roll.
+        [d.claim_span for d in defects],
+    )
     if scope.out_of_scope:
         log.info(
             "revision touched %d paragraph(s) no fix task named (of %d changed)",

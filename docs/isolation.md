@@ -173,10 +173,10 @@ keeps the generator's context small, preserving #6.
 
 ### Scoping the edit is not narrowing the review (D-scoped-revision)
 
-Under `revision.mode: patch` a revision changes only the paragraphs a fix task named and returns the
-rest byte-identical, instead of re-rendering the whole document every round. **No principle above
-moves.** The distinction that matters is between *who edits* and *who reviews*, and only the first is
-scoped:
+Under `revision.mode: patch` a revision changes only the paragraphs a fix task named and passages
+that restate a claim the task fixes, and returns unrelated text byte-identical instead of re-rendering
+the whole document every round (D-claim-scoped-patch). **No principle above moves.** The distinction
+that matters is between *who edits* and *who reviews*, and only the first is scoped:
 
 - Every critic still receives the **whole** rendered artifact, in a fresh blind context, every tick.
   Untouched prose is not unreviewed prose. #1 through #6 are untouched, and #7 — `critic(Rn) ≠
@@ -196,6 +196,17 @@ The residual this does introduce is framing: one model's voice now persists acro
 `loaded_language` floors at `minor` (D-social-bias) so a framing bias that survives its first review
 is not caught as material. Controller rule 13's bounded whole-document rewrite is the partial
 mitigation; D-scoped-revision records the gap.
+
+**The unit of the edit is the claim, not the paragraph (D-claim-scoped-patch).** The report frame
+restates each load-bearing claim in the conclusion, the key findings and the body, and a fix task
+names one locus. A writer that fixed the claim at that locus and was forbidden to touch its copies
+left the copies unfixed and set the patched copy against them, which the next pass reported as fresh
+defects. The patch licence therefore covers every passage that restates a fixed claim, and nothing
+else; it also forbids standing in for unedited text with a placeholder and changing any heading.
+Everything above holds word for word with "paragraph" read as "claim": critics still read the whole
+artifact, rotation stays, clean records still reset on every generation. The scope measurement
+counts these edits as `restated`, apart from `out_of_scope`, so the number that means "re-rolled
+text nobody complained about" keeps meaning it.
 
 ## The depersonalization step (principle 1, made concrete)
 
