@@ -197,6 +197,17 @@ The residual this does introduce is framing: one model's voice now persists acro
 is not caught as material. Controller rule 13's bounded whole-document rewrite is the partial
 mitigation; D-scoped-revision records the gap.
 
+**The unit of the edit is the claim, not the paragraph (D-claim-scoped-patch).** The report frame
+restates each load-bearing claim in the conclusion, the key findings and the body, and a fix task
+names one locus. A writer that fixed the claim at that locus and was forbidden to touch its copies
+left the copies unfixed and set the patched copy against them, which the next pass reported as fresh
+defects. The patch licence therefore covers every passage that restates a fixed claim, and nothing
+else; it also forbids standing in for unedited text with a placeholder and changing any heading.
+Everything above holds word for word with "paragraph" read as "claim": critics still read the whole
+artifact, rotation stays, clean records still reset on every generation. The scope measurement
+counts these edits as `restated`, apart from `out_of_scope`, so the number that means "re-rolled
+text nobody complained about" keeps meaning it.
+
 ## The depersonalization step (principle 1, made concrete)
 
 ```mermaid

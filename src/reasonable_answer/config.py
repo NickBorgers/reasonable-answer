@@ -707,6 +707,12 @@ class RevisionConfig(BaseModel):
     different model still patches every round, so no single model's prose accumulates
     unchallenged.
 
+    The unit of a patch is the *claim* (D-claim-scoped-patch): the frame restates each
+    claim in the conclusion, the key findings and the body, and a fix carried to one of
+    the three left the others unfixed and the report contradicting itself. The writer is
+    told to carry the change to every restatement, and the scope measurement counts
+    those edits as `restated`, apart from `out_of_scope`.
+
     Both settings are here rather than in code so the two can be A/B'd from
     configuration; `rewrite` reproduces the old prompt byte for byte.
     """

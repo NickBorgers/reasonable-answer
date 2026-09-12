@@ -500,7 +500,8 @@ asked, never how many passes the budgets allow.
 
 Rule 13's two branches are one rule, in the shape rule 13 already had (it branches internally on
 `blocking > 0` too). The rewrite branch exists because of **D-scoped-revision**: under
-`revision.mode: patch` every revision edits only the paragraphs a fix task named, so a run can only
+`revision.mode: patch` every revision edits only the paragraphs a fix task named — plus the passages
+that restate the same claim, since D-claim-scoped-patch — so a run can only
 accrete, and a stuck signal has one thing left to try before it means "more ticks will not move it".
 With `rewrite_cap: 0` the rule is exactly the terminal it always was. Resetting `stagnation_count` is
 load-bearing — left at the limit, the next tick re-fires rule 13 and spends the whole rewrite budget

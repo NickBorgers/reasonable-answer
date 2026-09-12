@@ -105,3 +105,28 @@ def test_a_polish_pass_is_never_scoped():
     text = prompts.writer_revision("q", "r", [], polish=True, mode="patch")
     assert text.endswith(prompts.WRITER_REWRITE_CLOSE)
     assert prompts.WRITER_PATCH_CLOSE not in text
+
+
+# ------------------------------------------ claim-scoped patch (D-claim-scoped-patch)
+
+
+def test_patch_mode_carries_a_fix_to_every_restatement_of_the_claim():
+    """The frame restates a claim in the conclusion, the key findings and the body; a
+    task names one locus. A paragraph-only licence left the copies unfixed and set the
+    patched copy against them, which is what the next pass then flagged."""
+    close = prompts.WRITER_PATCH_CLOSE
+    assert "The unit of a fix is the claim, not the paragraph" in close
+    assert "every other passage that restates that claim" in close
+    # The licence is the restatements and nothing else: byte-identical still governs
+    # every paragraph that neither a task nor a restated claim implicates.
+    assert "Those restatement edits are in scope; nothing else is." in close
+    assert "byte-identical" in close
+
+
+def test_patch_mode_forbids_placeholders_and_heading_changes():
+    """Two observed ways a patch chain decays: a section returned as
+    '(No changes required.)', and headings numbered, renumbered or dropped."""
+    close = prompts.WRITER_PATCH_CLOSE
+    assert "Reproduce every paragraph you are not editing in full" in close
+    assert "(no changes required)" in close
+    assert "do not number, renumber, drop, or merge sections" in close
