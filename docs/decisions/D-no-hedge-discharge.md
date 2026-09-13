@@ -1,39 +1,15 @@
 ## D-no-hedge-discharge — a fix task is resolved by changing the claim, never by appending a qualifier to it
 
-**The finding.** Across ten expert defect reviews of recent production runs, the same move appears in
-every run that failed to converge: the revision keeps the flagged claim — its figure, its scope and
-its citation — and bolts a disclaimer onto it. The flagged sentence then no longer matches the
-finding that was filed against it, and the round is compliant.
+**The finding.** Across ten expert defect reviews of recent production runs, the same move appeared
+in every run that failed to converge: the revision kept the flagged claim — its figure, scope, or
+citation — and added a disclaimer. The sentence then no longer matched the filed finding even though
+the unsupported claim survived. Aggregate observations included repeated caveats within a report,
+high fix counts with little reduction in material defects, attribution language substituted for
+support, absence claims made without searching, and time-sensitive answers based on stale evidence.
 
-- `run-ec7c2e2cf598` (IR wildlife) ships "remains an extrapolation from broader ALAN research" four
-  times verbatim and "has not been directly established for … surveillance-camera IR LEDs" three
-  more. `defects_applied` ran 10–11 a round while the material count stayed 10–11. The review's own
-  summary: defects are repaired by re-wording the sentence, never by re-reading the paper.
-- `run-31169ad53140` (IR people) stacks three hedges on one claim — "is an inference from that
-  visibility rather than a documented health effect in the cited sources, and is not supported by
-  empirical evidence" — and the claim is flagged again. Material by round: 7, 10, 10, 11, 9, 8, 7, 11.
-- `run-ebac4175d67f` (water) shows the instruction and the residue together. The instruction:
-  "Qualify the claim by stating the value is unverified **or** remove the specific figure." The
-  shipped text: "reported as approximately 1.2 liters/kWh in some studies, though the specific value
-  cannot be verified from the original citation [6]" — the wrong number and a citation that does not
-  support it both survive, and the estimate that depends on the number is untouched. Ninety-six
-  fixes over eight rounds moved the material count by four.
-- `run-c859ff5bf071` (rug) clears three flags with "no rug-specific evidence is cited", "there is no
-  widely available lifecycle assessment" and "the direction of the net effect over time is not
-  established". The assessment that decides the question (WRAP, *Displacement Rates Untangled*, Feb
-  2025) was public, published by the same organisation as the report's most-cited source, and never
-  searched for. A round-5 `overstated_claim` instruction asked for another such disclaimer.
-- `run-1dd853cbbfd0` (9/11), told to attribute a claim, wrote "according to anecdotal accounts cited
-  in [4]" — an evaluative qualifier standing in for a citation, which then tripped `loaded_language`
-  and survived four rounds. `run-c859ff5bf071` and `run-4783c2d9cb81` each carry a caveat clause
-  duplicated verbatim two or three times inside one conclusion: successive rounds pasting a fix.
-- Staleness is the same failure pointed at the calendar. `run-80a189d3670d` (fluoride, run Sept 2026)
-  rests on nothing newer than Aug 2024 and misses a federal ruling, a JAMA meta-analysis and a
-  Cochrane review on its exact question; `run-897ca0e6c7a5` defines "mid-tier" by 2023 models;
-  `run-188459deba66` presents a provincial gap closed in 2020 as current.
-
-As in D-scoped-revision and D-claim-scoped-patch, these runs are the operator's own `audit.json`
-trail and are not part of this repository, so they are the **motivation and not the warrant** (QP9).
+These aggregate observations come from the operator's private audit trail and contain no public
+examples here. As in D-scoped-revision and D-claim-scoped-patch, they are the **motivation and not the
+warrant** (QP9).
 
 **The warrant is the mechanism, and it is checkable in the prompts.** `WRITER_PATCH_CLOSE` and
 `writer_revision` said "resolve every fix task"; `critic_user` said an instruction "must allow
@@ -106,7 +82,7 @@ operator re-runs `ra audition`. That is the documented consequence of any critic
   citation. Measure first.
 - *Forbid the caveat escape in the critic contract outright.* That is the unsatisfiable-demand loop
   D-run-date-grounding was written to close — a critic that may not offer weakening will demand a
-  document, and `run-75eb136b9bfb` is what that produces. The escape is kept and given a meaning.
+  document the writer cannot obtain. The escape is kept and given a meaning.
 - *A new taxonomy category for a hedged claim.* It would need its own audition fixtures, floor and
   evidence, and the defect it names is already reportable: a claim whose hedge leaves it stronger
   than its support is `overstated_claim`, which is precisely what the runs above re-filed each round.
