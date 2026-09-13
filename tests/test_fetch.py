@@ -1414,3 +1414,74 @@ def test_a_failed_critic_lens_is_not_promoted_by_a_mechanical_finding(
 
     assert result.failed
     assert result.issues == []
+
+
+# ------------------------------------------------ bibliography integrity at the gate
+
+
+_ORPHANED = (
+    "# T\n\nA claim [1].\n\n## Sources\n\n"
+    "[1] A cited page. https://x.test/page-1\n"
+    "[2] A page nothing cites. https://x.test/page-2\n"
+)
+
+
+def test_bibliography_findings_are_minted_with_verification_off(tmp_path, identities, config):
+    """They need no fetch: the facts are in the report's own text, so the gate is the
+    evidence lens completing, not `search.verify_sources` (D-bibliography-integrity)."""
+    from reasonable_answer.graph import _critique_one
+    from reasonable_answer.taxonomy import Category
+
+    rt, _ = _runtime(tmp_path, identities, config, fetcher=None)
+    result = _critique_one(
+        rt, Lens.EVIDENCE, "evidence-spec", "q?", _ORPHANED, "h" * 64, "vendor-a/model-a", attempt=1
+    )
+
+    assert not rt.verify_sources
+    assert not result.failed
+    assert [i.category for i in result.issues] == [Category.UNCLEAR_STRUCTURE]
+    assert result.issues[0].citation_id == "[2]"
+
+
+def test_bibliography_findings_never_reach_another_lens(tmp_path, identities, config):
+    """`unclear_structure` is the completeness lens's category, but the *minting* gate is
+    the evidence lens — the one place the pipeline already settles citation facts. A
+    logic or completeness review must come back exactly as its critic left it."""
+    from reasonable_answer.graph import _critique_one
+
+    rt, _ = _runtime(tmp_path, identities, config, fetcher=None)
+    for lens in (Lens.LOGIC, Lens.COMPLETENESS):
+        result = _critique_one(
+            rt, lens, f"{lens.value}-spec", "q?", _ORPHANED, "h" * 64, "vendor-a/model-a", attempt=1
+        )
+        assert result.issues == []
+
+
+def test_a_failed_evidence_lens_is_not_promoted_by_a_bibliography_finding(
+    tmp_path, identities, config
+):
+    """Same gate as the not-found precedent: a failed lens stays failed and empty, and
+    the finding is simply re-derived from the same text on the next attempt."""
+    from fakes import FakeClient
+
+    from reasonable_answer.graph import Runtime, _critique_one
+    from reasonable_answer.llm import ModelCallError
+    from reasonable_answer.store import RunStore
+
+    def boom(alias, user):
+        raise ModelCallError("critic unavailable")
+
+    client = FakeClient(identities=identities, critique_fn=boom, report_fn=lambda n: _ORPHANED)
+    rt = Runtime(
+        config=config,
+        client=client,
+        identities=identities,
+        store=RunStore(tmp_path, "run-bib-fail"),
+        fetcher=None,
+    )
+    result = _critique_one(
+        rt, Lens.EVIDENCE, "evidence-spec", "q?", _ORPHANED, "h" * 64, "vendor-a/model-a", attempt=1
+    )
+
+    assert result.failed
+    assert result.issues == []

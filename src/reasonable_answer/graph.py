@@ -1673,8 +1673,20 @@ def _critique_one(
             update={"issues": claimcheck.reconcile(result.issues, checked) + claimcheck.issues_from(checked)}
         )
 
-    if sources and not result.failed:
-        mechanical = triage.mechanical_citation_issues(sources, report_mod.parse(report_text))
+    #
+    # The bibliography's own referential integrity is settled the same way and under the
+    # same gate (D-bibliography-integrity): a dangling marker, an orphan entry and a
+    # duplicated entry are facts about the artifact's own text — no fetched body and no
+    # URL shape is read — and none of them can be *expressed* as a critic finding
+    # — every issue anchors to a `claim_span` in a body paragraph, so a defect whose
+    # whole subject is the reference list has no lens that owns it. It runs with
+    # verification off too, because it needs no fetch.
+    if lens is Lens.EVIDENCE and not result.failed:
+        structure = report_mod.parse(report_text)
+        mechanical = list(triage.mechanical_citation_issues(sources, structure)) if sources else []
+        mechanical += triage.mechanical_bibliography_issues(
+            report_text, structure, sources, limit=rt.config.search.max_source_urls
+        )
         if mechanical:
             result = result.model_copy(update={"issues": [*mechanical, *result.issues]})
     return result

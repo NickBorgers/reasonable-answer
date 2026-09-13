@@ -5,14 +5,24 @@ from __future__ import annotations
 import pytest
 
 from reasonable_answer import report as report_mod
-from reasonable_answer.schemas import LensResult, RawIssue, StructuralRef
-from reasonable_answer.taxonomy import Category, Lens, Severity
+from reasonable_answer.schemas import (
+    MAX_CITATION_ID,
+    MAX_INSTRUCTION,
+    MAX_RATIONALE,
+    LensResult,
+    RawIssue,
+    StructuralRef,
+)
+from reasonable_answer.taxonomy import LENS_CATEGORIES, Category, Lens, Severity
 from reasonable_answer.triage import (
+    _LABEL_MAX,
     LensValidationError,
     ViolationCode,
     clamp,
     clean_records,
+    distinct_issues,
     material_count,
+    mechanical_bibliography_issues,
     signal_signature,
     tally,
     to_defects,
@@ -390,3 +400,218 @@ def test_typographic_punctuation_does_not_make_an_honest_quote_a_misquote():
     )
 
     validate_issue(Lens.EVIDENCE, retyped, structure)  # does not raise
+
+
+# --------------------------------------------------- bibliography integrity (D-bibliography-integrity)
+
+
+CLEAN_BIBLIOGRAPHY = """# Fluoride
+
+## Findings
+
+Community water fluoridation is set at 0.7 mg/L in the United States [1].
+
+Skeletal effects appear above 1.5 mg/L [2].
+
+## Sources
+
+[1] CDC. Community Water Fluoridation. https://www.cdc.gov/fluoridation/index.html
+
+[2] WHO (2004). Fluoride in Drinking-water. https://www.who.int/publications/i/item/9241563192
+"""
+
+
+def bibliography_issues(report_text: str, sources=None, **kwargs):
+    return mechanical_bibliography_issues(
+        report_text, report_mod.parse(report_text), sources, **kwargs
+    )
+
+
+def owning_lens(category: Category) -> Lens:
+    """The lens whose closed schema the category belongs to."""
+    return next(lens for lens, cats in LENS_CATEGORIES.items() if category in cats)
+
+
+def assert_quotable(issues: list[RawIssue], report_text: str) -> None:
+    """Every minted finding would survive `validate_issue`.
+
+    Production bypasses it — the fields are pipeline-authored, exactly as
+    `mechanical_citation_issues`' are — so this is the check that a change here cannot
+    quietly mint a finding the writer could not locate.
+    """
+    structure = report_mod.parse(report_text)
+    assert issues
+    for minted in issues:
+        validate_issue(owning_lens(minted.category), minted, structure)
+
+
+def test_a_clean_bibliography_mints_nothing():
+    assert bibliography_issues(CLEAN_BIBLIOGRAPHY) == []
+
+
+def test_a_marker_with_no_entry_is_an_uncited_claim():
+    report = CLEAN_BIBLIOGRAPHY.replace(
+        "Skeletal effects appear above 1.5 mg/L [2].",
+        "Skeletal effects appear above 1.5 mg/L [2]. Enforcement rests on the DEA schedule [11].",
+    )
+    issues = bibliography_issues(report)
+    assert [i.category for i in issues] == [Category.UNCITED_CLAIM]
+    dangling = issues[0]
+    assert dangling.severity is Severity.MAJOR
+    assert dangling.citation_id == "[11]"
+    assert "[11]" in dangling.claim_span
+    assert_quotable(issues, report)
+
+
+def test_a_long_marker_number_is_bounded_in_the_minted_issue():
+    number = "9" * 150
+    report = CLEAN_BIBLIOGRAPHY.replace(
+        "Skeletal effects appear above 1.5 mg/L [2].",
+        f"Skeletal effects appear above 1.5 mg/L [2]. Another claim [{number}].",
+    )
+    issues = bibliography_issues(report)
+    dangling = next(i for i in issues if i.category is Category.UNCITED_CLAIM)
+    assert dangling.citation_id == f"[{number}]"[:_LABEL_MAX]
+
+
+def test_a_range_marker_is_expanded_before_the_entry_is_looked_for():
+    report = CLEAN_BIBLIOGRAPHY.replace(
+        "set at 0.7 mg/L in the United States [1]", "set at 0.7 mg/L in the United States [1-3]"
+    )
+    issues = bibliography_issues(report)
+    assert [i.citation_id for i in issues if i.category is Category.UNCITED_CLAIM] == ["[3]"]
+
+
+def test_an_entry_nothing_cites_is_an_orphan():
+    report = CLEAN_BIBLIOGRAPHY + (
+        "\n[3] European Commission SCHER (2019). "
+        "https://ec.europa.eu/health/scientific_committees/scher_o_182.pdf\n"
+    )
+    issues = bibliography_issues(report)
+    assert [i.category for i in issues] == [Category.UNCLEAR_STRUCTURE]
+    orphan = issues[0]
+    assert orphan.severity is Severity.MINOR
+    assert orphan.citation_id == "[3]"
+    assert "SCHER" in orphan.claim_span
+    assert_quotable(issues, report)
+
+
+def test_a_long_entry_number_is_bounded_in_the_minted_issue():
+    number = "9" * 150
+    report = CLEAN_BIBLIOGRAPHY + f"\n[{number}] Long-number source. https://example.org/long\n"
+    orphan = next(i for i in bibliography_issues(report) if i.category is Category.UNCLEAR_STRUCTURE)
+    assert orphan.citation_id == f"[{number}]"[:_LABEL_MAX]
+
+
+def test_one_url_listed_twice_is_a_duplicate_entry():
+    report = CLEAN_BIBLIOGRAPHY.replace(
+        "Skeletal effects appear above 1.5 mg/L [2].",
+        "Skeletal effects appear above 1.5 mg/L [2], reaffirmed in 2022 [3].",
+    ) + "\n[3] WHO (2022). Fluoride in Drinking-water. https://www.who.int/publications/i/item/9241563192\n"
+    issues = bibliography_issues(report)
+    assert [i.category for i in issues] == [Category.UNCLEAR_STRUCTURE]
+    duplicate = issues[0]
+    assert duplicate.severity is Severity.MINOR
+    assert duplicate.citation_id == "[2], [3]"
+    assert_quotable(issues, report)
+
+
+def test_a_report_with_no_sources_section_mints_nothing():
+    assert bibliography_issues(REPORT) == []
+
+
+def test_a_report_whose_body_cites_nothing_mints_nothing():
+    """Every entry would be an orphan; a bibliography attached to a body with no
+    markers at all is a different defect, and not this one's to report."""
+    report = CLEAN_BIBLIOGRAPHY.replace(" [1]", "").replace(" [2]", "")
+    assert bibliography_issues(report) == []
+
+
+def test_the_entry_budget_bounds_the_work():
+    report = CLEAN_BIBLIOGRAPHY + "\n[3] An orphan. https://example.org/three\n"
+    assert bibliography_issues(report, limit=2) == []
+    assert len(bibliography_issues(report, limit=3)) == 1
+
+
+def test_the_entry_budget_does_not_turn_later_entries_into_missing_entries():
+    report = CLEAN_BIBLIOGRAPHY.replace(
+        "Skeletal effects appear above 1.5 mg/L [2].",
+        "Skeletal effects appear above 1.5 mg/L [2]. A later source supports this [3].",
+    ) + "\n[3] Later source. https://example.org/three\n"
+    assert bibliography_issues(report, limit=2) == []
+
+
+def test_two_critics_of_one_lens_report_a_bibliography_finding_once():
+    """The findings are derived from the artifact, so a depth-2 slate mints them twice;
+    `_issue_key` has to collapse them or the totals double (D-front-loaded-depth)."""
+    report = CLEAN_BIBLIOGRAPHY + "\n[3] An orphan entry. https://example.org/three\n"
+    minted = bibliography_issues(report)
+    results = [
+        result(Lens.EVIDENCE, list(minted), critic="vendor-x/critic"),
+        result(Lens.EVIDENCE, list(minted), critic="vendor-y/critic"),
+    ]
+    assert len(distinct_issues(results)) == len(minted)
+    per_category, totals = tally(results)
+    assert per_category["unclear_structure"].minor == 1
+    assert totals.minor == 1
+
+
+def test_a_failed_evidence_review_contributes_no_bibliography_findings():
+    report = CLEAN_BIBLIOGRAPHY + "\n[3] An orphan entry. https://example.org/three\n"
+    minted = bibliography_issues(report)
+    assert distinct_issues([result(Lens.EVIDENCE, list(minted), failed=True)]) == []
+
+
+def test_every_minted_finding_is_at_its_own_severity_floor():
+    """Minted at the floor, so the clamp is a no-op — the direction RC-005 requires."""
+    report = (
+        CLEAN_BIBLIOGRAPHY.replace(
+            "Skeletal effects appear above 1.5 mg/L [2].",
+            "Skeletal effects appear above 1.5 mg/L [2], and elsewhere [4].",
+        )
+        + "\n[3] An orphan entry. https://example.org/three\n"
+        + "[5] A duplicate. https://www.cdc.gov/fluoridation/index.html\n"
+    )
+    minted = bibliography_issues(report)
+    assert {i.category for i in minted} == {Category.UNCITED_CLAIM, Category.UNCLEAR_STRUCTURE}
+    assert len(minted) == 4  # dangling [4], orphan [3], orphan [5], duplicate [5]
+    assert clamp(minted) == minted
+
+
+def test_two_long_numbered_entries_under_one_url_still_mint_a_bounded_duplicate():
+    """The overflow the review reproduced: two entries numbered with 120 digits each under
+    one URL used to raise `ValidationError` from `rationale` (400-char cap) — an uncaught
+    exception that escaped `_critique_one` and aborted the critique node instead of
+    failing anything closed. Every minted field is clipped on construction now."""
+    a, b = "1" * 120, "2" * 120
+    report = (
+        "# T\n\nA claim [" + a + "] and again [" + b + "].\n\n## Sources\n\n"
+        "[" + a + "] First listing. https://example.org/same\n"
+        "[" + b + "] Second listing. https://example.org/same\n"
+    )
+    issues = bibliography_issues(report)
+    duplicates = [i for i in issues if i.category is Category.UNCLEAR_STRUCTURE]
+    assert len(duplicates) == 1
+    assert len(duplicates[0].rationale) <= MAX_RATIONALE
+    assert len(duplicates[0].instruction) <= MAX_INSTRUCTION
+    assert len(duplicates[0].citation_id) <= MAX_CITATION_ID
+    assert_quotable(issues, report)
+
+
+@pytest.mark.parametrize("digits", [1, 40, 120, 400])
+def test_no_entry_number_length_can_make_minting_raise(digits):
+    """Dangling marker, orphan and duplicate, each with a number of every length the
+    marker parser accepts: construction never raises and every field is within bounds."""
+    number = "7" * digits
+    report = (
+        "# T\n\nA claim [" + number + "] and another [9].\n\n## Sources\n\n"
+        "[" + number + "] Listed. https://example.org/a\n"
+        "[" + number + "] Listed again. https://example.org/a\n"
+        "[8] Never cited. https://example.org/b\n"
+    )
+    minted = bibliography_issues(report)
+    assert {i.category for i in minted} == {Category.UNCITED_CLAIM, Category.UNCLEAR_STRUCTURE}
+    for issue_ in minted:
+        assert len(issue_.rationale) <= MAX_RATIONALE
+        assert len(issue_.instruction) <= MAX_INSTRUCTION
+        assert len(issue_.citation_id) <= MAX_CITATION_ID

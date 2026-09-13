@@ -17,12 +17,17 @@ from __future__ import annotations
 
 import hashlib
 import re
+from dataclasses import dataclass
 from enum import Enum
 
 from pydantic import ValidationError
 
+from . import excerpt, fetch
 from .report import Structure
 from .schemas import (
+    MAX_CITATION_ID,
+    MAX_INSTRUCTION,
+    MAX_RATIONALE,
     MAX_SPAN,
     CleanRecord,
     Defect,
@@ -446,6 +451,283 @@ def mechanical_citation_issues(sources: list, structure: Structure) -> list[RawI
                 instruction=(
                     "Remove this citation or replace it with a source that resolves and "
                     "supports the claim; do not invent a URL."
+                ),
+            )
+        )
+    return issues
+
+# ------------------------------------------------------- bibliography integrity
+
+
+#: The bibliography facts below are settled by string comparison, so they are minted
+#: here rather than asked of a critic (D-bibliography-integrity). The cap mirrors
+#: `search.max_source_urls`: an anti-pathological ceiling that must never bind on a
+#: real bibliography.
+DEFAULT_ENTRY_LIMIT = 200
+#: A bibliography label as interpolated into minted fields: `[n]` with `n` cut so that
+#: two labels plus a 120-character URL stay inside `MAX_RATIONALE`.
+_LABEL_MAX = 40
+
+@dataclass(frozen=True)
+class _Entry:
+    """One bibliography entry, as the report lists it."""
+
+    number: int
+    text: str
+    url: str | None
+
+
+def _entries(report_text: str, limit: int | None) -> list[_Entry]:
+    """The `## Sources` entries, numbered the way `excerpt.entry_numbers` numbers them:
+    what the entry says it is (`[3]`, `3.`) when it says, its position otherwise."""
+    out: list[_Entry] = []
+    for position, entry in enumerate(fetch.source_entries(report_text), 1):
+        if limit is not None and len(out) >= limit:
+            break
+        match = excerpt._ENTRY_NUMBER.match(entry)
+        explicit = (match.group(1) or match.group(2)) if match else None
+        number = int(explicit) if explicit else position
+        out.append(_Entry(number=number, text=entry, url=fetch.entry_url(entry)))
+    return out
+
+
+def _sources_section(structure: Structure) -> int | None:
+    """The index of the `## Sources` section, or None when the report has none."""
+    for index, title in enumerate(structure.section_titles):
+        if title.strip().lower() == "sources":
+            return index
+    return None
+
+
+def _citations(structure: Structure, sources_section: int | None) -> dict[int, list]:
+    """Bibliography number -> the *body* paragraphs citing it, in document order.
+
+    Markers are read with `excerpt`'s own parser and ranges expanded, so "cited" means
+    here exactly what it means when the excerpter picks anchors for a source. The
+    Sources section is excluded: an entry's own `[3]` is not a citation of itself.
+    """
+    cited: dict[int, list] = {}
+    for paragraph in structure.paragraphs:
+        if paragraph.section == sources_section:
+            continue
+        numbers: set[int] = set()
+        for marker in excerpt._MARKER.findall(paragraph.text):
+            numbers |= excerpt._cited(marker)
+        for number in sorted(numbers):
+            cited.setdefault(number, []).append(paragraph)
+    return cited
+
+
+def _citing_sentence(paragraph_text: str, number: int) -> str:
+    """The first sentence of `paragraph_text` that cites `number`, bounded to a span.
+
+    A prefix of a sentence of a paragraph is still a verbatim substring of it, which is
+    what keeps every minted `claim_span` quotable however long the sentence ran.
+    """
+    for sentence in excerpt._SENTENCE_END.split(paragraph_text):
+        sentence = sentence.strip()
+        if not sentence:
+            continue
+        if any(number in excerpt._cited(m) for m in excerpt._MARKER.findall(sentence)):
+            return sentence[:MAX_SPAN]
+    return paragraph_text[:MAX_SPAN]
+
+
+def _locate_text(text: str, structure: Structure) -> StructuralRef | None:
+    """The locus of the first paragraph containing `text`, or None.
+
+    Compared under `_normalize` — the same normalization `validate_issue` quotes
+    against — so a locus this returns is one the span validates at.
+    """
+    needle = _normalize(text)
+    if not needle:
+        return None
+    for p in structure.paragraphs:
+        if needle in _normalize(p.text):
+            return StructuralRef(section=p.section, paragraph=p.paragraph)
+    return None
+
+
+def _entry_anchor(entry: _Entry, structure: Structure) -> tuple[StructuralRef, str] | None:
+    """Where an entry sits and what to quote of it, or None when neither its text nor
+    its URL is found in any single paragraph (an entry split across a blank line).
+
+    Minting nothing is the right answer there: a finding whose `claim_span` is not in
+    the paragraph it names is one the writer cannot locate.
+    """
+    span = entry.text[:MAX_SPAN]
+    locus = _locate_text(span, structure)
+    if locus is not None:
+        return locus, span
+    if entry.url:
+        locus = _locate_text(entry.url, structure)
+        if locus is not None:
+            return locus, entry.url[:MAX_SPAN]
+    return None
+
+
+def _citation_label(number: int) -> str:
+    """A bibliography number bounded for every schema field that repeats it.
+
+    `excerpt._ENTRY_NUMBER` accepts any run of digits, so a number can be longer than
+    the fields that interpolate it. Cut to `_LABEL_MAX` — far below `MAX_CITATION_ID`
+    and `MAX_RATIONALE` — so two labels and a truncated URL always fit in one rationale.
+    """
+    return f"[{number}]"[:_LABEL_MAX]
+
+
+def _minted(**fields) -> RawIssue:
+    """Construct a pipeline-authored finding with every free-text field clipped to its
+    schema limit. The mechanical block runs inside `graph._critique_one` under
+    `pool.map`, where a `ValidationError` from an over-long field would abort the whole
+    critique node rather than fail one lens closed — so construction must be total
+    whatever the report put in its bibliography."""
+    fields["rationale"] = fields["rationale"][:MAX_RATIONALE]
+    fields["instruction"] = fields["instruction"][:MAX_INSTRUCTION]
+    if fields.get("citation_id"):
+        fields["citation_id"] = fields["citation_id"][:MAX_CITATION_ID]
+    return RawIssue(**fields)
+
+
+def mechanical_bibliography_issues(
+    report_text: str,
+    structure: Structure,
+    sources: list | None = None,
+    *,
+    limit: int = DEFAULT_ENTRY_LIMIT,
+) -> list[RawIssue]:
+    """Referential-integrity findings a string comparison settles (D-bibliography-integrity).
+
+    A sibling of `mechanical_citation_issues`, raised under the same gate and for the
+    same reason: these are facts about the artifact rather than judgements about it, and
+    the critic schema cannot express most of them at all — every critic finding anchors
+    to a verbatim `claim_span` in a body paragraph, so a defect whose whole subject is
+    the reference list has no lens that owns it.
+
+    Three checks, each stating an observable fact about the report's own text and an
+    instruction the writer can apply without going back to the search tier:
+
+    * a marker `[n]` cited in the body with no entry numbered `n` (`uncited_claim`);
+    * an entry the body never cites (`unclear_structure`);
+    * two entries under one URL (`unclear_structure`).
+
+    Nothing here reads a fetched body or judges a URL's shape: what a page contains, and
+    whether an address resolves, are the fetch path's questions (QP10,
+    D-notfound-fabrication), and this function asks only whether the report's markers
+    and its entry list agree with each other. `sources` is accepted for signature parity
+    with the precedent and is unused. Every field is clipped on construction
+    (`_minted`), so minting is total however the report numbered its entries.
+
+    Mechanically minted, so this bypasses `validate_issue` exactly as the precedent
+    does; `tests/test_triage.py` runs every minted finding through it anyway, so a
+    change here cannot quietly make one unquotable.
+
+    Nothing is minted for a report with no `## Sources` section and nothing for one
+    whose body carries no citation marker at all: that report has a defect, and it is
+    the one the writer template and the completeness lens already own, not a
+    referential-integrity slip.
+    """
+    sources_section = _sources_section(structure)
+    if sources_section is None or not fetch.sources_section(report_text).strip():
+        return []
+    all_entries = _entries(report_text, None)
+    if not all_entries:
+        return []
+    entries = all_entries[:limit]
+    cited = _citations(structure, sources_section)
+    if not cited:
+        return []
+
+    # Marker resolution is a cheap lookup over the complete bibliography. The limit
+    # bounds only the per-entry checks below; applying it here would turn every valid
+    # marker beyond the work budget into a manufactured missing-entry finding.
+    by_number = {entry.number: entry for entry in all_entries}
+    issues: list[RawIssue] = []
+
+    # 1. A marker with no entry behind it. The reader is told support exists and cannot
+    #    find out what it is, which is what `uncited_claim` names.
+    for number in sorted(cited):
+        if number in by_number:
+            continue
+        paragraph = cited[number][0]
+        citation_label = _citation_label(number)
+        issues.append(
+            _minted(
+                category=Category.UNCITED_CLAIM,
+                severity=Severity.MAJOR,
+                locus=StructuralRef(section=paragraph.section, paragraph=paragraph.paragraph),
+                claim_span=_citing_sentence(paragraph.text, number),
+                citation_id=citation_label,
+                rationale=(
+                    f"This sentence cites {citation_label}, and the ## Sources list has no entry "
+                    f"with that number: the marker points at nothing a reader can follow."
+                ),
+                instruction=(
+                    f"Add the entry for {citation_label} to ## Sources, or renumber the marker to "
+                    "the entry that actually supports this sentence, or remove the marker "
+                    "and the claim resting on it."
+                ),
+            )
+        )
+
+    for entry in entries:
+        anchor = _entry_anchor(entry, structure)
+        citing = cited.get(entry.number, [])
+        citation_label = _citation_label(entry.number)
+
+        # 2. An entry nothing cites.
+        if not citing and anchor is not None:
+            locus, span = anchor
+            issues.append(
+                _minted(
+                    category=Category.UNCLEAR_STRUCTURE,
+                    severity=Severity.MINOR,
+                    locus=locus,
+                    claim_span=span,
+                    citation_id=citation_label,
+                    rationale=(
+                        f"Entry {citation_label} is listed in ## Sources and no sentence in "
+                        "the body cites it."
+                    ),
+                    instruction=(
+                        "Cite it where it supports a claim, or remove it — a listed source a "
+                        "reader cannot find in the text reads as support the report does not "
+                        "use."
+                    ),
+                )
+            )
+
+        if entry.url is None:
+            continue
+
+    # 5. One URL listed twice. Two entries are two sources to a reader counting support.
+    seen: dict[str, _Entry] = {}
+    for entry in entries:
+        if entry.url is None:
+            continue
+        first = seen.setdefault(entry.url, entry)
+        if first is entry:
+            continue
+        anchor = _entry_anchor(entry, structure)
+        if anchor is None:
+            continue
+        locus, span = anchor
+        issues.append(
+            _minted(
+                category=Category.UNCLEAR_STRUCTURE,
+                severity=Severity.MINOR,
+                locus=locus,
+                claim_span=span,
+                citation_id=f"{_citation_label(first.number)}, {_citation_label(entry.number)}",
+                rationale=(
+                    f"Entries {_citation_label(first.number)} and "
+                    f"{_citation_label(entry.number)} list the same address "
+                    f"({entry.url[:120]}): one document appears in the bibliography twice, so "
+                    "a reader counting the sources behind a claim counts it twice."
+                ),
+                instruction=(
+                    "Merge the entries and renumber, updating every in-text marker that "
+                    "pointed at the duplicate."
                 ),
             )
         )

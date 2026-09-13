@@ -300,6 +300,33 @@ flat "could not fetch", and an opt-in tier (`sources.enabled` **and** `sources.p
 by default, fatal at startup without `pypdf`) **reads** a cited PDF rather than reporting it as an
 unreadable content type — so "a body this cannot read" narrows to formats no converter handles.
 
+**Bibliography integrity is settled mechanically (D-bibliography-integrity).** Every critic finding
+anchors to a verbatim `claim_span` in a body paragraph, so a defect whose whole subject is the
+reference list cannot be expressed in the critic schema and no lens owns it. Three such defects are
+decidable by string comparison against the report's own text — no fetched body is read and no URL is
+judged by its shape, so nothing here reaches past what the report itself says (QP10) — and
+`triage.mechanical_bibliography_issues` mints them from `graph._critique_one` under the same gate as
+the not-found finding above — the evidence lens, on a **completed** review, and with verification
+on or off, because none of them needs a fetch:
+
+| observable fact | category | floor | locus |
+|---|---|---|---|
+| a `[n]` cited in the body with no entry numbered `n` | `uncited_claim` | major | first citing paragraph |
+| an entry the body never cites | `unclear_structure` | minor | the paragraph listing it |
+| two entries under one URL | `unclear_structure` | minor | the paragraph listing the duplicate |
+
+No category is added to the taxonomy table, and each finding is minted **at** its category's floor,
+so the clamp is a no-op and RC-005's direction is untouched. These are pipeline-authored facts, not
+critic judgements: like the not-found finding they bypass `validate_issue`, whose subject is
+model-authored fields, and like it they never attach to a failed lens. Every field they carry is
+bounded on construction — a bibliography number of any length is cut to a short label before it is
+interpolated — so minting can never raise out of the critique node. Markers are read with
+`excerpt`'s parser (ranges expanded, the Sources section excluded), entries are numbered as
+`excerpt.entry_numbers` numbers them, and at most `search.max_source_urls` entries are considered.
+A report with no `## Sources` section, or whose body carries no citation marker at all, mints
+nothing here — that is a different defect, and the writer template and the completeness lens already
+own it.
+
 **What the critic is shown of a page is chosen by the claims, not by position
 (D-claim-anchored-excerpts).** A fetched body is retained up to `search.fetch_body_max_chars`, and
 one critic is shown at most `search.fetch_max_chars` of it — as the page's opening plus the passages
