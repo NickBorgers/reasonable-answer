@@ -115,7 +115,43 @@ Two narrowings keep it from becoming "quantify everything":
   neither does one already qualified to the cases its support covers.
 - The instruction may **never** demand a specific dataset or document as the only acceptable fix.
   Qualifying the claim to what the support establishes is always a complete resolution — the same
-  resolvability contract every critic instruction carries.
+  resolvability contract every critic instruction carries. **Qualifying the claim means restricting
+  it**, not annotating it; see the next section.
+
+### What "weaken the claim" means (D-no-hedge-discharge)
+
+The resolvability contract above guarantees the writer an escape from a demand it cannot satisfy.
+It is not a licence to keep the claim and hedge it, and both prompts now say so.
+
+**Writer side** (`prompts.WRITER_RESOLUTION_STANDARD`, carried by every non-polish revision in both
+`revision.mode`s). A fix task is resolved by changing the claim or its support, never by appending a
+qualifier to a claim that is kept. Weakening a claim means restricting it to what the support
+establishes — a narrower population, a smaller magnitude, the cases actually measured, one named
+source's finding — or removing it. Attaching *this remains an extrapolation*, *this is not directly
+established*, *this cannot be verified from the citation* or *this is unverified* to a claim that
+keeps its figure and its citation resolves nothing, and the defect is filed again. An evaluative
+qualifier (*according to anecdotal accounts*, *so-called*, *merely*) never stands in for a citation:
+a claim no source establishes is removed, or restated as the report's own inference and labelled as
+one. A limitation is stated once, where it applies — D-claim-scoped-patch carries a *fix* to every
+restatement of a claim, and a caveat is not a fix.
+
+**Critic side** (the `instruction` bullet, shared by all lenses). Where the acceptable resolution is
+to weaken the claim, the instruction must say what the weakened claim would be: the population it
+should be restricted to, the smaller magnitude the support carries, or the source it should be
+attributed to. An instruction whose cheapest compliant reading is *state that this is unverified* or
+*clarify that this figure is the author's own calculation* is not a fix and must not be offered,
+because it leaves the claim, its figure and its citation exactly as they are.
+
+**With search enabled** (`WRITER_SEARCH_ADDENDUM`) two further rules apply, both gated on retrieval
+because both ask the writer to go and look. An absence claim — *no source addresses this* — is a
+claim about the literature and is searched for like any other. And currency is checked against the
+run date (D-run-date-grounding): where the newest evidence the report rests on is more than a year
+older than the run date, on a question whose answer moves — regulation, litigation, guidelines,
+standards, prices, product generations, model versions — the writer searches for what changed since
+and states how recent its evidence is.
+
+The measurement is `additive_only` on the `generate` event, and it is **warn-only**: nothing rejects
+a draft for it. See [isolation.md](isolation.md#scoping-the-edit-is-not-narrowing-the-review-d-scoped-revision).
 
 ### Evidence handling (RA-011, D-in-artifact-citations, D-retrieval-opt-in)
 
