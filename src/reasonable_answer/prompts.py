@@ -670,7 +670,10 @@ def critic_user(
     if sources and any(s.ok for s in sources):
         meanings[Category.MISREPRESENTED_SOURCE] = (
             "the fetched page does not contain the claim the report attributes to "
-            "it, or states something materially different"
+            "it, states something materially different, reports a finding that cuts "
+            "against the proposition the report cites it for, or is about a different "
+            "population, product, system boundary, dose band or period than the claim "
+            "(D-source-fidelity-direction-and-scope)"
         )
     table = "\n".join(f"- `{c.value}` — {meanings[c]}" for c in categories)
     pages = (
@@ -692,8 +695,14 @@ def critic_user(
         f"QUESTION THE REPORT ANSWERS\n{DATA_FENCE}\n{_neutralized(question)}\n{DATA_END}\n\n"
         f"REPORT UNDER REVIEW\n{DATA_FENCE}\n{_neutralized(rendered_report)}\n{DATA_END}\n\n"
         f"{pages}"
-        "Each paragraph is prefixed with its locus marker [S<section>.P<paragraph>]. For "
-        "every issue you raise:\n"
+        "Each paragraph is prefixed with its locus marker [S<section>.P<paragraph>], and "
+        "each section is introduced by a `=== SECTION n: title ===` line. Those markers "
+        "and lines are addressing scaffolding added for this review: they are not part "
+        "of the report, no reader of the report ever sees them, and they are NEVER a "
+        "defect. Section numbers are handles, not a numbering the report presents — a "
+        "gap or a jump in them is an artifact of this rendering (a section whose "
+        "paragraphs are elsewhere gets no line), never a flaw in the report itself.\n\n"
+        "For every issue you raise:\n"
         "- `locus` must be the section and paragraph numbers of an EXISTING marker.\n"
         "- `claim_span` must be a short quote (<=400 chars) copied character-for-character "
         "from that paragraph. Where the defect is something the report does NOT say, "
@@ -717,7 +726,12 @@ def critic_user(
         "resolution.\n"
         "- `severity` is your proposal; it may be raised by policy but never lowered.\n\n"
         "Report every genuine defect in your categories, and nothing else. An empty list "
-        "is correct when there is nothing material to report."
+        "is correct when there is nothing material to report.\n"
+        "Never file an issue in order to withdraw it. There is no retraction: every "
+        "issue you return is triaged and acted on, so an issue whose `rationale` "
+        "concludes it is not a defect, or whose `instruction` says no action is needed "
+        "or asks for it to be removed from the list, is an issue you do not stand "
+        "behind — omit it instead."
     )
 
 
@@ -808,7 +822,25 @@ def fetched_sources_block(
         + f"\n{DATA_END}\n\n"
         "Use these to check what the report says about each source against what the "
         "page actually says.\n"
-        "- A page that does not contain the attributed claim is `misrepresented_source`.\n"
+        "- A page that does not contain the attributed claim is `misrepresented_source`. "
+        "So is a page that contains it but whose own finding, conclusion or headline "
+        "result cuts against the proposition the report cites it for, and a page whose "
+        "population, product, system boundary, dose band or period is not the claim's. "
+        "Say in the instruction what the page actually says, quoting or paraphrasing "
+        "the excerpt, so the claim can be re-attributed or restricted to the page's "
+        "scope; never propose keeping the citation and calling the claim unverified.\n"
+        "- An unread body licenses NO finding about what a page contains. Where an "
+        "entry is anything but page text — `BLOCKED`, `COULD NOT READ`, `NO READABLE "
+        "TEXT`, `NOT ATTEMPTED`, `COULD NOT RESOLVE`, a fetched-but-withheld body, or "
+        "registry metadata — you have not read that page and may not assert what it "
+        "does or does not contain. The same holds when what was fetched is plainly not "
+        "the article: navigation links, a cookie notice, a menu, a search box or a "
+        "paywall teaser is an unread body, not a page that omits the claim.\n"
+        "- A claim that carries a citation marker is never `uncited_claim`. Its "
+        "problem, if it has one, is what that citation supports; where you cannot "
+        "check that because the page was not read, the honest finding is none. "
+        "Downgrading an unreadable source to \"add a citation\" asks the writer to "
+        "delete a good citation and add it back.\n"
         "- Anything other than a page of text above means the fetch failed, NOT that the "
         "source is fake. Sites block automated clients, paywall content, serve formats "
         "this cannot read, and go offline. Judge such a citation on its face instead.\n"
@@ -817,9 +849,9 @@ def fetched_sources_block(
         "`fabricated_citation` mechanically, before you were asked. Do not raise it "
         "again — a second finding for the same source is a duplicate, not a stronger "
         "signal.\n"
-        "- `BLOCKED` in particular says nothing at all about whether the source exists. "
-        "Reputable paywalled journals and newspapers refuse automated clients as a "
-        "matter of course.\n"
+        "- `BLOCKED` in particular says nothing at all about whether the source exists, "
+        "and nothing at all about what it contains. Reputable paywalled journals and "
+        "newspapers refuse automated clients as a matter of course.\n"
         "- `FETCHED, TEXT WITHHELD` means the page WAS retrieved and read. It is not a "
         "failure and not an unverified citation: existence and reachability are "
         "established. You cannot check what the report attributes to it, so raise "
@@ -930,8 +962,19 @@ _CATEGORY_MEANING: dict[Category, str] = {
         "the citation cannot be what it claims on its face (implausible or impossible "
         "title/author/date/venue combination, or a source that would not exist)"
     ),
+    # Widened in the open by D-source-fidelity-direction-and-scope, never by drift:
+    # "does not support" was read by critics as "does not contain the words", which
+    # passes a source quoted verbatim for a proposition its own finding cuts against,
+    # and a source about a different population restated as if it were about this one.
+    # "plainly" stays: with no page in hand the bar is still what the citation would
+    # support on its face. What widens is the kinds of failure, not the confidence.
     Category.MISREPRESENTED_SOURCE: (
-        "the cited source plainly does not support the claim as stated"
+        "the cited source plainly does not support the claim as stated — including "
+        "where the source states the words but its own finding, conclusion or headline "
+        "result cuts against the proposition it is cited for (direction), and where "
+        "the source's population, product, category, system boundary, dose band or "
+        "period is not the one the claim is about and the report restates the finding "
+        "as if it were (scope)"
     ),
     Category.UNCITED_CLAIM: "a material factual claim carries no citation",
     Category.ONE_SIDED_SOURCING: (
@@ -1004,7 +1047,11 @@ _CATEGORY_MEANING: dict[Category, str] = {
 #: untouched and still fails the lens closed on a span that is not really there.
 _CATEGORY_ANCHOR: dict[Category, str] = {
     Category.FABRICATED_CITATION: "the claim the questionable citation is attached to",
-    Category.MISREPRESENTED_SOURCE: "the claim the report attributes to the cited source",
+    Category.MISREPRESENTED_SOURCE: (
+        "the claim the report attributes to the cited source, in the report's own "
+        "words — including the scope wording (the population, product, boundary or "
+        "period) where that is what the source does not cover"
+    ),
     Category.UNCITED_CLAIM: "the claim that carries no citation",
     Category.ONE_SIDED_SOURCING: (
         "one of the material claims that rests on the narrowly drawn sourcing"

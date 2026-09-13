@@ -860,6 +860,54 @@ def test_truncation_is_disclosed_so_absence_is_not_read_as_contradiction():
     assert "NOT evidence that the page lacks it" in block
 
 
+def test_an_unread_body_licenses_no_finding_about_page_content():
+    """D-source-fidelity-direction-and-scope. The rules already said a failed fetch is
+    not evidence of fabrication; they did not say it is not evidence about *content*
+    either. Reviews of production reports found `misrepresented_source` filed against a
+    page that refuses every automated client, and repeated across rounds against a page
+    whose extraction returned navigation chrome — the article states the claim
+    verbatim."""
+    block = prompts.fetched_sources_block(
+        [FetchedSource(url="https://example.org/a", status=403, error="HTTP 403")]
+    )
+
+    assert "An unread body licenses NO finding about what a page contains" in block
+    for label in ("BLOCKED", "COULD NOT READ", "NO READABLE TEXT", "NOT ATTEMPTED"):
+        assert f"`{label}`" in block
+    # A body that is plainly not the article is unread, not a page that omits the claim.
+    assert "navigation links, a cookie notice, a menu, a search box or a paywall teaser" in block
+    # BLOCKED now says nothing in both directions, not just about existence.
+    assert "nothing at all about whether the source exists, and nothing at all about what it" in block
+
+
+def test_a_cited_claim_is_never_downgraded_to_uncited_when_the_page_is_unreadable():
+    """The observed degradation: the page refuses automated clients, so the strongest
+    available finding becomes `uncited_claim` with the instruction "add a citation" — on
+    a claim already carrying one. The only fix open to a writer is deleting a good
+    citation and adding it back."""
+    block = prompts.fetched_sources_block(
+        [FetchedSource(url="https://example.org/a", status=403, error="HTTP 403")]
+    )
+
+    assert "A claim that carries a citation marker is never `uncited_claim`" in block
+    assert "the honest finding is none" in block
+
+
+def test_the_page_rules_name_direction_and_scope_and_the_instruction_they_require():
+    """A page can contain the report's words and still be evidence against them, and a
+    real source about a different population is not a source for this one. The fix must
+    be sayable without opening the page, so the instruction carries what the source
+    says — and "keep the citation, call the claim unverified" is not a fix."""
+    block = prompts.fetched_sources_block(
+        [FetchedSource(url="https://example.org/a", title="T", text="Body text.")]
+    )
+
+    assert "cuts against the proposition the report cites it for" in block
+    assert "population, product, system boundary, dose band or period is not the claim's" in block
+    assert "so the claim can be re-attributed or restricted to the page's" in block
+    assert "never propose keeping the citation and calling the claim unverified" in block
+
+
 def test_out_of_range_body_cap_is_rejected_at_load():
     """A retained body smaller than the excerpt budget would clip what the critic is
     shown back to the page's opening — the silent failure D-claim-anchored-excerpts

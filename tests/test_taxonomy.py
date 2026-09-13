@@ -149,3 +149,72 @@ def test_completeness_scope_covers_literal_obligations_and_rejects_easy_substitu
     assert "answers an adjacent question in its place" in prompt
     assert "does not challenge a load-bearing conclusion" in prompt
     assert "Do not invent an unstated goal" in prompt
+
+
+def test_the_evidence_brief_asks_direction_and_scope_with_its_exclusions():
+    """D-source-fidelity-direction-and-scope. The lens asked only "does the page contain
+    this sentence?", and three defect classes passed it: a source quoted verbatim for a
+    proposition its own finding cuts against, a source about a different population
+    restated as if it were about this one, and a negative about page content asserted
+    from a body nobody read.
+
+    The exclusions are the whole thing keeping the widened category narrow — without
+    them it reads as a licence to object to any source that is not a perfect match, and
+    that is the direction the audition's invented-issue rate measures."""
+    prompt = critic_user(Lens.EVIDENCE, "q", "# r\n\nbody\n")
+
+    # The two questions, each with the trigger that makes it checkable.
+    assert "does the page assert this, in this direction?" in prompt
+    assert "is the page's scope the claim's scope?" in prompt
+    assert "cuts the other way" in prompt
+    assert "stays attached to" in prompt
+
+    # The three narrowing exclusions, and the resolvable fixes they point at.
+    assert "NOT a stylistic mismatch of wording" in prompt
+    assert "merely BROADER than the claim" in prompt
+    assert "NOT a demand for a source the writer cannot get" in prompt
+    assert "restricting the claim to the scope the source covers" in prompt
+
+    # Scope is this category, not the logic lens's — and the logic lens is never told to
+    # look for it, because it does not hold the page.
+    assert "`misrepresented_source`" in prompt
+    assert Category.CONCEPTUAL_CONFLATION.value not in prompt
+
+
+def test_an_unread_body_licenses_no_finding_about_content():
+    """A 403 and a navigation-chrome extraction both produced `misrepresented_source`
+    findings in production, and a blocked page produced an `uncited_claim` against a
+    claim that already carried a citation — whose only fix is deleting a good one."""
+    prompt = critic_user(Lens.EVIDENCE, "q", "# r\n\nbody\n")
+
+    assert "licenses no finding about what a page contains" in prompt
+    for label in ("BLOCKED", "COULD NOT READ", "NO READABLE TEXT", "NOT ATTEMPTED"):
+        assert label in prompt
+    assert "plainly not the article" in prompt
+    assert "never `uncited_claim`" in prompt
+
+
+def test_the_widened_meaning_is_in_the_source_less_prompt_every_lens_sees():
+    """The widening is not verification-gated: with retrieval off the bar stays
+    "plainly", and what widens is the kinds of failure. So the evidence lens carries the
+    direction and scope clauses whether or not any page was fetched — which is also why
+    `audition.prompt_hash`, computed over exactly this surface, changes."""
+    meaning = _CATEGORY_MEANING[Category.MISREPRESENTED_SOURCE]
+    assert "plainly does not support the claim as stated" in meaning
+    assert "(direction)" in meaning and "(scope)" in meaning
+    assert meaning in critic_user(Lens.EVIDENCE, "q", "# r\n\nbody\n", None)
+
+
+def test_review_scaffolding_is_never_a_defect_and_findings_are_not_withdrawn_in_place():
+    """Two hygiene rules, all three lenses. Section markers are addressing scaffolding
+    `report.render_with_loci` adds, and a section whose paragraphs are elsewhere leaves an
+    apparent gap that critics have filed as a structure defect. And the schema gives a
+    critic no way to retract, so one withdrew inside the JSON and triage shipped the
+    withdrawal at `major`."""
+    for lens in LENSES:
+        prompt = critic_user(lens, "q", "# r\n\nbody\n")
+        assert "=== SECTION n: title ===" in prompt
+        assert "addressing scaffolding added for this review" in prompt
+        assert "Section numbers are handles" in prompt
+        assert "Never file an issue in order to withdraw it" in prompt
+        assert "There is no retraction" in prompt
