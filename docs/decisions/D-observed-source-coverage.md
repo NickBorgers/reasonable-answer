@@ -29,9 +29,10 @@ two.
 
 *Keyed to an artifact.* The tally is taken in `_critique_one` where the evidence lens fetches, and
 written into checkpointed state under the artifact's hash — never latest-wins. On a non-accepted
-terminal `_finalize` ships the best-scoring draft, which need not be the last one written (issue
-#93), so coverage keys the same way the outstanding-defect list does. A draft with no entry reads as
-*not recorded*, which is neither zero coverage nor a pass.
+terminal `_finalize` ships the draft selected by `review.selection`, which need not be the last one
+written (issue #93; D-latest-unblocked-selection), so coverage keys the same way the
+outstanding-defect list does. A draft with no entry reads as *not recorded*, which is neither zero
+coverage nor a pass.
 
 *One record per artifact, however many critics read it.* D-front-loaded-depth gives each lens
 `review.depth` critics per pass, so at the shipped default the evidence lens tallies the same

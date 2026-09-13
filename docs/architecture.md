@@ -85,7 +85,7 @@ Invariants (enforced in code, covered by tests):
 | **triage** | this tick's `Issue[]` (minus **upheld-adjudication suppressions**, D-writer-disputes) | `OrchestratorView` + `DefectList` | none — **mechanical** | deterministic |
 | **orchestrate** | `OrchestratorView` **only** | recommendation (minor-polish judgment) | LLM, blind | LLM inside guardrails |
 | **controller** | `ControllerInput` | decision + terminal status | none | **deterministic — owns termination** |
-| **finalize** | best report + history | final report + terminal status + audit trail | none | deterministic |
+| **finalize** | reports + history | selected report + terminal status + audit trail | none | deterministic |
 
 > **Trust model (RA-020, RB-004):** the orchestrator is a *blind LLM* whose authority is limited to
 > the minor-polish judgment; the **deterministic controller** owns every hard transition and
