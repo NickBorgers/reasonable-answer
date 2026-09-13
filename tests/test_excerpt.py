@@ -116,6 +116,24 @@ def test_a_body_that_fits_is_shown_whole():
     assert excerpt.render(chosen).startswith("Page text (complete, 10 characters):")
 
 
+def test_a_cut_body_is_never_complete_and_says_so():
+    """`FetchedSource.truncated` reaches the reader: a body that fits the budget but was
+    cut at the fetch cap is every retained character and still not the page
+    (D-claim-check-inconclusive-verdicts)."""
+    chosen = excerpt.select("short page", ["anything [1]"], budget=6_000, truncated=True)
+    assert not chosen.complete
+    assert chosen.all_retained_shown
+    rendered = excerpt.render(chosen)
+    assert rendered.startswith("Page text: the opening 10 characters of the page, shown in full.")
+    assert "continues past the last character retained" in rendered
+    assert rendered.rstrip().endswith("[…]")
+    # Excerpted from a cut body: the same sentence, on the partial header.
+    anchors = excerpt.anchors_for(REPORT, "https://example.org/eea")
+    partial = excerpt.select(PAGE, anchors, budget=6_000, truncated=True)
+    assert "continues past the last character retained" in excerpt.render(partial)
+    assert "continues past" not in excerpt.render(excerpt.select(PAGE, anchors, budget=6_000))
+
+
 def test_the_cited_figure_is_shown_wherever_on_the_page_it_sits():
     """The motivating defect: the figure is 14,000 characters in; a 6,000-character
     prefix never reaches it, and the critic files `misrepresented_source` against a

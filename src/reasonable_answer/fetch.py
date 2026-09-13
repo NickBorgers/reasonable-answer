@@ -257,6 +257,13 @@ class FetchedSource:
     url: str
     title: str = ""
     text: str = ""
+    #: `text` is a prefix of the page, not the page: the body was cut at `max_bytes` on
+    #: the wire, at a PDF's page cap, or at a consumer's character cap
+    #: (`CappedFetcher`). Read by `excerpt.select`, so a cut page is never presented
+    #: as shown whole and absence from it is never a finding
+    #: (D-claim-check-inconclusive-verdicts). Additive and default False, so every
+    #: constructor that predates it means what it meant.
+    truncated: bool = False
     status: int | None = None
     error: str | None = None
     outcome: SourceOutcome = SourceOutcome.FULL_TEXT
@@ -851,6 +858,9 @@ class SourceFetcher:
             url=url,
             title=parser.title,
             text=text,
+            # Survivable for text, unlike the PDF below — but not silent: what was
+            # read is a prefix of the page, and the readers say so.
+            truncated=resp.truncated or len(parser.text) > self._max_chars,
             status=status,
             outcome=SourceOutcome.FULL_TEXT,
         )
@@ -902,7 +912,9 @@ class SourceFetcher:
             )
 
         try:
-            markdown = textconv.pdf_to_markdown(resp.body, max_pages=self._pdf_max_pages)
+            markdown, pages_dropped = textconv.pdf_to_markdown_bounded(
+                resp.body, max_pages=self._pdf_max_pages
+            )
         except textconv.ConversionError as exc:
             return FetchedSource(
                 url=url,
@@ -911,7 +923,8 @@ class SourceFetcher:
                 outcome=SourceOutcome.UNREADABLE,
             )
 
-        text = " ".join(markdown.split())[: self._max_chars]
+        joined = " ".join(markdown.split())
+        text = joined[: self._max_chars]
         if not text.strip():
             # Overwhelmingly a scanned paper with no text layer. Distinguish it from an
             # empty HTML page: nothing about this URL will ever get better, whereas an
@@ -925,6 +938,7 @@ class SourceFetcher:
         return FetchedSource(
             url=url,
             text=text,
+            truncated=pages_dropped or len(joined) > self._max_chars,
             status=resp.status,
             outcome=SourceOutcome.FULL_TEXT,
         )
@@ -969,7 +983,11 @@ def clip_body(source: FetchedSource, max_chars: int) -> FetchedSource:
     """
     if source.outcome is not SourceOutcome.FULL_TEXT or len(source.text) <= max_chars:
         return source
-    return replace(source, text=source.text[:max_chars])
+    return replace(
+        source,
+        text=source.text[:max_chars],
+        truncated=source.truncated or len(source.text) > max_chars,
+    )
 
 
 def _looks_like_pdf(url: str, content_type: str) -> bool:

@@ -251,9 +251,11 @@ class SourceResolver:
         if not markdown:
             return resolved
 
+        joined = " ".join(markdown.split())
         return FetchedSource(
             url=url,
-            text=" ".join(markdown.split())[: self._max_chars],
+            text=joined[: self._max_chars],
+            truncated=len(joined) > self._max_chars,
             status=resolved.status,
             outcome=SourceOutcome.FULL_TEXT,
             # No `body_source_url`. This *is* the cited page, read by a client that can

@@ -531,6 +531,9 @@ def test_the_verification_handle_clips_to_its_configured_cap():
     seen = capped.fetch(READ_URL)
     assert len(seen.text) == 1_000
     assert "TAIL MARKER" not in seen.text
+    # The clip is announced, so a consumer never mistakes the prefix for the page
+    # (D-claim-check-inconclusive-verdicts).
+    assert seen.truncated and not inner.fetch(READ_URL).truncated
     # The cache itself is untouched, so the reader still gets the whole stored body.
     assert "TAIL MARKER" in inner.fetch(READ_URL).text
     assert capped.fetch_all([READ_URL])[0].text == seen.text

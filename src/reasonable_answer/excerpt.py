@@ -84,6 +84,9 @@ class Excerpted:
 
     total_chars: int
     excerpts: tuple[Excerpt, ...]
+    #: The body itself was cut before the page's end (`FetchedSource.truncated`), so
+    #: `total_chars` is the length of a prefix of the page, not of the page.
+    truncated: bool = False
 
     @property
     def shown_chars(self) -> int:
@@ -91,6 +94,18 @@ class Excerpted:
 
     @property
     def complete(self) -> bool:
+        """The reader is looking at the whole page. False for a cut body even when every
+        retained character is shown: absence from a prefix is not absence from the page
+        (D-claim-check-inconclusive-verdicts)."""
+        return (
+            not self.truncated
+            and len(self.excerpts) == 1
+            and self.excerpts[0].start == 0
+            and self.excerpts[0].end == self.total_chars
+        )
+
+    @property
+    def all_retained_shown(self) -> bool:
         return (
             len(self.excerpts) == 1
             and self.excerpts[0].start == 0
@@ -180,6 +195,7 @@ def select(
     budget: int,
     window: int = DEFAULT_WINDOW,
     head: int = DEFAULT_HEAD,
+    truncated: bool = False,
 ) -> Excerpted:
     """Choose up to `budget` characters of `body` to show for `anchors`.
 
@@ -188,10 +204,14 @@ def select(
     budget goes to the windows that best match the anchors, in document order, merged
     where they touch. With no anchors, or none that match anything, the fallback is the
     opening `budget` characters: exactly what was shown before this module existed.
+
+    `truncated` says `body` is a prefix of the page (the fetch hit its byte cap, a PDF
+    its page cap); it changes nothing about which characters are chosen and everything
+    about what the result claims — such a body is never `complete`.
     """
     total = len(body)
     if total <= budget:
-        return Excerpted(total, (Excerpt(0, total, body),))
+        return Excerpted(total, (Excerpt(0, total, body),), truncated)
 
     _, head_end = _snap(body, 0, min(head, budget))
     head_end = min(head_end, budget)
@@ -215,9 +235,9 @@ def select(
     if len(taken) == 1:
         # Nothing matched: show the opening, as before, rather than the head alone.
         end = min(budget, total)
-        return Excerpted(total, (Excerpt(0, end, body[:end]),))
+        return Excerpted(total, (Excerpt(0, end, body[:end]),), truncated)
 
-    return Excerpted(total, tuple(_merged(body, taken)))
+    return Excerpted(total, tuple(_merged(body, taken)), truncated)
 
 
 def _score_windows(
@@ -335,17 +355,31 @@ def render(excerpted: Excerpted) -> str:
     is, then each excerpt under its character range, with `[…]` marking the gaps."""
     if excerpted.complete:
         return f"Page text (complete, {excerpted.total_chars:,} characters):\n{excerpted.excerpts[0].text}"
-    parts = [
-        f"Page text: {excerpted.shown_chars:,} of {excerpted.total_chars:,} characters shown — "
-        "the opening of the page, then the passages that best match the sentences of the "
-        "report that cite this source. “[…]” marks text not shown."
-    ]
+    cut = (
+        " The fetch stopped at its cap before the end of the page, so the page continues "
+        "past the last character retained and nothing here says what that remainder contains."
+        if excerpted.truncated
+        else ""
+    )
+    if excerpted.all_retained_shown:
+        # A cut body that fits the budget: every retained character is here, and the
+        # page is still not whole. Say the second thing, or "all shown" reads as whole.
+        parts = [
+            f"Page text: the opening {excerpted.total_chars:,} characters of the page, shown in "
+            f"full.{cut} “[…]” marks text not shown."
+        ]
+    else:
+        parts = [
+            f"Page text: {excerpted.shown_chars:,} of {excerpted.total_chars:,} characters shown — "
+            "the opening of the page, then the passages that best match the sentences of the "
+            f"report that cite this source.{cut} “[…]” marks text not shown."
+        ]
     previous_end = 0
     for excerpt in excerpted.excerpts:
         if excerpt.start > previous_end:
             parts.append("[…]")
         parts.append(f"(characters {excerpt.start:,}–{excerpt.end:,})\n{excerpt.text}")
         previous_end = excerpt.end
-    if previous_end < excerpted.total_chars:
+    if previous_end < excerpted.total_chars or excerpted.truncated:
         parts.append("[…]")
     return "\n".join(parts)

@@ -411,12 +411,22 @@ mechanically, like the not-found above:
 | `contradicted` | `misrepresented_source` (major) | `misrepresented_source` (major) |
 | `absent` | `misrepresented_source` (major) | nothing; counted as `absent_partial` |
 | `supported`, `unreadable` | nothing | nothing |
-| unchecked (call failed, span not in page, no page, past `max_pairs`) | nothing | nothing |
+| unchecked (call failed, span not in page, no page, past `max_pairs`, `aborted` after `max_consecutive_failures` unchecked calls in a row) | nothing | nothing |
+
+A page whose body was cut before its end — at `search.fetch_max_bytes` on the wire, at
+`sources.pdf.max_pages`, at a cache or consumer character cap — is **always** "shown in part",
+however short what survived (`FetchedSource.truncated` → `Excerpted.complete` is false), and the
+checker and the critic are both told the page continues past the last character retained
+(D-claim-check-inconclusive-verdicts).
 
 Every failure lands toward the writer: an unchecked pair mints nothing, and the critic's own
 whole-document `misrepresented_source` judgement is kept for exactly the pairs the checker did not
-settle and dropped for the ones it did (`claimcheck.reconcile`: same paragraph, the critic's span
-inside the checked sentence), so one claim is never counted twice under two spans. The findings ride
+**settle** and dropped for the ones it did (`claimcheck.reconcile`: same paragraph, the critic's span
+inside the checked sentence), so one claim is never counted twice under two spans. A pair is settled
+by `supported`, `contradicted`, or `absent` from a page shown whole — the verdicts that read the page.
+`unreadable` and `absent` from a page shown in part settle nothing: they mint no finding, so they may
+retire none, and the critic's judgement on that sentence stands as it did before the checker existed
+(D-claim-check-inconclusive-verdicts). The findings ride
 the critic's `LensResult` — so they clamp, deduplicate, count toward `material`, withhold the clean
 record, and reach the writer as tasks exactly as a critic's own would — and a 402 during checking
 fails the lens with the account class so the run defers (D-credit-exhaustion-defers). Verdicts are
@@ -426,7 +436,10 @@ date cannot reuse a stale verdict. Each family still forms its own
 view, and it is never a clean record. Counts go to a `claim_check` event; the sentences, spans and
 reasons go to the run's critiques directory. No controller rule, no `ControllerInput` or
 `OrchestratorView` field, and no budget changes; calls per pass are bounded by citation markers ×
-depth and the anti-pathological `claim_check.max_pairs`.
+depth and the anti-pathological `claim_check.max_pairs`, and a pass whose calls fail
+`claim_check.max_consecutive_failures` times in a row records the rest `aborted` without a call, so
+a proxy that has stopped answering costs a few timeouts inside the critic's slot rather than one per
+pair (D-claim-check-inconclusive-verdicts).
 
 **Existence is checkable even when the body is not (D-existence-vs-body, off by default).** With `sources.enabled`
 and `sources.identifiers.enabled` both true, a cited URL that carries a DOI or PMID and would not
