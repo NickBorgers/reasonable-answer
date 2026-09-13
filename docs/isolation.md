@@ -82,6 +82,10 @@ flowchart TB
         Cin["SEES: report + question + its ONE lens + taxonomy"]
         Cno["NEVER: who wrote the report · the tick number · whether this is a confirmation critique · other lenses' output · the OTHER critic on its own lens · prior critiques (its own rejected field returns inside one call only — D-repair-turn-context)"]
     end
+    subgraph CHK["Claim checker (D-claim-level-verification, opt-in) — the evidence critic's own model, one fresh context per (sentence, page)"]
+        Kin["SEES: one citing sentence + its paragraph + ONE fetched page (claim-anchored excerpts, or whole)"]
+        Kno["NEVER: the report · the question · any other page · any other sentence's verdict · the critic's review · who wrote the report"]
+    end
     subgraph ORC["Orchestrator (blind LLM)"]
         Oin["SEES: OrchestratorView (category × severity counts, bounded ints/enums)"]
         Ono["NEVER: report text · defect text · citations · run_id/hash/model-ids"]
@@ -101,8 +105,8 @@ flowchart TB
     %% and the see/never distinction rides on the border colour instead.
     classDef see stroke:#3a3,stroke-width:2px;
     classDef no stroke:#c33,stroke-width:2px;
-    class Gin,Cin,Oin,CTin see;
-    class Gno,Cno,Ono,CTno no;
+    class Gin,Cin,Kin,Oin,CTin see;
+    class Gno,Cno,Kno,Ono,CTno no;
 ```
 
 ## How the seven principles are preserved

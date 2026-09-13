@@ -202,6 +202,38 @@ lacks it — `misrepresented_source` is raised only where an excerpt addresses t
 states something materially different. `dispute.adjudicate_mechanical` and `support.check` search
 the retained body, not the excerpts.
 
+**Each cited claim is checked against its page in its own context (D-claim-level-verification,
+opt-in, `claim_check.enabled`, requires `search.verify_sources`).** Every sentence of the report
+body that carries a citation marker is paired mechanically with the fetched page the bibliography
+lists under that number (`claimcheck.pairs`: the report's own loci, `excerpt`'s sentence split and
+marker expansion, `excerpt.entry_numbers`). Each pair is then checked by the evidence critic's own
+model in a **fresh context holding one sentence, its paragraph and one page** — the page as
+claim-anchored excerpts up to `claim_check.page_max_chars`, shown whole when it fits — and answers a
+closed verdict: `supported`, `contradicted`, `absent` or `unreadable`, with `supported` and
+`contradicted` anchored to a verbatim span of the page or rejected. Verdicts become findings
+mechanically, like the not-found above:
+
+| verdict | page shown whole | page shown in part |
+|---|---|---|
+| `contradicted` | `misrepresented_source` (major) | `misrepresented_source` (major) |
+| `absent` | `misrepresented_source` (major) | nothing; counted as `absent_partial` |
+| `supported`, `unreadable` | nothing | nothing |
+| unchecked (call failed, span not in page, no page, past `max_pairs`) | nothing | nothing |
+
+Every failure lands toward the writer: an unchecked pair mints nothing, and the critic's own
+whole-document `misrepresented_source` judgement is kept for exactly the pairs the checker did not
+settle and dropped for the ones it did (`claimcheck.reconcile`: same paragraph, the critic's span
+inside the checked sentence), so one claim is never counted twice under two spans. The findings ride
+the critic's `LensResult` — so they clamp, deduplicate, count toward `material`, withhold the clean
+record, and reach the writer as tasks exactly as a critic's own would — and a 402 during checking
+fails the lens with the account class so the run defers (D-credit-exhaustion-defers). Verdicts are
+memoised for the runtime per (critic identity, page text shown, sentence): the call is a function of
+those three, the memo is keyed on the critic's resolved identity so each family still forms its own
+view, and it is never a clean record. Counts go to a `claim_check` event; the sentences, spans and
+reasons go to the run's critiques directory. No controller rule, no `ControllerInput` or
+`OrchestratorView` field, and no budget changes; calls per pass are bounded by citation markers ×
+depth and the anti-pathological `claim_check.max_pairs`.
+
 **Existence is checkable even when the body is not (D-existence-vs-body, off by default).** With `sources.enabled`
 and `sources.identifiers.enabled` both true, a cited URL that carries a DOI or PMID and would not
 hand over its body is asked about at a bibliographic registry (Crossref, OpenAlex by default; arXiv

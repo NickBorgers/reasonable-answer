@@ -131,6 +131,15 @@ class RunStore:
             json.dumps(payload.model_dump(mode="json"), indent=2),
         )
 
+    def claim_check(self, artifact_hash: str, critic: str, attempt: int, payload: dict[str, Any]) -> None:
+        """One critic slot's claim-level verdicts (D-claim-level-verification): the checked
+        sentences, the page spans they were judged against and the verdicts. Report- and
+        page-derived content, so it lives beside the critiques and is purged with them;
+        the event trail carries counts only."""
+        safe = re.sub(r"[^A-Za-z0-9._-]+", "_", critic)[:40]
+        name = f"{next(self._seq):03d}-{artifact_hash[:12]}-claims-{safe}-a{attempt}.json"
+        self._write(Path("critiques") / name, json.dumps(payload, indent=2))
+
     def dispute(self, round_no: int, sequence: int, payload: dict[str, Any]) -> None:
         """Dispute grounds and claim spans are report-derived content, so they live
         in a purgeable content dir — never in events.jsonl, which survives
