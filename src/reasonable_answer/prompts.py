@@ -752,9 +752,7 @@ def fetched_sources_block(
     With `report` and `excerpt_chars` given, each body is rendered by `excerpt.select`:
     the page's opening, then the passages that best match the sentences of the report
     citing that source, inside `excerpt_chars`. Without them a body is shown from its
-    start, as it always was — which, measured on production audit trails, put the figure
-    a claim attributed to a page past what the critic could see in ten of twenty-two
-    terminal `misrepresented_source` findings. The header of each entry says how much of
+    start, as it always was. The header of each entry says how much of
     the page is shown, and the entry is labelled with the bibliography number(s) the
     report lists the URL under, so the critic can pair excerpts with citations.
     """
