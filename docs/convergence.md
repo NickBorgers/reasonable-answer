@@ -115,7 +115,43 @@ Two narrowings keep it from becoming "quantify everything":
   neither does one already qualified to the cases its support covers.
 - The instruction may **never** demand a specific dataset or document as the only acceptable fix.
   Qualifying the claim to what the support establishes is always a complete resolution — the same
-  resolvability contract every critic instruction carries.
+  resolvability contract every critic instruction carries. **Qualifying the claim means restricting
+  it**, not annotating it; see the next section.
+
+### What "weaken the claim" means (D-no-hedge-discharge)
+
+The resolvability contract above guarantees the writer an escape from a demand it cannot satisfy.
+It is not a licence to keep the claim and hedge it, and both prompts now say so.
+
+**Writer side** (`prompts.WRITER_RESOLUTION_STANDARD`, carried by every non-polish revision in both
+`revision.mode`s). A fix task is resolved by changing the claim or its support, never by appending a
+qualifier to a claim that is kept. Weakening a claim means restricting it to what the support
+establishes — a narrower population, a smaller magnitude, the cases actually measured, one named
+source's finding — or removing it. Attaching *this remains an extrapolation*, *this is not directly
+established*, *this cannot be verified from the citation* or *this is unverified* to a claim that
+keeps its figure and its citation resolves nothing, and the defect is filed again. An evaluative
+qualifier (*according to anecdotal accounts*, *so-called*, *merely*) never stands in for a citation:
+a claim no source establishes is removed, or restated as the report's own inference and labelled as
+one. A limitation is stated once, where it applies — D-claim-scoped-patch carries a *fix* to every
+restatement of a claim, and a caveat is not a fix.
+
+**Critic side** (the `instruction` bullet, shared by all lenses). Where the acceptable resolution is
+to weaken the claim, the instruction must say what the weakened claim would be: the population it
+should be restricted to, the smaller magnitude the support carries, or the source it should be
+attributed to. An instruction whose cheapest compliant reading is *state that this is unverified* or
+*clarify that this figure is the author's own calculation* is not a fix and must not be offered,
+because it leaves the claim, its figure and its citation exactly as they are.
+
+**With search enabled** (`WRITER_SEARCH_ADDENDUM`) two further rules apply, both gated on retrieval
+because both ask the writer to go and look. An absence claim — *no source addresses this* — is a
+claim about the literature and is searched for like any other. And currency is checked against the
+run date (D-run-date-grounding): where the newest evidence the report rests on is more than a year
+older than the run date, on a question whose answer moves — regulation, litigation, guidelines,
+standards, prices, product generations, model versions — the writer searches for what changed since
+and states how recent its evidence is.
+
+The measurement is `additive_only` on the `generate` event, and it is **warn-only**: nothing rejects
+a draft for it. See [isolation.md](isolation.md#scoping-the-edit-is-not-narrowing-the-review-d-scoped-revision).
 
 ### Arithmetic, magnitude and the decisive consideration (D-decisive-quantities)
 
@@ -262,9 +298,55 @@ not-found above is escalated, and that escalation is the pipeline's, not the mod
 now surfaced under its own `SourceOutcome` label (`BLOCKED`, `COULD NOT READ`, …) rather than one
 flat "could not fetch", and an opt-in tier (`sources.enabled` **and** `sources.pdf.enabled`, both off
 by default, fatal at startup without `pypdf`) **reads** a cited PDF rather than reporting it as an
-unreadable content type — so "a body this cannot read" narrows to formats no converter handles. Page
-text is truncated and the critic is told so, so a claim it cannot see is not read as a claim the page
-contradicts.
+unreadable content type — so "a body this cannot read" narrows to formats no converter handles.
+
+**What the critic is shown of a page is chosen by the claims, not by position
+(D-claim-anchored-excerpts).** A fetched body is retained up to `search.fetch_body_max_chars`, and
+one critic is shown at most `search.fetch_max_chars` of it — as the page's opening plus the passages
+that best match the report's own sentences citing that source (`excerpt.select`: deterministic,
+numbers weighted above content words, whole sentences, document order), each under its character
+range, with `[…]` marking what is not shown and a header stating how much of the page is. Every
+entry is labelled with the bibliography number(s) the report lists the URL under. A fixed prefix can
+omit claim-relevant text later in a page even when retrieval succeeded. The rule the critic is given
+is unchanged in substance and sharpened in wording: a
+page shown in part is truncated, and a claim missing from the excerpts is not evidence that the page
+lacks it — `misrepresented_source` is raised only where an excerpt addresses the same point and
+states something materially different. `dispute.adjudicate_mechanical` searches the retained body,
+not the excerpts; `support.check` is a separate mechanism entirely, working from `session.reads`
+(capped at `read_max_chars`) rather than this cap.
+
+**Each cited claim is checked against its page in its own context (D-claim-level-verification,
+opt-in, `claim_check.enabled`, requires `search.verify_sources`).** Every sentence of the report
+body that carries a citation marker is paired mechanically with the fetched page the bibliography
+lists under that number (`claimcheck.pairs`: the report's own loci, `excerpt`'s sentence split and
+marker expansion, `excerpt.entry_numbers`). Each pair is then checked by the evidence critic's own
+model in a **fresh context holding one sentence, its paragraph and one page** — the page as
+claim-anchored excerpts up to `claim_check.page_max_chars`, shown whole when it fits — and answers a
+closed verdict: `supported`, `contradicted`, `absent` or `unreadable`, with `supported` and
+`contradicted` anchored to a verbatim span of the page or rejected. Verdicts become findings
+mechanically, like the not-found above:
+
+| verdict | page shown whole | page shown in part |
+|---|---|---|
+| `contradicted` | `misrepresented_source` (major) | `misrepresented_source` (major) |
+| `absent` | `misrepresented_source` (major) | nothing; counted as `absent_partial` |
+| `supported`, `unreadable` | nothing | nothing |
+| unchecked (call failed, span not in page, no page, past `max_pairs`) | nothing | nothing |
+
+Every failure lands toward the writer: an unchecked pair mints nothing, and the critic's own
+whole-document `misrepresented_source` judgement is kept for exactly the pairs the checker did not
+settle and dropped for the ones it did (`claimcheck.reconcile`: same paragraph, the critic's span
+inside the checked sentence), so one claim is never counted twice under two spans. The findings ride
+the critic's `LensResult` — so they clamp, deduplicate, count toward `material`, withhold the clean
+record, and reach the writer as tasks exactly as a critic's own would — and a 402 during checking
+fails the lens with the account class so the run defers (D-credit-exhaustion-defers). Verdicts are
+memoised for the runtime per (critic resolved identity, complete system prompt, complete user
+prompt): the memo covers every input the checker sees, so a changed paragraph, source metadata or
+date cannot reuse a stale verdict. Each family still forms its own
+view, and it is never a clean record. Counts go to a `claim_check` event; the sentences, spans and
+reasons go to the run's critiques directory. No controller rule, no `ControllerInput` or
+`OrchestratorView` field, and no budget changes; calls per pass are bounded by citation markers ×
+depth and the anti-pathological `claim_check.max_pairs`.
 
 **Existence is checkable even when the body is not (D-existence-vs-body, off by default).** With `sources.enabled`
 and `sources.identifiers.enabled` both true, a cited URL that carries a DOI or PMID and would not

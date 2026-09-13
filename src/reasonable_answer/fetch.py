@@ -946,7 +946,7 @@ class CappedFetcher:
     and that is only true if the cap travels with the handle rather than with the cache.
 
     Clipping is a no-op when the caps are equal, which is the default and every
-    configuration that leaves `read_max_chars` at or below `fetch_max_chars`.
+    configuration that leaves `read_max_chars` at or below `fetch_body_max_chars`.
     """
 
     def __init__(self, inner: SourceFetcher, *, max_chars: int) -> None:

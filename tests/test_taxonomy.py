@@ -255,3 +255,16 @@ def test_heading_text_is_not_quotable_so_no_heading_trigger_ships():
     for lens in LENSES:
         prompt = critic_user(lens, "q", "# r\n\nbody\n")
         assert "heading" not in prompt.lower()
+
+
+def test_the_instruction_bullet_says_what_the_weakened_claim_would_be():
+    """The resolvability contract stays — an instruction may never demand a document
+    the writer cannot obtain — but "weaken the claim" is no longer left undefined, and
+    an instruction whose cheap branch is a disclaimer is not offered
+    (D-no-hedge-discharge). The bullet is shared by every lens."""
+    for lens in Lens:
+        prompt = critic_user(lens, "q", "# r\n\nbody\n")
+        assert "the instruction must allow weakening the claim as an acceptable resolution" in prompt
+        assert "must say what the weakened claim would be" in prompt
+        assert "state that this is unverified" in prompt
+        assert "Never ask for a caveat to be added to a claim that stands." in prompt
