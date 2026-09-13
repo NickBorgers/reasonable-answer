@@ -2343,15 +2343,14 @@ def _finalize(state: State, rt: Runtime) -> dict:
         chosen_round = state.get("round", 0)
         defects = state.get("defects", [])
     elif board:
-        # Under the default `review.selection: latest_unblocked`, ship the latest round
-        # among those carrying the fewest blocking issues (D-latest-unblocked-selection).
-        # The last draft is not shipped *because* it is last: a round with more blocking
-        # issues than an earlier one still loses. What no longer decides is the major and
-        # minor count — on near-identical patched artifacts that is critic variance, and
-        # ranking on it ships whichever round drew the softest panel, and rewards a draft
-        # that asserts less. Each artifact is scored on its most-critiqued triage rather
-        # than its first (RC-002, `latest_scores_per_artifact`). `fewest_defects`
-        # restores the previous weighted rule unchanged.
+        # Never ship the last draft *because* it is last. Which draft ships is
+        # `review.selection` (D-latest-unblocked-selection): `fewest_defects`, the code
+        # default, ranks on the weighted severity score; `latest_unblocked` keeps the
+        # rounds with the fewest blocking issues and ships the latest of those, for a
+        # deployment whose operator judges major and minor counts on near-identical
+        # patched artifacts to be critic variance. Either way each artifact is scored
+        # on its most-critiqued triage rather than its first (RC-002,
+        # `latest_scores_per_artifact`).
         from .controller import latest_scores_per_artifact, select_shipped_index
 
         rows = latest_scores_per_artifact(board)

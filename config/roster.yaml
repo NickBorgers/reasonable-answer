@@ -443,19 +443,15 @@ review:
   # (D-failing-critic-sidelined). 2026-09-04..09, glm-5.3 failed 46 of 66 critique calls
   # and was drawn again on every draft, each failure three 300s timeouts. 0 disables.
   critic_strike_limit: 2
-  # Which draft a non-accepted terminal ships (D-latest-unblocked-selection). Both values
-  # are spelled out here because this is the knob you reach for when comparing report
-  # quality, not because it needs setting — `latest_unblocked` is the code default.
-  #
-  # `latest_unblocked` keeps the rounds with the fewest blocking issues and ships the
-  # latest of those. `fewest_defects` is the previous rule, byte for byte: minimal
-  # 100·blocking + 10·major + 1·minor, ties to the latest round.
-  #
-  # Fifteen production runs finished 2026-09-10..13, all eight rounds, none accepted.
-  # Their per-round material counts oscillate rather than fall (25,3,16,15,4,7,6,10 and
-  # 11,11,10,10,10,3,2,9), and ten independent expert reviews of those reports found the
-  # same thing about the weighted rule: it selects on critic variance, and the cheapest
-  # way to lower a major count is to assert less.
+  # Which draft a non-accepted terminal ships (D-latest-unblocked-selection). The code
+  # default is `fewest_defects`, the rule this system always had: minimal
+  # 100·blocking + 10·major + 1·minor, ties to the latest round. THIS deployment opts
+  # into `latest_unblocked` — keep the rounds with the fewest blocking issues and ship
+  # the latest of those — on the operator's reading of their own run history: under
+  # patch-mode revision each round is a near-identical artifact, the major and minor
+  # counts moved with which critics drew the round more than with the text, and the
+  # cheapest way to lower a major count was to assert less. That is an operator
+  # judgement, which is why it is set here and not in the code default (QP9).
   selection: latest_unblocked
 
 # How a writer is asked to apply a defect list (D-scoped-revision). Both settings below are

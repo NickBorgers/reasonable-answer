@@ -724,17 +724,19 @@ and keep their gates (RI-001, RH-001).
   `controller.select_shipped_index` from one row per artifact — each artifact's **latest** triage
   (RC-002), ordered by round. Which rule runs is `review.selection`
   (D-latest-unblocked-selection):
-    - `latest_unblocked` (**default**): keep the rows with the minimum **blocking** count; among
-      those, the **latest round**. Major and minor counts do not enter selection — on the
-      near-identical artifacts `revision.mode: patch` produces, their round-to-round variance is
-      larger than the between-round difference the selection is supposed to measure, so ranking on
-      them selects the panel rather than the prose, and rewards a draft that asserts less.
-    - `fewest_defects`: the previous rule, unchanged — minimal
+    - `fewest_defects` (**code default**, the rule this system always had): minimal
       `w_b·blocking + w_m·major + w_n·minor`, ties → **latest round** (D-latest-round-tiebreak).
+    - `latest_unblocked` (**opt-in**; the shipped `config/roster.yaml` sets it, the way it opts
+      into search): keep the rows with the minimum **blocking** count; among those, the **latest
+      round**. Major and minor counts do not enter selection. The case for it is an operator
+      judgement about their own runs — that on the near-identical artifacts `revision.mode: patch`
+      produces, those counts move with the critic slate more than with the prose — and because
+      that judgement rests on observations the repository cannot cite (QP9), it is a deployment
+      posture and not the default.
   Both are pure functions of bounded categorical counts, so QP1 holds either way; under both, ties
   in the deciding quantity go to the latest round, so D-latest-round-tiebreak's tie direction is
-  subsumed, not reversed. The `triage` event records `blocking`/`major`/`minor` alongside
-  `material`, so the selection is reconstructible from the audit trail.
+  kept, not reversed. The `triage` event records `blocking`/`major`/`minor` alongside `material`,
+  so the selection is reconstructible from the audit trail under either rule.
 
 ### Terminal statuses (RA-012, RC-001)
 

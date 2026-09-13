@@ -146,5 +146,5 @@ def test_selection_mode_decides_which_round_ships(
     ]
 
 
-def test_the_default_selection_is_latest_unblocked(config):
-    assert config.review.selection == "latest_unblocked"
+def test_the_default_selection_is_the_previous_rule(config):
+    assert config.review.selection == "fewest_defects"

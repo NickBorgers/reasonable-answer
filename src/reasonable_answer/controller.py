@@ -243,8 +243,9 @@ def select_shipped_index(scores: list[tuple[int, int, int]], mode: str) -> int:
 
     Pure, total, and a function of bounded categorical counts only (QP1). `scores` must
     already be one row per artifact, ordered by round — see `latest_scores_per_artifact`.
-    `fewest_defects` is the pre-D-latest-unblocked-selection rule, kept so the two can
-    be A/B'd from configuration exactly as `revision.mode` is (D-scoped-revision).
+    `fewest_defects` is the rule this system always had and the code default;
+    `latest_unblocked` is the opt-in alternative (D-latest-unblocked-selection), so the
+    two can be A/B'd from configuration exactly as `revision.mode` is (D-scoped-revision).
     """
     if mode == "fewest_defects":
         return best_scoring_index(scores)

@@ -356,10 +356,10 @@ tested property, not a convention.
 **What to expect in practice.** With a strict roster, `accepted` is uncommon: a second reviewer on
 a lens usually finds something the first did not, and each rewrite gives the next round new text to
 object to. Runs that reach the cap ship the draft selected by `review.selection`, with the
-outstanding defects listed in `final.json`. The default, `latest_unblocked`, ships the latest round
-among those with the fewest blocking issues; the legacy `fewest_defects` mode ships the draft with
-the lowest weighted defect score. Raise `hard_cap`, or narrow the question, if you want more
-convergence pressure.
+outstanding defects listed in `final.json`. The code default, `fewest_defects`, ships the draft with
+the lowest weighted defect score; `latest_unblocked`, which the shipped roster opts into, ships the
+latest round among those with the fewest blocking issues. Raise `hard_cap`, or narrow the question,
+if you want more convergence pressure.
 
 **Retrieval (optional, off by default).** Set `search.enabled: true` in the roster and writers get a
 `web_search` tool backed by the Brave Search API, so the URLs in `## Sources` are ones a search
