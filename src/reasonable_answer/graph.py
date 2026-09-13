@@ -180,6 +180,15 @@ class Runtime:
     #: reader below holds its own reference to the shared fetcher rather than reusing
     #: this field as a "something fetches" flag.
     fetcher: Any | None = None
+    #: The evidence page an arbiter is shown when adjudicating a dispute (D-writer-disputes),
+    #: capped to `fetch_max_chars` like the evidence critic's excerpt — never
+    #: `fetch_body_max_chars` like `fetcher` above. The arbiter's prompt renders this page
+    #: verbatim, with no excerpting, and a `dispute_upheld` verdict suppresses a defect; a
+    #: fetcher shared with `fetcher` would let widening the retained body for verification
+    #: and mechanical adjudication also 20x the untrusted page text an arbiter's ruling
+    #: turns on, unannounced (D-claim-anchored-excerpts). None exactly when `fetcher` is —
+    #: same on/off switch, independent cap.
+    dispute_fetcher: Any | None = None
     #: None when writers may not read sources (D-writer-source-reads); they then work
     #: from search snippets exactly as they did before.
     reader: Any | None = None
@@ -343,12 +352,25 @@ def _build_runtime(
         if (config.search.verify_sources or config.search.read_sources)
         else None
     )
-    # Verification sees `fetch_max_chars` and nothing more, whatever the cache holds.
-    # Without the cap travelling with the handle, raising `read_max_chars` would widen
-    # both the evidence lens's page text and `dispute.adjudicate_mechanical`'s
-    # containment window — and a dispute upheld there suppresses a defect, so
-    # `search.read_sources` would have a path into the stop decision it must not have.
+    # Verification sees `fetch_body_max_chars` and nothing more, whatever the cache
+    # holds. Without the cap travelling with the handle, raising `read_max_chars` would
+    # widen both the pool the evidence lens's excerpts are drawn from and
+    # `dispute.adjudicate_mechanical`'s containment window — and a dispute upheld there
+    # suppresses a defect, so `search.read_sources` would have a path into the stop
+    # decision it must not have. What one critic is *shown* of that body is the smaller
+    # `fetch_max_chars`, applied at render time as claim-anchored excerpts
+    # (D-claim-anchored-excerpts).
     fetcher = (
+        fetch.CappedFetcher(source_fetcher, max_chars=config.search.fetch_body_max_chars)
+        if config.search.verify_sources and source_fetcher is not None
+        else None
+    )
+    # The arbiter's evidence page is rendered verbatim into its prompt (`prompts.arbiter_user`),
+    # unlike the evidence critic's claim-anchored excerpt of the same retained body, so it keeps
+    # the smaller `fetch_max_chars` cap `fetcher` carried before this widened for verification
+    # and mechanical adjudication (D-claim-anchored-excerpts). Wrapping the same `source_fetcher`
+    # costs no extra fetch — the shared cache already holds the larger retained body.
+    dispute_fetcher = (
         fetch.CappedFetcher(source_fetcher, max_chars=config.search.fetch_max_chars)
         if config.search.verify_sources and source_fetcher is not None
         else None
@@ -385,7 +407,8 @@ def _build_runtime(
     for warning in warnings:
         log.warning("roster: %s", warning)
     return Runtime(config=config, client=client, identities=identities, store=store,
-                   warnings=warnings, searcher=searcher, fetcher=fetcher, reader=reader)
+                   warnings=warnings, searcher=searcher, fetcher=fetcher,
+                   dispute_fetcher=dispute_fetcher, reader=reader)
 
 
 def _degrade_roster(
@@ -552,10 +575,13 @@ def _cache_max_chars(config: Config) -> int:
     is then handed a view that applies its own (`fetch.CappedFetcher`). The resolver
     ladder uses the same number, or a body reached through an open-access mirror would
     be bounded differently from one fetched directly (D-writer-source-reads).
+
+    Verification's cap is `fetch_body_max_chars`, the retained body, not the
+    `fetch_max_chars` one critic is shown of it (D-claim-anchored-excerpts).
     """
     if config.search.read_sources:
-        return max(config.search.fetch_max_chars, config.search.read_max_chars)
-    return config.search.fetch_max_chars
+        return max(config.search.fetch_body_max_chars, config.search.read_max_chars)
+    return config.search.fetch_body_max_chars
 
 
 def _build_resolver(config: Config, warnings: list[str]):
@@ -1263,11 +1289,11 @@ def _adjudicate(state: State, rt: Runtime) -> dict:
                 else:
                     page = None
                     if (
-                        rt.fetcher is not None
+                        rt.dispute_fetcher is not None
                         and challenge.evidence_url
                         and challenge.evidence_url in cited_sources
                     ):
-                        page = rt.fetcher.fetch(challenge.evidence_url)
+                        page = rt.dispute_fetcher.fetch(challenge.evidence_url)
                     try:
                         ruling = dispute_mod.adjudicate_one(
                             rt.client,
@@ -1562,6 +1588,7 @@ def _critique_one(
         attempt=attempt,
         current_date=run_date,
         source_char_budget=rt.config.search.source_char_budget,
+        excerpt_chars=rt.config.search.fetch_max_chars,
     )
 
     # A cited URL that a definitive not-found (404/410) does not resolve is a

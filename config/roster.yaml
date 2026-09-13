@@ -180,7 +180,16 @@ search:
   # liability whatever it costs. These stay.
   fetch_timeout_seconds: 15.0
   fetch_max_bytes: 400000
+  # Page text shown to the critic per page, as claim-anchored excerpts: the page's
+  # opening, then the passages that best match the report's own sentences citing it
+  # (D-claim-anchored-excerpts). It used to be the page's FIRST 6,000 characters, which
+  # could omit a claim-relevant figure appearing later in an otherwise successfully
+  # fetched page.
   fetch_max_chars: 6000
+  # Page text RETAINED per page — the pool the excerpts are chosen from, and what a
+  # mechanical dispute adjudication searches. At least fetch_max_chars; sized to hold an
+  # ordinary article or briefing whole.
+  fetch_body_max_chars: 120000
 
   # Let a writer READ a page before it cites it (D-writer-source-reads). A search
   # result is a title, a URL and one line of snippet, so without this the writer picks
@@ -198,7 +207,7 @@ search:
   #                            # read_char_budget below is the bound that matters, and it
   #                            # is a correctness one (D-unbounded-evidence)
   # read_max_chars: 6000       # page text shown per read; raising it above
-  #                            # fetch_max_chars widens the writer's view only, never
+  #                            # fetch_body_max_chars widens the writer's view only, never
   #                            # the evidence lens's or mechanical adjudication's
   # read_char_budget: 200000   # whole-run page text handed to writers
   #

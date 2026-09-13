@@ -111,7 +111,8 @@ receives fetched pages, how much of a page it receives, and whether disputes can
 mechanically. Resolver call availability is the exception recorded by D-writer-resolver-budget:
 writer reads and verification share each enabled tier's whole-run call pool. `Runtime.fetcher` is
 still set only for verification, and it is a
-`fetch.CappedFetcher` view clipped to `fetch_max_chars` rather than the shared cache itself —
+`fetch.CappedFetcher` view clipped to the verification retained-body cap rather than the shared
+cache itself —
 "alone" has to cover the *volume* as well as the channel, because mechanical adjudication turns on
 string containment and a longer body upholds more disputes. The reader holds its own reference to
 the same cache, so a page is still downloaded once. The controller, the 14 rules, the taxonomy, the
@@ -159,9 +160,11 @@ findings.
   `Runtime.fetcher` is set only when `verify_sources`; the reader holds the shared instance
   separately, and the existing verification tests are what would catch a regression.
 * *Sharing one fetcher shares one character cap, and the caps are not the same.* The cache must
-  store the larger of `fetch_max_chars` and `read_max_chars` or the reader would be silently
-  clipped to the critic's cap — so verification is handed a `fetch.CappedFetcher` view that clips
-  back to `fetch_max_chars`, and the cap travels with the handle rather than with the cache. Left
+  store the larger of `fetch_body_max_chars` and `read_max_chars` or the reader would be silently
+  clipped to the verification cap — so verification is handed a `fetch.CappedFetcher` view that clips
+  back to `fetch_body_max_chars`, and the cap travels with the handle rather than with the cache.
+  The smaller `fetch_max_chars` limit is applied later to the claim-anchored excerpts shown to one
+  critic (D-claim-anchored-excerpts). Left
   unclipped this would not merely show a critic more text: `dispute.adjudicate_mechanical` upholds
   on string containment, an upheld dispute suppresses a finding, and `search.read_sources` would
   thereby have acquired a path into the stop decision. The resolver ladder is built with the cache

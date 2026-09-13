@@ -15,6 +15,7 @@ from __future__ import annotations
 import json
 from collections.abc import Sequence
 
+from . import excerpt
 from .fetch import SourceOutcome
 from .schemas import REFINE_TRANSFORMS, Defect
 from .taxonomy import LENS_BRIEF, LENS_CATEGORIES, Category, Lens
@@ -644,7 +645,13 @@ def critic_user(
     *,
     current_date: str | None = None,
     source_char_budget: int | None = None,
+    report_text: str | None = None,
+    excerpt_chars: int | None = None,
 ) -> str:
+    """`report_text` is the raw artifact (not the loci rendering) and `excerpt_chars`
+    the per-page budget; together they turn each fetched body into claim-anchored
+    excerpts (D-claim-anchored-excerpts). Without both, a body is shown from its start
+    as it was before, so every existing caller and the audition hash are unchanged."""
     categories = [c for c in LENS_CATEGORIES[lens]]
     # With the cited pages in hand, two categories stop being judgements about
     # plausibility and become checkable facts. Say so, or the critic keeps applying
@@ -666,6 +673,13 @@ def critic_user(
             "it, or states something materially different"
         )
     table = "\n".join(f"- `{c.value}` — {meanings[c]}" for c in categories)
+    pages = (
+        fetched_sources_block(
+            sources, source_char_budget, report=report_text, excerpt_chars=excerpt_chars
+        )
+        if sources
+        else ""
+    )
     # Only the in-scope categories, so the lens's own anchors are not buried under nine
     # others it may not raise — the same closed-scope discipline as the meanings table.
     anchors = "\n".join(f"  - `{c.value}` — quote {_CATEGORY_ANCHOR[c]}" for c in categories)
@@ -677,7 +691,7 @@ def critic_user(
         f"for you, however tempting:\n{table}\n\n"
         f"QUESTION THE REPORT ANSWERS\n{DATA_FENCE}\n{_neutralized(question)}\n{DATA_END}\n\n"
         f"REPORT UNDER REVIEW\n{DATA_FENCE}\n{_neutralized(rendered_report)}\n{DATA_END}\n\n"
-        f"{fetched_sources_block(sources, source_char_budget) if sources else ''}"
+        f"{pages}"
         "Each paragraph is prefixed with its locus marker [S<section>.P<paragraph>]. For "
         "every issue you raise:\n"
         "- `locus` must be the section and paragraph numbers of an EXISTING marker.\n"
@@ -707,7 +721,13 @@ def critic_user(
     )
 
 
-def fetched_sources_block(sources: list, char_budget: int | None = None) -> str:
+def fetched_sources_block(
+    sources: list,
+    char_budget: int | None = None,
+    *,
+    report: str | None = None,
+    excerpt_chars: int | None = None,
+) -> str:
     """The pages the report cites, fetched and fenced.
 
     Third-party web content in a critic's context, same as it is in a writer's — and a
@@ -727,29 +747,37 @@ def fetched_sources_block(sources: list, char_budget: int | None = None) -> str:
     bibliography that outgrew a fetch cap used to go missing silently — which supplied
     `fabricated_citation` findings faster than any writer could retire them. The first
     body is shown whole regardless, so the block is never bodyless.
+
+    **Which part of a body is shown is chosen by the claims** (D-claim-anchored-excerpts).
+    With `report` and `excerpt_chars` given, each body is rendered by `excerpt.select`:
+    the page's opening, then the passages that best match the sentences of the report
+    citing that source, inside `excerpt_chars`. Without them a body is shown from its
+    start, as it always was. The header of each entry says how much of
+    the page is shown, and the entry is labelled with the bibliography number(s) the
+    report lists the URL under, so the critic can pair excerpts with citations.
     """
+    numbers = excerpt.entry_numbers(report) if report is not None else {}
     entries = []
     spent = 0
     for i, s in enumerate(sources, 1):
+        label = _source_label(i, numbers.get(s.url))
+        shown = _shown_text(s, report, excerpt_chars, numbers) if s.ok else ""
         withheld = (
-            s.ok
-            and char_budget is not None
-            and spent > 0
-            and spent + len(s.text) > char_budget
+            s.ok and char_budget is not None and spent > 0 and spent + len(shown) > char_budget
         )
         if withheld:
             # Retrieved, and deliberately not shown. Stated as its own fact: calling it a
             # failed fetch would invite a fabrication finding against a page we hold, and
             # calling it registry-confirmed would claim a corroboration nobody made.
             entries.append(
-                f"[{i}] {s.url}\nFETCHED, TEXT WITHHELD: this page was retrieved and read "
+                f"{label} {s.url}\nFETCHED, TEXT WITHHELD: this page was retrieved and read "
                 f"successfully. Its text is not shown here so that this review stays "
                 f"legible. The source exists and is reachable."
             )
             continue
         if s.ok:
-            spent += len(s.text)
-            head = f"[{i}] {s.url}"
+            spent += len(shown)
+            head = f"{label} {s.url}"
             if s.title:
                 head += f"\nPage title: {s.title}"
             if s.body_source_url:
@@ -758,17 +786,17 @@ def fetched_sources_block(sources: list, char_budget: int | None = None) -> str:
                     f"open-access copy at {s.body_source_url}, commonly a preprint or "
                     f"author manuscript rather than the published version of record."
                 )
-            entries.append(f"{head}\nPage text (truncated):\n{s.text}")
+            entries.append(f"{head}\n{shown}")
         elif s.metadata is not None and s.outcome in _CONFIRMED_OUTCOMES:
-            entries.append(f"[{i}] {s.url}\n{_existence_entry(s)}")
+            entries.append(f"{label} {s.url}\n{_existence_entry(s)}")
         else:
             # A failed fetch is not evidence of fabrication — sites block clients, go
             # down, and paywall. The critic is told the difference explicitly, because
             # treating "could not read" as "does not exist" would manufacture blocking
             # defects out of transient network conditions. Naming the *class* of failure
             # is what lets it distinguish the one case where the opposite holds.
-            label = _OUTCOME_LABEL.get(s.outcome, "COULD NOT RESOLVE")
-            entries.append(f"[{i}] {s.url}\n{label}: {s.error}")
+            outcome = _OUTCOME_LABEL.get(s.outcome, "COULD NOT RESOLVE")
+            entries.append(f"{label} {s.url}\n{outcome}: {s.error}")
 
     return (
         f"PAGES CITED BY THE REPORT, AS FETCHED\n"
@@ -805,9 +833,34 @@ def fetched_sources_block(sources: list, char_budget: int | None = None) -> str:
         "cited URL, you are reading a different version of the document — usually a "
         "preprint. Treat it as corroboration, not as the version of record, and do not "
         "raise a defect on a discrepancy that a revision would explain.\n"
-        "- The page text is truncated. If the claim plausibly appears in a part you "
-        "cannot see, do not raise an issue.\n\n"
+        "- Page text is shown in part: the opening of the page, then the passages that "
+        "best match the report's own sentences citing it, each under its character "
+        "range, with “[…]” marking text not shown and the header stating how "
+        "much of the page you are seeing. A page shown in part is truncated, and a figure "
+        "or claim missing from what you were shown is NOT evidence that the page lacks "
+        "it. Raise `misrepresented_source` only when an excerpt addresses the same point "
+        "and states something materially different, never because the attributed claim "
+        "does not appear in the excerpts.\n\n"
     )
+
+
+def _source_label(index: int, numbers: list[int] | None) -> str:
+    """`[3]` — the bibliography number the report lists this URL under, or several
+    (`[3][7]`) when it is listed twice; the block's own index when the report is not
+    in hand. The critic pairs an excerpt with a citation by this label, so it must be
+    the number the report uses, not the position in a deduplicated fetch list."""
+    if numbers:
+        return "".join(f"[{n}]" for n in numbers)
+    return f"[{index}]"
+
+
+def _shown_text(source, report: str | None, excerpt_chars: int | None, numbers: dict) -> str:
+    """A body as the critic sees it: claim-anchored excerpts when the report and a
+    budget are in hand, the body from its start otherwise."""
+    if report is None or excerpt_chars is None:
+        return f"Page text (truncated):\n{source.text}"
+    anchors = excerpt.anchors_for(report, source.url, numbers)
+    return excerpt.render(excerpt.select(source.text, anchors, budget=excerpt_chars))
 
 
 #: Outcomes in which a registry has corroborated the citation's existence. Rendered with

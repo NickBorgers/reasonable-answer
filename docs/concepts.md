@@ -207,6 +207,11 @@ it — each one, again, a guard against a known LLM failure mode:
   `search.max_source_urls` ceiling (D-unbounded-evidence), and hands successful bodies to the
   evidence lens. Entries without a fetchable URL and addressable entries beyond that ceiling remain
   unchecked and are recorded as not attempted.
+  Each fetched body is retained up to `search.fetch_body_max_chars`; mechanical dispute
+  adjudication searches that retained text (`support.check` is unrelated — it works from
+  `session.reads`, capped at `read_max_chars`). One evidence-critic context receives at most
+  `search.fetch_max_chars` characters per page, selected as claim-anchored excerpts rather than a
+  fixed prefix (D-claim-anchored-excerpts).
   Page text in any one critic context is bounded by `search.source_char_budget`, an efficacy limit;
   a source past it is still listed, marked fetched with its text withheld. For attempted pages this turns "does this source say that?" from a plausibility
   guess into a check against the page — the same per-claim-against-fetched-text move
