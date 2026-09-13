@@ -19,8 +19,7 @@ the feature; each is an interaction with something else.
    on the HTML path, and the PDF path had no way to learn that `sources.pdf.max_pages` had dropped
    pages. A page cut at `search.fetch_max_bytes` whose surviving text fit `page_max_chars` was shown
    to the checker under the "complete" header, so `absent` from that prefix minted a major finding
-   against a page that may state the claim on the next line. Article pages that carry hundreds of
-   kilobytes of markup before the body are ordinary, not pathological.
+   against a page that may state the claim beyond the retained prefix.
 3. **A dead proxy was met with every pair.** `claimcheck.check` ran each pair serially and
    unconditionally, so a proxy that had stopped answering cost `max_pairs` calls, each spending the
    client's full timeout and retry budget, inside one critic's slot — for a pass that would mint

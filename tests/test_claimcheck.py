@@ -19,7 +19,7 @@ from pydantic import ValidationError
 from reasonable_answer import claimcheck, triage
 from reasonable_answer.config import ClaimCheckConfig, Config, ConfigError, SearchConfig
 from reasonable_answer.fetch import FetchedSource
-from reasonable_answer.graph import Runtime, _critique_one
+from reasonable_answer.graph import Runtime, _critique_one, _run_fingerprint
 from reasonable_answer.llm import ModelCallError, ProviderAccountError
 from reasonable_answer.schemas import ClaimVerdict, CritiqueOutput, RawIssue, StructuralRef
 from reasonable_answer.store import RunStore
@@ -434,6 +434,44 @@ def test_consecutive_failures_abort_the_pass_instead_of_timing_out_per_pair(iden
     assert claimcheck.issues_from(result) == []
 
 
+def test_a_cache_hit_neither_resets_nor_advances_the_failure_streak(identities):
+    cache = claimcheck.VerdictCache()
+    middle = "The cached claim is supported [1]."
+    sources = [page("https://example.test/emals", EMALS_PAGE)]
+    kwargs = dict(page_max_chars=30_000, max_pairs=200, max_tokens=800, repair_retries=0,
+                  max_consecutive_failures=2, cache=cache)
+    priming_report = f"## Findings\n\n{middle}\n\n## Sources\n\n[1] https://example.test/emals"
+    claimcheck.check(_client(identities, lambda alias, user: _supported(user)), "evidence-spec",
+                     identities["evidence-spec"], priming_report, sources, **kwargs)
+
+    calls = 0
+
+    def fail(alias, user):
+        nonlocal calls
+        calls += 1
+        raise ModelCallError("down", failure_class="timeout")
+
+    report = f"""## Findings
+
+The first call fails [1].
+
+{middle}
+
+The second call fails [1].
+
+This pair must be aborted [1].
+
+## Sources
+
+[1] https://example.test/emals
+"""
+    result = claimcheck.check(_client(identities, fail), "evidence-spec",
+                              identities["evidence-spec"], report, sources, **kwargs)
+    assert calls == 2
+    assert [v.unchecked_reason for v in result.verdicts] == ["timeout", None, "timeout", "aborted"]
+    assert result.verdicts[1].cached
+
+
 def test_a_page_cut_at_the_fetch_cap_is_never_shown_whole(identities):
     """A body that fits `page_max_chars` is not the page when the fetch stopped at its
     byte cap or a PDF at its page cap. Absence from what survived is not absence from
@@ -544,11 +582,18 @@ def test_the_checker_is_off_by_default_and_requires_verification(roster):
 
 @pytest.mark.parametrize(
     "field,value",
-    [("page_max_chars", 1_000), ("max_pairs", 0), ("max_tokens", 100)],
+    [("page_max_chars", 1_000), ("max_pairs", 0), ("max_tokens", 100),
+     ("max_consecutive_failures", 0), ("max_consecutive_failures", 101)],
 )
 def test_claim_check_config_bounds(field, value):
     with pytest.raises(ValidationError):
         ClaimCheckConfig(**{field: value})
+
+
+def test_the_failure_limit_is_not_part_of_the_run_identity(config):
+    changed = config.model_copy(update={"claim_check": config.claim_check.model_copy(
+        update={"max_consecutive_failures": 7})})
+    assert _run_fingerprint(config, "q", None) == _run_fingerprint(changed, "q", None)
 
 
 # ------------------------------------------------------------------ the lens

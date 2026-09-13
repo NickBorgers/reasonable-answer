@@ -46,6 +46,22 @@ review findings the way `D-<slug>` ids are.
 | QP11 | **Evidence-base freshness is checked mechanically and is never blocking.** See the marker line above and [§3](#3-refreshing-the-evidence-base). | this file | — |
 | QP12 | **Principles-as-spec drift is blocking, in both directions.** Behavior governed by QP1–QP10 changing without this file and the decision registry (a new `docs/decisions/D-<slug>.md`) moving too — or a principle here weakening with no new fetchable evidence in the diff — is the `quality` reviewer's row-12 analogue. See [§4](#4-retiring-or-weakening-a-principle). | this file + every surface above | — |
 
+**Application — bounded claim-check failures
+(D-claim-check-inconclusive-verdicts).** `claimcheck.check` and
+`config.ClaimCheckConfig.max_consecutive_failures` apply QP7 at the per-critic checker entry point:
+after a bounded number of consecutive calls end unchecked, the remaining pairs are recorded
+`aborted` without calls. A checked verdict resets the streak; a cache hit is not a call and changes
+the streak neither way. This is a call bound inside the existing critique slot, not a controller
+budget or a new refinement loop.
+
+**Application — explicit partial evidence and settled suppression
+(D-claim-check-inconclusive-verdicts).** `fetch.FetchedSource.truncated`, `resolve.SourceResolver`,
+`textconv.pdf_to_markdown_bounded`, `excerpt.select`, and `claimcheck` apply QP10 by preserving
+whether a fetched body was cut through every retrieval tier. A checker verdict suppresses the
+critic's own `misrepresented_source` finding only when it is supported, contradicted, or absent
+from a page shown whole. Unreadable and partial-page absence verdicts suppress nothing, so a
+retrieval bound cannot turn an unobserved suffix into evidence of absence.
+
 **Application — addressed blockers in finalize comments (D-addressed-blockers-visible).** Addressed
 and unaddressed blocker ids are derived mechanically from the same structured reviewer and fixer
 artifacts under QP8. The added verdict field changes how the finalize comment classifies findings for
