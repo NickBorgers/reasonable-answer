@@ -2,14 +2,20 @@
 
 from __future__ import annotations
 
-from types import SimpleNamespace
-
 import pytest
 
 from reasonable_answer import report as report_mod
-from reasonable_answer.schemas import MAX_CITATION_ID, LensResult, RawIssue, StructuralRef
+from reasonable_answer.schemas import (
+    MAX_CITATION_ID,
+    MAX_INSTRUCTION,
+    MAX_RATIONALE,
+    LensResult,
+    RawIssue,
+    StructuralRef,
+)
 from reasonable_answer.taxonomy import LENS_CATEGORIES, Category, Lens, Severity
 from reasonable_answer.triage import (
+    _LABEL_MAX,
     LensValidationError,
     ViolationCode,
     clamp,
@@ -21,7 +27,6 @@ from reasonable_answer.triage import (
     tally,
     to_defects,
     validate_issue,
-    withdraw_no_ops,
 )
 
 REPORT = """# Title
@@ -466,7 +471,7 @@ def test_a_long_marker_number_is_bounded_in_the_minted_issue():
     )
     issues = bibliography_issues(report)
     dangling = next(i for i in issues if i.category is Category.UNCITED_CLAIM)
-    assert dangling.citation_id == f"[{number}]"[:MAX_CITATION_ID]
+    assert dangling.citation_id == f"[{number}]"[:_LABEL_MAX]
 
 
 def test_a_range_marker_is_expanded_before_the_entry_is_looked_for():
@@ -495,77 +500,7 @@ def test_a_long_entry_number_is_bounded_in_the_minted_issue():
     number = "9" * 150
     report = CLEAN_BIBLIOGRAPHY + f"\n[{number}] Long-number source. https://example.org/long\n"
     orphan = next(i for i in bibliography_issues(report) if i.category is Category.UNCLEAR_STRUCTURE)
-    assert orphan.citation_id == f"[{number}]"[:MAX_CITATION_ID]
-
-
-def test_a_cited_bare_domain_is_a_misrepresented_source():
-    report = CLEAN_BIBLIOGRAPHY.replace(
-        "https://www.who.int/publications/i/item/9241563192", "https://www.datacenterfrontier.com"
-    )
-    issues = bibliography_issues(report)
-    assert [i.category for i in issues] == [Category.MISREPRESENTED_SOURCE]
-    bare = issues[0]
-    assert bare.severity is Severity.MAJOR
-    assert bare.citation_id == "[2]"
-    assert_quotable(issues, report)
-
-
-def test_an_uncited_bare_domain_is_the_orphan_case_only():
-    report = CLEAN_BIBLIOGRAPHY + "\n[3] Data Center Frontier. https://www.datacenterfrontier.com\n"
-    assert [i.category for i in bibliography_issues(report)] == [Category.UNCLEAR_STRUCTURE]
-
-
-def test_a_deep_path_is_not_a_bare_domain():
-    report = CLEAN_BIBLIOGRAPHY.replace(
-        "https://www.who.int/publications/i/item/9241563192", "https://www.datacenterfrontier.com/2024/"
-    )
-    assert bibliography_issues(report) == []
-
-
-@pytest.mark.parametrize(
-    "url",
-    [
-        "https://www.ft.com/content/12345678-90ab-cdef-1234-567890abcdef",
-        "https://www.moodys.com/research/China-Credit-Outlook--PR_123456",
-        "https://www.example.org/research/Measuring-the-Chinese-Economy-654321",
-        "https://www.example.org/reports/xxxx-annual-review",
-    ],
-)
-def test_a_placeholder_shaped_url_is_a_fabricated_citation(url):
-    report = CLEAN_BIBLIOGRAPHY.replace("https://www.who.int/publications/i/item/9241563192", url)
-    issues = bibliography_issues(report)
-    assert [i.category for i in issues] == [Category.FABRICATED_CITATION]
-    assert issues[0].severity is Severity.BLOCKING
-    assert issues[0].citation_id == "[2]"
-    assert_quotable(issues, report)
-
-
-@pytest.mark.parametrize(
-    "url",
-    [
-        # A real identifier must never cost a citation a `blocking` finding.
-        "https://arxiv.org/abs/2405.20362",
-        "https://doi.org/10.1007/s11367-024-02323-9",
-        "https://pubmed.ncbi.nlm.nih.gov/29711346/",
-        "https://github.com/anthropics/anthropic-sdk-python/commit/9f8a3c2be17d4a5c",
-        "https://www.worldcat.org/isbn/9780262033848",
-        "https://www.moodys.com/research/China-Outlook--PR_2024_0112",
-        "https://www.ft.com/content/f47ac10b-58cc-4372-a567-0e02b2c3d479",
-        "https://www.who.int/publications/i/item/9241563192",
-    ],
-)
-def test_a_real_identifier_is_not_a_placeholder(url):
-    report = CLEAN_BIBLIOGRAPHY.replace("https://www.who.int/publications/i/item/9241563192", url)
-    assert bibliography_issues(report) == []
-
-
-def test_a_url_a_not_found_already_settled_is_not_reported_twice():
-    """The precedent mints `fabricated_citation` for a 404; a template URL that also
-    404s must not arrive as a second blocking finding for one defect."""
-    url = "https://www.moodys.com/research/China-Credit-Outlook--PR_123456"
-    report = CLEAN_BIBLIOGRAPHY.replace("https://www.who.int/publications/i/item/9241563192", url)
-    source = SimpleNamespace(url=url, unresolvable=True, status=404)
-    assert bibliography_issues(report, [source]) == []
+    assert orphan.citation_id == f"[{number}]"[:_LABEL_MAX]
 
 
 def test_one_url_listed_twice_is_a_duplicate_entry():
@@ -631,54 +566,52 @@ def test_every_minted_finding_is_at_its_own_severity_floor():
     """Minted at the floor, so the clamp is a no-op — the direction RC-005 requires."""
     report = (
         CLEAN_BIBLIOGRAPHY.replace(
-            "https://www.who.int/publications/i/item/9241563192",
-            "https://www.moodys.com/research/China--PR_123456",
+            "Skeletal effects appear above 1.5 mg/L [2].",
+            "Skeletal effects appear above 1.5 mg/L [2], and elsewhere [4].",
         )
         + "\n[3] An orphan entry. https://example.org/three\n"
+        + "[5] A duplicate. https://www.cdc.gov/fluoridation/index.html\n"
     )
     minted = bibliography_issues(report)
-    assert len(minted) == 2
+    assert {i.category for i in minted} == {Category.UNCITED_CLAIM, Category.UNCLEAR_STRUCTURE}
+    assert len(minted) == 4  # dangling [4], orphan [3], orphan [5], duplicate [5]
     assert clamp(minted) == minted
 
 
-# --------------------------------------------------- withdrawn findings
-
-
-@pytest.mark.parametrize(
-    "instruction",
-    [
-        "No action needed — the report already says this.",
-        "No action is required here.",
-        "This is not a defect; the citation is correct.",
-        "Removing from list per instructions.",
-        "Remove this from the list — I withdraw the finding.",
-    ],
-)
-def test_an_instruction_that_withdraws_the_finding_drops_it(instruction):
-    withdrawn_issue = issue(Category.UNCITED_CLAIM, Severity.MAJOR).model_copy(
-        update={"instruction": instruction}
+def test_two_long_numbered_entries_under_one_url_still_mint_a_bounded_duplicate():
+    """The overflow the review reproduced: two entries numbered with 120 digits each under
+    one URL used to raise `ValidationError` from `rationale` (400-char cap) — an uncaught
+    exception that escaped `_critique_one` and aborted the critique node instead of
+    failing anything closed. Every minted field is clipped on construction now."""
+    a, b = "1" * 120, "2" * 120
+    report = (
+        "# T\n\nA claim [" + a + "] and again [" + b + "].\n\n## Sources\n\n"
+        "[" + a + "] First listing. https://example.org/same\n"
+        "[" + b + "] Second listing. https://example.org/same\n"
     )
-    kept, withdrawn = withdraw_no_ops([result(Lens.EVIDENCE, [withdrawn_issue])])
-    assert kept[0].issues == []
-    assert withdrawn == [
-        {"lens": "evidence", "category": "uncited_claim", "locus": "S1.P1"}
-    ]
+    issues = bibliography_issues(report)
+    duplicates = [i for i in issues if i.category is Category.UNCLEAR_STRUCTURE]
+    assert len(duplicates) == 1
+    assert len(duplicates[0].rationale) <= MAX_RATIONALE
+    assert len(duplicates[0].instruction) <= MAX_INSTRUCTION
+    assert len(duplicates[0].citation_id) <= MAX_CITATION_ID
+    assert_quotable(issues, report)
 
 
-def test_an_actionable_instruction_survives():
-    kept, withdrawn = withdraw_no_ops(
-        [result(Lens.EVIDENCE, [issue(Category.UNCITED_CLAIM, Severity.MAJOR)])]
+@pytest.mark.parametrize("digits", [1, 40, 120, 400])
+def test_no_entry_number_length_can_make_minting_raise(digits):
+    """Dangling marker, orphan and duplicate, each with a number of every length the
+    marker parser accepts: construction never raises and every field is within bounds."""
+    number = "7" * digits
+    report = (
+        "# T\n\nA claim [" + number + "] and another [9].\n\n## Sources\n\n"
+        "[" + number + "] Listed. https://example.org/a\n"
+        "[" + number + "] Listed again. https://example.org/a\n"
+        "[8] Never cited. https://example.org/b\n"
     )
-    assert len(kept[0].issues) == 1
-    assert withdrawn == []
-
-
-def test_withdrawal_never_touches_a_failed_lens():
-    """A failed review is discarded and re-critiqued (rule 2); editing its issues here
-    would turn an incomplete review into one that has been filtered."""
-    withdrawn_issue = issue(Category.UNCITED_CLAIM, Severity.MAJOR).model_copy(
-        update={"instruction": "No action needed."}
-    )
-    kept, withdrawn = withdraw_no_ops([result(Lens.EVIDENCE, [withdrawn_issue], failed=True)])
-    assert len(kept[0].issues) == 1
-    assert withdrawn == []
+    minted = bibliography_issues(report)
+    assert {i.category for i in minted} == {Category.UNCITED_CLAIM, Category.UNCLEAR_STRUCTURE}
+    for issue_ in minted:
+        assert len(issue_.rationale) <= MAX_RATIONALE
+        assert len(issue_.instruction) <= MAX_INSTRUCTION
+        assert len(issue_.citation_id) <= MAX_CITATION_ID

@@ -52,6 +52,31 @@ def test_every_explicit_question_part_is_an_answer_obligation():
     assert "Do not substitute an adjacent question or invent an unstated goal" in system
 
 
+def test_writer_shows_the_arithmetic_and_sizes_the_comparison():
+    """D-decisive-quantities, writer half. The motivating failure is a report that says
+    it divides by a PUE and then does not: a derivation described but not performed reads
+    as done. The comparison bullets are the symmetric half of the completeness lens's
+    magnitude and decisive-consideration triggers — a counterargument whose size is never
+    stated can headline a section while being orders of magnitude too small to matter."""
+    system = prompts.WRITER_SYSTEM
+    assert "You state the argument that settles the question" in system
+    assert "a derivation you describe is a derivation you perform" in system
+    assert "its inputs, its units and its result" in system
+    assert "a magnitude for each side" in system
+    assert "how large a counterargument is relative to the main effect" in system
+
+
+def test_writer_holds_headings_and_ambiguous_readings_to_the_same_standard():
+    """The heading standard is writer-side only, deliberately: heading text is not
+    quotable, so no critic can raise it fail-closed (see the decision, and
+    `tests/test_taxonomy.py::test_heading_text_is_not_quotable_so_no_heading_trigger_ships`).
+    The reading standard is the writer half of the `unexamined_presupposition` widening."""
+    system = prompts.WRITER_SYSTEM
+    assert "A heading claims no more than the section beneath it supports" in system
+    assert "asserts what its own prose goes on to disclaim" in system
+    assert "you say which reading you answer" in system
+
+
 def test_no_top_level_title():
     # export_markdown already emits `# {question}` above the body; a template H1
     # would double it.
@@ -130,3 +155,75 @@ def test_patch_mode_forbids_placeholders_and_heading_changes():
     assert "Reproduce every paragraph you are not editing in full" in close
     assert "(no changes required)" in close
     assert "do not number, renumber, drop, or merge sections" in close
+
+
+# ------------------------------------- no hedge discharge (D-no-hedge-discharge)
+
+
+def test_a_task_is_not_resolved_by_appending_a_qualifier():
+    """The cheapest compliant edit was to keep the claim and hedge it, which made the
+    flagged sentence stop matching its finding while the claim, its figure and its
+    citation all survived. The revision prompt now says what resolving means."""
+    standard = prompts.WRITER_RESOLUTION_STANDARD
+    assert "never by appending a qualifier to a claim you keep" in standard
+    # "Weaken the claim" is the critics' guaranteed escape; this is what it means.
+    assert "restricting it to what the support establishes" in standard
+    assert "will be filed against it again" in standard
+
+
+def test_an_evaluative_qualifier_is_not_a_citation():
+    standard = prompts.WRITER_RESOLUTION_STANDARD
+    assert "Never substitute an evaluative qualifier for a citation" in standard
+    assert "anecdotal" in standard
+    assert "restated as this report's own inference and labelled as one" in standard
+
+
+def test_a_caveat_is_not_copied_into_every_restatement():
+    """D-claim-scoped-patch carries a *fix* to every restatement of a claim. A caveat
+    pasted into all three is how one conclusion ended up with the same clause twice."""
+    assert "State a limitation once, where it applies" in prompts.WRITER_RESOLUTION_STANDARD
+
+
+def test_both_revision_modes_carry_the_resolution_standard():
+    """Appending a qualifier is as available under `rewrite` as under `patch`, so
+    scoping the edit never addressed it and the standard is not mode-specific. The
+    closes themselves are untouched, so the D-scoped-revision A/B still differs in
+    exactly one thing."""
+    for mode in ("patch", "rewrite"):
+        text = prompts.writer_revision("q", "r", [_defect()], polish=False, mode=mode)
+        assert prompts.WRITER_RESOLUTION_STANDARD in text
+    assert prompts.WRITER_RESOLUTION_STANDARD not in prompts.WRITER_PATCH_CLOSE
+    assert prompts.WRITER_RESOLUTION_STANDARD not in prompts.WRITER_REWRITE_CLOSE
+
+
+def test_a_polish_pass_carries_no_resolution_standard():
+    """Rule 9 fires only when `material == 0`: there are no fix tasks to discharge."""
+    text = prompts.writer_revision("q", "r", [], polish=True, mode="patch")
+    assert prompts.WRITER_RESOLUTION_STANDARD not in text
+
+
+def test_the_goal_sentence_names_the_change_not_the_qualifier():
+    text = prompts.writer_revision("q", "r", [_defect()], polish=False)
+    assert "not by qualifying a claim you leave standing" in text
+
+
+def test_an_absence_claim_is_searched_for_like_any_other_claim():
+    """"No source addresses this" is a claim about the literature. It was shipped
+    repeatedly with no search behind it, including where the deciding assessment was
+    public and from the same body as the report's most-cited reference."""
+    addendum = prompts.WRITER_SEARCH_ADDENDUM
+    assert "Before writing that the evidence does not cover something" in addendum
+    assert "held to the same standard as every other claim you make" in addendum
+    # Search-gated, because it asks the writer to go and look.
+    assert "does not cover something" not in prompts.writer_system(False)
+    assert "does not cover something" in prompts.writer_system(True)
+
+
+def test_currency_is_checked_against_the_run_date():
+    """The writer holds the run date (D-run-date-grounding) and never asked what had
+    changed since its newest source."""
+    addendum = prompts.WRITER_SEARCH_ADDENDUM
+    assert "Check currency against the date you are given" in addendum
+    assert "more than a year older" in addendum
+    assert "how recent the evidence you are relying on is" in addendum
+    assert "Check currency" not in prompts.writer_system(False)

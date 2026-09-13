@@ -568,6 +568,47 @@ def test_build_runtime_gives_verification_the_retained_body(tmp_path, identities
     assert runtime.fetcher.fetch(READ_URL).text == body
 
 
+def test_build_runtime_caps_the_arbiters_page_smaller_than_the_retained_body(
+    tmp_path, identities, monkeypatch
+):
+    """The dispute arbiter renders its evidence page verbatim (`prompts.arbiter_user`), unlike
+    the evidence critic's claim-anchored excerpt of the same retained body, so it must keep the
+    smaller `fetch_max_chars` cap even though `runtime.fetcher` was widened to
+    `fetch_body_max_chars` for verification and mechanical adjudication
+    (D-claim-anchored-excerpts). A shared handle here would silently 20x the untrusted page text
+    an arbiter's `dispute_upheld` verdict — which suppresses a defect outright — turns on."""
+    from fakes import FakeClient
+
+    from reasonable_answer import fetch
+    from reasonable_answer.graph import build_runtime
+    from reasonable_answer.schemas import CritiqueOutput
+
+    body = "A" * 15_000
+    monkeypatch.setattr(
+        fetch.SourceFetcher,
+        "_resolved",
+        lambda self, url, depth=0: _body(url, body),
+    )
+    config = _config(
+        tmp_path,
+        verify_sources=True,
+        fetch_max_chars=1_000,
+        fetch_body_max_chars=20_000,
+    )
+    client = FakeClient(
+        identities=identities,
+        critique_fn=lambda a, u: CritiqueOutput(issues=[]),
+        report_fn=lambda n: DRAFT,
+    )
+
+    runtime = build_runtime(config, run_id="run-dispute-fetcher-test", client=client)
+
+    assert runtime.dispute_fetcher is not None
+    assert len(runtime.dispute_fetcher.fetch(READ_URL).text) == 1_000
+    # Same underlying page, same run-lifetime cache — only the view differs.
+    assert runtime.fetcher.fetch(READ_URL).text == body
+
+
 @pytest.mark.parametrize(
     "source",
     [

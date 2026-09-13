@@ -19,7 +19,6 @@ import hashlib
 import re
 from dataclasses import dataclass
 from enum import Enum
-from urllib.parse import urlsplit
 
 from pydantic import ValidationError
 
@@ -27,6 +26,8 @@ from . import excerpt, fetch
 from .report import Structure
 from .schemas import (
     MAX_CITATION_ID,
+    MAX_INSTRUCTION,
+    MAX_RATIONALE,
     MAX_SPAN,
     CleanRecord,
     Defect,
@@ -463,87 +464,9 @@ def mechanical_citation_issues(sources: list, structure: Structure) -> list[RawI
 #: `search.max_source_urls`: an anti-pathological ceiling that must never bind on a
 #: real bibliography.
 DEFAULT_ENTRY_LIMIT = 200
-
-#: Hex digits in order, so a template identifier (`12345678-90ab-cdef-…`) and a run of
-#: counting digits are recognised by one rule instead of two that can drift apart.
-_HEX_ORDER = "0123456789abcdef"
-_HEX_INDEX = {c: i for i, c in enumerate(_HEX_ORDER)}
-
-#: How long a run of consecutive ascending or descending digits has to be before it is a
-#: placeholder rather than an identifier. Six is the shortest run that the identifier
-#: shapes this pipeline actually cites do not reach by accident — arXiv ids, DOIs,
-#: PMIDs, ISBN-13s, commit hashes — and the cost of a false positive here is a
-#: `blocking` finding against a real citation, so the threshold errs long.
-_PLACEHOLDER_RUN = 6
-#: The same rule over a dashed hex template, where the dashes are not part of the run.
-_TEMPLATE_RUN = 8
-
-_DIGIT_RUN = re.compile(r"\d+")
-#: A UUID-shaped identifier. Checked for monotonicity, never rejected on shape — real
-#: UUIDs appear in real URLs.
-_UUID_SHAPED = re.compile(r"[0-9a-fA-F]{8}(?:-[0-9a-fA-F]{4}){3}-[0-9a-fA-F]{12}")
-#: The other placeholder writers produce: a redacted-looking run of x's.
-_XXXX = re.compile(r"x{4,}", re.IGNORECASE)
-
-
-def _longest_monotone_run(text: str) -> int:
-    """Longest run of characters stepping by exactly +1 or -1 through `_HEX_ORDER`."""
-    best = run = 1 if text else 0
-    step = 0
-    for previous, current in zip(text, text[1:], strict=False):
-        delta = _HEX_INDEX[current] - _HEX_INDEX[previous]
-        if delta in (1, -1) and (step == 0 or delta == step):
-            run += 1
-            step = delta
-        elif delta in (1, -1):
-            run, step = 2, delta
-        else:
-            run, step = 1, 0
-        best = max(best, run)
-    return best
-
-
-def _url_path(url: str) -> str:
-    """The path and query of `url` — everything after the host."""
-    try:
-        parsed = urlsplit(url)
-    except ValueError:  # pragma: no cover - urlsplit is total on str in practice
-        return ""
-    return parsed.path + (f"?{parsed.query}" if parsed.query else "")
-
-
-def _is_placeholder_url(url: str) -> bool:
-    """Whether `url`'s path is a template a writer left unfilled.
-
-    Three shapes, all observable in the string and none of them a judgement about the
-    site: a run of six or more counting digits (`…--PR_123456`), a UUID-shaped
-    identifier whose hex is itself counting (`12345678-90ab-cdef-1234-567890abcdef`),
-    and a run of x's. Deliberately tight, and tested against the real identifier shapes
-    it must not fire on.
-    """
-    path = _url_path(url)
-    if not path:
-        return False
-    if _XXXX.search(path):
-        return True
-    for match in _UUID_SHAPED.finditer(path):
-        if _longest_monotone_run(match.group(0).replace("-", "").lower()) >= _TEMPLATE_RUN:
-            return True
-    return any(
-        len(run.group(0)) >= _PLACEHOLDER_RUN
-        and _longest_monotone_run(run.group(0)) >= _PLACEHOLDER_RUN
-        for run in _DIGIT_RUN.finditer(path)
-    )
-
-
-def _is_bare_domain(url: str) -> bool:
-    """Whether `url` addresses a *site* rather than a document."""
-    try:
-        parsed = urlsplit(url)
-    except ValueError:  # pragma: no cover
-        return False
-    return bool(parsed.netloc) and parsed.path.strip("/") == "" and not parsed.query
-
+#: A bibliography label as interpolated into minted fields: `[n]` with `n` cut so that
+#: two labels plus a 120-character URL stay inside `MAX_RATIONALE`.
+_LABEL_MAX = 40
 
 @dataclass(frozen=True)
 class _Entry:
@@ -644,8 +567,26 @@ def _entry_anchor(entry: _Entry, structure: Structure) -> tuple[StructuralRef, s
 
 
 def _citation_label(number: int) -> str:
-    """A bibliography number bounded for every schema field that repeats it."""
-    return f"[{number}]"[:MAX_CITATION_ID]
+    """A bibliography number bounded for every schema field that repeats it.
+
+    `excerpt._ENTRY_NUMBER` accepts any run of digits, so a number can be longer than
+    the fields that interpolate it. Cut to `_LABEL_MAX` — far below `MAX_CITATION_ID`
+    and `MAX_RATIONALE` — so two labels and a truncated URL always fit in one rationale.
+    """
+    return f"[{number}]"[:_LABEL_MAX]
+
+
+def _minted(**fields) -> RawIssue:
+    """Construct a pipeline-authored finding with every free-text field clipped to its
+    schema limit. The mechanical block runs inside `graph._critique_one` under
+    `pool.map`, where a `ValidationError` from an over-long field would abort the whole
+    critique node rather than fail one lens closed — so construction must be total
+    whatever the report put in its bibliography."""
+    fields["rationale"] = fields["rationale"][:MAX_RATIONALE]
+    fields["instruction"] = fields["instruction"][:MAX_INSTRUCTION]
+    if fields.get("citation_id"):
+        fields["citation_id"] = fields["citation_id"][:MAX_CITATION_ID]
+    return RawIssue(**fields)
 
 
 def mechanical_bibliography_issues(
@@ -663,19 +604,19 @@ def mechanical_bibliography_issues(
     to a verbatim `claim_span` in a body paragraph, so a defect whose whole subject is
     the reference list has no lens that owns it.
 
-    Five checks, each stating an observable fact and an instruction the writer can apply
-    without going back to the search tier:
+    Three checks, each stating an observable fact about the report's own text and an
+    instruction the writer can apply without going back to the search tier:
 
     * a marker `[n]` cited in the body with no entry numbered `n` (`uncited_claim`);
     * an entry the body never cites (`unclear_structure`);
-    * a cited entry whose only address is a bare domain (`misrepresented_source`) — a
-      site is not a document;
-    * an entry whose URL is an unfilled template (`fabricated_citation`);
     * two entries under one URL (`unclear_structure`).
 
-    `sources`, when the evidence lens fetched, is used only to stand down: a URL a
-    definitive not-found already settled is minted by `mechanical_citation_issues` at
-    the same `blocking` floor, and reporting it twice would double one defect.
+    Nothing here reads a fetched body or judges a URL's shape: what a page contains, and
+    whether an address resolves, are the fetch path's questions (QP10,
+    D-notfound-fabrication), and this function asks only whether the report's markers
+    and its entry list agree with each other. `sources` is accepted for signature parity
+    with the precedent and is unused. Every field is clipped on construction
+    (`_minted`), so minting is total however the report numbered its entries.
 
     Mechanically minted, so this bypasses `validate_issue` exactly as the precedent
     does; `tests/test_triage.py` runs every minted finding through it anyway, so a
@@ -701,7 +642,6 @@ def mechanical_bibliography_issues(
     # bounds only the per-entry checks below; applying it here would turn every valid
     # marker beyond the work budget into a manufactured missing-entry finding.
     by_number = {entry.number: entry for entry in all_entries}
-    unresolvable = {s.url for s in (sources or []) if getattr(s, "unresolvable", False)}
     issues: list[RawIssue] = []
 
     # 1. A marker with no entry behind it. The reader is told support exists and cannot
@@ -712,7 +652,7 @@ def mechanical_bibliography_issues(
         paragraph = cited[number][0]
         citation_label = _citation_label(number)
         issues.append(
-            RawIssue(
+            _minted(
                 category=Category.UNCITED_CLAIM,
                 severity=Severity.MAJOR,
                 locus=StructuralRef(section=paragraph.section, paragraph=paragraph.paragraph),
@@ -739,7 +679,7 @@ def mechanical_bibliography_issues(
         if not citing and anchor is not None:
             locus, span = anchor
             issues.append(
-                RawIssue(
+                _minted(
                     category=Category.UNCLEAR_STRUCTURE,
                     severity=Severity.MINOR,
                     locus=locus,
@@ -760,60 +700,6 @@ def mechanical_bibliography_issues(
         if entry.url is None:
             continue
 
-        # 3. A bare domain cited for a specific claim. Uncited, it is the orphan case
-        #    above; cited, the report attributes a statement to a site rather than to
-        #    any page that makes it.
-        if citing and _is_bare_domain(entry.url):
-            paragraph = citing[0]
-            issues.append(
-                RawIssue(
-                    category=Category.MISREPRESENTED_SOURCE,
-                    severity=Severity.MAJOR,
-                    locus=StructuralRef(section=paragraph.section, paragraph=paragraph.paragraph),
-                    claim_span=_citing_sentence(paragraph.text, entry.number),
-                    citation_id=citation_label,
-                    rationale=(
-                        f"Entry {citation_label} addresses only a site root "
-                        f"({entry.url[:120]}), not a page: no document at that address states "
-                        "what this sentence attributes to it."
-                    ),
-                    instruction=(
-                        "A site is not a document — cite the page that states the claim, or "
-                        "remove the citation and the claim that rests on it."
-                    ),
-                )
-            )
-
-        # 4. An unfilled template. The precedent's category and instruction, because the
-        #    fact is the same one: the address cannot be what it claims on its face.
-        if entry.url not in unresolvable and _is_placeholder_url(entry.url):
-            if citing:
-                paragraph = citing[0]
-                locus = StructuralRef(section=paragraph.section, paragraph=paragraph.paragraph)
-                span = _citing_sentence(paragraph.text, entry.number)
-            elif anchor is not None:
-                locus, span = anchor
-            else:
-                continue
-            issues.append(
-                RawIssue(
-                    category=Category.FABRICATED_CITATION,
-                    severity=Severity.BLOCKING,
-                    locus=locus,
-                    claim_span=span,
-                    citation_id=citation_label,
-                    rationale=(
-                        f"The URL of entry {citation_label} ({entry.url[:120]}) is shaped like "
-                        "an unfilled template — a counting run of digits, or a placeholder "
-                        "identifier, where a real one would be."
-                    ),
-                    instruction=(
-                        "Remove this citation or replace it with a source that resolves and "
-                        "supports the claim; do not invent a URL."
-                    ),
-                )
-            )
-
     # 5. One URL listed twice. Two entries are two sources to a reader counting support.
     seen: dict[str, _Entry] = {}
     for entry in entries:
@@ -827,14 +713,15 @@ def mechanical_bibliography_issues(
             continue
         locus, span = anchor
         issues.append(
-            RawIssue(
+            _minted(
                 category=Category.UNCLEAR_STRUCTURE,
                 severity=Severity.MINOR,
                 locus=locus,
                 claim_span=span,
-                citation_id=f"[{first.number}], [{entry.number}]"[:MAX_CITATION_ID],
+                citation_id=f"{_citation_label(first.number)}, {_citation_label(entry.number)}",
                 rationale=(
-                    f"Entries [{first.number}] and [{entry.number}] list the same address "
+                    f"Entries {_citation_label(first.number)} and "
+                    f"{_citation_label(entry.number)} list the same address "
                     f"({entry.url[:120]}): one document appears in the bibliography twice, so "
                     "a reader counting the sources behind a claim counts it twice."
                 ),
@@ -845,54 +732,6 @@ def mechanical_bibliography_issues(
             )
         )
     return issues
-
-
-#: An instruction that asks for nothing. A critic that files a finding and then withdraws
-#: it in the instruction field ("No action needed … Removing from list per instructions")
-#: leaves a fix-task the writer cannot act on, and the severity floor ships it as
-#: `major` all the same (D-bibliography-integrity).
-_NO_OP_INSTRUCTION = re.compile(
-    r"no action (?:is )?(?:needed|required)"
-    r"|not a defect"
-    r"|remov(?:e|ing) (?:this |it )?from (?:the )?list",
-    re.IGNORECASE,
-)
-
-
-def withdraw_no_ops(results: list[LensResult]) -> tuple[list[LensResult], list[dict]]:
-    """Drop findings whose `instruction` withdraws them, before anything is counted.
-
-    An instruction that requires no action is unactionable *by construction*: there is
-    no edit that satisfies it, so dropping it removes no signal a writer could have
-    acted on. That is why this is not a severity downgrade and does not touch RC-005:
-    the clamp governs how severe a finding that asks for something is, and a finding
-    that asks for nothing never reaches it.
-
-    Failed lenses pass through untouched, for the same reason `suppress` leaves them
-    alone: withdrawal must never turn an incomplete review into a countable one (rule 2
-    semantics). Every withdrawal is returned for logging in bounded, content-free
-    fields — a silent drop would be an invisible hole in the audit trail.
-    """
-    filtered: list[LensResult] = []
-    withdrawn: list[dict] = []
-    for result in results:
-        if result.failed:
-            filtered.append(result)
-            continue
-        kept: list[RawIssue] = []
-        for issue in result.issues:
-            if _NO_OP_INSTRUCTION.search(issue.instruction):
-                withdrawn.append(
-                    {
-                        "lens": result.lens.value,
-                        "category": issue.category.value,
-                        "locus": str(issue.locus),
-                    }
-                )
-            else:
-                kept.append(issue)
-        filtered.append(result.model_copy(update={"issues": kept}))
-    return filtered, withdrawn
 
 
 def clamp(issues: list[RawIssue]) -> list[RawIssue]:

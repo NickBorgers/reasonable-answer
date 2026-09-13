@@ -182,9 +182,9 @@ search:
   fetch_max_bytes: 400000
   # Page text shown to the critic per page, as claim-anchored excerpts: the page's
   # opening, then the passages that best match the report's own sentences citing it
-  # (D-claim-anchored-excerpts). It used to be the page's FIRST 6,000 characters, and
-  # ten of twenty-two terminal misrepresented_source findings across fifteen production
-  # runs named a figure the page states past that point.
+  # (D-claim-anchored-excerpts). It used to be the page's FIRST 6,000 characters, which
+  # could omit a claim-relevant figure appearing later in an otherwise successfully
+  # fetched page.
   fetch_max_chars: 6000
   # Page text RETAINED per page — the pool the excerpts are chosen from, and what a
   # mechanical dispute adjudication searches. At least fetch_max_chars; sized to hold an
@@ -207,7 +207,7 @@ search:
   #                            # read_char_budget below is the bound that matters, and it
   #                            # is a correctness one (D-unbounded-evidence)
   # read_max_chars: 6000       # page text shown per read; raising it above
-  #                            # fetch_max_chars widens the writer's view only, never
+  #                            # fetch_body_max_chars widens the writer's view only, never
   #                            # the evidence lens's or mechanical adjudication's
   # read_char_budget: 200000   # whole-run page text handed to writers
   #
@@ -333,6 +333,28 @@ disputes:
   budget: 6
   # Disputes accepted from one revision pass.
   max_per_pass: 3
+
+# Claim-level source verification (D-claim-level-verification). Every sentence that
+# cites a fetched page is checked against that page by the evidence critic's own model
+# in its own fresh context — one sentence, one page — and a `contradicted` verdict, or
+# `absent` on a page shown whole, becomes a misrepresented_source finding on that
+# critic's review. This is the per-source sub-context the source_char_budget comment
+# above calls INTERIM, taken to the claim: measured on prod, the single evidence
+# context was the one lens that almost never cleared, and most of what it raised was
+# misrepresented_source against text it could not see.
+#
+# Off in the shipped roster because it reads the pages verify_sources fetches, and
+# verify_sources is off here (see above). A deployment that turns verification on
+# should turn this on with it. Cost: one small call per (sentence, page) pair per
+# evidence critic per new draft; unchanged pairs are memoised for the run.
+claim_check:
+  enabled: false
+  # One page per checker context, as claim-anchored excerpts. A page that fits is
+  # shown whole, and only then may `absent` become a finding.
+  page_max_chars: 30000
+  # Anti-pathological: pairs past it are recorded unchecked and left to the critic.
+  max_pairs: 200
+  max_tokens: 1200
 
 # Critic auditioning (docs/architecture.md). Measures whether each rostered critic can
 # actually find a planted defect and stay quiet on a sound report — the question neither

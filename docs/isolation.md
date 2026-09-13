@@ -82,6 +82,10 @@ flowchart TB
         Cin["SEES: report + question + its ONE lens + taxonomy"]
         Cno["NEVER: who wrote the report · the tick number · whether this is a confirmation critique · other lenses' output · the OTHER critic on its own lens · prior critiques (its own rejected field returns inside one call only — D-repair-turn-context)"]
     end
+    subgraph CHK["Claim checker (D-claim-level-verification, opt-in) — the evidence critic's own model, one fresh context per (sentence, page)"]
+        Kin["SEES: one citing sentence + its paragraph + ONE fetched page (claim-anchored excerpts, or whole)"]
+        Kno["NEVER: the report · the question · any other page · any other sentence's verdict · the critic's review · who wrote the report"]
+    end
     subgraph ORC["Orchestrator (blind LLM)"]
         Oin["SEES: OrchestratorView (category × severity counts, bounded ints/enums)"]
         Ono["NEVER: report text · defect text · citations · run_id/hash/model-ids"]
@@ -101,8 +105,8 @@ flowchart TB
     %% and the see/never distinction rides on the border colour instead.
     classDef see stroke:#3a3,stroke-width:2px;
     classDef no stroke:#c33,stroke-width:2px;
-    class Gin,Cin,Oin,CTin see;
-    class Gno,Cno,Ono,CTno no;
+    class Gin,Cin,Kin,Oin,CTin see;
+    class Gno,Cno,Kno,Ono,CTno no;
 ```
 
 ## How the seven principles are preserved
@@ -208,6 +212,16 @@ artifact, rotation stays, clean records still reset on every generation. The sco
 counts these edits as `restated`, apart from `out_of_scope`, so the number that means "re-rolled
 text nobody complained about" keeps meaning it.
 
+**A fix is a change, not an annotation (D-no-hedge-discharge).** Neither licence says what a writer
+must do to the text it is allowed to edit, and the cheapest compliant edit — keep the claim, append
+"this remains an extrapolation" — makes the flagged sentence stop matching its finding while the
+claim, its figure and its citation all survive. The revision prompt therefore defines resolution
+(see [convergence.md](convergence.md#what-weaken-the-claim-means-d-no-hedge-discharge)), and the
+scope measurement gains `additive_only`: of the paragraphs a task named or that restated a flagged
+claim, how many came back containing every word of the old text, in order, with more around them.
+It is a subset of `in_scope` plus `restated` — a rate to read against them, never a fourth bucket —
+and, like every other number here, it is warn-only. Nothing about who edits or who reviews moves.
+
 ## The depersonalization step (principle 1, made concrete)
 
 ```mermaid
@@ -288,7 +302,11 @@ writer grading its own review.
 `search.verify_sources: true`, text from an attempted, addressable cited page can enter a
 **critic's** context. The fetched body is retained up to `search.fetch_body_max_chars` for
 verification and mechanical adjudication, while the critic receives at most `fetch_max_chars`
-characters selected from it as claim-anchored excerpts (D-claim-anchored-excerpts). Addressable
+characters selected from it as claim-anchored excerpts (D-claim-anchored-excerpts). A dispute's
+arbiter (below) is shown a fetched page as well, verbatim rather than excerpted, and is capped at
+the same smaller `fetch_max_chars` as the critic — never the wider retained body — because a
+`dispute_upheld` verdict suppresses a defect outright, so a hostile page on that path can retire a
+real finding rather than merely provoke a spurious one. Addressable
 citations are attempted up to the anti-pathological
 `search.max_source_urls` ceiling (D-unbounded-evidence). Unaddressable entries and addressable
 entries beyond that ceiling remain unchecked; the latter are recorded as not attempted because a

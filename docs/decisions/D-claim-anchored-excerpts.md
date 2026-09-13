@@ -18,8 +18,8 @@ not by position. A new module, `excerpt`, does deterministic string work and not
 * `excerpt.select` scans the retained body in overlapping windows, scores each window by the anchor
   tokens it contains — numbers and percentages at four times the weight of content words, years and
   one- or two-digit counts at a word's weight, stopwords and the citation marker itself ignored —
-  and shows, inside the same `fetch_max_chars` budget as before: the page's opening (title, date and
-  scope live there), then the best-scoring windows widened to whole sentences, in document order,
+  and shows, inside the same `fetch_max_chars` budget as before: the page's opening (reserved for
+  page-identifying context), then the best-scoring windows widened to whole sentences, in document order,
   merged where they touch. A body that fits the budget is shown whole. A source no sentence cites, or
   whose anchors match nothing, is shown from its start, which is exactly what it got before.
 * `excerpt.render` states how much of the page is shown, labels each excerpt with its character
@@ -31,12 +31,24 @@ Two configuration values now do the two jobs one used to do. `search.fetch_max_c
 its name and its meaning — characters of page text shown to one critic per page — and gains the
 excerpt semantics above. A new `search.fetch_body_max_chars` (120,000, validated `>=
 fetch_max_chars`) is how much extracted text is *retained* per page: the pool the excerpts are chosen
-from, and what `dispute.adjudicate_mechanical`'s containment test and `support.check` search. The
-shared fetch cache stores the larger of that and `read_max_chars`; verification's `CappedFetcher`
+from, and what `dispute.adjudicate_mechanical`'s containment test searches — not `support.check`,
+which works from `session.reads` and stays capped at `read_max_chars` regardless. The shared fetch
+cache stores the larger of `fetch_body_max_chars` and `read_max_chars`; verification's `CappedFetcher`
 clips to `fetch_body_max_chars`, so the D-writer-source-reads guarantee — `read_max_chars` never
 widens what verification or adjudication sees — holds unchanged with the larger number in the same
 place. The per-artifact `source_char_budget` is untouched and now counts what is *shown*, so two
 long pages excerpted to 6,000 each are both shown where their raw bodies would have withheld one.
+
+Widening `Runtime.fetcher` to `fetch_body_max_chars` would silently have widened a fourth consumer
+too: a dispute's arbiter, which fetches the disputed evidence page through the same handle
+(`graph._adjudicate`) and renders it into its prompt verbatim, with no excerpting of its own. An
+arbiter's `dispute_upheld` verdict suppresses a defect outright, so that page's untrusted text
+matters more per character than a critic's does, not less — it must not grow twenty-fold as a side
+effect of a change scoped to verification and mechanical adjudication. `Runtime` therefore gains a
+second handle, `dispute_fetcher`: the same `CappedFetcher` class, wrapping the same `source_fetcher`
+so no page is fetched twice, but clipped to `fetch_max_chars` like the critic's excerpt rather than
+`fetch_body_max_chars` like `fetcher`. `_adjudicate` reads the arbiter's page through this handle,
+never through `fetcher`.
 
 **The critic's rule, sharpened not changed.** The block's closing rules now say what an excerpt is,
 that a page shown in part is truncated, that a claim missing from the excerpts is *not* evidence the
@@ -50,7 +62,10 @@ so the audition prompt hash and every cached verdict are untouched.
 raise, how severities clamp, who reviews whom, what the orchestrator sees and how the controller
 terminates do not. Fetched text was already untrusted data fenced into the evidence lens alone, and
 an excerpt is a substring of it. Isolation.md's role table needs no edit: the evidence critic still
-sees "the pages the report cites, fetched and fenced" — a better-chosen part of them.
+sees "the pages the report cites, fetched and fenced" — a better-chosen part of them. The arbiter's
+untrusted-page budget is explicitly unchanged by this decision (`dispute_fetcher` above); it stays
+at `fetch_max_chars`, exactly what it was before `fetcher` widened for verification and mechanical
+adjudication.
 
 **Why not the alternatives.**
 
