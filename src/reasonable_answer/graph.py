@@ -1578,8 +1578,20 @@ def _critique_one(
     # clear the evidence lens (issue #92, D-notfound-fabrication). Attached only to a *completed* review: a
     # failed lens is discarded and re-critiqued (rule 2), and because the fetch is cached
     # the finding is simply re-derived on the next attempt, so nothing is lost.
-    if sources and not result.failed:
-        mechanical = triage.mechanical_citation_issues(sources, report_mod.parse(report_text))
+    #
+    # The bibliography's own referential integrity is settled the same way and under the
+    # same gate (D-bibliography-integrity): a dangling marker, an orphan entry, a bare
+    # domain cited for a figure, a template URL and a duplicated entry are all facts
+    # about the artifact's text, and none of them can be *expressed* as a critic finding
+    # — every issue anchors to a `claim_span` in a body paragraph, so a defect whose
+    # whole subject is the reference list has no lens that owns it. It runs with
+    # verification off too, because it needs no fetch.
+    if lens is Lens.EVIDENCE and not result.failed:
+        structure = report_mod.parse(report_text)
+        mechanical = list(triage.mechanical_citation_issues(sources, structure)) if sources else []
+        mechanical += triage.mechanical_bibliography_issues(
+            report_text, structure, sources, limit=rt.config.search.max_source_urls
+        )
         if mechanical:
             result = result.model_copy(update={"issues": [*mechanical, *result.issues]})
     return result
@@ -1926,6 +1938,12 @@ def _triage(state: State, rt: Runtime) -> dict:
     for entry in suppressed:
         rt.store.event("suppression", artifact_hash=artifact_hash, **entry)
 
+    # A finding whose instruction withdraws it asks for no edit, so it is dropped here —
+    # once, alongside suppression, before anything is counted (D-bibliography-integrity).
+    results, withdrawn = triage.withdraw_no_ops(results)
+    for entry in withdrawn:
+        rt.store.event("withdrawn_issue", artifact_hash=artifact_hash, **entry)
+
     # A lens is incomplete when it has no *completed* review of this artifact — not
     # when one of several reviews failed (D-front-loaded-depth). At review depth 1 the two
     # readings coincide, which is the behaviour rules 2/3 were written against.
@@ -1986,6 +2004,7 @@ def _triage(state: State, rt: Runtime) -> dict:
         artifact_hash=artifact_hash,
         material=material,
         lenses_failed=lenses_failed,
+        withdrawn=len(withdrawn),
         cleared={s.lens.value: s.cleared_count for s in status},
         acceptance=acceptance,
     )

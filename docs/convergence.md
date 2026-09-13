@@ -186,6 +186,42 @@ flat "could not fetch", and an opt-in tier (`sources.enabled` **and** `sources.p
 by default, fatal at startup without `pypdf`) **reads** a cited PDF rather than reporting it as an
 unreadable content type — so "a body this cannot read" narrows to formats no converter handles.
 
+**Bibliography integrity is settled mechanically (D-bibliography-integrity).** Every critic finding
+anchors to a verbatim `claim_span` in a body paragraph, so a defect whose whole subject is the
+reference list cannot be expressed in the critic schema and no lens owns it. Five such defects are
+decidable by string comparison against the report's own text, and
+`triage.mechanical_bibliography_issues` mints them from `graph._critique_one` under the same gate as
+the not-found finding above — the evidence lens, on a **completed** review, and with verification
+on or off, because none of them needs a fetch:
+
+| observable fact | category | floor | locus |
+|---|---|---|---|
+| a `[n]` cited in the body with no entry numbered `n` | `uncited_claim` | major | first citing paragraph |
+| an entry the body never cites | `unclear_structure` | minor | the paragraph listing it |
+| a **cited** entry whose only address is a bare domain | `misrepresented_source` | major | first citing paragraph |
+| an entry whose URL is an unfilled template (a run of six or more counting digits, a counting UUID, `xxxx`) | `fabricated_citation` | blocking | first citing paragraph, else the entry |
+| two entries under one URL | `unclear_structure` | minor | the paragraph listing the duplicate |
+
+No category is added to the taxonomy table, and each finding is minted **at** its category's floor,
+so the clamp is a no-op and RC-005's direction is untouched. These are pipeline-authored facts, not
+critic judgements: like the not-found finding they bypass `validate_issue`, whose subject is
+model-authored fields, and like it they never attach to a failed lens. Markers are read with
+`excerpt`'s parser (ranges expanded, the Sources section excluded), entries are numbered as
+`excerpt.entry_numbers` numbers them, and at most `search.max_source_urls` entries are considered.
+A report with no `## Sources` section, or whose body carries no citation marker at all, mints
+nothing here — that is a different defect, and the writer template and the completeness lens already
+own it.
+
+**A finding that withdraws itself is dropped, not counted (D-bibliography-integrity).** A critic that
+files an issue and then retracts it in its own `instruction` field ("No action needed… Removing from
+list per instructions") leaves a fix-task that names no edit, and the severity floor ships it as
+`major` all the same. `triage.withdraw_no_ops` drops those in `graph._triage`, once, beside dispute
+suppression — so tally, clean records, defects and the stagnation signature see one filtered stream —
+and records a `withdrawn` count on the `triage` event with a `withdrawn_issue` event per drop. It is
+not a downgrade: an instruction that requires no action is unactionable by construction, so dropping
+it removes no signal a writer could have acted on, and the clamp still governs every finding that
+asks for something.
+
 **What the critic is shown of a page is chosen by the claims, not by position
 (D-claim-anchored-excerpts).** A fetched body is retained up to `search.fetch_body_max_chars`, and
 one critic is shown at most `search.fetch_max_chars` of it — as the page's opening plus the passages

@@ -2,21 +2,26 @@
 
 from __future__ import annotations
 
+from types import SimpleNamespace
+
 import pytest
 
 from reasonable_answer import report as report_mod
 from reasonable_answer.schemas import LensResult, RawIssue, StructuralRef
-from reasonable_answer.taxonomy import Category, Lens, Severity
+from reasonable_answer.taxonomy import LENS_CATEGORIES, Category, Lens, Severity
 from reasonable_answer.triage import (
     LensValidationError,
     ViolationCode,
     clamp,
     clean_records,
+    distinct_issues,
     material_count,
+    mechanical_bibliography_issues,
     signal_signature,
     tally,
     to_defects,
     validate_issue,
+    withdraw_no_ops,
 )
 
 REPORT = """# Title
@@ -390,3 +395,264 @@ def test_typographic_punctuation_does_not_make_an_honest_quote_a_misquote():
     )
 
     validate_issue(Lens.EVIDENCE, retyped, structure)  # does not raise
+
+
+# --------------------------------------------------- bibliography integrity (D-bibliography-integrity)
+
+
+CLEAN_BIBLIOGRAPHY = """# Fluoride
+
+## Findings
+
+Community water fluoridation is set at 0.7 mg/L in the United States [1].
+
+Skeletal effects appear above 1.5 mg/L [2].
+
+## Sources
+
+[1] CDC. Community Water Fluoridation. https://www.cdc.gov/fluoridation/index.html
+
+[2] WHO (2004). Fluoride in Drinking-water. https://www.who.int/publications/i/item/9241563192
+"""
+
+
+def bibliography_issues(report_text: str, sources=None, **kwargs):
+    return mechanical_bibliography_issues(
+        report_text, report_mod.parse(report_text), sources, **kwargs
+    )
+
+
+def owning_lens(category: Category) -> Lens:
+    """The lens whose closed schema the category belongs to."""
+    return next(lens for lens, cats in LENS_CATEGORIES.items() if category in cats)
+
+
+def assert_quotable(issues: list[RawIssue], report_text: str) -> None:
+    """Every minted finding would survive `validate_issue`.
+
+    Production bypasses it — the fields are pipeline-authored, exactly as
+    `mechanical_citation_issues`' are — so this is the check that a change here cannot
+    quietly mint a finding the writer could not locate.
+    """
+    structure = report_mod.parse(report_text)
+    assert issues
+    for minted in issues:
+        validate_issue(owning_lens(minted.category), minted, structure)
+
+
+def test_a_clean_bibliography_mints_nothing():
+    assert bibliography_issues(CLEAN_BIBLIOGRAPHY) == []
+
+
+def test_a_marker_with_no_entry_is_an_uncited_claim():
+    report = CLEAN_BIBLIOGRAPHY.replace(
+        "Skeletal effects appear above 1.5 mg/L [2].",
+        "Skeletal effects appear above 1.5 mg/L [2]. Enforcement rests on the DEA schedule [11].",
+    )
+    issues = bibliography_issues(report)
+    assert [i.category for i in issues] == [Category.UNCITED_CLAIM]
+    dangling = issues[0]
+    assert dangling.severity is Severity.MAJOR
+    assert dangling.citation_id == "[11]"
+    assert "[11]" in dangling.claim_span
+    assert_quotable(issues, report)
+
+
+def test_a_range_marker_is_expanded_before_the_entry_is_looked_for():
+    report = CLEAN_BIBLIOGRAPHY.replace(
+        "set at 0.7 mg/L in the United States [1]", "set at 0.7 mg/L in the United States [1-3]"
+    )
+    issues = bibliography_issues(report)
+    assert [i.citation_id for i in issues if i.category is Category.UNCITED_CLAIM] == ["[3]"]
+
+
+def test_an_entry_nothing_cites_is_an_orphan():
+    report = CLEAN_BIBLIOGRAPHY + (
+        "\n[3] European Commission SCHER (2019). "
+        "https://ec.europa.eu/health/scientific_committees/scher_o_182.pdf\n"
+    )
+    issues = bibliography_issues(report)
+    assert [i.category for i in issues] == [Category.UNCLEAR_STRUCTURE]
+    orphan = issues[0]
+    assert orphan.severity is Severity.MINOR
+    assert orphan.citation_id == "[3]"
+    assert "SCHER" in orphan.claim_span
+    assert_quotable(issues, report)
+
+
+def test_a_cited_bare_domain_is_a_misrepresented_source():
+    report = CLEAN_BIBLIOGRAPHY.replace(
+        "https://www.who.int/publications/i/item/9241563192", "https://www.datacenterfrontier.com"
+    )
+    issues = bibliography_issues(report)
+    assert [i.category for i in issues] == [Category.MISREPRESENTED_SOURCE]
+    bare = issues[0]
+    assert bare.severity is Severity.MAJOR
+    assert bare.citation_id == "[2]"
+    assert_quotable(issues, report)
+
+
+def test_an_uncited_bare_domain_is_the_orphan_case_only():
+    report = CLEAN_BIBLIOGRAPHY + "\n[3] Data Center Frontier. https://www.datacenterfrontier.com\n"
+    assert [i.category for i in bibliography_issues(report)] == [Category.UNCLEAR_STRUCTURE]
+
+
+def test_a_deep_path_is_not_a_bare_domain():
+    report = CLEAN_BIBLIOGRAPHY.replace(
+        "https://www.who.int/publications/i/item/9241563192", "https://www.datacenterfrontier.com/2024/"
+    )
+    assert bibliography_issues(report) == []
+
+
+@pytest.mark.parametrize(
+    "url",
+    [
+        "https://www.ft.com/content/12345678-90ab-cdef-1234-567890abcdef",
+        "https://www.moodys.com/research/China-Credit-Outlook--PR_123456",
+        "https://www.example.org/research/Measuring-the-Chinese-Economy-654321",
+        "https://www.example.org/reports/xxxx-annual-review",
+    ],
+)
+def test_a_placeholder_shaped_url_is_a_fabricated_citation(url):
+    report = CLEAN_BIBLIOGRAPHY.replace("https://www.who.int/publications/i/item/9241563192", url)
+    issues = bibliography_issues(report)
+    assert [i.category for i in issues] == [Category.FABRICATED_CITATION]
+    assert issues[0].severity is Severity.BLOCKING
+    assert issues[0].citation_id == "[2]"
+    assert_quotable(issues, report)
+
+
+@pytest.mark.parametrize(
+    "url",
+    [
+        # A real identifier must never cost a citation a `blocking` finding.
+        "https://arxiv.org/abs/2405.20362",
+        "https://doi.org/10.1007/s11367-024-02323-9",
+        "https://pubmed.ncbi.nlm.nih.gov/29711346/",
+        "https://github.com/anthropics/anthropic-sdk-python/commit/9f8a3c2be17d4a5c",
+        "https://www.worldcat.org/isbn/9780262033848",
+        "https://www.moodys.com/research/China-Outlook--PR_2024_0112",
+        "https://www.ft.com/content/f47ac10b-58cc-4372-a567-0e02b2c3d479",
+        "https://www.who.int/publications/i/item/9241563192",
+    ],
+)
+def test_a_real_identifier_is_not_a_placeholder(url):
+    report = CLEAN_BIBLIOGRAPHY.replace("https://www.who.int/publications/i/item/9241563192", url)
+    assert bibliography_issues(report) == []
+
+
+def test_a_url_a_not_found_already_settled_is_not_reported_twice():
+    """The precedent mints `fabricated_citation` for a 404; a template URL that also
+    404s must not arrive as a second blocking finding for one defect."""
+    url = "https://www.moodys.com/research/China-Credit-Outlook--PR_123456"
+    report = CLEAN_BIBLIOGRAPHY.replace("https://www.who.int/publications/i/item/9241563192", url)
+    source = SimpleNamespace(url=url, unresolvable=True, status=404)
+    assert bibliography_issues(report, [source]) == []
+
+
+def test_one_url_listed_twice_is_a_duplicate_entry():
+    report = CLEAN_BIBLIOGRAPHY.replace(
+        "Skeletal effects appear above 1.5 mg/L [2].",
+        "Skeletal effects appear above 1.5 mg/L [2], reaffirmed in 2022 [3].",
+    ) + "\n[3] WHO (2022). Fluoride in Drinking-water. https://www.who.int/publications/i/item/9241563192\n"
+    issues = bibliography_issues(report)
+    assert [i.category for i in issues] == [Category.UNCLEAR_STRUCTURE]
+    duplicate = issues[0]
+    assert duplicate.severity is Severity.MINOR
+    assert duplicate.citation_id == "[2], [3]"
+    assert_quotable(issues, report)
+
+
+def test_a_report_with_no_sources_section_mints_nothing():
+    assert bibliography_issues(REPORT) == []
+
+
+def test_a_report_whose_body_cites_nothing_mints_nothing():
+    """Every entry would be an orphan; a bibliography attached to a body with no
+    markers at all is a different defect, and not this one's to report."""
+    report = CLEAN_BIBLIOGRAPHY.replace(" [1]", "").replace(" [2]", "")
+    assert bibliography_issues(report) == []
+
+
+def test_the_entry_budget_bounds_the_work():
+    report = CLEAN_BIBLIOGRAPHY + "\n[3] An orphan. https://example.org/three\n"
+    assert bibliography_issues(report, limit=2) == []
+    assert len(bibliography_issues(report, limit=3)) == 1
+
+
+def test_two_critics_of_one_lens_report_a_bibliography_finding_once():
+    """The findings are derived from the artifact, so a depth-2 slate mints them twice;
+    `_issue_key` has to collapse them or the totals double (D-front-loaded-depth)."""
+    report = CLEAN_BIBLIOGRAPHY + "\n[3] An orphan entry. https://example.org/three\n"
+    minted = bibliography_issues(report)
+    results = [
+        result(Lens.EVIDENCE, list(minted), critic="vendor-x/critic"),
+        result(Lens.EVIDENCE, list(minted), critic="vendor-y/critic"),
+    ]
+    assert len(distinct_issues(results)) == len(minted)
+    per_category, totals = tally(results)
+    assert per_category["unclear_structure"].minor == 1
+    assert totals.minor == 1
+
+
+def test_a_failed_evidence_review_contributes_no_bibliography_findings():
+    report = CLEAN_BIBLIOGRAPHY + "\n[3] An orphan entry. https://example.org/three\n"
+    minted = bibliography_issues(report)
+    assert distinct_issues([result(Lens.EVIDENCE, list(minted), failed=True)]) == []
+
+
+def test_every_minted_finding_is_at_its_own_severity_floor():
+    """Minted at the floor, so the clamp is a no-op — the direction RC-005 requires."""
+    report = (
+        CLEAN_BIBLIOGRAPHY.replace(
+            "https://www.who.int/publications/i/item/9241563192",
+            "https://www.moodys.com/research/China--PR_123456",
+        )
+        + "\n[3] An orphan entry. https://example.org/three\n"
+    )
+    minted = bibliography_issues(report)
+    assert len(minted) == 2
+    assert clamp(minted) == minted
+
+
+# --------------------------------------------------- withdrawn findings
+
+
+@pytest.mark.parametrize(
+    "instruction",
+    [
+        "No action needed — the report already says this.",
+        "No action is required here.",
+        "This is not a defect; the citation is correct.",
+        "Removing from list per instructions.",
+        "Remove this from the list — I withdraw the finding.",
+    ],
+)
+def test_an_instruction_that_withdraws_the_finding_drops_it(instruction):
+    withdrawn_issue = issue(Category.UNCITED_CLAIM, Severity.MAJOR).model_copy(
+        update={"instruction": instruction}
+    )
+    kept, withdrawn = withdraw_no_ops([result(Lens.EVIDENCE, [withdrawn_issue])])
+    assert kept[0].issues == []
+    assert withdrawn == [
+        {"lens": "evidence", "category": "uncited_claim", "locus": "S1.P1"}
+    ]
+
+
+def test_an_actionable_instruction_survives():
+    kept, withdrawn = withdraw_no_ops(
+        [result(Lens.EVIDENCE, [issue(Category.UNCITED_CLAIM, Severity.MAJOR)])]
+    )
+    assert len(kept[0].issues) == 1
+    assert withdrawn == []
+
+
+def test_withdrawal_never_touches_a_failed_lens():
+    """A failed review is discarded and re-critiqued (rule 2); editing its issues here
+    would turn an incomplete review into one that has been filtered."""
+    withdrawn_issue = issue(Category.UNCITED_CLAIM, Severity.MAJOR).model_copy(
+        update={"instruction": "No action needed."}
+    )
+    kept, withdrawn = withdraw_no_ops([result(Lens.EVIDENCE, [withdrawn_issue], failed=True)])
+    assert len(kept[0].issues) == 1
+    assert withdrawn == []

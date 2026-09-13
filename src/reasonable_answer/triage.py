@@ -17,12 +17,16 @@ from __future__ import annotations
 
 import hashlib
 import re
+from dataclasses import dataclass
 from enum import Enum
+from urllib.parse import urlsplit
 
 from pydantic import ValidationError
 
+from . import excerpt, fetch
 from .report import Structure
 from .schemas import (
+    MAX_CITATION_ID,
     MAX_SPAN,
     CleanRecord,
     Defect,
@@ -450,6 +454,434 @@ def mechanical_citation_issues(sources: list, structure: Structure) -> list[RawI
             )
         )
     return issues
+
+# ------------------------------------------------------- bibliography integrity
+
+
+#: The bibliography facts below are settled by string comparison, so they are minted
+#: here rather than asked of a critic (D-bibliography-integrity). The cap mirrors
+#: `search.max_source_urls`: an anti-pathological ceiling that must never bind on a
+#: real bibliography.
+DEFAULT_ENTRY_LIMIT = 200
+
+#: Hex digits in order, so a template identifier (`12345678-90ab-cdef-…`) and a run of
+#: counting digits are recognised by one rule instead of two that can drift apart.
+_HEX_ORDER = "0123456789abcdef"
+_HEX_INDEX = {c: i for i, c in enumerate(_HEX_ORDER)}
+
+#: How long a run of consecutive ascending or descending digits has to be before it is a
+#: placeholder rather than an identifier. Six is the shortest run that the identifier
+#: shapes this pipeline actually cites do not reach by accident — arXiv ids, DOIs,
+#: PMIDs, ISBN-13s, commit hashes — and the cost of a false positive here is a
+#: `blocking` finding against a real citation, so the threshold errs long.
+_PLACEHOLDER_RUN = 6
+#: The same rule over a dashed hex template, where the dashes are not part of the run.
+_TEMPLATE_RUN = 8
+
+_DIGIT_RUN = re.compile(r"\d+")
+#: A UUID-shaped identifier. Checked for monotonicity, never rejected on shape — real
+#: UUIDs appear in real URLs.
+_UUID_SHAPED = re.compile(r"[0-9a-fA-F]{8}(?:-[0-9a-fA-F]{4}){3}-[0-9a-fA-F]{12}")
+#: The other placeholder writers produce: a redacted-looking run of x's.
+_XXXX = re.compile(r"x{4,}", re.IGNORECASE)
+
+
+def _longest_monotone_run(text: str) -> int:
+    """Longest run of characters stepping by exactly +1 or -1 through `_HEX_ORDER`."""
+    best = run = 1 if text else 0
+    step = 0
+    for previous, current in zip(text, text[1:], strict=False):
+        delta = _HEX_INDEX[current] - _HEX_INDEX[previous]
+        if delta in (1, -1) and (step == 0 or delta == step):
+            run += 1
+            step = delta
+        elif delta in (1, -1):
+            run, step = 2, delta
+        else:
+            run, step = 1, 0
+        best = max(best, run)
+    return best
+
+
+def _url_path(url: str) -> str:
+    """The path and query of `url` — everything after the host."""
+    try:
+        parsed = urlsplit(url)
+    except ValueError:  # pragma: no cover - urlsplit is total on str in practice
+        return ""
+    return parsed.path + (f"?{parsed.query}" if parsed.query else "")
+
+
+def _is_placeholder_url(url: str) -> bool:
+    """Whether `url`'s path is a template a writer left unfilled.
+
+    Three shapes, all observable in the string and none of them a judgement about the
+    site: a run of six or more counting digits (`…--PR_123456`), a UUID-shaped
+    identifier whose hex is itself counting (`12345678-90ab-cdef-1234-567890abcdef`),
+    and a run of x's. Deliberately tight, and tested against the real identifier shapes
+    it must not fire on.
+    """
+    path = _url_path(url)
+    if not path:
+        return False
+    if _XXXX.search(path):
+        return True
+    for match in _UUID_SHAPED.finditer(path):
+        if _longest_monotone_run(match.group(0).replace("-", "").lower()) >= _TEMPLATE_RUN:
+            return True
+    return any(
+        len(run.group(0)) >= _PLACEHOLDER_RUN
+        and _longest_monotone_run(run.group(0)) >= _PLACEHOLDER_RUN
+        for run in _DIGIT_RUN.finditer(path)
+    )
+
+
+def _is_bare_domain(url: str) -> bool:
+    """Whether `url` addresses a *site* rather than a document."""
+    try:
+        parsed = urlsplit(url)
+    except ValueError:  # pragma: no cover
+        return False
+    return bool(parsed.netloc) and parsed.path.strip("/") == "" and not parsed.query
+
+
+@dataclass(frozen=True)
+class _Entry:
+    """One bibliography entry, as the report lists it."""
+
+    number: int
+    text: str
+    url: str | None
+
+
+def _entries(report_text: str, limit: int) -> list[_Entry]:
+    """The `## Sources` entries, numbered the way `excerpt.entry_numbers` numbers them:
+    what the entry says it is (`[3]`, `3.`) when it says, its position otherwise."""
+    out: list[_Entry] = []
+    for position, entry in enumerate(fetch.source_entries(report_text), 1):
+        if len(out) >= limit:
+            break
+        match = excerpt._ENTRY_NUMBER.match(entry)
+        explicit = (match.group(1) or match.group(2)) if match else None
+        number = int(explicit) if explicit else position
+        out.append(_Entry(number=number, text=entry, url=fetch.entry_url(entry)))
+    return out
+
+
+def _sources_section(structure: Structure) -> int | None:
+    """The index of the `## Sources` section, or None when the report has none."""
+    for index, title in enumerate(structure.section_titles):
+        if title.strip().lower() == "sources":
+            return index
+    return None
+
+
+def _citations(structure: Structure, sources_section: int | None) -> dict[int, list]:
+    """Bibliography number -> the *body* paragraphs citing it, in document order.
+
+    Markers are read with `excerpt`'s own parser and ranges expanded, so "cited" means
+    here exactly what it means when the excerpter picks anchors for a source. The
+    Sources section is excluded: an entry's own `[3]` is not a citation of itself.
+    """
+    cited: dict[int, list] = {}
+    for paragraph in structure.paragraphs:
+        if paragraph.section == sources_section:
+            continue
+        numbers: set[int] = set()
+        for marker in excerpt._MARKER.findall(paragraph.text):
+            numbers |= excerpt._cited(marker)
+        for number in sorted(numbers):
+            cited.setdefault(number, []).append(paragraph)
+    return cited
+
+
+def _citing_sentence(paragraph_text: str, number: int) -> str:
+    """The first sentence of `paragraph_text` that cites `number`, bounded to a span.
+
+    A prefix of a sentence of a paragraph is still a verbatim substring of it, which is
+    what keeps every minted `claim_span` quotable however long the sentence ran.
+    """
+    for sentence in excerpt._SENTENCE_END.split(paragraph_text):
+        sentence = sentence.strip()
+        if not sentence:
+            continue
+        if any(number in excerpt._cited(m) for m in excerpt._MARKER.findall(sentence)):
+            return sentence[:MAX_SPAN]
+    return paragraph_text[:MAX_SPAN]
+
+
+def _locate_text(text: str, structure: Structure) -> StructuralRef | None:
+    """The locus of the first paragraph containing `text`, or None.
+
+    Compared under `_normalize` — the same normalization `validate_issue` quotes
+    against — so a locus this returns is one the span validates at.
+    """
+    needle = _normalize(text)
+    if not needle:
+        return None
+    for p in structure.paragraphs:
+        if needle in _normalize(p.text):
+            return StructuralRef(section=p.section, paragraph=p.paragraph)
+    return None
+
+
+def _entry_anchor(entry: _Entry, structure: Structure) -> tuple[StructuralRef, str] | None:
+    """Where an entry sits and what to quote of it, or None when neither its text nor
+    its URL is found in any single paragraph (an entry split across a blank line).
+
+    Minting nothing is the right answer there: a finding whose `claim_span` is not in
+    the paragraph it names is one the writer cannot locate.
+    """
+    span = entry.text[:MAX_SPAN]
+    locus = _locate_text(span, structure)
+    if locus is not None:
+        return locus, span
+    if entry.url:
+        locus = _locate_text(entry.url, structure)
+        if locus is not None:
+            return locus, entry.url[:MAX_SPAN]
+    return None
+
+
+def mechanical_bibliography_issues(
+    report_text: str,
+    structure: Structure,
+    sources: list | None = None,
+    *,
+    limit: int = DEFAULT_ENTRY_LIMIT,
+) -> list[RawIssue]:
+    """Referential-integrity findings a string comparison settles (D-bibliography-integrity).
+
+    A sibling of `mechanical_citation_issues`, raised under the same gate and for the
+    same reason: these are facts about the artifact rather than judgements about it, and
+    the critic schema cannot express most of them at all — every critic finding anchors
+    to a verbatim `claim_span` in a body paragraph, so a defect whose whole subject is
+    the reference list has no lens that owns it.
+
+    Five checks, each stating an observable fact and an instruction the writer can apply
+    without going back to the search tier:
+
+    * a marker `[n]` cited in the body with no entry numbered `n` (`uncited_claim`);
+    * an entry the body never cites (`unclear_structure`);
+    * a cited entry whose only address is a bare domain (`misrepresented_source`) — a
+      site is not a document;
+    * an entry whose URL is an unfilled template (`fabricated_citation`);
+    * two entries under one URL (`unclear_structure`).
+
+    `sources`, when the evidence lens fetched, is used only to stand down: a URL a
+    definitive not-found already settled is minted by `mechanical_citation_issues` at
+    the same `blocking` floor, and reporting it twice would double one defect.
+
+    Mechanically minted, so this bypasses `validate_issue` exactly as the precedent
+    does; `tests/test_triage.py` runs every minted finding through it anyway, so a
+    change here cannot quietly make one unquotable.
+
+    Nothing is minted for a report with no `## Sources` section and nothing for one
+    whose body carries no citation marker at all: that report has a defect, and it is
+    the one the writer template and the completeness lens already own, not a
+    referential-integrity slip.
+    """
+    sources_section = _sources_section(structure)
+    if sources_section is None or not fetch.sources_section(report_text).strip():
+        return []
+    entries = _entries(report_text, limit)
+    if not entries:
+        return []
+    cited = _citations(structure, sources_section)
+    if not cited:
+        return []
+
+    by_number = {entry.number: entry for entry in entries}
+    unresolvable = {s.url for s in (sources or []) if getattr(s, "unresolvable", False)}
+    issues: list[RawIssue] = []
+
+    # 1. A marker with no entry behind it. The reader is told support exists and cannot
+    #    find out what it is, which is what `uncited_claim` names.
+    for number in sorted(cited):
+        if number in by_number:
+            continue
+        paragraph = cited[number][0]
+        issues.append(
+            RawIssue(
+                category=Category.UNCITED_CLAIM,
+                severity=Severity.MAJOR,
+                locus=StructuralRef(section=paragraph.section, paragraph=paragraph.paragraph),
+                claim_span=_citing_sentence(paragraph.text, number),
+                citation_id=f"[{number}]",
+                rationale=(
+                    f"This sentence cites [{number}], and the ## Sources list has no entry "
+                    f"numbered {number}: the marker points at nothing a reader can follow."
+                ),
+                instruction=(
+                    f"Add the entry for [{number}] to ## Sources, or renumber the marker to "
+                    "the entry that actually supports this sentence, or remove the marker "
+                    "and the claim resting on it."
+                ),
+            )
+        )
+
+    for entry in entries:
+        anchor = _entry_anchor(entry, structure)
+        citing = cited.get(entry.number, [])
+
+        # 2. An entry nothing cites.
+        if not citing and anchor is not None:
+            locus, span = anchor
+            issues.append(
+                RawIssue(
+                    category=Category.UNCLEAR_STRUCTURE,
+                    severity=Severity.MINOR,
+                    locus=locus,
+                    claim_span=span,
+                    citation_id=f"[{entry.number}]",
+                    rationale=(
+                        f"Entry [{entry.number}] is listed in ## Sources and no sentence in "
+                        "the body cites it."
+                    ),
+                    instruction=(
+                        "Cite it where it supports a claim, or remove it — a listed source a "
+                        "reader cannot find in the text reads as support the report does not "
+                        "use."
+                    ),
+                )
+            )
+
+        if entry.url is None:
+            continue
+
+        # 3. A bare domain cited for a specific claim. Uncited, it is the orphan case
+        #    above; cited, the report attributes a statement to a site rather than to
+        #    any page that makes it.
+        if citing and _is_bare_domain(entry.url):
+            paragraph = citing[0]
+            issues.append(
+                RawIssue(
+                    category=Category.MISREPRESENTED_SOURCE,
+                    severity=Severity.MAJOR,
+                    locus=StructuralRef(section=paragraph.section, paragraph=paragraph.paragraph),
+                    claim_span=_citing_sentence(paragraph.text, entry.number),
+                    citation_id=f"[{entry.number}]",
+                    rationale=(
+                        f"Entry [{entry.number}] addresses only a site root "
+                        f"({entry.url[:120]}), not a page: no document at that address states "
+                        "what this sentence attributes to it."
+                    ),
+                    instruction=(
+                        "A site is not a document — cite the page that states the claim, or "
+                        "remove the citation and the claim that rests on it."
+                    ),
+                )
+            )
+
+        # 4. An unfilled template. The precedent's category and instruction, because the
+        #    fact is the same one: the address cannot be what it claims on its face.
+        if entry.url not in unresolvable and _is_placeholder_url(entry.url):
+            if citing:
+                paragraph = citing[0]
+                locus = StructuralRef(section=paragraph.section, paragraph=paragraph.paragraph)
+                span = _citing_sentence(paragraph.text, entry.number)
+            elif anchor is not None:
+                locus, span = anchor
+            else:
+                continue
+            issues.append(
+                RawIssue(
+                    category=Category.FABRICATED_CITATION,
+                    severity=Severity.BLOCKING,
+                    locus=locus,
+                    claim_span=span,
+                    citation_id=f"[{entry.number}]",
+                    rationale=(
+                        f"The URL of entry [{entry.number}] ({entry.url[:120]}) is shaped like "
+                        "an unfilled template — a counting run of digits, or a placeholder "
+                        "identifier, where a real one would be."
+                    ),
+                    instruction=(
+                        "Remove this citation or replace it with a source that resolves and "
+                        "supports the claim; do not invent a URL."
+                    ),
+                )
+            )
+
+    # 5. One URL listed twice. Two entries are two sources to a reader counting support.
+    seen: dict[str, _Entry] = {}
+    for entry in entries:
+        if entry.url is None:
+            continue
+        first = seen.setdefault(entry.url, entry)
+        if first is entry:
+            continue
+        anchor = _entry_anchor(entry, structure)
+        if anchor is None:
+            continue
+        locus, span = anchor
+        issues.append(
+            RawIssue(
+                category=Category.UNCLEAR_STRUCTURE,
+                severity=Severity.MINOR,
+                locus=locus,
+                claim_span=span,
+                citation_id=f"[{first.number}], [{entry.number}]"[:MAX_CITATION_ID],
+                rationale=(
+                    f"Entries [{first.number}] and [{entry.number}] list the same address "
+                    f"({entry.url[:120]}): one document appears in the bibliography twice, so "
+                    "a reader counting the sources behind a claim counts it twice."
+                ),
+                instruction=(
+                    "Merge the entries and renumber, updating every in-text marker that "
+                    "pointed at the duplicate."
+                ),
+            )
+        )
+    return issues
+
+
+#: An instruction that asks for nothing. A critic that files a finding and then withdraws
+#: it in the instruction field ("No action needed … Removing from list per instructions")
+#: leaves a fix-task the writer cannot act on, and the severity floor ships it as
+#: `major` all the same (D-bibliography-integrity).
+_NO_OP_INSTRUCTION = re.compile(
+    r"no action (?:is )?(?:needed|required)"
+    r"|not a defect"
+    r"|remov(?:e|ing) (?:this |it )?from (?:the )?list",
+    re.IGNORECASE,
+)
+
+
+def withdraw_no_ops(results: list[LensResult]) -> tuple[list[LensResult], list[dict]]:
+    """Drop findings whose `instruction` withdraws them, before anything is counted.
+
+    An instruction that requires no action is unactionable *by construction*: there is
+    no edit that satisfies it, so dropping it removes no signal a writer could have
+    acted on. That is why this is not a severity downgrade and does not touch RC-005:
+    the clamp governs how severe a finding that asks for something is, and a finding
+    that asks for nothing never reaches it.
+
+    Failed lenses pass through untouched, for the same reason `suppress` leaves them
+    alone: withdrawal must never turn an incomplete review into a countable one (rule 2
+    semantics). Every withdrawal is returned for logging in bounded, content-free
+    fields — a silent drop would be an invisible hole in the audit trail.
+    """
+    filtered: list[LensResult] = []
+    withdrawn: list[dict] = []
+    for result in results:
+        if result.failed:
+            filtered.append(result)
+            continue
+        kept: list[RawIssue] = []
+        for issue in result.issues:
+            if _NO_OP_INSTRUCTION.search(issue.instruction):
+                withdrawn.append(
+                    {
+                        "lens": result.lens.value,
+                        "category": issue.category.value,
+                        "locus": str(issue.locus),
+                    }
+                )
+            else:
+                kept.append(issue)
+        filtered.append(result.model_copy(update={"issues": kept}))
+    return filtered, withdrawn
 
 
 def clamp(issues: list[RawIssue]) -> list[RawIssue]:
