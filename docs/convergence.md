@@ -33,7 +33,7 @@ but **triage clamps it up to a mechanical, category-specific floor** — the cri
 | lens | category | meaning | **mechanical floor** |
 |------|----------|---------|----------------------|
 | evidence | `fabricated_citation` | citation cannot be what it claims on its face | **blocking** |
-| evidence | `misrepresented_source` | cited source does not support the claim as stated | **major** |
+| evidence | `misrepresented_source` | cited source does not support the claim as stated — including a source whose own finding cuts against the proposition it is cited for, or whose population/boundary/period is not the claim's (D-source-fidelity-direction-and-scope) | **major** |
 | evidence | `uncited_claim` | material claim with no citation | **major** |
 | evidence | `one_sided_sourcing` | sources drawn from one outlet or viewpoint cluster where genuine alternatives exist ([bias.md](./bias.md)) | **major** |
 | logic | `contradicted_claim` | claim contradicts another claim or a cited source, however many sections apart the two passages sit | **blocking** |
@@ -278,7 +278,7 @@ Two categories change character:
 | category | verification off | verification on |
 |---|---|---|
 | `fabricated_citation` | implausible on its face | the URL does not resolve |
-| `misrepresented_source` | plainly would not support the claim | the fetched page does not contain the claim |
+| `misrepresented_source` | plainly would not support the claim, in its words, its direction or its scope | the fetched page does not contain the claim, states something materially different, reports a finding cutting the other way, or is about a different population/boundary/period |
 
 Only the evidence lens receives them. Logic and completeness cannot raise a citation category, so
 page text would widen what those lenses see without widening what they may report.
@@ -315,6 +315,59 @@ states something materially different. `dispute.adjudicate_mechanical` searches 
 not the excerpts; `support.check` is a separate mechanism entirely, working from `session.reads`
 (capped at `read_max_chars`) rather than this cap.
 
+#### Direction and scope (D-source-fidelity-direction-and-scope)
+
+> **Normative.** This subsection governs the meaning of `Category.MISREPRESENTED_SOURCE` in both
+> columns of the table above (`prompts._CATEGORY_MEANING` and the sharpened meaning `critic_user`
+> substitutes when a body arrived), `LENS_BRIEF[Lens.EVIDENCE]`, and the closing rules of
+> `prompts.fetched_sources_block`. Changing one side without the other is docs-as-spec drift.
+
+**Support is not word-matching.** "Does not support the claim as stated" covers three failures, not
+one. The page may not say it. The page may say it and mean the opposite of what it is cited for —
+**direction**. Or the page may say it about something else — **scope**. The evidence lens is asked
+both questions of every cited claim whose page it holds:
+
+1. **Direction — does the page assert this, in this direction?** A source can be quoted
+   verbatim-correctly for a proposition its own finding, conclusion or headline result cuts against.
+   Two recurring shapes: a meta-analysis that found *no* relationship cited as establishing one, and
+   a body's "insufficient data to determine" rendered as a determination — absence of evidence read
+   as evidence of absence.
+2. **Scope — is the page's scope the claim's scope?** A finding stays attached to the population,
+   product, category, system boundary, dose or wavelength band, and period it was measured on. A
+   real, correctly quoted source about a different one of those, restated as if it were about the
+   question's, does not support the claim. This is the same rule `WRITER_SYSTEM` already states for
+   writers, now raisable.
+
+Both are `misrepresented_source`, at its unchanged `major` floor. Scope is deliberately **not**
+`conceptual_conflation`: that category is the logic lens's and is about the report's own reasoning,
+where this is about what a cited page is evidence *for*. The verification-off meaning keeps its
+`plainly` — with no page in hand the bar is still what the citation would support on its face — so
+what widens is the kinds of failure, not the confidence required to report one.
+
+**Three exclusions, load-bearing.** Without them the widened category is a licence to object, which
+is the noise direction the audition measures. It is **not** a stylistic mismatch of wording where
+the substance matches; **not** a source merely *broader* than the claim when it genuinely covers the
+claim's case; and **not** a demand for a source the writer cannot get. The resolvable fixes are
+re-attributing the claim to a source the report already carries, restricting the claim to the scope
+the source covers, or removing the attribution. A `misrepresented_source` instruction must therefore
+say what the source actually says, quoted or paraphrased from the excerpt, and may never propose
+keeping the citation while labelling the claim unverified.
+
+**An unread body licenses no finding about content.** `BLOCKED`, `COULD NOT READ`, `NO READABLE
+TEXT`, `NOT ATTEMPTED`, `COULD NOT RESOLVE`, `FETCHED, TEXT WITHHELD` and registry-metadata-only
+entries say nothing about what the page contains — `BLOCKED` in particular now says so in both
+directions, where it previously said only that the source may still exist. A body that is plainly
+not the article (navigation, a cookie notice, a menu, a paywall teaser) counts as unread. And a
+claim carrying a citation marker is never `uncited_claim`: its problem, if any, is what that
+citation supports, and where that cannot be checked the honest finding is none — the alternative
+asks a writer to delete a good citation in order to satisfy "add a citation".
+
+**Two hygiene rules, all three lenses.** The `=== SECTION n: title ===` lines and `[S<n>.P<m>]`
+markers `report.render_with_loci` adds are addressing scaffolding for the review, not part of the
+report; section numbers are handles, and a gap in them is an artifact of the rendering rather than a
+defect in the report's organization. And a critic may not file an issue in order to withdraw it:
+there is no retraction, so an issue whose rationale concludes it is not a defect, or whose
+instruction requires no action, is omitted rather than filed.
 **Each cited claim is checked against its page in its own context (D-claim-level-verification,
 opt-in, `claim_check.enabled`, requires `search.verify_sources`).** Every sentence of the report
 body that carries a citation marker is paired mechanically with the fetched page the bibliography
