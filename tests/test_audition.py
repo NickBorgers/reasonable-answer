@@ -26,6 +26,7 @@ from reasonable_answer.config import (
     ReviewConfig,
     Roster,
 )
+from reasonable_answer.prompts import _CATEGORY_MEANING
 from reasonable_answer.schemas import CritiqueOutput, LensResult, RawIssue, StructuralRef
 from reasonable_answer.taxonomy import LENS_CATEGORIES, Category, Lens, Severity
 from reasonable_answer.triage import clean_records
@@ -1475,6 +1476,26 @@ def test_run_assignment_uses_the_production_critic_prompt():
         Lens.EVIDENCE, fixture.question, report_mod.render_with_loci(fixture.artifact), None
     )
     assert any(user == expected for _, user in client.prompts)
+
+
+def test_the_widened_evidence_meaning_is_measured_by_the_audition():
+    """D-source-fidelity-direction-and-scope widens `misrepresented_source` in both its
+    meanings, and the verification-off one lives in the source-less surface this harness
+    measures — so the direction and scope clauses, and the exclusions that narrow them,
+    are what a cached verdict was graded under.
+
+    That is why the widening invalidates the cache: `prompt_hash` covers this surface
+    (D-audition-rubric-identity), so verdicts recorded under the old evidence brief are
+    recomputed rather than reused. The sharpened, sources-present meaning stays outside
+    the hash, as D-audition-source-mode requires.
+    """
+    surface = prompts.critic_user(Lens.EVIDENCE, "q", "body", None)
+
+    assert _CATEGORY_MEANING[Category.MISREPRESENTED_SOURCE] in surface
+    assert "(direction)" in surface and "(scope)" in surface
+    assert "NOT a demand for a source the writer cannot get" in surface
+    # The sharpened meaning is not in it; nothing here measures a critic under sources.
+    assert "the fetched page does not contain the claim" not in surface
 
 
 def test_audition_measures_the_source_less_prompt_surface():

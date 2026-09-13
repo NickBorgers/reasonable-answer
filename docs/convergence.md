@@ -33,7 +33,7 @@ but **triage clamps it up to a mechanical, category-specific floor** — the cri
 | lens | category | meaning | **mechanical floor** |
 |------|----------|---------|----------------------|
 | evidence | `fabricated_citation` | citation cannot be what it claims on its face | **blocking** |
-| evidence | `misrepresented_source` | cited source does not support the claim as stated | **major** |
+| evidence | `misrepresented_source` | cited source does not support the claim as stated — including a source whose own finding cuts against the proposition it is cited for, or whose population/boundary/period is not the claim's (D-source-fidelity-direction-and-scope) | **major** |
 | evidence | `uncited_claim` | material claim with no citation | **major** |
 | evidence | `one_sided_sourcing` | sources drawn from one outlet or viewpoint cluster where genuine alternatives exist ([bias.md](./bias.md)) | **major** |
 | logic | `contradicted_claim` | claim contradicts another claim or a cited source, however many sections apart the two passages sit | **blocking** |
@@ -278,7 +278,7 @@ Two categories change character:
 | category | verification off | verification on |
 |---|---|---|
 | `fabricated_citation` | implausible on its face | the URL does not resolve |
-| `misrepresented_source` | plainly would not support the claim | the fetched page does not contain the claim |
+| `misrepresented_source` | plainly would not support the claim, in its words, its direction or its scope | the fetched page does not contain the claim, states something materially different, reports a finding cutting the other way, or is about a different population/boundary/period |
 
 Only the evidence lens receives them. Logic and completeness cannot raise a citation category, so
 page text would widen what those lenses see without widening what they may report.
@@ -342,6 +342,59 @@ states something materially different. `dispute.adjudicate_mechanical` searches 
 not the excerpts; `support.check` is a separate mechanism entirely, working from `session.reads`
 (capped at `read_max_chars`) rather than this cap.
 
+#### Direction and scope (D-source-fidelity-direction-and-scope)
+
+> **Normative.** This subsection governs the meaning of `Category.MISREPRESENTED_SOURCE` in both
+> columns of the table above (`prompts._CATEGORY_MEANING` and the sharpened meaning `critic_user`
+> substitutes when a body arrived), `LENS_BRIEF[Lens.EVIDENCE]`, and the closing rules of
+> `prompts.fetched_sources_block`. Changing one side without the other is docs-as-spec drift.
+
+**Support is not word-matching.** "Does not support the claim as stated" covers three failures, not
+one. The page may not say it. The page may say it and mean the opposite of what it is cited for —
+**direction**. Or the page may say it about something else — **scope**. The evidence lens is asked
+both questions of every cited claim whose page it holds:
+
+1. **Direction — does the page assert this, in this direction?** A source can be quoted
+   verbatim-correctly for a proposition its own finding, conclusion or headline result cuts against.
+   Two recurring shapes: a meta-analysis that found *no* relationship cited as establishing one, and
+   a body's "insufficient data to determine" rendered as a determination — absence of evidence read
+   as evidence of absence.
+2. **Scope — is the page's scope the claim's scope?** A finding stays attached to the population,
+   product, category, system boundary, dose or wavelength band, and period it was measured on. A
+   real, correctly quoted source about a different one of those, restated as if it were about the
+   question's, does not support the claim. This is the same rule `WRITER_SYSTEM` already states for
+   writers, now raisable.
+
+Both are `misrepresented_source`, at its unchanged `major` floor. Scope is deliberately **not**
+`conceptual_conflation`: that category is the logic lens's and is about the report's own reasoning,
+where this is about what a cited page is evidence *for*. The verification-off meaning keeps its
+`plainly` — with no page in hand the bar is still what the citation would support on its face — so
+what widens is the kinds of failure, not the confidence required to report one.
+
+**Three exclusions, load-bearing.** Without them the widened category is a licence to object, which
+is the noise direction the audition measures. It is **not** a stylistic mismatch of wording where
+the substance matches; **not** a source merely *broader* than the claim when it genuinely covers the
+claim's case; and **not** a demand for a source the writer cannot get. The resolvable fixes are
+re-attributing the claim to a source the report already carries, restricting the claim to the scope
+the source covers, or removing the attribution. A `misrepresented_source` instruction must therefore
+say what the source actually says, quoted or paraphrased from the excerpt, and may never propose
+keeping the citation while labelling the claim unverified.
+
+**An unread body licenses no finding about content.** `BLOCKED`, `COULD NOT READ`, `NO READABLE
+TEXT`, `NOT ATTEMPTED`, `COULD NOT RESOLVE`, `FETCHED, TEXT WITHHELD` and registry-metadata-only
+entries say nothing about what the page contains — `BLOCKED` in particular now says so in both
+directions, where it previously said only that the source may still exist. A body that is plainly
+not the article (navigation, a cookie notice, a menu, a paywall teaser) counts as unread. And a
+claim carrying a citation marker is never `uncited_claim`: its problem, if any, is what that
+citation supports, and where that cannot be checked the honest finding is none — the alternative
+asks a writer to delete a good citation in order to satisfy "add a citation".
+
+**Two hygiene rules, all three lenses.** The `=== SECTION n: title ===` lines and `[S<n>.P<m>]`
+markers `report.render_with_loci` adds are addressing scaffolding for the review, not part of the
+report; section numbers are handles, and a gap in them is an artifact of the rendering rather than a
+defect in the report's organization. And a critic may not file an issue in order to withdraw it:
+there is no retraction, so an issue whose rationale concludes it is not a defect, or whose
+instruction requires no action, is omitted rather than filed.
 **Each cited claim is checked against its page in its own context (D-claim-level-verification,
 opt-in, `claim_check.enabled`, requires `search.verify_sources`).** Every sentence of the report
 body that carries a citation marker is paired mechanically with the fetched page the bibliography
@@ -680,7 +733,7 @@ asked, never how many passes the budgets allow.
 | 9 | `material == 0` **and** `round < hard_cap` **and** `minor > 0` **and** `polish_recommended` **and** `polish_used < polish_cap` | **continue** (polish → generate; `polish_used += 1`) |
 | 10 | `material == 0` **and** `weak_met` (every under-cleared lens is `roster_limited`) | **converged_unconfirmed** |
 | 11 | `material == 0` (not strong, not toppable, not weak — confirmation budget spent) | **exhausted_unresolved** (clean-but-unconfirmed) |
-| 12 | `cycle_detected` | **needs_human_review** (freeze best-scoring version) |
+| 12 | `cycle_detected` | **needs_human_review** (freeze the selected version) |
 | 13 | `material > 0` **and** `stagnation_count ≥ K` **and** `rewrites_used < rewrite_cap` | **continue** (generate — a **full-document rewrite** by a fresh writer, ignoring `revision.mode`; `rewrites_used += 1`, `stagnation_count := 0`) |
 | 13 | `material > 0` **and** `stagnation_count ≥ K` | early terminal: **needs_human_review** if `blocking>0` else **exhausted_unresolved** |
 | 14 | `material > 0` | **continue** (generate from defect list) |
@@ -747,9 +800,23 @@ and keep their gates (RI-001, RH-001).
   triage increments or resets the counter, including a rule-2 re-critique pass over the same draft,
   not only the passes that follow a fresh generation.
 - **cycle:** the `artifact_hash` sequence repeats with period ≤ `L` (byte-level).
-- **best-scoring version:** minimal `w_b·blocking + w_m·major + w_n·minor`, using each artifact's
-  latest triage (RC-002); after those rows are ordered by round, ties → **latest round**
-  (D-latest-round-tiebreak).
+- **selected version:** the draft a non-accepted terminal ships, chosen by
+  `controller.select_shipped_index` from one row per artifact — each artifact's **latest** triage
+  (RC-002), ordered by round. Which rule runs is `review.selection`
+  (D-latest-unblocked-selection):
+    - `fewest_defects` (**code default**, the rule this system always had): minimal
+      `w_b·blocking + w_m·major + w_n·minor`, ties → **latest round** (D-latest-round-tiebreak).
+    - `latest_unblocked` (**opt-in**; the shipped `config/roster.yaml` sets it, the way it opts
+      into search): keep the rows with the minimum **blocking** count; among those, the **latest
+      round**. Major and minor counts do not enter selection. The case for it is an operator
+      judgement about their own runs — that on the near-identical artifacts `revision.mode: patch`
+      produces, those counts move with the critic slate more than with the prose — and because
+      that judgement rests on observations the repository cannot cite (QP9), it is a deployment
+      posture and not the default.
+  Both are pure functions of bounded categorical counts, so QP1 holds either way; under both, ties
+  in the deciding quantity go to the latest round, so D-latest-round-tiebreak's tie direction is
+  kept, not reversed. The `triage` event records `blocking`/`major`/`minor` alongside `material`,
+  so the selection is reconstructible from the audit trail under either rule.
 
 ### Terminal statuses (RA-012, RC-001)
 
