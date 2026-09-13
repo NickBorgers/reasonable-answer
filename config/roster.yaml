@@ -182,9 +182,9 @@ search:
   fetch_max_bytes: 400000
   # Page text shown to the critic per page, as claim-anchored excerpts: the page's
   # opening, then the passages that best match the report's own sentences citing it
-  # (D-claim-anchored-excerpts). It used to be the page's FIRST 6,000 characters, and
-  # ten of twenty-two terminal misrepresented_source findings across fifteen production
-  # runs named a figure the page states past that point.
+  # (D-claim-anchored-excerpts). It used to be the page's FIRST 6,000 characters, which
+  # could omit a claim-relevant figure appearing later in an otherwise successfully
+  # fetched page.
   fetch_max_chars: 6000
   # Page text RETAINED per page — the pool the excerpts are chosen from, and what a
   # mechanical dispute adjudication searches. At least fetch_max_chars; sized to hold an

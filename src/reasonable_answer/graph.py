@@ -180,6 +180,15 @@ class Runtime:
     #: reader below holds its own reference to the shared fetcher rather than reusing
     #: this field as a "something fetches" flag.
     fetcher: Any | None = None
+    #: The evidence page an arbiter is shown when adjudicating a dispute (D-writer-disputes),
+    #: capped to `fetch_max_chars` like the evidence critic's excerpt — never
+    #: `fetch_body_max_chars` like `fetcher` above. The arbiter's prompt renders this page
+    #: verbatim, with no excerpting, and a `dispute_upheld` verdict suppresses a defect; a
+    #: fetcher shared with `fetcher` would let widening the retained body for verification
+    #: and mechanical adjudication also 20x the untrusted page text an arbiter's ruling
+    #: turns on, unannounced (D-claim-anchored-excerpts). None exactly when `fetcher` is —
+    #: same on/off switch, independent cap.
+    dispute_fetcher: Any | None = None
     #: None when writers may not read sources (D-writer-source-reads); they then work
     #: from search snippets exactly as they did before.
     reader: Any | None = None
@@ -356,6 +365,16 @@ def _build_runtime(
         if config.search.verify_sources and source_fetcher is not None
         else None
     )
+    # The arbiter's evidence page is rendered verbatim into its prompt (`prompts.arbiter_user`),
+    # unlike the evidence critic's claim-anchored excerpt of the same retained body, so it keeps
+    # the smaller `fetch_max_chars` cap `fetcher` carried before this widened for verification
+    # and mechanical adjudication (D-claim-anchored-excerpts). Wrapping the same `source_fetcher`
+    # costs no extra fetch — the shared cache already holds the larger retained body.
+    dispute_fetcher = (
+        fetch.CappedFetcher(source_fetcher, max_chars=config.search.fetch_max_chars)
+        if config.search.verify_sources and source_fetcher is not None
+        else None
+    )
     reader = _build_reader(config, source_fetcher)
 
     run_id = run_id or f"run-{uuid.uuid4().hex[:12]}"
@@ -388,7 +407,8 @@ def _build_runtime(
     for warning in warnings:
         log.warning("roster: %s", warning)
     return Runtime(config=config, client=client, identities=identities, store=store,
-                   warnings=warnings, searcher=searcher, fetcher=fetcher, reader=reader)
+                   warnings=warnings, searcher=searcher, fetcher=fetcher,
+                   dispute_fetcher=dispute_fetcher, reader=reader)
 
 
 def _degrade_roster(
@@ -1269,11 +1289,11 @@ def _adjudicate(state: State, rt: Runtime) -> dict:
                 else:
                     page = None
                     if (
-                        rt.fetcher is not None
+                        rt.dispute_fetcher is not None
                         and challenge.evidence_url
                         and challenge.evidence_url in cited_sources
                     ):
-                        page = rt.fetcher.fetch(challenge.evidence_url)
+                        page = rt.dispute_fetcher.fetch(challenge.evidence_url)
                     try:
                         ruling = dispute_mod.adjudicate_one(
                             rt.client,

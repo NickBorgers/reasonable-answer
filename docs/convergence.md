@@ -197,8 +197,9 @@ omit claim-relevant text later in a page even when retrieval succeeded. The rule
 is unchanged in substance and sharpened in wording: a
 page shown in part is truncated, and a claim missing from the excerpts is not evidence that the page
 lacks it — `misrepresented_source` is raised only where an excerpt addresses the same point and
-states something materially different. `dispute.adjudicate_mechanical` and `support.check` search
-the retained body, not the excerpts.
+states something materially different. `dispute.adjudicate_mechanical` searches the retained body,
+not the excerpts; `support.check` is a separate mechanism entirely, working from `session.reads`
+(capped at `read_max_chars`) rather than this cap.
 
 #### Direction and scope (D-source-fidelity-direction-and-scope)
 
