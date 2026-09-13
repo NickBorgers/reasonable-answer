@@ -7,7 +7,7 @@ from types import SimpleNamespace
 import pytest
 
 from reasonable_answer import report as report_mod
-from reasonable_answer.schemas import LensResult, RawIssue, StructuralRef
+from reasonable_answer.schemas import MAX_CITATION_ID, LensResult, RawIssue, StructuralRef
 from reasonable_answer.taxonomy import LENS_CATEGORIES, Category, Lens, Severity
 from reasonable_answer.triage import (
     LensValidationError,
@@ -458,6 +458,17 @@ def test_a_marker_with_no_entry_is_an_uncited_claim():
     assert_quotable(issues, report)
 
 
+def test_a_long_marker_number_is_bounded_in_the_minted_issue():
+    number = "9" * 150
+    report = CLEAN_BIBLIOGRAPHY.replace(
+        "Skeletal effects appear above 1.5 mg/L [2].",
+        f"Skeletal effects appear above 1.5 mg/L [2]. Another claim [{number}].",
+    )
+    issues = bibliography_issues(report)
+    dangling = next(i for i in issues if i.category is Category.UNCITED_CLAIM)
+    assert dangling.citation_id == f"[{number}]"[:MAX_CITATION_ID]
+
+
 def test_a_range_marker_is_expanded_before_the_entry_is_looked_for():
     report = CLEAN_BIBLIOGRAPHY.replace(
         "set at 0.7 mg/L in the United States [1]", "set at 0.7 mg/L in the United States [1-3]"
@@ -478,6 +489,13 @@ def test_an_entry_nothing_cites_is_an_orphan():
     assert orphan.citation_id == "[3]"
     assert "SCHER" in orphan.claim_span
     assert_quotable(issues, report)
+
+
+def test_a_long_entry_number_is_bounded_in_the_minted_issue():
+    number = "9" * 150
+    report = CLEAN_BIBLIOGRAPHY + f"\n[{number}] Long-number source. https://example.org/long\n"
+    orphan = next(i for i in bibliography_issues(report) if i.category is Category.UNCLEAR_STRUCTURE)
+    assert orphan.citation_id == f"[{number}]"[:MAX_CITATION_ID]
 
 
 def test_a_cited_bare_domain_is_a_misrepresented_source():
@@ -578,6 +596,14 @@ def test_the_entry_budget_bounds_the_work():
     report = CLEAN_BIBLIOGRAPHY + "\n[3] An orphan. https://example.org/three\n"
     assert bibliography_issues(report, limit=2) == []
     assert len(bibliography_issues(report, limit=3)) == 1
+
+
+def test_the_entry_budget_does_not_turn_later_entries_into_missing_entries():
+    report = CLEAN_BIBLIOGRAPHY.replace(
+        "Skeletal effects appear above 1.5 mg/L [2].",
+        "Skeletal effects appear above 1.5 mg/L [2]. A later source supports this [3].",
+    ) + "\n[3] Later source. https://example.org/three\n"
+    assert bibliography_issues(report, limit=2) == []
 
 
 def test_two_critics_of_one_lens_report_a_bibliography_finding_once():

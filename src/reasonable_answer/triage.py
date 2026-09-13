@@ -554,12 +554,12 @@ class _Entry:
     url: str | None
 
 
-def _entries(report_text: str, limit: int) -> list[_Entry]:
+def _entries(report_text: str, limit: int | None) -> list[_Entry]:
     """The `## Sources` entries, numbered the way `excerpt.entry_numbers` numbers them:
     what the entry says it is (`[3]`, `3.`) when it says, its position otherwise."""
     out: list[_Entry] = []
     for position, entry in enumerate(fetch.source_entries(report_text), 1):
-        if len(out) >= limit:
+        if limit is not None and len(out) >= limit:
             break
         match = excerpt._ENTRY_NUMBER.match(entry)
         explicit = (match.group(1) or match.group(2)) if match else None
@@ -643,6 +643,11 @@ def _entry_anchor(entry: _Entry, structure: Structure) -> tuple[StructuralRef, s
     return None
 
 
+def _citation_label(number: int) -> str:
+    """A bibliography number bounded for every schema field that repeats it."""
+    return f"[{number}]"[:MAX_CITATION_ID]
+
+
 def mechanical_bibliography_issues(
     report_text: str,
     structure: Structure,
@@ -684,14 +689,18 @@ def mechanical_bibliography_issues(
     sources_section = _sources_section(structure)
     if sources_section is None or not fetch.sources_section(report_text).strip():
         return []
-    entries = _entries(report_text, limit)
-    if not entries:
+    all_entries = _entries(report_text, None)
+    if not all_entries:
         return []
+    entries = all_entries[:limit]
     cited = _citations(structure, sources_section)
     if not cited:
         return []
 
-    by_number = {entry.number: entry for entry in entries}
+    # Marker resolution is a cheap lookup over the complete bibliography. The limit
+    # bounds only the per-entry checks below; applying it here would turn every valid
+    # marker beyond the work budget into a manufactured missing-entry finding.
+    by_number = {entry.number: entry for entry in all_entries}
     unresolvable = {s.url for s in (sources or []) if getattr(s, "unresolvable", False)}
     issues: list[RawIssue] = []
 
@@ -701,19 +710,20 @@ def mechanical_bibliography_issues(
         if number in by_number:
             continue
         paragraph = cited[number][0]
+        citation_label = _citation_label(number)
         issues.append(
             RawIssue(
                 category=Category.UNCITED_CLAIM,
                 severity=Severity.MAJOR,
                 locus=StructuralRef(section=paragraph.section, paragraph=paragraph.paragraph),
                 claim_span=_citing_sentence(paragraph.text, number),
-                citation_id=f"[{number}]",
+                citation_id=citation_label,
                 rationale=(
-                    f"This sentence cites [{number}], and the ## Sources list has no entry "
-                    f"numbered {number}: the marker points at nothing a reader can follow."
+                    f"This sentence cites {citation_label}, and the ## Sources list has no entry "
+                    f"with that number: the marker points at nothing a reader can follow."
                 ),
                 instruction=(
-                    f"Add the entry for [{number}] to ## Sources, or renumber the marker to "
+                    f"Add the entry for {citation_label} to ## Sources, or renumber the marker to "
                     "the entry that actually supports this sentence, or remove the marker "
                     "and the claim resting on it."
                 ),
@@ -723,6 +733,7 @@ def mechanical_bibliography_issues(
     for entry in entries:
         anchor = _entry_anchor(entry, structure)
         citing = cited.get(entry.number, [])
+        citation_label = _citation_label(entry.number)
 
         # 2. An entry nothing cites.
         if not citing and anchor is not None:
@@ -733,9 +744,9 @@ def mechanical_bibliography_issues(
                     severity=Severity.MINOR,
                     locus=locus,
                     claim_span=span,
-                    citation_id=f"[{entry.number}]",
+                    citation_id=citation_label,
                     rationale=(
-                        f"Entry [{entry.number}] is listed in ## Sources and no sentence in "
+                        f"Entry {citation_label} is listed in ## Sources and no sentence in "
                         "the body cites it."
                     ),
                     instruction=(
@@ -760,9 +771,9 @@ def mechanical_bibliography_issues(
                     severity=Severity.MAJOR,
                     locus=StructuralRef(section=paragraph.section, paragraph=paragraph.paragraph),
                     claim_span=_citing_sentence(paragraph.text, entry.number),
-                    citation_id=f"[{entry.number}]",
+                    citation_id=citation_label,
                     rationale=(
-                        f"Entry [{entry.number}] addresses only a site root "
+                        f"Entry {citation_label} addresses only a site root "
                         f"({entry.url[:120]}), not a page: no document at that address states "
                         "what this sentence attributes to it."
                     ),
@@ -790,9 +801,9 @@ def mechanical_bibliography_issues(
                     severity=Severity.BLOCKING,
                     locus=locus,
                     claim_span=span,
-                    citation_id=f"[{entry.number}]",
+                    citation_id=citation_label,
                     rationale=(
-                        f"The URL of entry [{entry.number}] ({entry.url[:120]}) is shaped like "
+                        f"The URL of entry {citation_label} ({entry.url[:120]}) is shaped like "
                         "an unfilled template — a counting run of digits, or a placeholder "
                         "identifier, where a real one would be."
                     ),

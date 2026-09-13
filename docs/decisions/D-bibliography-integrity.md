@@ -3,34 +3,15 @@
 **The finding.** Every critic finding must anchor to a verbatim `claim_span` in a body paragraph
 (`triage.validate_issue`, `docs/isolation.md`). A defect whose whole subject is the reference list
 therefore **cannot be expressed in the schema**, and none of the three lenses owns it. That is not a
-gap in the prompts; it is a gap in what a critic is able to say. Ten expert reviews of recent
-production reports found the same class of defect over and over, and in every case it is decidable
-by string comparison against the report's own text:
+gap in the prompts; it is a gap in what a critic is able to say. Synthetic reports demonstrate the
+relevant shapes without publishing private run material: a body marker can lack a matching entry;
+an entry can be unused or duplicated; a cited address can name only a site root; and a URL can
+contain an obvious unfilled identifier while still returning HTTP 200. A critic can also emit an
+instruction that withdraws its own finding. Each condition is decidable from bounded fields or by
+string comparison against the report itself.
 
-* `run-80a189d3670d` (fluoride, 8 rounds): `[3]` is listed and cited nowhere in the body; `[2]` and
-  `[15]` are the same WHO document listed twice under different years, and eleven in-text citations
-  rest on `[2]`. The reviewer's own root-cause note: *"an entry with zero in-text citations cannot
-  generate a span-anchored defect … so a defect that lives in the bibliography alone cannot be
-  expressed."* Across eight rounds no critique event ever raised one.
-* `run-5728bdbc1057` (DEA): `[11]` is cited in the body and has no entry; two entries are cited zero
-  times; `source_coverage` reported 11/11 bodies read.
-* `run-1dd853cbbfd0` (9/11): `[5]` — an Amazon product page for a conspiracy book — and `[13]` appear
-  only in `## Sources`, where a reader takes them as supporting material.
-* `run-c859ff5bf071` (rug): 6 of 15 entries are never cited in the body.
-* `run-ebac4175d67f` (water): six bare-domain entries (`https://www.datacenterfrontier.com`) are
-  cited for specific figures; coverage recorded *24 cited; 24 existence confirmed*.
-* `run-188459deba66` (China GDP): placeholder URLs —
-  `ft.com/content/12345678-90ab-cdef-1234-567890abcdef`, `moodys.com/research/…--PR_123456`,
-  `…Measuring-the-Chinese-Economy-54321`. SPA shells and soft-404s answer 200, so the fetcher counted
-  them as bodies read and the label said *22 existence confirmed*.
-* `run-80a189d3670d` again, from the other end: a critic filed a finding and withdrew it in its own
-  `instruction` field — *"No action needed… Removing from list per instructions"* — and it shipped at
-  `major`, because the severity floor clamps a category and triage has no notion of an instruction
-  that asks for nothing.
-
-Those run ids and counts are motivation, not warrant (QP9): the audit trail is not in this repo. The
-warrant is the mechanism, and it is checkable offline from the diff — `tests/test_triage.py` builds
-each shape out of report text and asserts what is minted.
+The warrant is the mechanism, checkable offline from the repository: `tests/test_triage.py` builds
+each synthetic shape and asserts what is minted.
 
 **The decision.** `triage.mechanical_bibliography_issues(report_text, structure, sources=None)` mints
 these findings deterministically, called from `graph._critique_one` under the same gate as its
@@ -57,8 +38,9 @@ citation; `tests/test_triage.py` pins arXiv ids, DOIs, PMIDs, ISBN-13s, commit h
 
 Nothing is minted where the report has no `## Sources` section, or where its body carries no citation
 marker at all: that report has a defect, and it is the one the writer template and the completeness
-lens already own. At most `search.max_source_urls` entries are considered — the same
-anti-pathological ceiling, which must never bind on a real bibliography.
+lens already own. The complete number-to-entry map resolves body markers, while at most
+`search.max_source_urls` entries receive the per-entry checks and duplicate scan. This keeps the
+anti-pathological work ceiling from manufacturing missing-entry findings for valid later entries.
 
 **Sixth change, on the other side of triage.** `triage.withdraw_no_ops` drops a finding whose
 `instruction` matches a withdrawal (`no action (is )?(needed|required)`, `not a defect`,
@@ -110,26 +92,23 @@ category, would both be worse.
 * *A bibliography-scoped locus (`S<n>.B<m>`) so critics can point at entries.* A change to the locus
   schema, to `report.parse`, to `validate_issue`, to every critic prompt and to the audition rubric,
   in exchange for letting a model re-derive by judgement what string comparison settles. Worth
-  revisiting if judgement-shaped bibliography defects turn up; none of the ten reviews found one.
-* *Widen `fetch.coverage` to report these.* Coverage is a report and never a gate (docs/convergence.md);
-  a count that does not mint a defect does not get a report fixed. `run-ebac4175d67f`'s six bare
-  domains were already inside a coverage line reading *24 existence confirmed*.
-* *Fetch the placeholder URLs and let the 404 do the work.* The motivating case is exactly the one
-  where that fails: `ft.com` and `moodys.com` answer 200 with an SPA shell, so the fetcher counted the
-  placeholders as bodies read. The shape of the URL is the evidence, and it needs no network.
-* *Lower the placeholder digit-run threshold to five* so `…-Measuring-the-Chinese-Economy-54321`
-  fires. Rejected: five-digit ids are common in real URLs (a Moody's `PR_54321`, a CMS post id), and
-  a false positive here is `blocking`. That one entry is caught by the bare-domain and orphan checks
-  in other runs, and by a human in this one.
+  revisiting if judgement-shaped bibliography defects require it.
+* *Widen `fetch.coverage` to report these.* Coverage is a report and never a gate
+  (docs/convergence.md); a count that does not mint a defect does not get a report fixed.
+* *Fetch the placeholder URLs and let the 404 do the work.* An SPA shell or soft 404 can answer 200,
+  so status alone does not settle whether an obviously templated address is real. The shape of the
+  URL is the evidence, and it needs no network.
+* *Lower the placeholder digit-run threshold to five.* Rejected: five-digit ids are common in real
+  URLs, and a false positive here is `blocking`.
 
 **Deliberately not done.**
 
-* *Title / author / date agreement between the fetched body and the bibliography entry* — the
-  `run-80a189d3670d` `[3]` case is "not found **and** wrong date", and existence-vs-identity is a
-  fetch-path decision with its own evidence bar and its own failure modes (a redirect to a landing
-  page is not a retitled document). Named here so it is not mistaken for an oversight.
-* *Source independence* — the same authors, the same dataset, a work cited alongside its own chapter
-  as if independent (`run-5728bdbc1057`). Judgement, not mechanics; a lens question, not a string one.
+* *Title / author / date agreement between the fetched body and the bibliography entry* —
+  existence-vs-identity is a fetch-path decision with its own evidence bar and failure modes (a
+  redirect to a landing page is not a retitled document). Named here so it is not mistaken for an
+  oversight.
+* *Source independence* — shared authorship or data can make nominally separate entries dependent.
+  That is judgement, not mechanics; a lens question, not a string one.
 * *Any change to `fetch.coverage` counts or its label.* The counts keep meaning what
   D-observed-source-coverage says they mean; these findings are defects, and defects are a separate
   channel.

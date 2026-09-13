@@ -82,7 +82,7 @@ Invariants (enforced in code, covered by tests):
 | **generate** | question + latest report + **defect list**; with retrieval on, its own `web_search` results and — with `search.read_sources` — the pages it read from them (D-writer-source-reads) | next report (with citations) — under `revision.mode: patch` only the paragraphs a fix task named — and the passages that restate the same claim (D-claim-scoped-patch) — are edited, the rest returned byte-identical (D-scoped-revision); plus, with `search.support_manifest`, an **audit-side** support manifest | non-author (alternating) | LLM (untrusted output) |
 | **adjudicate** *(D-writer-disputes, opt-in)* | pending disputes + finding + one paragraph | `AdjudicationRecord[]` | mechanical fetch-check, else an arbiter ≠ disputer ≠ raiser | mechanical, or LLM inside a closed 2-field schema |
 | **critique** | report + question + **one lens** + taxonomy | `Issue[]` per critic | `review.depth` non-author models per lens, drawn as one slate (`roles.critic_slate`) | LLM (untrusted output) |
-| **triage** | this tick's `Issue[]` (minus **upheld-adjudication suppressions**, D-writer-disputes) | `OrchestratorView` + `DefectList` | none — **mechanical** | deterministic |
+| **triage** | this tick's critic and mechanically authored `Issue[]` (minus **upheld-adjudication suppressions**, D-writer-disputes, and **withdrawn no-op findings**, D-bibliography-integrity) | `OrchestratorView` + `DefectList` | none — **mechanical** | deterministic |
 | **orchestrate** | `OrchestratorView` **only** | recommendation (minor-polish judgment) | LLM, blind | LLM inside guardrails |
 | **controller** | `ControllerInput` | decision + terminal status | none | **deterministic — owns termination** |
 | **finalize** | best report + history | final report + terminal status + audit trail | none | deterministic |
@@ -109,8 +109,11 @@ flowchart TD
 ```
 
 Each lens runs on the head of its assigned pool, in a **fresh context**, blind to the others. They
-emit `Issue[]` against a closed schema. `stylistic` (cosmetic preference, ignored for convergence)
-is not listed above per lens because it attaches to all three — any lens may raise it.
+emit `Issue[]` against a closed schema. On a completed evidence review, deterministic bibliography
+checks may add mechanically authored findings, including `unclear_structure`, to the evidence
+result (D-bibliography-integrity); the category still describes the defect even though no critic
+minted it. `stylistic` (cosmetic preference, ignored for convergence) is not listed above per lens
+because it attaches to all three — any lens may raise it.
 
 At `review.depth: 2` (the default, D-front-loaded-depth) each of those boxes is **two** critics
 rather than one: the next distinct eligible non-author model in the pool reads the same artifact
