@@ -1,10 +1,10 @@
 ## D-source-fidelity-direction-and-scope — the evidence lens checks a source's direction and scope, not only whether the page contains the words
 
-**The finding.** Expert defect reviews of recent production reports, read against the runs that
-produced them, found one gap repeatedly: the evidence lens asks, in effect, a single question —
-*does the page contain this sentence?* — and three defect classes pass it. They were the most
-serious defects in the set, and each survived a lens that had the page in hand and cleared the
-citation.
+**The finding.** The evidence lens asks, in effect, a single question — *does the page contain
+this sentence?* — and three defect classes pass it while a lens that has the page in hand clears the
+citation. Each is stated below as the failure shape a critic can be asked about; each is
+reproducible against a synthetic fixture, and none depends on any production observation for its
+warrant.
 
 *Direction.* A source quoted verbatim-correctly for a proposition its own finding cuts against. The
 recurring shapes: a meta-analysis that found **no** relationship between a dose variable and an
@@ -26,14 +26,14 @@ because the extractor returned navigation chrome rather than the article, on a p
 claim verbatim. And a blocked page degrading the strongest available finding into `uncited_claim`
 with the instruction "add a citation", on a claim that already carried one.
 
-Two hygiene defects cost rounds alongside these. Critics filed `unclear_structure` findings about
-section-numbering "gaps" that exist only in `report.render_with_loci`'s scaffolding — a section whose
-paragraphs are elsewhere gets no `=== SECTION n: … ===` line — in one case consuming a substantial
-share of a lens's output. And a critic, having no way to retract a finding, withdrew one inside the
-JSON: rationale trailing off mid-sentence, instruction "no action needed, removing from list". Triage
-passed it through at `major`.
+Two hygiene defects sit alongside these, both visible in the rendering the critic reads. A
+critic can file `unclear_structure` about section-numbering "gaps" that exist only in
+`report.render_with_loci`'s scaffolding — a section whose paragraphs are elsewhere gets no
+`=== SECTION n: … ===` line. And the schema gives a critic no way to retract a finding, so a critic
+that changes its mind can only withdraw inside the JSON — a rationale that concludes there is no
+defect, an instruction that requires no action — which triage then counts at the category floor.
 
-The warrant is not that audit trail (QP9); it is the prompt text, checkable in the repo and
+The warrant is the prompt text (QP9), checkable in the repo and
 reproducible against synthetic fixtures in `tests/test_taxonomy.py` and `tests/test_fetch.py`.
 `prompts._CATEGORY_MEANING[MISREPRESENTED_SOURCE]` read "the cited source plainly does not support
 the claim as stated" and `LENS_BRIEF[Lens.EVIDENCE]` asked only whether a source "is described as
@@ -133,8 +133,7 @@ was.
 * *The per-source sub-context reader* (the D-unbounded-evidence follow-up). The two questions here
   are exactly what it would ask per citation, and it is being designed separately.
 * *Source independence / duplicate provenance* — two entries by the same authors counted as
-  corroboration, which the same reviews found. A candidate for `one_sided_sourcing`'s meaning,
-  not this category's.
+  corroboration. A candidate for `one_sided_sourcing`'s meaning, not this category's.
 * *Temporal currency* — a source predating the run date by years. Writer-side search is its own PR;
   a critic-side staleness rule is a candidate follow-up.
 * No change to `WRITER_*` prompts, to the fetch tiers, to the excerpter, or to any configuration

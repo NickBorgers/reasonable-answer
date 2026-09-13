@@ -249,8 +249,8 @@ class SearchConfig(BaseModel):
     #: citing, and every round draws on the same pool, so a call cap bit early and often.
     read_budget: int | None = Field(default=None, ge=1, le=100_000)
     #: Characters of page text shown to the writer per read. Raising this above
-    #: `fetch_max_chars` enlarges the shared fetch cache and nothing else: verification
-    #: is handed a `fetch.CappedFetcher` clipped back to `fetch_max_chars`, so what the
+    #: `fetch_body_max_chars` enlarges the shared fetch cache and nothing else: verification
+    #: is handed a `fetch.CappedFetcher` clipped back to `fetch_body_max_chars`, so what the
     #: evidence lens sees — and what `dispute.adjudicate_mechanical` searches — stays a
     #: function of `verify_sources` alone (D-writer-source-reads).
     read_max_chars: int = Field(default=6_000, ge=500, le=100_000)
@@ -330,7 +330,7 @@ class PdfSourceConfig(BaseModel):
     #: critic, and only the extracted text is retained.
     max_bytes: int = Field(default=25_000_000, ge=100_000, le=100_000_000)
     #: Pages read before the rest is dropped. A thousand-page appendix would otherwise
-    #: spend real time producing text that `fetch_max_chars` throws away anyway.
+    #: spend real time producing text that `fetch_body_max_chars` throws away anyway.
     max_pages: int = Field(default=40, ge=1, le=2_000)
 
 
@@ -710,6 +710,38 @@ class DisputeConfig(BaseModel):
     arbiter_max_tokens: int = Field(default=4000, ge=500, le=16000)
 
 
+class ClaimCheckConfig(BaseModel):
+    """Claim-level source verification for the evidence lens (D-claim-level-verification).
+
+    Off by default, like every retrieval feature (D-retrieval-opt-in): with `enabled:
+    false` the evidence lens is byte-identical to a build without it. Requires
+    `search.verify_sources`, because the checker reads the pages verification fetched
+    and has nothing to read otherwise — the pairing (`enabled` without `verify_sources`)
+    fails closed at load.
+
+    With it on, every sentence of the report that cites a fetched page is checked
+    against that page in **its own fresh context**, one claim and one page per call,
+    under the evidence critic's own slot. That is the per-source sub-context
+    D-unbounded-evidence scoped as its follow-up, taken to the claim: the single
+    evidence context that held every page — and, under `source_char_budget`, withheld
+    most of them — is what put a claim's figure past what any critic could see.
+    """
+
+    model_config = ConfigDict(extra="forbid")
+
+    enabled: bool = False
+    #: Characters of one page shown to one checker call, as claim-anchored excerpts
+    #: (`excerpt.select` anchored on the one sentence being checked). A page that fits
+    #: is shown whole, and only then may `absent` become a finding: on a page shown in
+    #: part, absence from the excerpts is not absence from the page.
+    page_max_chars: int = Field(default=30_000, ge=2_000, le=200_000)
+    #: Anti-pathological ceiling on (sentence, page) pairs checked per critic per
+    #: artifact — a bibliography of two hundred citations is a bug, not a report. Pairs
+    #: past it are recorded as unchecked; the critic's own judgement covers them.
+    max_pairs: int = Field(default=200, ge=1, le=2_000)
+    max_tokens: int = Field(default=1_200, ge=200, le=8_000)
+
+
 class RevisionConfig(BaseModel):
     """How a writer is asked to apply a defect list (D-scoped-revision).
 
@@ -956,6 +988,7 @@ class Config(BaseModel):
     audition: AuditionConfig = Field(default_factory=AuditionConfig)
     seed: SeedConfig = Field(default_factory=SeedConfig)
     disputes: DisputeConfig = Field(default_factory=DisputeConfig)
+    claim_check: ClaimCheckConfig = Field(default_factory=ClaimCheckConfig)
     refine: RefineConfig = Field(default_factory=RefineConfig)
     push: PushConfig = Field(default_factory=PushConfig)
     runs_dir: Path = Path("runs")
@@ -998,6 +1031,18 @@ class Config(BaseModel):
     #: anchor every critic quote to the paragraph it cites, closing the last
     #: free-text channel from critic to writer
     require_verbatim_spans: bool = True
+
+    @model_validator(mode="after")
+    def _check_claim_check(self) -> Config:
+        if self.claim_check.enabled and not self.search.verify_sources:
+            # The checker reads the pages verification fetched. Without verification
+            # there are no pages, and an "enabled" checker that silently checked nothing
+            # would report every claim unchecked while looking switched on.
+            raise ConfigError(
+                "fail closed: claim_check.enabled requires search.verify_sources — the "
+                "claim checker reads the pages source verification fetches"
+            )
+        return self
 
     @classmethod
     def load(cls, path: str | Path | None = None) -> Config:

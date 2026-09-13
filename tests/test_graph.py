@@ -316,6 +316,29 @@ def test_patch_mode_wires_claim_spans_into_restatement_measurement(identities, t
     assert revisions[0]["out_of_scope"] == 0
 
 
+def test_patch_mode_records_additive_only_on_generate_event(identities, tmp_path, roster):
+    """The wired graph publishes an additive-only repair on its generate event."""
+    cfg = Config(
+        roster=roster,
+        budgets=Budgets(min_ticks=2, hard_cap=4),
+        runs_dir=tmp_path / "runs",
+    )
+    client = make_client(identities, critique_fn=always_material)
+    client.report_fn = lambda _n: REPORT.replace(
+        "A claim that is fully supported [1].",
+        "A claim that is fully supported [1], with an added qualifier.",
+    )
+    final = run(cfg, question="Is it so?", seed=REPORT, client=client)
+
+    revisions = [
+        e
+        for e in _events(cfg, final)
+        if e["kind"] == "generate" and "changed_paragraphs" in e
+    ]
+    assert revisions
+    assert revisions[0]["additive_only"] == 1
+
+
 def test_the_first_draft_carries_no_scope_measurement(identities, tmp_path, roster):
     """Absent means "not applicable", never "in scope" — the A/B must not average the
     first draft, a polish pass, or a rule-13 rewrite into the out-of-scope rate."""

@@ -218,3 +218,120 @@ def test_review_scaffolding_is_never_a_defect_and_findings_are_not_withdrawn_in_
         assert "Section numbers are handles" in prompt
         assert "Never file an issue in order to withdraw it" in prompt
         assert "There is no retraction" in prompt
+# ------------------------------------------------- D-decisive-quantities
+
+
+def test_the_logic_brief_owns_arithmetic_distance_and_absence_of_evidence():
+    """D-decisive-quantities. Three defects that sit in plain sight in the text the
+    critic already holds, and that no lens was told to look for: a derivation the report
+    states and does not perform, a contradiction whose two halves are sections apart, and
+    an "insufficient data" step read as "no effect". Each ships with its narrowing —
+    without those the arithmetic rule becomes a precision-nitpick generator and the
+    absence-of-evidence rule fires on every honest statement of uncertainty."""
+    prompt = critic_user(Lens.LOGIC, "q", "# r\n\nbody\n")
+
+    # Arithmetic: the trigger, the recomputation duty, and both narrowings.
+    assert "reproduce it from the inputs the report itself states" in prompt
+    assert "a unit that changes between premise and result" in prompt
+    assert "put the recomputed value in the rationale" in prompt
+    assert "stated to fewer significant figures than its inputs" in prompt
+    assert "an input the report never states is not a defect of the derivation" in prompt
+
+    # Distance is explicitly not a restriction, and `related_span` carries the other half.
+    assert "however many sections apart the two passages sit" in prompt
+    assert "differ by more than their stated precision" in prompt
+
+    # Absence of evidence, with the over-firing carve-out.
+    assert "Absence of evidence is not evidence of absence" in prompt
+    assert "concludes accordingly has read it correctly" in prompt
+
+
+def test_the_completeness_brief_owns_magnitude_the_decisive_argument_and_readings():
+    """D-decisive-quantities. The completeness question is what the asker would do with
+    the answer, not whether every topic-list item is mentioned. The magnitude trigger's
+    conditional half is the whole thing keeping it from reading as "quantify everything",
+    which is unsatisfiable under `search.enabled: false` and is the noise direction the
+    audition's controls measure."""
+    prompt = critic_user(Lens.COMPLETENESS, "q", "# r\n\nbody\n")
+
+    # The frame, one sentence, not a trigger.
+    assert "what the asker would do with this answer" in prompt
+
+    # Magnitude: trigger, the in-report condition, and the two narrowings.
+    assert "no order-of-magnitude estimate, no break-even" in prompt
+    assert "ordinary arithmetic from facts the report states, would supply one" in prompt
+    assert "not a demand for precision" in prompt
+    assert "kind, mechanism or character needs no" in prompt
+
+    # The decisive consideration, and its in-report narrowing.
+    assert "The decisive consideration" in prompt
+    assert "argues its way past it without ever stating it" in prompt
+    assert "follows from facts the report itself states or cites" in prompt
+
+    # Readings of the question.
+    assert "admits more than one" in prompt
+    assert "state the reading taken" in prompt
+
+
+def test_the_widened_readings_reach_the_category_meanings_table():
+    """A brief tells a critic where to look; the meanings table is what bounds the
+    category it may file under. Both must carry the widening or a critic reads the
+    trigger and then finds no category that admits it (D-decisive-quantities)."""
+    logic = critic_user(Lens.LOGIC, "q", "# r\n\nbody\n")
+    assert "derivation that does not yield the number it reports" in logic
+    assert "treats an absence of evidence as evidence of absence" in logic
+    assert "however many sections apart the two passages sit" in logic
+
+    completeness = critic_user(Lens.COMPLETENESS, "q", "# r\n\nbody\n")
+    assert "with no magnitude on either side" in completeness
+    assert "decisive consideration the report's own material supplies" in completeness
+    assert "without saying which reading it took" in completeness
+
+
+def test_decisive_quantities_adds_no_category_and_moves_no_floor():
+    """The widenings are readings of existing categories, exactly as
+    D-conceptual-conflation widened `overstated_claim`. `rubric_hash` hashes
+    `LENS_CATEGORIES` and `SEVERITY_FLOOR`; if either moved, every cached audition
+    verdict would be invalidated by a change that only edits prompt text."""
+    assert SEVERITY_FLOOR[Category.INVALID_INFERENCE] is Severity.MAJOR
+    assert SEVERITY_FLOOR[Category.CONTRADICTED_CLAIM] is Severity.BLOCKING
+    assert SEVERITY_FLOOR[Category.INCOMPLETE_ANSWER] is Severity.MAJOR
+    assert SEVERITY_FLOOR[Category.UNEXAMINED_PRESUPPOSITION] is Severity.MAJOR
+    assert Category.INVALID_INFERENCE in LENS_CATEGORIES[Lens.LOGIC]
+    assert Category.INCOMPLETE_ANSWER in LENS_CATEGORIES[Lens.COMPLETENESS]
+
+
+def test_heading_text_is_not_quotable_so_no_heading_trigger_ships():
+    """D-decisive-quantities deliberately keeps the heading rule writer-side only.
+
+    A section heading asserting what its prose disclaims is a real defect, but
+    `report.parse` puts heading text in `section_titles` and in no `Paragraph`, so it is
+    absent from both the cited paragraph and `full_text` and `triage._require_quote`
+    would reject any `claim_span` drawn from one — failing the lens closed through the
+    whole repair budget. Telling a critic to quote a heading is telling it to fail. When
+    this test starts failing, headings have become quotable and the trigger can ship."""
+    from reasonable_answer import report
+
+    structure = report.parse(
+        "## Conclusion\n\nYes.\n\n## Scientific Contradictions\n\nNo contradictions were found.\n"
+    )
+    assert "Scientific Contradictions" in structure.section_titles
+    assert "Scientific Contradictions" not in structure.full_text
+    assert all("Scientific Contradictions" not in p.text for p in structure.paragraphs)
+
+    for lens in LENSES:
+        prompt = critic_user(lens, "q", "# r\n\nbody\n")
+        assert "heading" not in prompt.lower()
+
+
+def test_the_instruction_bullet_says_what_the_weakened_claim_would_be():
+    """The resolvability contract stays — an instruction may never demand a document
+    the writer cannot obtain — but "weaken the claim" is no longer left undefined, and
+    an instruction whose cheap branch is a disclaimer is not offered
+    (D-no-hedge-discharge). The bullet is shared by every lens."""
+    for lens in Lens:
+        prompt = critic_user(lens, "q", "# r\n\nbody\n")
+        assert "the instruction must allow weakening the claim as an acceptable resolution" in prompt
+        assert "must say what the weakened claim would be" in prompt
+        assert "state that this is unverified" in prompt
+        assert "Never ask for a caveat to be added to a claim that stands." in prompt

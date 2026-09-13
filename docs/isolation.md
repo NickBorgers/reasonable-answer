@@ -82,6 +82,10 @@ flowchart TB
         Cin["SEES: report + question + its ONE lens + taxonomy"]
         Cno["NEVER: who wrote the report · the tick number · whether this is a confirmation critique · other lenses' output · the OTHER critic on its own lens · prior critiques (its own rejected field returns inside one call only — D-repair-turn-context)"]
     end
+    subgraph CHK["Claim checker (D-claim-level-verification, opt-in) — the evidence critic's own model, one fresh context per (sentence, page)"]
+        Kin["SEES: one citing sentence + its paragraph + ONE fetched page (claim-anchored excerpts, or whole)"]
+        Kno["NEVER: the report · the question · any other page · any other sentence's verdict · the critic's review · who wrote the report"]
+    end
     subgraph ORC["Orchestrator (blind LLM)"]
         Oin["SEES: OrchestratorView (category × severity counts, bounded ints/enums)"]
         Ono["NEVER: report text · defect text · citations · run_id/hash/model-ids"]
@@ -101,8 +105,8 @@ flowchart TB
     %% and the see/never distinction rides on the border colour instead.
     classDef see stroke:#3a3,stroke-width:2px;
     classDef no stroke:#c33,stroke-width:2px;
-    class Gin,Cin,Oin,CTin see;
-    class Gno,Cno,Ono,CTno no;
+    class Gin,Cin,Kin,Oin,CTin see;
+    class Gno,Cno,Kno,Ono,CTno no;
 ```
 
 ## How the seven principles are preserved
@@ -207,6 +211,16 @@ Everything above holds word for word with "paragraph" read as "claim": critics s
 artifact, rotation stays, clean records still reset on every generation. The scope measurement
 counts these edits as `restated`, apart from `out_of_scope`, so the number that means "re-rolled
 text nobody complained about" keeps meaning it.
+
+**A fix is a change, not an annotation (D-no-hedge-discharge).** Neither licence says what a writer
+must do to the text it is allowed to edit, and the cheapest compliant edit — keep the claim, append
+"this remains an extrapolation" — makes the flagged sentence stop matching its finding while the
+claim, its figure and its citation all survive. The revision prompt therefore defines resolution
+(see [convergence.md](convergence.md#what-weaken-the-claim-means-d-no-hedge-discharge)), and the
+scope measurement gains `additive_only`: of the paragraphs a task named or that restated a flagged
+claim, how many came back containing every word of the old text, in order, with more around them.
+It is a subset of `in_scope` plus `restated` — a rate to read against them, never a fourth bucket —
+and, like every other number here, it is warn-only. Nothing about who edits or who reviews moves.
 
 ## The depersonalization step (principle 1, made concrete)
 

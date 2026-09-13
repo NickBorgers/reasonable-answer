@@ -18,8 +18,8 @@ not by position. A new module, `excerpt`, does deterministic string work and not
 * `excerpt.select` scans the retained body in overlapping windows, scores each window by the anchor
   tokens it contains — numbers and percentages at four times the weight of content words, years and
   one- or two-digit counts at a word's weight, stopwords and the citation marker itself ignored —
-  and shows, inside the same `fetch_max_chars` budget as before: the page's opening (title, date and
-  scope live there), then the best-scoring windows widened to whole sentences, in document order,
+  and shows, inside the same `fetch_max_chars` budget as before: the page's opening (reserved for
+  page-identifying context), then the best-scoring windows widened to whole sentences, in document order,
   merged where they touch. A body that fits the budget is shown whole. A source no sentence cites, or
   whose anchors match nothing, is shown from its start, which is exactly what it got before.
 * `excerpt.render` states how much of the page is shown, labels each excerpt with its character

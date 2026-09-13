@@ -95,6 +95,23 @@ class LensResult(BaseModel):
     confirm_state: bool = False
 
 
+class ClaimVerdict(BaseModel):
+    """One claim checked against one fetched page, in its own context (D-claim-level-verification).
+
+    A closed four-way verdict. `supported` and `contradicted` must carry a verbatim
+    `support_span` from the page text the checker was shown, and `claimcheck` rejects
+    the verdict otherwise: a verdict nobody can point at in the page is not a check.
+    `absent` says nothing shown addresses the claim; `unreadable` says the text shown
+    is not the document's body (navigation, a cookie notice, a table of contents).
+    """
+
+    model_config = ConfigDict(extra="forbid")
+
+    verdict: Literal["supported", "contradicted", "absent", "unreadable"]
+    support_span: str | None = Field(default=None, max_length=MAX_SPAN)
+    reason: str = Field(min_length=1, max_length=MAX_RATIONALE)
+
+
 class Defect(BaseModel):
     """A generator-facing fix-task. Depersonalized: no lens, no model, no verdict."""
 

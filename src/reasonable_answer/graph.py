@@ -25,9 +25,9 @@ from typing import Any, TypedDict
 from langgraph.graph import END, START, StateGraph
 
 from . import audition as audition_mod
+from . import claimcheck, fetch, prompts, reading, resolve, roles, search, support, triage
 from . import critique as critique_mod
 from . import dispute as dispute_mod
-from . import fetch, prompts, reading, resolve, roles, search, support, triage
 from . import report as report_mod
 from .build import build_identity
 from .config import Config, ConfigError, Roster, validate_roster_health
@@ -192,10 +192,19 @@ class Runtime:
     #: None when writers may not read sources (D-writer-source-reads); they then work
     #: from search snippets exactly as they did before.
     reader: Any | None = None
+    #: Per-runtime memo of claim-level verdicts (D-claim-level-verification), keyed on
+    #: the critic identity, the page text shown and the sentence — the three things a
+    #: checker call is a function of. Never a clean record: clearance is still minted
+    #: from the completed review of the current artifact (RC-002).
+    claim_cache: claimcheck.VerdictCache = field(default_factory=claimcheck.VerdictCache)
 
     @property
     def search_enabled(self) -> bool:
         return self.searcher is not None
+
+    @property
+    def claim_check_enabled(self) -> bool:
+        return self.config.claim_check.enabled and self.verify_sources
 
     @property
     def verify_sources(self) -> bool:
@@ -848,6 +857,14 @@ def _scope_fields(
             "revision touched %d paragraph(s) no fix task named (of %d changed)",
             len(scope.out_of_scope),
             len(scope.changed),
+        )
+    if scope.additive_only:
+        # A task discharged by appending to the claim rather than changing it
+        # (D-no-hedge-discharge). Warn-only, like every other number here.
+        log.info(
+            "revision only added words to %d of the %d paragraph(s) it was asked to change",
+            len(scope.additive_only),
+            scope.in_scope_count + len(scope.restated),
         )
     return scope.as_event_fields()
 
@@ -1574,6 +1591,59 @@ def _critique_one(
                 ),
             )
 
+    # Claim-level verification, one sentence and one page per fresh context, under this
+    # critic's slot (D-claim-level-verification). Run before the whole-document review so
+    # an account refusal is learned before the larger call is spent. Its verdicts are
+    # merged below: a checked pair's verdict is authoritative for
+    # `misrepresented_source`, the critic's own judgement covers the rest.
+    checked: claimcheck.ClaimCheck | None = None
+    if lens is Lens.EVIDENCE and sources and rt.claim_check_enabled:
+        cc = rt.config.claim_check
+        try:
+            checked = claimcheck.check(
+                rt.client,
+                alias,
+                identity,
+                report_text,
+                sources,
+                page_max_chars=cc.page_max_chars,
+                max_pairs=cc.max_pairs,
+                max_tokens=cc.max_tokens,
+                repair_retries=rt.client.budgets.critic_repair_retries,
+                cache=rt.claim_cache,
+                current_date=run_date,
+            )
+        except ProviderAccountError as exc:
+            # The same shape `critique_once` returns for the critic's own 402, so
+            # `_defer_if_account_refused` reads it identically.
+            return LensResult(
+                lens=lens,
+                artifact_hash=artifact_hash,
+                critic_alias=alias,
+                critic_identity=identity,
+                artifact_author_identity=author_identity,
+                failed=True,
+                failure_reason=str(exc)[:400],
+                failure_class=exc.failure_class,
+                attempt=attempt,
+            )
+        counts = checked.counts()
+        rt.store.claim_check(artifact_hash, identity, attempt, checked.as_record())
+        rt.store.event("claim_check", artifact_hash=artifact_hash, critic=identity, **counts)
+        log.info(
+            "claim check by %s: %d pairs, %d checked, %d contradicted, %d absent (%d partial), "
+            "%d unreadable, %d unchecked, %d cached",
+            alias,
+            counts["pairs"],
+            counts["checked"],
+            counts["contradicted"],
+            counts["absent"],
+            counts["absent_partial"],
+            counts["unreadable"],
+            counts["unchecked"],
+            counts["cached"],
+        )
+
     result = critique_mod.critique_once(
         rt.client,
         alias,
@@ -1598,6 +1668,11 @@ def _critique_one(
     # clear the evidence lens (issue #92, D-notfound-fabrication). Attached only to a *completed* review: a
     # failed lens is discarded and re-critiqued (rule 2), and because the fetch is cached
     # the finding is simply re-derived on the next attempt, so nothing is lost.
+    if checked is not None and not result.failed:
+        result = result.model_copy(
+            update={"issues": claimcheck.reconcile(result.issues, checked) + claimcheck.issues_from(checked)}
+        )
+
     if sources and not result.failed:
         mechanical = triage.mechanical_citation_issues(sources, report_mod.parse(report_text))
         if mechanical:
