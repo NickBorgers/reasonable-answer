@@ -249,8 +249,8 @@ class SearchConfig(BaseModel):
     #: citing, and every round draws on the same pool, so a call cap bit early and often.
     read_budget: int | None = Field(default=None, ge=1, le=100_000)
     #: Characters of page text shown to the writer per read. Raising this above
-    #: `fetch_max_chars` enlarges the shared fetch cache and nothing else: verification
-    #: is handed a `fetch.CappedFetcher` clipped back to `fetch_max_chars`, so what the
+    #: `fetch_body_max_chars` enlarges the shared fetch cache and nothing else: verification
+    #: is handed a `fetch.CappedFetcher` clipped back to `fetch_body_max_chars`, so what the
     #: evidence lens sees — and what `dispute.adjudicate_mechanical` searches — stays a
     #: function of `verify_sources` alone (D-writer-source-reads).
     read_max_chars: int = Field(default=6_000, ge=500, le=100_000)

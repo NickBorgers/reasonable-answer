@@ -207,7 +207,7 @@ search:
   #                            # read_char_budget below is the bound that matters, and it
   #                            # is a correctness one (D-unbounded-evidence)
   # read_max_chars: 6000       # page text shown per read; raising it above
-  #                            # fetch_max_chars widens the writer's view only, never
+  #                            # fetch_body_max_chars widens the writer's view only, never
   #                            # the evidence lens's or mechanical adjudication's
   # read_char_budget: 200000   # whole-run page text handed to writers
   #
