@@ -18,6 +18,7 @@ from reasonable_answer.config import Budgets, ConfigError
 from reasonable_answer.llm import Completion, MalformedOutputError, ProbeIncomplete
 from reasonable_answer.schemas import (
     ArbiterVerdict,
+    ClaimVerdict,
     CritiqueOutput,
     IssueRepairs,
     OrchestratorRecommendation,
@@ -134,6 +135,10 @@ class FakeClient:
     #: callable(alias, user) -> ArbiterVerdict; None means an arbiter call is a
     #: test error (the run under test was not expected to reach one)
     arbiter_fn: Any | None = None
+    #: callable(alias, user) -> ClaimVerdict (D-claim-level-verification); None means a
+    #: checker call is a test error — the checker is off by default, so a run that
+    #: reaches one without scripting it has enabled something it did not mean to.
+    claim_fn: Any | None = None
     #: repairs offered to a critic whose issues fail validation. 0 keeps the historical
     #: one-call-per-critique behaviour every existing test was written against.
     critic_repair_retries: int = 0
@@ -256,6 +261,10 @@ class FakeClient:
                 if self.arbiter_fn is None:
                     raise AssertionError("unexpected arbiter call")
                 return self.arbiter_fn(alias, user)
+            if schema is ClaimVerdict:
+                if self.claim_fn is None:
+                    raise AssertionError("unexpected claim check call")
+                return self.claim_fn(alias, attempt_user)
             raise AssertionError(f"unexpected schema {schema}")
 
         return structured_with_repair(

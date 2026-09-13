@@ -334,6 +334,28 @@ disputes:
   # Disputes accepted from one revision pass.
   max_per_pass: 3
 
+# Claim-level source verification (D-claim-level-verification). Every sentence that
+# cites a fetched page is checked against that page by the evidence critic's own model
+# in its own fresh context — one sentence, one page — and a `contradicted` verdict, or
+# `absent` on a page shown whole, becomes a misrepresented_source finding on that
+# critic's review. This is the per-source sub-context the source_char_budget comment
+# above calls INTERIM, taken to the claim: measured on prod, the single evidence
+# context was the one lens that almost never cleared, and most of what it raised was
+# misrepresented_source against text it could not see.
+#
+# Off in the shipped roster because it reads the pages verify_sources fetches, and
+# verify_sources is off here (see above). A deployment that turns verification on
+# should turn this on with it. Cost: one small call per (sentence, page) pair per
+# evidence critic per new draft; unchanged pairs are memoised for the run.
+claim_check:
+  enabled: false
+  # One page per checker context, as claim-anchored excerpts. A page that fits is
+  # shown whole, and only then may `absent` become a finding.
+  page_max_chars: 30000
+  # Anti-pathological: pairs past it are recorded unchecked and left to the critic.
+  max_pairs: 200
+  max_tokens: 1200
+
 # Critic auditioning (docs/architecture.md). Measures whether each rostered critic can
 # actually find a planted defect and stay quiet on a sound report — the question neither
 # `validate_roster_health` nor `ra doctor`'s probes ask.
