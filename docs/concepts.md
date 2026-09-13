@@ -170,7 +170,9 @@ controller — an ordered table of fourteen rules, plain code, provably terminat
 stop decision. It enforces a floor (a draft is never accepted on its first critique), a hard cap
 on rounds, and early exits for stagnation (the same defects three ticks running) and cycles (the
 drafts started repeating). If the cap is hit with issues outstanding, the run ships its
-*best-scoring* draft with an honest status like `needs_human_review` — it never quietly launders
+*selected* draft — by default the one with the fewest weighted defects, or, where the deployment
+opts into `review.selection: latest_unblocked`, the latest round among those with the fewest
+blocking issues — with an honest status like `needs_human_review` — it never quietly launders
 an exhausted run into an accepted one. The one LLM near this decision, the orchestrator, is the
 blind referee from the diagram above: its entire authority is a yes/no on cosmetic polish, decided
 from counts alone.

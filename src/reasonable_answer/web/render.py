@@ -313,7 +313,7 @@ def render_index(
   That split is the point: spotting a specific flaw is what an LLM is sharp at, and grading its
   own work is what it is worst at. An answer ships when no eligible reviewer can still find a
   material defect &mdash; never because one declared it good &mdash; and plain code, not an LLM,
-  makes that call; a run that hits the round cap ships its best-scoring draft with the defects it
+  makes that call; a run that hits the round cap ships its selected draft with the defects it
   could not resolve recorded against it instead. {sources_note} Expect this to take
   <strong>10&ndash;25 minutes</strong>.</p>
   <form method="post" action="{base_path}/runs">

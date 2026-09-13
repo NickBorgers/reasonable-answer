@@ -14,6 +14,8 @@ from reasonable_answer.controller import (
     decide,
     detect_cycle,
     latest_scores_per_artifact,
+    latest_unblocked_index,
+    select_shipped_index,
 )
 from reasonable_answer.schemas import LensStatus
 from reasonable_answer.taxonomy import LENSES
@@ -286,6 +288,38 @@ def test_best_scoring_index_breaks_ties_toward_the_latest_round():
     assert best_scoring_index([(0, 0, 0), (0, 1, 0)]) == 0
     assert best_scoring_index([(1, 0, 0), (0, 9, 9)]) == 1
     assert best_scoring_index([]) == 0
+
+
+def test_latest_unblocked_index_decides_on_blocking_alone():
+    """D-latest-unblocked-selection: blocking decides, and nothing else does."""
+    # A blocking issue loses to any number of majors and minors.
+    assert latest_unblocked_index([(1, 0, 0), (0, 9, 9)]) == 1
+    assert latest_unblocked_index([(0, 9, 9), (1, 0, 0)]) == 0
+    # Ties in blocking go to the LATEST round regardless of major/minor — this is the
+    # case the old rule got wrong on near-identical patched artifacts: round 7 scored 1
+    # material with a soft logic panel, round 8 scored 7 with a harsh one on two
+    # paragraphs' difference (run-1dd853cbbfd0).
+    assert latest_unblocked_index([(0, 1, 0), (0, 7, 0)]) == 1
+    assert latest_unblocked_index([(0, 0, 0), (0, 0, 0), (0, 0, 0)]) == 2
+    # ... but only among the rows that tie on the minimum. A later round that adds a
+    # blocking issue still loses: this is not "ship the last draft because it is last".
+    assert latest_unblocked_index([(0, 9, 9), (1, 0, 0), (1, 0, 0)]) == 0
+    # A single row, and the empty board.
+    assert latest_unblocked_index([(3, 3, 3)]) == 0
+    assert latest_unblocked_index([]) == 0
+
+
+def test_select_shipped_index_dispatches_on_the_configured_mode():
+    # The one board that separates the two rules: equal blocking, rising majors.
+    scores = [(0, 1, 0), (0, 7, 0)]
+    assert select_shipped_index(scores, "latest_unblocked") == 1
+    assert select_shipped_index(scores, "fewest_defects") == 0
+    # `fewest_defects` is the old rule unchanged, for every board the old test pins.
+    for board in ([(0, 0, 0), (0, 0, 0), (0, 0, 0)], [(0, 0, 0), (0, 1, 0)], [(1, 0, 0), (0, 9, 9)], []):
+        assert select_shipped_index(board, "fewest_defects") == best_scoring_index(board)
+    # Both modes agree when blocking alone separates the rows, and on an empty board.
+    assert select_shipped_index([(1, 0, 0), (0, 9, 9)], "latest_unblocked") == 1
+    assert select_shipped_index([], "latest_unblocked") == 0
 
 
 def test_latest_scores_per_artifact_supersedes_a_refuted_clean_pass():

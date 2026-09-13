@@ -243,6 +243,26 @@ def test_an_out_of_range_critic_strike_limit_fails_closed(limit):
         ReviewConfig(critic_strike_limit=limit)
 
 
+def test_selection_defaults_to_the_rule_the_system_always_had():
+    """The code default is `fewest_defects`; `latest_unblocked` is opt-in
+    (D-latest-unblocked-selection) because its warrant is operator observation, not a
+    citation the repository can carry (QP9). The knob lives under `review` and not under
+    `budgets`, which `_run_fingerprint` hashes."""
+    assert ReviewConfig().selection == "fewest_defects"
+    assert "selection" not in Budgets.model_fields
+
+
+@pytest.mark.parametrize("mode", ["latest_unblocked", "fewest_defects"])
+def test_both_selection_rules_are_accepted(mode):
+    assert ReviewConfig(selection=mode).selection == mode
+
+
+@pytest.mark.parametrize("mode", ["best_scoring", "", "LATEST_UNBLOCKED", None])
+def test_an_unknown_selection_rule_fails_closed(mode):
+    with pytest.raises(ValidationError):
+        ReviewConfig(selection=mode)
+
+
 # ---------------------------------------------------- eligibility is not spent for depth
 
 

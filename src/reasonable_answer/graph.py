@@ -2080,6 +2080,14 @@ def _triage(state: State, rt: Runtime) -> dict:
         "triage",
         artifact_hash=artifact_hash,
         material=material,
+        # The severity tuple the shipped-round selection actually reads, alongside the
+        # scalar `material` it used to be alone here. Without it the choice of round is
+        # unauditable from the trail: two independent reviews of production runs could
+        # not tell a considered selection from a bug, because `material` does not say how
+        # many of the issues were blocking (D-latest-unblocked-selection).
+        blocking=totals.blocking,
+        major=totals.major,
+        minor=totals.minor,
         lenses_failed=lenses_failed,
         cleared={s.lens.value: s.cleared_count for s in status},
         acceptance=acceptance,
@@ -2335,12 +2343,21 @@ def _finalize(state: State, rt: Runtime) -> dict:
         chosen_round = state.get("round", 0)
         defects = state.get("defects", [])
     elif board:
-        # Never ship the last draft just because it is last — ship the best-scoring one,
-        # scored on each artifact's most-critiqued triage rather than its first.
-        from .controller import best_scoring_index, latest_scores_per_artifact
+        # Never ship the last draft *because* it is last. Which draft ships is
+        # `review.selection` (D-latest-unblocked-selection): `fewest_defects`, the code
+        # default, ranks on the weighted severity score; `latest_unblocked` keeps the
+        # rounds with the fewest blocking issues and ships the latest of those, for a
+        # deployment whose operator judges major and minor counts on near-identical
+        # patched artifacts to be critic variance. Either way each artifact is scored
+        # on its most-critiqued triage rather than its first (RC-002,
+        # `latest_scores_per_artifact`).
+        from .controller import latest_scores_per_artifact, select_shipped_index
 
         rows = latest_scores_per_artifact(board)
-        idx = best_scoring_index([(b["blocking"], b["major"], b["minor"]) for b in rows])
+        idx = select_shipped_index(
+            [(b["blocking"], b["major"], b["minor"]) for b in rows],
+            rt.config.review.selection,
+        )
         text = rows[idx]["report"]
         chosen_round = rows[idx]["round"]
         # The defects that annotate the shipped report must be the ones raised against
