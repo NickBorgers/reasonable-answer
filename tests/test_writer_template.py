@@ -52,6 +52,31 @@ def test_every_explicit_question_part_is_an_answer_obligation():
     assert "Do not substitute an adjacent question or invent an unstated goal" in system
 
 
+def test_writer_shows_the_arithmetic_and_sizes_the_comparison():
+    """D-decisive-quantities, writer half. The motivating failure is a report that says
+    it divides by a PUE and then does not: a derivation described but not performed reads
+    as done. The comparison bullets are the symmetric half of the completeness lens's
+    magnitude and decisive-consideration triggers — a counterargument whose size is never
+    stated can headline a section while being orders of magnitude too small to matter."""
+    system = prompts.WRITER_SYSTEM
+    assert "You state the argument that settles the question" in system
+    assert "a derivation you describe is a derivation you perform" in system
+    assert "its inputs, its units and its result" in system
+    assert "a magnitude for each side" in system
+    assert "how large a counterargument is relative to the main effect" in system
+
+
+def test_writer_holds_headings_and_ambiguous_readings_to_the_same_standard():
+    """The heading standard is writer-side only, deliberately: heading text is not
+    quotable, so no critic can raise it fail-closed (see the decision, and
+    `tests/test_taxonomy.py::test_heading_text_is_not_quotable_so_no_heading_trigger_ships`).
+    The reading standard is the writer half of the `unexamined_presupposition` widening."""
+    system = prompts.WRITER_SYSTEM
+    assert "A heading claims no more than the section beneath it supports" in system
+    assert "asserts what its own prose goes on to disclaim" in system
+    assert "you say which reading you answer" in system
+
+
 def test_no_top_level_title():
     # export_markdown already emits `# {question}` above the body; a template H1
     # would double it.

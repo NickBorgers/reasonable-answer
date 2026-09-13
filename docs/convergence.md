@@ -36,15 +36,15 @@ but **triage clamps it up to a mechanical, category-specific floor** — the cri
 | evidence | `misrepresented_source` | cited source does not support the claim as stated | **major** |
 | evidence | `uncited_claim` | material claim with no citation | **major** |
 | evidence | `one_sided_sourcing` | sources drawn from one outlet or viewpoint cluster where genuine alternatives exist ([bias.md](./bias.md)) | **major** |
-| logic | `contradicted_claim` | claim contradicts another claim or a cited source | **blocking** |
-| logic | `invalid_inference` | conclusion does not follow from premises | **major** |
+| logic | `contradicted_claim` | claim contradicts another claim or a cited source, however many sections apart the two passages sit | **blocking** |
+| logic | `invalid_inference` | conclusion does not follow from premises, including a stated derivation that does not yield its own number and an absence-of-evidence step | **major** |
 | logic | `overstated_claim` | claim stronger than its support | **major** |
 | logic | `conceptual_conflation` | two materially distinct things are treated as interchangeable, and the substitution carries an inference | **major** |
 | logic | `loaded_language` | evaluative characterization smuggled in as description, neither attributed nor argued ([bias.md](./bias.md)) | minor |
-| completeness | `incomplete_answer` | an explicit, material part of the question is unanswered or replaced by an adjacent question | **major** |
+| completeness | `incomplete_answer` | an explicit, material part of the question is unanswered or replaced by an adjacent question, including a comparative question answered with no magnitude and a comparison whose decisive consideration is never stated | **major** |
 | completeness | `omitted_counterargument` | a material opposing view is missing, or a purported opposing case substitutes an easier objection that does not challenge a load-bearing conclusion | **major** |
 | completeness | `unclear_structure` | organization/clarity impedes evaluation | minor |
-| completeness | `unexamined_presupposition` | a contested premise of the question is inherited rather than surfaced and examined ([bias.md](./bias.md)) | **major** |
+| completeness | `unexamined_presupposition` | a contested premise of the question is inherited rather than surfaced and examined ([bias.md](./bias.md)), or one reading of an ambiguous question is answered without saying which | **major** |
 | any | `stylistic` | cosmetic preference | minor (**ignored** for convergence) |
 
 The three social-bias categories are constrained by their own rulebook — what a bias finding may
@@ -152,6 +152,84 @@ and states how recent its evidence is.
 
 The measurement is `additive_only` on the `generate` event, and it is **warn-only**: nothing rejects
 a draft for it. See [isolation.md](isolation.md#scoping-the-edit-is-not-narrowing-the-review-d-scoped-revision).
+
+### Arithmetic, magnitude and the decisive consideration (D-decisive-quantities)
+
+> **Normative.** This subsection governs the arithmetic, distant-contradiction and
+> absence-of-evidence readings of `invalid_inference` / `contradicted_claim`; the magnitude,
+> decisive-consideration and multiple-reading readings of `incomplete_answer` /
+> `unexamined_presupposition`; `LENS_BRIEF[Lens.LOGIC]` and `LENS_BRIEF[Lens.COMPLETENESS]`; the
+> matching entries in `prompts.py::_CATEGORY_MEANING`; and the four matching writer standards in
+> `prompts.py::WRITER_SYSTEM`. Changing one side without the other is docs-as-spec drift.
+
+No new category and no floor change. Like D-conceptual-conflation's widening of
+`overstated_claim`, these are readings of existing categories stated in the open rather than left
+to drift, because in production no lens owned arithmetic and no lens asked whether the argument
+that settles the question was present.
+
+**Logic lens — three rules.**
+
+1. **Arithmetic and units.** Where the report states a derivation — a product, a ratio, a share of
+   a total, a unit conversion, a range computed from stated inputs — the critic reproduces it from
+   the inputs the report itself states. A result that does not follow from those inputs, a unit
+   that changes between premise and result, or a scenario label that does not match the range
+   attached to it, is `invalid_inference`, with the recomputed value in the rationale. Two
+   narrowings are part of the rule: a figure stated to fewer significant figures than its inputs
+   is not a defect, and
+   an input the report never states is not a defect *of the derivation* — a claim resting on an
+   unstated input is `overstated_claim` under D-conceptual-conflation's anchoring rule.
+2. **Distant contradictions are expected.** A claim contradicted by the conclusion, by a key
+   finding, or by a figure stated elsewhere in the report is `contradicted_claim` however many
+   sections apart the two passages sit; the other passage goes in `related_span`, which is already
+   verbatim-anchored against the whole artifact (`triage.IN_ARTIFACT_RELATED`), not against the
+   cited paragraph. Two figures for the same quantity that differ by more than their stated
+   precision are a contradiction wherever in the report they appear. Nothing about the mechanism changes here —
+   distance was never in the definition; the prompt simply never said a distant second passage was
+   expected, and critics read the omission as a restriction.
+3. **Absence of evidence is not evidence of absence.** "No evidence of X at level L",
+   "insufficient data to determine" and "not established" do not mean "no X at L". A conclusion
+   carrying the second while its support says only the first is `invalid_inference`. The
+   narrowing: a report that states the evidence is insufficient and concludes accordingly has read
+   it correctly, and is not this defect.
+
+**Completeness lens — the frame and three triggers.** The completeness question is *what would the
+asker do with this answer, and which input to that decision is missing* — not whether every item on
+a topic list is covered. That frame is not itself a trigger; the three triggers are:
+
+4. **Magnitude.** Where the question asks which of two things is larger, better or more, or asks
+   how much, an answer with no magnitude on either side — no figure, no order-of-magnitude
+   estimate, no break-even — is `incomplete_answer`, **but only where the report's own cited
+   material, or ordinary arithmetic from facts it states, would supply one**. It is not a demand
+   for precision: an order of magnitude, or the break-even point, is a complete answer. A question
+   about **kind, mechanism or character** needs no magnitude, mirroring the same carve-out in
+   D-conceptual-conflation.
+5. **The decisive consideration.** Where one argument settles the comparison — a term common to
+   both sides cancels, a cost is already sunk, a stated dose sits against a published limit, one
+   option repeats a production cycle the other does not — and the report argues its way past it
+   without ever stating it, that is `incomplete_answer`, with the consideration named in the rationale.
+   The narrowing: only where the consideration follows from facts the report itself states or
+   cites, so the fix is available inside the report.
+6. **Readings of the question.** Where the question's wording admits more than one reading — a
+   causal boundary ("alone", "impact", "adequately"), an undefined tier ("mid-tier") — and the
+   report answers one of them without saying which, that is `unexamined_presupposition`. The fix is
+   to state the reading taken and, where the answer would change under another reading, to say so.
+
+As with every critic instruction, none of these may demand a specific dataset or document as the
+only acceptable fix; stating the limitation, or qualifying the claim, is always a resolution.
+
+**Writer standards** are symmetric, in `WRITER_SYSTEM`: state the argument that settles the
+question; where arithmetic settles it, show the arithmetic with its inputs and units, because a
+derivation described is a derivation to be performed; for a comparison give a magnitude for each
+side and the break-even where one exists, and state a counterargument's size relative to the main
+effect; a heading claims no more than its section supports; and say which reading of an ambiguous
+question is being answered.
+
+**Headings are writer-side only, deliberately.** A section heading is not quotable: `report.parse`
+puts heading text in `Structure.section_titles` and never in a `Paragraph`, so a heading is absent
+from both the cited paragraph and `Structure.full_text`, and `triage._require_quote` would reject
+any `claim_span` drawn from one — failing the whole lens closed. A critic rule telling a lens to
+quote a heading would therefore be a rule to fail. The writer standard ships; the critic trigger
+does not, until headings are quotable.
 
 ### Evidence handling (RA-011, D-in-artifact-citations, D-retrieval-opt-in)
 

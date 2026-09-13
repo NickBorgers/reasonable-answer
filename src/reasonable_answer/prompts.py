@@ -140,6 +140,18 @@ WRITER_SYSTEM = (
     "concrete figure or a source that states it, or you qualify the claim to what "
     "your support establishes. A claim about kind, mechanism or character needs no "
     "number, and you do not manufacture one.\n"
+    "- You state the argument that settles the question rather than leaving a reader "
+    "to assemble it. Where arithmetic settles it, you show the arithmetic — its "
+    "inputs, its units and its result — so a reader can reproduce it: a derivation "
+    "you describe is a derivation you perform. For a comparison you give a magnitude "
+    "for each side and, where one exists, the break-even; and you state how large a "
+    "counterargument is relative to the main effect, so its weight is on the page "
+    "rather than left to the reader.\n"
+    "- A heading claims no more than the section beneath it supports, and never "
+    "asserts what its own prose goes on to disclaim.\n"
+    "- Where the question admits more than one reading — a causal boundary, an "
+    "undefined term or tier — you say which reading you answer, and where the answer "
+    "would change under another reading you say that too.\n"
     "- You use neutral, precise language: an evaluative characterization is "
     "attributed to a source or argued in the text, never smuggled in as "
     "description.\n"
@@ -1052,10 +1064,22 @@ _CATEGORY_MEANING: dict[Category, str] = {
         "single outlet, organization, or aligned cluster, and the text shows no "
         "independent corroboration or acknowledgment of the imbalance"
     ),
+    # Widened in the open by D-decisive-quantities: distance between the two passages
+    # was never part of the definition, but critics read it in, so it is ruled out here.
     Category.CONTRADICTED_CLAIM: (
-        "the claim contradicts another claim in the report, or a source the report cites"
+        "the claim contradicts another claim in the report — however many sections "
+        "apart the two passages sit, including two figures for the same quantity that "
+        "differ by more than their stated precision — or a source the report cites"
     ),
-    Category.INVALID_INFERENCE: "the conclusion does not follow from the stated premises",
+    # Also widened in the open by D-decisive-quantities: a derivation that does not
+    # yield its own number, and an absence-of-evidence step, are both conclusions that
+    # do not follow from their stated premises. Neither is a new defect class.
+    Category.INVALID_INFERENCE: (
+        "the conclusion does not follow from the stated premises — including a stated "
+        "derivation that does not yield the number it reports, a unit that changes "
+        "between premise and result, and a conclusion that treats an absence of "
+        "evidence as evidence of absence"
+    ),
     # Explicitly widened by D-conceptual-conflation, never silently: a scope claim with
     # no concrete anchor is not a new defect class, it is this one — the support is
     # thematic and the claim is quantitative, so the claim outruns it.
@@ -1075,7 +1099,10 @@ _CATEGORY_MEANING: dict[Category, str] = {
     ),
     Category.INCOMPLETE_ANSWER: (
         "an explicit, material part of the question is unanswered, or the report "
-        "answers an adjacent question in its place"
+        "answers an adjacent question in its place — including a comparative or "
+        "quantitative question answered with no magnitude on either side, and a "
+        "comparison whose decisive consideration the report's own material supplies "
+        "but never states (D-decisive-quantities)"
     ),
     Category.OMITTED_COUNTERARGUMENT: (
         "a material opposing view a careful reader expects is absent, or the purported "
@@ -1085,7 +1112,8 @@ _CATEGORY_MEANING: dict[Category, str] = {
     Category.UNEXAMINED_PRESUPPOSITION: (
         "the report adopts a contested presupposition — inherited from the question "
         "or introduced by its own framing — as settled fact, without stating or "
-        "examining it"
+        "examining it, or answers one reading of a question whose wording admits "
+        "more than one without saying which reading it took"
     ),
     Category.UNCLEAR_STRUCTURE: "organization or clarity impedes evaluating the argument",
     Category.STYLISTIC: "cosmetic preference only",

@@ -75,6 +75,13 @@ presupposition — state it, cite the dispute about it, and answer conditionally
 framing. The critic's trigger is adoption-without-examination: the report treats the
 presupposition as settled fact.
 
+The same rule covers a question whose observable wording admits more than one reading, such as a
+causal boundary or an undefined tier. Answering under one reading without naming it inherits that
+reading as an unexamined presupposition. The writer states the reading taken and where the answer
+would change under another; the critic anchors the finding to the passage that silently answers
+under one reading (D-decisive-quantities). This is still an observable-text rule, not an inference
+about the writer's intent.
+
 The fix is always resolvable within the report (state and examine the presupposition, or recast
 the framing) — compatible with the resolvability contract on critic instructions. Floor `major`:
 this is `omitted_counterargument`'s sibling, an omission of examination, and it carries the same
