@@ -356,6 +356,41 @@ def test_a_blocking_issue_at_the_cap_needs_human_review(identities, config):
     assert final["terminal_status"] == "needs_human_review"
 
 
+def test_the_triage_event_records_the_severity_tuple_the_selection_reads(identities, config):
+    """D-latest-unblocked-selection: `material` alone left the shipped round
+    unauditable — two independent reviews of production runs could not tell a considered
+    selection from a bug, because the count does not say how many issues were blocking."""
+
+    def blocking(_alias, _user) -> CritiqueOutput:
+        return CritiqueOutput(
+            issues=[
+                uncited().model_copy(
+                    update={
+                        "category": Category.FABRICATED_CITATION,
+                        "severity": Severity.MINOR,  # floored up to blocking by triage
+                    }
+                )
+            ]
+        )
+
+    client = make_client(
+        identities,
+        critique_fn=lambda a, u: blocking(a, u) if lens_of(u) == "evidence" else CritiqueOutput(issues=[]),
+    )
+    final = run(config, question="Is it so?", seed=REPORT, client=client)
+    triages = [
+        json.loads(line)
+        for line in (client_run_dir(final) / "events.jsonl").read_text().splitlines()
+        if json.loads(line)["kind"] == "triage"
+    ]
+    assert triages
+    for event in triages:
+        # `material` is kept — nothing reading the old trail loses a field.
+        assert event["material"] == event["blocking"] + event["major"]
+        assert event["blocking"] >= 1
+        assert event["minor"] == 0
+
+
 def test_a_failing_lens_can_never_produce_an_accept(identities, config):
     """Fail-closed: a lens that keeps returning garbage aborts the run rather than
     letting the other two lenses accept the report."""

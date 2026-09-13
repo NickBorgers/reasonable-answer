@@ -132,7 +132,7 @@ def decide(ci: ControllerInput) -> Decision:
             rule=12,
             action="terminal",
             terminal_status="needs_human_review",
-            note="artifact cycle detected; freezing best-scoring version",
+            note="artifact cycle detected; freezing the selected version",
         )
 
     # 13 — the signal is stuck. Under scoped revision (D-scoped-revision) a stuck signal has
@@ -192,8 +192,8 @@ def latest_scores_per_artifact(board: list[dict]) -> list[dict]:
     by_hash: dict[str, dict] = {}
     for row in board:
         by_hash[row["artifact_hash"]] = row
-    # Ordered by round so that `best_scoring_index`'s latest-wins tie-break means what
-    # it says; a dict would otherwise order by each artifact's FIRST appearance.
+    # Ordered by round so that the latest-wins tie-break in `select_shipped_index` means
+    # what it says; a dict would otherwise order by each artifact's FIRST appearance.
     return sorted(by_hash.values(), key=lambda r: r["round"])
 
 
@@ -213,3 +213,39 @@ def best_scoring_index(
         key=lambda i: (w_b * scores[i][0] + w_m * scores[i][1] + w_n * scores[i][2], -i),
     )
     return best
+
+
+def latest_unblocked_index(scores: list[tuple[int, int, int]]) -> int:
+    """Minimal `blocking`; among those, the LATEST round (D-latest-unblocked-selection).
+
+    Major and minor counts do not enter selection. Under `revision.mode: patch` each
+    round hands the critics a near-identical artifact, and the round-to-round variance
+    of major/minor counts on near-identical text exceeds the between-round difference
+    the selection is meant to measure — so ranking on them selects the softest panel,
+    and rewards a draft that asserts less because a hedge is unfalsifiable and therefore
+    unflaggable. Blocking counts are different in kind: `fabricated_citation` is minted
+    mechanically from a 404 (D-notfound-fabrication) and `contradicted_claim` is the
+    rarest logic category, so the blocking count is both low-variance and the one class
+    a reader must never be handed.
+
+    Latest wins among equal-blocking rows for the reason `best_scoring_index` already
+    gave (D-latest-round-tiebreak, whose tie rule this subsumes rather than reverses):
+    the latest artifact has absorbed every fix task the run produced and has been read
+    by at least as many passes.
+    """
+    if not scores:
+        return 0
+    return min(range(len(scores)), key=lambda i: (scores[i][0], -i))
+
+
+def select_shipped_index(scores: list[tuple[int, int, int]], mode: str) -> int:
+    """Which of the ordered-by-round rows a non-accepted terminal ships.
+
+    Pure, total, and a function of bounded categorical counts only (QP1). `scores` must
+    already be one row per artifact, ordered by round — see `latest_scores_per_artifact`.
+    `fewest_defects` is the pre-D-latest-unblocked-selection rule, kept so the two can
+    be A/B'd from configuration exactly as `revision.mode` is (D-scoped-revision).
+    """
+    if mode == "fewest_defects":
+        return best_scoring_index(scores)
+    return latest_unblocked_index(scores)

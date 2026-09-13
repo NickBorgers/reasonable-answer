@@ -493,7 +493,7 @@ asked, never how many passes the budgets allow.
 | 9 | `material == 0` **and** `round < hard_cap` **and** `minor > 0` **and** `polish_recommended` **and** `polish_used < polish_cap` | **continue** (polish → generate; `polish_used += 1`) |
 | 10 | `material == 0` **and** `weak_met` (every under-cleared lens is `roster_limited`) | **converged_unconfirmed** |
 | 11 | `material == 0` (not strong, not toppable, not weak — confirmation budget spent) | **exhausted_unresolved** (clean-but-unconfirmed) |
-| 12 | `cycle_detected` | **needs_human_review** (freeze best-scoring version) |
+| 12 | `cycle_detected` | **needs_human_review** (freeze the selected version) |
 | 13 | `material > 0` **and** `stagnation_count ≥ K` **and** `rewrites_used < rewrite_cap` | **continue** (generate — a **full-document rewrite** by a fresh writer, ignoring `revision.mode`; `rewrites_used += 1`, `stagnation_count := 0`) |
 | 13 | `material > 0` **and** `stagnation_count ≥ K` | early terminal: **needs_human_review** if `blocking>0` else **exhausted_unresolved** |
 | 14 | `material > 0` | **continue** (generate from defect list) |
@@ -560,9 +560,21 @@ and keep their gates (RI-001, RH-001).
   triage increments or resets the counter, including a rule-2 re-critique pass over the same draft,
   not only the passes that follow a fresh generation.
 - **cycle:** the `artifact_hash` sequence repeats with period ≤ `L` (byte-level).
-- **best-scoring version:** minimal `w_b·blocking + w_m·major + w_n·minor`, using each artifact's
-  latest triage (RC-002); after those rows are ordered by round, ties → **latest round**
-  (D-latest-round-tiebreak).
+- **selected version:** the draft a non-accepted terminal ships, chosen by
+  `controller.select_shipped_index` from one row per artifact — each artifact's **latest** triage
+  (RC-002), ordered by round. Which rule runs is `review.selection`
+  (D-latest-unblocked-selection):
+    - `latest_unblocked` (**default**): keep the rows with the minimum **blocking** count; among
+      those, the **latest round**. Major and minor counts do not enter selection — on the
+      near-identical artifacts `revision.mode: patch` produces, their round-to-round variance is
+      larger than the between-round difference the selection is supposed to measure, so ranking on
+      them selects the panel rather than the prose, and rewards a draft that asserts less.
+    - `fewest_defects`: the previous rule, unchanged — minimal
+      `w_b·blocking + w_m·major + w_n·minor`, ties → **latest round** (D-latest-round-tiebreak).
+  Both are pure functions of bounded categorical counts, so QP1 holds either way; under both, ties
+  in the deciding quantity go to the latest round, so D-latest-round-tiebreak's tie direction is
+  subsumed, not reversed. The `triage` event records `blocking`/`major`/`minor` alongside
+  `material`, so the selection is reconstructible from the audit trail.
 
 ### Terminal statuses (RA-012, RC-001)
 

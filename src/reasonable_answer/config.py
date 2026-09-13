@@ -767,6 +767,17 @@ class ReviewConfig(BaseModel):
     #: `budgets`, so a new field there would make every paused run look like changed
     #: inputs at the deploy that shipped it.
     critic_strike_limit: int = Field(default=2, ge=0, le=20)
+    #: Which draft a non-accepted terminal ships, out of every artifact the run produced
+    #: (D-latest-unblocked-selection). `latest_unblocked` keeps the rows with the fewest
+    #: **blocking** issues and, among those, ships the latest round: major and minor
+    #: counts are critic judgements whose round-to-round variance on the near-identical
+    #: artifacts `revision.mode: patch` produces swamps the difference between rounds,
+    #: so ranking on them selects the softest panel and rewards hedging. `fewest_defects`
+    #: is the previous rule — minimal `100·blocking + 10·major + 1·minor`, ties to the
+    #: latest round — kept byte-for-byte so the two are A/B-able from configuration, the
+    #: way `revision.mode` is. Here and not under `budgets` for the reason
+    #: `critic_strike_limit` gives: `_run_fingerprint` hashes `budgets`.
+    selection: Literal["latest_unblocked", "fewest_defects"] = "latest_unblocked"
 
     @model_validator(mode="after")
     def _check(self) -> ReviewConfig:
