@@ -227,13 +227,12 @@ class SearchConfig(BaseModel):
     #: claim attributes to a page is in front of the critic wherever on the page it sits.
     fetch_max_chars: int = Field(default=6_000, ge=500, le=100_000)
     #: Characters of extracted text *retained* per page: the pool those excerpts are
-    #: chosen from, and what `dispute.adjudicate_mechanical`'s containment test searches.
+    #: chosen from, and what `dispute.adjudicate_mechanical`'s containment test searches
+    #: (not `support.check`, which works from `read_max_chars`-capped reads instead).
     #: Must be at least `fetch_max_chars`. Sized so that an ordinary article or briefing
-    #: is held whole — the pages behind ten of twenty-two terminal
-    #: `misrepresented_source` findings measured on production ran 13,000–44,000
-    #: characters, with the cited figure past the 6,000 the critic used to see. Bounded
-    #: because a model-chosen URL is still an egress and `fetch_max_bytes` above already
-    #: caps what is read off the wire; this caps what is kept of it.
+    #: is held whole, well past the 6,000 the critic used to see. Bounded because a
+    #: model-chosen URL is still an egress and `fetch_max_bytes` above already caps what
+    #: is read off the wire; this caps what is kept of it.
     fetch_body_max_chars: int = Field(default=120_000, ge=500, le=2_000_000)
 
     #: Give writers a `read_source` tool (D-writer-source-reads), so a claim can be
@@ -250,8 +249,8 @@ class SearchConfig(BaseModel):
     #: citing, and every round draws on the same pool, so a call cap bit early and often.
     read_budget: int | None = Field(default=None, ge=1, le=100_000)
     #: Characters of page text shown to the writer per read. Raising this above
-    #: `fetch_max_chars` enlarges the shared fetch cache and nothing else: verification
-    #: is handed a `fetch.CappedFetcher` clipped back to `fetch_max_chars`, so what the
+    #: `fetch_body_max_chars` enlarges the shared fetch cache and nothing else: verification
+    #: is handed a `fetch.CappedFetcher` clipped back to `fetch_body_max_chars`, so what the
     #: evidence lens sees — and what `dispute.adjudicate_mechanical` searches — stays a
     #: function of `verify_sources` alone (D-writer-source-reads).
     read_max_chars: int = Field(default=6_000, ge=500, le=100_000)
@@ -331,7 +330,7 @@ class PdfSourceConfig(BaseModel):
     #: critic, and only the extracted text is retained.
     max_bytes: int = Field(default=25_000_000, ge=100_000, le=100_000_000)
     #: Pages read before the rest is dropped. A thousand-page appendix would otherwise
-    #: spend real time producing text that `fetch_max_chars` throws away anyway.
+    #: spend real time producing text that `fetch_body_max_chars` throws away anyway.
     max_pages: int = Field(default=40, ge=1, le=2_000)
 
 

@@ -389,7 +389,12 @@ stores the larger of `fetch_body_max_chars` and `read_max_chars`, and verificati
 `fetch.CappedFetcher` view clipped back to `fetch_body_max_chars`, so `read_max_chars` never widens
 what a critic reads or what `dispute.adjudicate_mechanical` searches. What one critic is *shown* of
 that retained body is the smaller `fetch_max_chars`, selected at render time as claim-anchored
-excerpts rather than taken from the top of the page (`excerpt.select`, D-claim-anchored-excerpts).
+excerpts rather than taken from the top of the page (`excerpt.select`, D-claim-anchored-excerpts). A
+dispute's arbiter is shown a fetched page too, but verbatim rather than as an excerpt, and a
+`dispute_upheld` verdict there suppresses a defect — so it is handed its own `Runtime.dispute_fetcher`,
+a second `CappedFetcher` over the same cache clipped to `fetch_max_chars`, not `fetch_body_max_chars`;
+widening the retained body for verification and mechanical adjudication must not also widen the raw
+untrusted text an arbiter's ruling turns on.
 
 **Format conversion happens at the edge, not here.** `intake` requires markdown, because
 `report.parse` builds the `[S<n>.P<m>]` loci from `#` headings and `fetch.extract_source_urls`

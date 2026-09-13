@@ -844,25 +844,6 @@ def fetched_sources_block(
     )
 
 
-def _source_label(index: int, numbers: list[int] | None) -> str:
-    """`[3]` — the bibliography number the report lists this URL under, or several
-    (`[3][7]`) when it is listed twice; the block's own index when the report is not
-    in hand. The critic pairs an excerpt with a citation by this label, so it must be
-    the number the report uses, not the position in a deduplicated fetch list."""
-    if numbers:
-        return "".join(f"[{n}]" for n in numbers)
-    return f"[{index}]"
-
-
-def _shown_text(source, report: str | None, excerpt_chars: int | None, numbers: dict) -> str:
-    """A body as the critic sees it: claim-anchored excerpts when the report and a
-    budget are in hand, the body from its start otherwise."""
-    if report is None or excerpt_chars is None:
-        return f"Page text (truncated):\n{source.text}"
-    anchors = excerpt.anchors_for(report, source.url, numbers)
-    return excerpt.render(excerpt.select(source.text, anchors, budget=excerpt_chars))
-
-
 # ------------------------------------------------------------ claim checker
 
 #: One claim, one page, one fresh context (D-claim-level-verification). The checker is a
@@ -923,6 +904,25 @@ def claim_check_user(
         "character-for-character from the page text above; a span that is not in it "
         "fails the check."
     )
+
+
+def _source_label(index: int, numbers: list[int] | None) -> str:
+    """`[3]` — the bibliography number the report lists this URL under, or several
+    (`[3][7]`) when it is listed twice; the block's own index when the report is not
+    in hand. The critic pairs an excerpt with a citation by this label, so it must be
+    the number the report uses, not the position in a deduplicated fetch list."""
+    if numbers:
+        return "".join(f"[{n}]" for n in numbers)
+    return f"[{index}]"
+
+
+def _shown_text(source, report: str | None, excerpt_chars: int | None, numbers: dict) -> str:
+    """A body as the critic sees it: claim-anchored excerpts when the report and a
+    budget are in hand, the body from its start otherwise."""
+    if report is None or excerpt_chars is None:
+        return f"Page text (truncated):\n{source.text}"
+    anchors = excerpt.anchors_for(report, source.url, numbers)
+    return excerpt.render(excerpt.select(source.text, anchors, budget=excerpt_chars))
 
 
 #: Outcomes in which a registry has corroborated the citation's existence. Rendered with

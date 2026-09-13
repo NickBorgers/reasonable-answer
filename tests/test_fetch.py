@@ -969,6 +969,52 @@ def test_evidence_lens_sees_the_fetched_pages(tmp_path, identities, config):
     assert "https://example.org/a" in client.calls[-1].user
 
 
+def test_evidence_lens_wiring_reaches_excerpt_selection_for_a_long_page(
+    tmp_path, identities, config
+):
+    """`graph.py::_critique_one` wires `excerpt_chars=rt.config.search.fetch_max_chars`
+    into `critique_once` — the production call site that actually turns claim-anchored
+    excerpts on (D-claim-anchored-excerpts). Every other `_critique_one`-level test in
+    this module uses a fixture body well under `fetch_max_chars` (6,000 by default), so
+    `excerpt.select`'s 'body fits, show whole' branch is always taken and this call site
+    is never exercised end to end. Here the fetched page is long enough, and the cited
+    figure sits far enough past the opening, that reverting the wiring (`excerpt_chars`
+    left `None`, or the wrong config field) would make the figure vanish from what the
+    critic is shown — this pins that it does not."""
+    from reasonable_answer.graph import _critique_one
+
+    filler = "Navigation. Cookie notice. About this briefing. " * 300  # ~14,000 chars, > 6,000
+    # Repeated filler followed by a unique marker at the very end, far past any window a
+    # sentence-snapped excerpt anchored on the citing sentence above would reach.
+    tail_only = "Unrelated filler sentence. " * 300 + "TAIL END MARKER NEVER SHOWN."
+    page = (
+        "Textiles and the environment. Published 2022.\n"
+        + filler
+        + "Across the life cycle, the production phase accounts for 80% of the climate "
+        "change impact.\n"
+        + tail_only
+    )
+    report = (
+        "Body claiming the production phase accounts for 80% of the climate change "
+        "impact [1].\n\n## Sources\n\n[1] https://example.org/a\n"
+    )
+
+    class _LongPageFetcher:
+        def fetch_all(self, urls):
+            return [FetchedSource(url=urls[0], title="T", text=page)]
+
+    rt, client = _runtime(tmp_path, identities, config, fetcher=_LongPageFetcher())
+    _critique_one(
+        rt, Lens.EVIDENCE, "evidence-spec", "q?", report, "h" * 64, "vendor-a/model-a", attempt=1
+    )
+
+    user = client.calls[-1].user
+    assert "production phase accounts for 80%" in user
+    assert "characters shown" in user  # the excerpt header, never the old bare-prefix one
+    assert "TAIL END MARKER NEVER SHOWN" not in user  # scored out, not merely truncated at the end
+    assert "[…]" in user  # a real excerpt, not the whole ~21,000-char page
+
+
 def test_evidence_lens_uses_the_configured_source_character_budget(
     tmp_path, identities, config
 ):
