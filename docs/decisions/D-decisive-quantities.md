@@ -1,14 +1,12 @@
 ## D-decisive-quantities — a lens owns arithmetic, magnitude, and the argument that settles the question
 
-**The finding.** A round of expert defect reviews of recent production reports converges on one
-gap: no lens owned numbers, and no lens asked whether the argument that settles the question was
-present. The categories to express both already existed; nothing told a critic to look. The failure
-modes, stated as modes rather than as incidents:
+**The finding.** The taxonomy had categories capable of expressing numerical and decision-completion
+defects, but the lens briefs did not assign those checks to a critic. The relevant failure modes are:
 
 * **A derivation described but not performed.** A report states its method — "divide by X to get
   Y" — and the numbers downstream are the undivided ones. The sentence describing the method is
-  frequently *added late, in response to a critic*, without touching the figures it was supposed to
-  justify: the prose is patched and the arithmetic is not, so the defect is created by a fix.
+  added without touching the figures it was supposed to justify: the prose is patched and the
+  arithmetic is not.
 * **A unit that changes between premise and result.** A figure lifted from a source in one unit is
   restated in another with no conversion, and the resulting order-of-magnitude error propagates
   through every derived quantity.
@@ -34,11 +32,10 @@ modes, stated as modes rather than as incidents:
   boundary or an undefined tier admits more than one reading; the report answers one and never says
   which, so a reader cannot tell whether the answer is to their question.
 
-Those reviews motivate this decision; they are not its warrant (QP9, and audit content stays in the
-audit trail). The warrant is the mechanism, checkable in code and reproducible from the synthetic
-fixtures in `tests/`: the categories, the floors and the span validation are all unchanged, and what
-changes is the text of two lens briefs, four category meanings and four writer standards, each
-pinned by a test.
+This list defines the shapes the prompts must cover; it makes no claim about their incidence in
+production. The tests verify that the trigger and narrowing language reaches the real prompt paths
+and that the categories, floors, and span validation remain unchanged. They do not establish
+behavioral detection rates or false-positive rates; those remain audition questions.
 
 **The decision.** Six readings of four existing categories, stated in the open — the same discipline
 D-conceptual-conflation used to widen `overstated_claim`: each trigger ships with its narrowing, and
@@ -60,9 +57,8 @@ none may demand a specific document as the only fix.
 
 *Completeness lens* (`taxonomy.LENS_BRIEF[Lens.COMPLETENESS]`, `prompts._CATEGORY_MEANING`), framed
 by one sentence — the question is what the asker would do with this answer and which input to that
-decision is missing, not whether every item on a topic list is covered — the observed failure being
-a lens that files a missing-topic finding while the distinction the asker would actually act on
-stays absent:
+decision is missing, not whether every item on a topic list is covered — preventing a lens from
+filing a missing-topic finding while the distinction the asker would actually act on stays absent:
 
 4. **Magnitude** — a comparative or "how much" question answered with no magnitude on either side is
    `incomplete_answer`, **only where** the report's own cited material or ordinary arithmetic from
@@ -100,13 +96,19 @@ fail-closed. `tests/test_taxonomy.py::test_heading_text_is_not_quotable_so_no_he
 pins the observation, so the day headings become quotable the reason for the omission is visible.
 The writer-side standard has no such constraint and ships.
 
-**Invariants: none move.** No category is added or removed, so `LENS_CATEGORIES` and `SEVERITY_FLOOR`
+**Invariants.** No category is added or removed, so `LENS_CATEGORIES` and `SEVERITY_FLOOR`
 are byte-identical and severity floors still clamp up only. `triage.validate_issue` and
 `IN_ARTIFACT_RELATED` are untouched, so lens validation still fails closed on a span that is not
 really there — rule 2 relies on existing whole-artifact anchoring rather than relaxing it. Author
 exclusion, the blind orchestrator, termination and the untrusted-text boundary are not in the diff:
 this change is prompt text and the documents that govern it. Nothing enters a generator context that
 did not enter it before, and the report and question stay inside `DATA_FENCE`.
+
+Rule 6 is a clarified instance of the observable-text social-bias rule: when the question's wording
+admits multiple readings, silently inheriting one reading is adoption of an unexamined
+presupposition. [bias.md](../bias.md#4-question-presupposition-rule-unexamined_presupposition-completeness-lens-floor-major)
+therefore records the same trigger and writer remedy. The observable-text constraint and the
+category's `major` floor do not move (D-social-bias, D-observable-categories).
 
 **Why not the alternatives.**
 

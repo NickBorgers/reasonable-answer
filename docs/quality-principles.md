@@ -126,6 +126,15 @@ boundary is unchanged. The audition measures the added category through its exis
 metrics, deterministic verdict, and rubric-identity invalidation under QP8; no LLM grades prose into
 a control decision.
 
+**Application — decisive quantities (D-decisive-quantities).** The widened logic and completeness
+briefs change what isolated writers and critics assess, not what crosses contexts: report and
+question text remain fenced as untrusted data and critique traffic remains bounded structural data
+under QP5. The roles still refine through independent critique and regeneration under QP6. Existing
+categories retain their mechanical floors under QP1, and audition verdicts remain deterministic
+aggregations of structured metrics under QP8. The prompt-path tests establish the presence and
+narrowing of each instruction, not behavioral detection or false-positive rates; changing the
+prompt hash invalidates cached audition evidence so those questions must be measured again.
+
 **Application — the in-call repair turn (D-repair-turn-context).** Handing a critic back the field
 value it just submitted puts its own earlier output into its own context, which the drift table in
 [isolation.md](./isolation.md) names as a **primary** vector and which QP4 is otherwise the strongest
