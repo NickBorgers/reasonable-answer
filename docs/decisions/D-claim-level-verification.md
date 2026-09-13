@@ -1,43 +1,25 @@
 ## D-claim-level-verification — each cited claim is checked against its page in its own context, and the verdict is minted, not judged
 
-**The finding.** Seven production runs finished on build `417fbc9` (2026-09-12..13, the first build
-carrying D-claim-scoped-patch). None converged: five `exhausted_unresolved`, two `needs_human_review`.
-The copy-and-contradiction mechanism that decision removed was gone from the terminal defect lists;
-what remained was one lens. Across the seven runs' 56 critique passes, the **evidence lens** was
-cleared by a single critic in about 14 and by two critics once; logic and completeness cleared
-routinely. A run cannot reach `material == 0` while one lens never clears, so the evidence lens was
-the whole of the non-convergence.
-
-What it raised is on the record. Of the 38 major defects standing at the terminal round, 14 were
-`misrepresented_source`, and eight of those name, in their own rationale, a fetched text that was
-a navigation menu, a landing page, a site's home page, a table of contents or a report's front
-matter. D-claim-anchored-excerpts (PR #208) traced that to the fetch path: the critic was shown the
-first 6,000 characters of each page and, refetching the pages behind 22 such findings across fifteen
-runs, ten named a figure the page states *past* that cap. Its remedy — show the critic the passages
-nearest the report's own citing sentences — is the plumbing this decision builds on, and its own
-"deliberately not done" names what it left: *the per-source sub-context D-unbounded-evidence scoped
-as its follow-up*.
+**The finding.** D-claim-anchored-excerpts makes the characters an evidence critic sees relevant to
+the report's citing sentences, but deliberately leaves every fetched page in one bounded evidence
+context. Its own "deliberately not done" names the per-source sub-context D-unbounded-evidence
+scoped as its follow-up. This decision supplies that sub-context at claim granularity.
 
 Two properties of the single evidence context are what this decision changes, and neither is
 addressed by choosing better excerpts:
 
-* **Every page competes for one context.** `source_char_budget` (60,000) is a per-artifact bound
-  on page text shown to one critic, and the bibliographies in these runs ran 12–24 entries. At 6,000
-  characters per page, most pages were `FETCHED, TEXT WITHHELD` — reachable, unread — and the critic
-  was told to raise nothing about them. The excerpts sharpen what the critic sees of the pages that
-  fit; they do not change how many fit. Principle #6 of [isolation.md](../isolation.md) names this
+* **Every page competes for one context.** `source_char_budget` is a per-artifact bound on page text
+  shown to one critic. Pages beyond that budget are `FETCHED, TEXT WITHHELD` — reachable, unread —
+  and the critic is told to raise nothing about them. The excerpts sharpen what the critic sees of
+  the pages that fit; they do not change how many fit. Principle #6 of [isolation.md](../isolation.md) names this
   exact failure — retrieval degrades for material in the middle of a long context — and the
   `source_char_budget` comment has called the single context INTERIM since D-unbounded-evidence.
-* **Absence was a judgement.** The critic was asked to hold in mind, per page, whether the shown
-  part was the whole, and to raise absence only against a whole page. Measured twice now — before
-  and after the excerpt change's own prompt sharpening — it does not reliably do so, and there is no
-  reason to expect a third wording to work: a critic handed text and asked whether a claim is in it
-  answers the question it was asked.
+* **Absence was a judgement.** The critic is asked to hold in mind, per page, whether the shown part
+  was the whole, and to raise absence only against a whole page. That distinction is currently a
+  prompt instruction rather than a mechanically enforced condition.
 
-These figures are the operator's own `audit.json` trail and are the motivation, not the warrant
-(QP9). The warrant is the mechanism, checkable offline: one context, N pages, a budget that
-withholds most of them, and a category whose finding depends on a distinction the context was asked
-to keep.
+The warrant is therefore mechanically inspectable offline: one context contains multiple pages, a
+budget can withhold some of them, and an absence finding depends on whether the page was shown whole.
 
 **The decision.** The unit of source verification becomes the **claim**, and each claim is checked
 in its own context.
@@ -80,9 +62,10 @@ in its own context.
    call already has: a 402 during checking fails the lens with the account failure class, before the
    critic's larger call is spent, so `_defer_if_account_refused` defers the run
    (D-credit-exhaustion-defers).
-6. **Verdicts are memoised for the runtime**, keyed on (critic resolved identity, page text shown,
-   normalised sentence). The call is a function of those three; re-running it on an unchanged
-   sentence against an unchanged page buys sampling noise and nothing else. This is the one point
+6. **Verdicts are memoised for the runtime**, keyed on the critic's resolved identity and hashes of
+   the complete system and user prompts. The key therefore covers the sentence, its paragraph,
+   source number and URL, rendered page text, current date, and prompt wording. Re-running an
+   identical prompt buys sampling noise and nothing else. This is the one point
    the design debated, and it is decided on purpose: the memo is keyed on the critic's identity, so a
    second family still forms its own view and cross-model confirmation is untouched; it is a memo of
    a *verdict*, never a clean record — clearance is still minted from the completed review of the

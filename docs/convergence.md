@@ -225,8 +225,9 @@ inside the checked sentence), so one claim is never counted twice under two span
 the critic's `LensResult` — so they clamp, deduplicate, count toward `material`, withhold the clean
 record, and reach the writer as tasks exactly as a critic's own would — and a 402 during checking
 fails the lens with the account class so the run defers (D-credit-exhaustion-defers). Verdicts are
-memoised for the runtime per (critic identity, page text shown, sentence): the call is a function of
-those three, the memo is keyed on the critic's resolved identity so each family still forms its own
+memoised for the runtime per (critic resolved identity, complete system prompt, complete user
+prompt): the memo covers every input the checker sees, so a changed paragraph, source metadata or
+date cannot reuse a stale verdict. Each family still forms its own
 view, and it is never a clean record. Counts go to a `claim_check` event; the sentences, spans and
 reasons go to the run's critiques directory. No controller rule, no `ControllerInput` or
 `OrchestratorView` field, and no budget changes; calls per pass are bounded by citation markers ×

@@ -14,9 +14,10 @@ import json
 
 import pytest
 from fakes import FakeClient
+from pydantic import ValidationError
 
 from reasonable_answer import claimcheck, triage
-from reasonable_answer.config import Config, ConfigError, SearchConfig
+from reasonable_answer.config import ClaimCheckConfig, Config, ConfigError, SearchConfig
 from reasonable_answer.fetch import FetchedSource
 from reasonable_answer.graph import Runtime, _critique_one
 from reasonable_answer.llm import ModelCallError, ProviderAccountError
@@ -387,10 +388,29 @@ def test_the_cache_returns_an_unchanged_pair_without_a_call_and_is_keyed_on_iden
     other = claimcheck.check(client, "writer-b", "vendor-b/model-b", REPORT, _sources(), **kwargs)
     assert other.counts()["cached"] == 0
     assert len(calls) == 10
-    # A changed sentence misses the cache; the unchanged ones still hit.
+    # A changed sentence also changes the prompt context of its paragraph peer.
     changed = REPORT.replace("roughly 90%", "roughly 95%")
     third = claimcheck.check(client, "evidence-spec", "vendor-d/evidence", changed, _sources(), **kwargs)
-    assert third.counts()["cached"] == 4
+    assert third.counts()["cached"] == 3
+
+
+def test_the_cache_misses_when_only_the_surrounding_paragraph_changes(identities):
+    calls = []
+
+    def claim_fn(alias, user):
+        calls.append(alias)
+        return _supported(user)
+
+    cache = claimcheck.VerdictCache()
+    kwargs = dict(page_max_chars=30_000, max_pairs=200, max_tokens=800, repair_retries=0, cache=cache)
+    client = _client(identities, claim_fn)
+    claimcheck.check(client, "evidence-spec", "vendor-d/evidence", REPORT, _sources(), **kwargs)
+    changed = REPORT.replace(
+        "## Conclusion\n\n", "## Conclusion\n\nThe comparison scope is unchanged. "
+    )
+    second = claimcheck.check(client, "evidence-spec", "vendor-d/evidence", changed, _sources(), **kwargs)
+    assert second.counts()["cached"] == 3
+    assert len(calls) == 7
 
 
 def test_a_page_shown_in_part_never_makes_absence_a_finding(identities):
@@ -423,6 +443,15 @@ def test_the_checker_is_off_by_default_and_requires_verification(roster):
         claim_check={"enabled": True},
     )
     assert cfg.claim_check.enabled and cfg.search.verify_sources
+
+
+@pytest.mark.parametrize(
+    "field,value",
+    [("page_max_chars", 1_000), ("max_pairs", 0), ("max_tokens", 100)],
+)
+def test_claim_check_config_bounds(field, value):
+    with pytest.raises(ValidationError):
+        ClaimCheckConfig(**{field: value})
 
 
 # ------------------------------------------------------------------ the lens

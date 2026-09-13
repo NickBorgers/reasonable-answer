@@ -151,9 +151,10 @@ class VerdictCache:
         self._max = max_entries
 
     @staticmethod
-    def key(identity: str, page_text: str, sentence: str) -> tuple[str, str, str, str]:
-        body = hashlib.sha256(page_text.encode("utf-8")).hexdigest()
-        return (identity, body, _normalize(sentence), "v1")
+    def key(identity: str, system: str, user: str) -> tuple[str, str, str, str]:
+        system_hash = hashlib.sha256(system.encode("utf-8")).hexdigest()
+        user_hash = hashlib.sha256(user.encode("utf-8")).hexdigest()
+        return (identity, system_hash, user_hash, "v2")
 
     def get(self, key: tuple[str, str, str, str]) -> PairVerdict | None:
         with self._lock:
@@ -287,7 +288,15 @@ def _check_pair(
 ) -> PairVerdict:
     excerpted = excerpt.select(source.text, [pair.sentence], budget=page_max_chars)
     shown = excerpt.render(excerpted)
-    key = VerdictCache.key(identity, shown, pair.sentence)
+    user = prompts.claim_check_user(
+        pair.sentence,
+        pair.paragraph,
+        pair.number,
+        pair.url,
+        shown,
+        current_date=current_date,
+    )
+    key = VerdictCache.key(identity, prompts.CLAIM_CHECK_SYSTEM, user)
     if cache is not None:
         hit = cache.get(key)
         if hit is not None:
@@ -311,14 +320,6 @@ def _check_pair(
                     "from the page text shown; the span given is not in it"
                 )
 
-    user = prompts.claim_check_user(
-        pair.sentence,
-        pair.paragraph,
-        pair.number,
-        pair.url,
-        shown,
-        current_date=current_date,
-    )
     try:
         output = client.structured(
             alias,
