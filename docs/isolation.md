@@ -285,8 +285,11 @@ merely tidiness — the writer authors the manifest, so a manifest that fed acce
 writer grading its own review.
 
 **Fetched source pages (D-source-verification)** are the same class, one step further: with
-`search.verify_sources: true` the *full text* of an attempted, addressable cited page can enter a
-**critic's** context. Addressable citations are attempted up to the anti-pathological
+`search.verify_sources: true`, text from an attempted, addressable cited page can enter a
+**critic's** context. The fetched body is retained up to `search.fetch_body_max_chars` for
+verification and mechanical adjudication, while the critic receives at most `fetch_max_chars`
+characters selected from it as claim-anchored excerpts (D-claim-anchored-excerpts). Addressable
+citations are attempted up to the anti-pathological
 `search.max_source_urls` ceiling (D-unbounded-evidence). Unaddressable entries and addressable
 entries beyond that ceiling remain unchecked; the latter are recorded as not attempted because a
 citation the fetcher never saw carries no outcome, cannot appear in the sources block, and is then

@@ -1,12 +1,9 @@
 """Claim-anchored excerpts of a fetched page (D-claim-anchored-excerpts).
 
 The evidence critic is shown a bounded amount of each cited page. Until this module
-existed that bound was the *first* `fetch_max_chars` characters — a page's navigation,
-summary and opening paragraphs — and the figure a report attributed to page was,
-more often than not, further down. The critic was told the text was truncated and not
-to read absence as contradiction; measured on production audit trails, it read absence
-as contradiction anyway: of 22 terminal `misrepresented_source` findings across fifteen
-runs, ten named a figure that the page states past the cap.
+existed that bound was the *first* `fetch_max_chars` characters — often a page's
+navigation, summary and opening paragraphs — so claim-relevant text later in the page
+could be absent even though retrieval succeeded.
 
 This module chooses *which* characters to show instead of *how many*. For each source,
 the sentences of the report that cite it are the anchors; the page is scanned in

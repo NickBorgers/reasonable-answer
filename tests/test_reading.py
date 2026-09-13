@@ -482,7 +482,7 @@ def test_reading_on_forwards_the_default_unbounded_call_budget(tmp_path):
 
 def test_reading_widens_the_shared_cache_but_not_the_verification_path(tmp_path):
     """One fetcher, two caps. The cache must hold the larger, or the reader would be
-    silently clipped to the critic's cap — but the cap has to travel with the *handle*,
+    silently clipped to the verification cap — but the cap has to travel with the *handle*,
     or raising `read_max_chars` would widen what the evidence lens is shown."""
     from reasonable_answer.graph import _cache_max_chars
 
@@ -516,8 +516,8 @@ def test_reading_widens_the_shared_cache_but_not_the_verification_path(tmp_path)
     assert _cache_max_chars(retained) == 20_000
 
 
-def test_the_verification_handle_clips_to_the_critics_cap():
-    """`fetch_max_chars` is what the evidence lens and mechanical adjudication see,
+def test_the_verification_handle_clips_to_its_configured_cap():
+    """The verification handle bounds what verification and mechanical adjudication see,
     whatever the shared cache holds. The stakes are not cosmetic: a longer body makes
     `dispute.adjudicate_mechanical`'s containment test more likely to uphold a dispute,
     and an upheld dispute suppresses a defect — so an unclipped handle would give
@@ -534,6 +534,38 @@ def test_the_verification_handle_clips_to_the_critics_cap():
     # The cache itself is untouched, so the reader still gets the whole stored body.
     assert "TAIL MARKER" in inner.fetch(READ_URL).text
     assert capped.fetch_all([READ_URL])[0].text == seen.text
+
+
+def test_build_runtime_gives_verification_the_retained_body(tmp_path, identities, monkeypatch):
+    """The runtime cap is the retained body, not the smaller critic excerpt budget."""
+    from fakes import FakeClient
+
+    from reasonable_answer import fetch
+    from reasonable_answer.graph import build_runtime
+    from reasonable_answer.schemas import CritiqueOutput
+
+    body = "A" * 15_000
+    monkeypatch.setattr(
+        fetch.SourceFetcher,
+        "_resolved",
+        lambda self, url, depth=0: _body(url, body),
+    )
+    config = _config(
+        tmp_path,
+        verify_sources=True,
+        fetch_max_chars=1_000,
+        fetch_body_max_chars=20_000,
+    )
+    client = FakeClient(
+        identities=identities,
+        critique_fn=lambda a, u: CritiqueOutput(issues=[]),
+        report_fn=lambda n: DRAFT,
+    )
+
+    runtime = build_runtime(config, run_id="run-retained-body-test", client=client)
+
+    assert runtime.fetcher is not None
+    assert runtime.fetcher.fetch(READ_URL).text == body
 
 
 @pytest.mark.parametrize(
