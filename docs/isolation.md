@@ -212,6 +212,16 @@ artifact, rotation stays, clean records still reset on every generation. The sco
 counts these edits as `restated`, apart from `out_of_scope`, so the number that means "re-rolled
 text nobody complained about" keeps meaning it.
 
+**A fix is a change, not an annotation (D-no-hedge-discharge).** Neither licence says what a writer
+must do to the text it is allowed to edit, and the cheapest compliant edit — keep the claim, append
+"this remains an extrapolation" — makes the flagged sentence stop matching its finding while the
+claim, its figure and its citation all survive. The revision prompt therefore defines resolution
+(see [convergence.md](convergence.md#what-weaken-the-claim-means-d-no-hedge-discharge)), and the
+scope measurement gains `additive_only`: of the paragraphs a task named or that restated a flagged
+claim, how many came back containing every word of the old text, in order, with more around them.
+It is a subset of `in_scope` plus `restated` — a rate to read against them, never a fourth bucket —
+and, like every other number here, it is warn-only. Nothing about who edits or who reviews moves.
+
 ## The depersonalization step (principle 1, made concrete)
 
 ```mermaid

@@ -120,6 +120,12 @@ class ScopeReport:
     #: the edits D-claim-scoped-patch licenses, counted apart from `out_of_scope` so
     #: the number that means "re-rolled text nobody complained about" keeps meaning it.
     restated: tuple[StructuralRef, ...] = ()
+    #: Of the paragraphs a task named, or whose previous text restated a flagged claim,
+    #: the ones whose revised text keeps every word of the old text, in order, and adds
+    #: more — the writer only appended (D-no-hedge-discharge). A subset of `in_scope`
+    #: plus `restated`, never of `out_of_scope`: the question is whether the edits that
+    #: were asked for changed anything, not whether unasked-for edits were additive.
+    additive_only: tuple[StructuralRef, ...] = ()
 
     @property
     def in_scope_count(self) -> int:
@@ -131,6 +137,7 @@ class ScopeReport:
             "in_scope": self.in_scope_count,
             "restated": len(self.restated),
             "out_of_scope": len(self.out_of_scope),
+            "additive_only": len(self.additive_only),
             "defect_loci_untouched": len(self.untouched_defect_loci),
         }
 
@@ -183,6 +190,31 @@ def restates(paragraph: str, claim_span: str) -> bool:
     return match.size >= need
 
 
+def only_added_words(previous: str, revised: str) -> bool:
+    """Whether `revised` is `previous` with words added and none taken away.
+
+    The cheapest compliant answer to a fix task is to keep the sentence and append a
+    qualifier to it — "this remains an extrapolation", "this cannot be verified from
+    the citation" — which makes the flagged text stop matching the finding while the
+    claim, its figure and its citation all survive (D-no-hedge-discharge). That move
+    has an exact signature: every word of the old paragraph is still there, in order,
+    with more around it.
+
+    Compared on words, lower-cased and with punctuation dropped, for the reason
+    `restates` gives: re-wrapping, a comma or a capital is not the edit in question.
+    Subsequence, not prefix, because the qualifier is as often inserted mid-sentence
+    as appended to the end. A writer who deleted or replaced a single word is not
+    counted, which is the honest direction to err: the measurement claims only that
+    nothing was taken away.
+    """
+    old_words = _words(previous)
+    new_words = _words(revised)
+    if not old_words or len(new_words) <= len(old_words):
+        return False
+    remaining = iter(new_words)
+    return all(word in remaining for word in old_words)
+
+
 def _ref(p: Paragraph) -> StructuralRef:
     return StructuralRef(section=p.section, paragraph=p.paragraph)
 
@@ -212,6 +244,13 @@ def revision_scope(
     about. Matching is against the old text, because that is where the copy was; what
     the writer turned it into is not the question. With no spans given the report is
     exactly what it was.
+
+    Of the paragraphs that were asked for — in scope, or a restatement of a flagged
+    claim — the ones the revision only *added words to* are counted again as
+    `additive_only` (D-no-hedge-discharge). That is the signature of a fix task
+    discharged by appending a qualifier to a claim the writer kept. It is a subset,
+    not a fourth bucket: an additive paragraph is already counted in `in_scope` or
+    `restated`, and the number is read as a rate against them.
     """
     old = parse(previous).paragraphs
     new = parse(revised).paragraphs
@@ -233,9 +272,10 @@ def revision_scope(
     changed: list[StructuralRef] = []
     out_of_scope: list[StructuralRef] = []
     restated_refs: list[StructuralRef] = []
+    additive_refs: list[StructuralRef] = []
     touched: set[tuple[int, int]] = set()
 
-    for tag, i1, i2, _j1, _j2 in matcher.get_opcodes():
+    for tag, i1, i2, j1, j2 in matcher.get_opcodes():
         if tag == "equal":
             continue
         if tag == "insert":
@@ -253,6 +293,10 @@ def revision_scope(
             if not named:
                 out_of_scope.append(_ref(neighbours[-1]))
             continue
+        # What the paragraphs of this block turned into. A deletion has no new side,
+        # so nothing there can be additive, which is right: text that is gone was not
+        # discharged by appending to it.
+        counterparts = [q.text for q in new[j1:j2]]
         for p in old[i1:i2]:
             changed.append(_ref(p))
             if in_scope(p):
@@ -261,6 +305,9 @@ def revision_scope(
                 restated_refs.append(_ref(p))
             else:
                 out_of_scope.append(_ref(p))
+                continue
+            if any(only_added_words(p.text, text) for text in counterparts):
+                additive_refs.append(_ref(p))
 
     untouched = [
         StructuralRef(section=s, paragraph=p) for (s, p) in sorted(loci - touched)
@@ -270,4 +317,5 @@ def revision_scope(
         out_of_scope=tuple(out_of_scope),
         untouched_defect_loci=tuple(untouched),
         restated=tuple(restated_refs),
+        additive_only=tuple(additive_refs),
     )

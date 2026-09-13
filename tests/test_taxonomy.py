@@ -149,3 +149,16 @@ def test_completeness_scope_covers_literal_obligations_and_rejects_easy_substitu
     assert "answers an adjacent question in its place" in prompt
     assert "does not challenge a load-bearing conclusion" in prompt
     assert "Do not invent an unstated goal" in prompt
+
+
+def test_the_instruction_bullet_says_what_the_weakened_claim_would_be():
+    """The resolvability contract stays — an instruction may never demand a document
+    the writer cannot obtain — but "weaken the claim" is no longer left undefined, and
+    an instruction whose cheap branch is a disclaimer is not offered
+    (D-no-hedge-discharge). The bullet is shared by every lens."""
+    for lens in Lens:
+        prompt = critic_user(lens, "q", "# r\n\nbody\n")
+        assert "the instruction must allow weakening the claim as an acceptable resolution" in prompt
+        assert "must say what the weakened claim would be" in prompt
+        assert "state that this is unverified" in prompt
+        assert "Never ask for a caveat to be added to a claim that stands." in prompt

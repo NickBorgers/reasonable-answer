@@ -858,6 +858,14 @@ def _scope_fields(
             len(scope.out_of_scope),
             len(scope.changed),
         )
+    if scope.additive_only:
+        # A task discharged by appending to the claim rather than changing it
+        # (D-no-hedge-discharge). Warn-only, like every other number here.
+        log.info(
+            "revision only added words to %d of the %d paragraph(s) it was asked to change",
+            len(scope.additive_only),
+            scope.in_scope_count + len(scope.restated),
+        )
     return scope.as_event_fields()
 
 

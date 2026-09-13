@@ -168,7 +168,16 @@ WRITER_SEARCH_ADDENDUM = (
     "needs more than the snippet supports, say so in the text rather than "
     "overstating what you verified.\n"
     "- If search is unavailable or returns nothing useful, weaken the claim and say "
-    "the support is missing. Never fill the gap with an invented citation."
+    "the support is missing. Never fill the gap with an invented citation.\n"
+    "- Before writing that the evidence does not cover something — 'no source "
+    "addresses this', 'no assessment exists', 'this has not been studied' — search "
+    "for it. That is a claim about the literature, and it is held to the same "
+    "standard as every other claim you make.\n"
+    "- Check currency against the date you are given. Where the newest evidence your "
+    "report rests on is more than a year older than that date, and the question is "
+    "one whose answer moves — regulation, litigation, guidelines, standards, prices, "
+    "product generations, model versions — search for what has changed since, and say "
+    "in the text how recent the evidence you are relying on is."
 )
 
 
@@ -458,6 +467,38 @@ WRITER_PATCH_CLOSE = (
 )
 
 
+#: What it means to resolve a fix task (D-no-hedge-discharge). Shared by both revision
+#: modes, and deliberately so: appending a qualifier is the cheapest edit that makes a
+#: flagged sentence stop matching its finding, and it is as available under `rewrite` as
+#: under `patch`, so scoping the edit (D-scoped-revision) never addressed it. The
+#: critics' resolvability contract — an instruction may never demand a document the
+#: writer cannot obtain, so weakening the claim is always an acceptable resolution — was
+#: written to stop unsatisfiable demands, and was read as a licence to keep the claim
+#: and hedge it. This says what weakening is: restricting the claim to what the support
+#: establishes, not annotating a claim that is left standing.
+#:
+#: The examples are in the writers' own observed words rather than invented, because a
+#: rule stated abstractly ("do not hedge") is the rule that produced the hedges.
+WRITER_RESOLUTION_STANDARD = (
+    "WHAT RESOLVING A TASK MEANS. A task is resolved by changing the claim or its "
+    "support, never by appending a qualifier to a claim you keep. Weakening a claim "
+    "means restricting it to what the support establishes — a narrower population, a "
+    "smaller magnitude, the cases actually measured, one named source's finding — or "
+    "removing the claim. Attaching 'this remains an extrapolation', 'this is not "
+    "directly established', 'this cannot be verified from the citation' or 'this is "
+    "unverified' to a claim that keeps its figure and its citation does not resolve "
+    "anything: the claim still says what it said, and the same defect will be filed "
+    "against it again.\n"
+    "Never substitute an evaluative qualifier for a citation. 'According to anecdotal "
+    "accounts', 'so-called', 'merely' and the like characterize the support instead "
+    "of citing it, and are themselves defects. A claim no source establishes is "
+    "removed, or restated as this report's own inference and labelled as one.\n"
+    "State a limitation once, where it applies. Do not copy the same caveat into every "
+    "passage that restates the claim: a fix travels to the restatements, a caveat "
+    "does not."
+)
+
+
 def writer_revision(
     question: str,
     report: str,
@@ -480,9 +521,16 @@ def writer_revision(
         "Only cosmetic polish remains. Improve clarity and readability. Change no "
         "substantive claim and remove no citation."
         if polish
-        else "Resolve every fix task below. Preserve everything that is not implicated."
+        else (
+            "Resolve every fix task below by changing what it names — the claim, or "
+            "its support — not by qualifying a claim you leave standing. Preserve "
+            "everything that is not implicated."
+        )
     )
     dispute_note = WRITER_DISPUTE_ADDENDUM if disputes_enabled and not polish else ""
+    # A polish pass has no fix tasks to discharge, so the standard has nothing to say
+    # there; rule 9 fires only when `material == 0`.
+    resolution = "" if polish else f"\n\n{WRITER_RESOLUTION_STANDARD}"
     close = WRITER_PATCH_CLOSE if mode == "patch" and not polish else WRITER_REWRITE_CLOSE
     return (
         f"{UNTRUSTED_NOTE}\n\n"
@@ -495,7 +543,7 @@ def writer_revision(
         "Each task names a locus (section/paragraph of the draft), a defect category, and "
         "a concrete instruction. Apply them all. Where a task asks for a citation you "
         "cannot honestly supply, weaken or remove the claim rather than inventing a "
-        f"source.{dispute_note}\n\n"
+        f"source.{resolution}{dispute_note}\n\n"
         f"{close}"
     )
 
@@ -713,8 +761,13 @@ def critic_user(
         "- `instruction` is a concrete fix an editor could apply without further "
         "context or access to new source material. Where the ideal fix would need a "
         "document the writer may not be able to obtain, the instruction must allow "
-        "weakening the claim or adding an explicit caveat as an acceptable "
-        "resolution.\n"
+        "weakening the claim as an acceptable resolution — and must say what the "
+        "weakened claim would be: the population it should be restricted to, the "
+        "smaller magnitude it supports, or the source it should be attributed to. An "
+        "instruction whose cheapest compliant reading is 'state that this is "
+        "unverified' or 'clarify that this figure is the author's own calculation' is "
+        "not a fix: it leaves the claim, its figure and its citation exactly as they "
+        "are. Never ask for a caveat to be added to a claim that stands.\n"
         "- `severity` is your proposal; it may be raised by policy but never lowered.\n\n"
         "Report every genuine defect in your categories, and nothing else. An empty list "
         "is correct when there is nothing material to report."
