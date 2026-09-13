@@ -227,13 +227,12 @@ class SearchConfig(BaseModel):
     #: claim attributes to a page is in front of the critic wherever on the page it sits.
     fetch_max_chars: int = Field(default=6_000, ge=500, le=100_000)
     #: Characters of extracted text *retained* per page: the pool those excerpts are
-    #: chosen from, and what `dispute.adjudicate_mechanical`'s containment test searches.
+    #: chosen from, and what `dispute.adjudicate_mechanical`'s containment test searches
+    #: (not `support.check`, which works from `read_max_chars`-capped reads instead).
     #: Must be at least `fetch_max_chars`. Sized so that an ordinary article or briefing
-    #: is held whole — the pages behind ten of twenty-two terminal
-    #: `misrepresented_source` findings measured on production ran 13,000–44,000
-    #: characters, with the cited figure past the 6,000 the critic used to see. Bounded
-    #: because a model-chosen URL is still an egress and `fetch_max_bytes` above already
-    #: caps what is read off the wire; this caps what is kept of it.
+    #: is held whole, well past the 6,000 the critic used to see. Bounded because a
+    #: model-chosen URL is still an egress and `fetch_max_bytes` above already caps what
+    #: is read off the wire; this caps what is kept of it.
     fetch_body_max_chars: int = Field(default=120_000, ge=500, le=2_000_000)
 
     #: Give writers a `read_source` tool (D-writer-source-reads), so a claim can be

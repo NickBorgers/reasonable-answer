@@ -678,6 +678,63 @@ def test_the_arbiters_reason_is_persisted_to_the_dispute_audit_record(tmp_path):
     assert reason_text not in events_text
 
 
+def test_the_arbiter_sees_the_page_through_dispute_fetcher_not_fetcher(tmp_path):
+    """D-claim-anchored-excerpts widened `Runtime.fetcher` to `fetch_body_max_chars` for
+    verification and mechanical adjudication. The arbiter's evidence page must keep coming
+    from the separate, smaller-capped `Runtime.dispute_fetcher` — never from `fetcher` — or
+    that widening would also have 20x'd the untrusted page text an arbiter's `dispute_upheld`
+    verdict turns on, which suppresses a defect outright rather than merely risking a
+    spurious one. Two distinct fakes, keyed to the same URL but carrying different text,
+    make it observable which handle actually supplied the arbiter's page."""
+    defect = make_defect(category=Category.OVERSTATED_CLAIM)  # not mechanical: straight to arbiter
+    dispute = make_dispute()  # cites GOOD_PAGE.url
+    seen_users: list[str] = []
+
+    def arbiter(_alias, user):
+        seen_users.append(user)
+        return ArbiterVerdict(dispute_upheld=False, reason="not corroborated")
+
+    fetcher = FakeFetcher(pages={GOOD_PAGE.url: GOOD_PAGE})
+    dispute_fetcher = FakeFetcher(
+        pages={GOOD_PAGE.url: FetchedSource(url=GOOD_PAGE.url, text="NARROW-CAPPED-TEXT")}
+    )
+
+    config = make_config(tmp_path)
+    client = FakeClient(
+        identities=IDENTITIES,
+        critique_fn=lambda a, u: CritiqueOutput(issues=[]),
+        report_fn=lambda n: REPORT,
+        arbiter_fn=arbiter,
+    )
+    store = RunStore(config.runs_dir, "run-dispute-fetcher-arbiter")
+    rt = Runtime(
+        config=config,
+        client=client,
+        identities=client.resolve_identities(config.roster.all_aliases),
+        store=store,
+        fetcher=fetcher,
+        dispute_fetcher=dispute_fetcher,
+    )
+    state = {
+        "question": "Did the senator launch a campaign?",
+        "report": REPORT,
+        "defect_citation_scope": fetch.extract_source_urls(REPORT),
+        "pending_disputes": _pending(defect, dispute),
+        "adjudications": [],
+        "dispute_budget_remaining": 3,
+        "defect_provenance": {},
+        "round": 2,
+        "author_identity": "vendor-a/model-a",
+    }
+
+    _adjudicate(state, rt)
+
+    assert dispute_fetcher.fetches == [GOOD_PAGE.url]
+    assert fetcher.fetches == []  # the wide-capped handle is never touched by the arbiter path
+    assert seen_users and "NARROW-CAPPED-TEXT" in seen_users[0]
+    assert "large crowd" not in seen_users[0]  # GOOD_PAGE's text, which `fetcher` alone holds
+
+
 # ------------------------------------------------- citation scope (D-dispute-evidence-prior-draft)
 
 #: No eligible arbiter once the disputer and the raising critic are excluded — isolates
