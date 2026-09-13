@@ -343,13 +343,16 @@ def _build_runtime(
         if (config.search.verify_sources or config.search.read_sources)
         else None
     )
-    # Verification sees `fetch_max_chars` and nothing more, whatever the cache holds.
-    # Without the cap travelling with the handle, raising `read_max_chars` would widen
-    # both the evidence lens's page text and `dispute.adjudicate_mechanical`'s
-    # containment window — and a dispute upheld there suppresses a defect, so
-    # `search.read_sources` would have a path into the stop decision it must not have.
+    # Verification sees `fetch_body_max_chars` and nothing more, whatever the cache
+    # holds. Without the cap travelling with the handle, raising `read_max_chars` would
+    # widen both the pool the evidence lens's excerpts are drawn from and
+    # `dispute.adjudicate_mechanical`'s containment window — and a dispute upheld there
+    # suppresses a defect, so `search.read_sources` would have a path into the stop
+    # decision it must not have. What one critic is *shown* of that body is the smaller
+    # `fetch_max_chars`, applied at render time as claim-anchored excerpts
+    # (D-claim-anchored-excerpts).
     fetcher = (
-        fetch.CappedFetcher(source_fetcher, max_chars=config.search.fetch_max_chars)
+        fetch.CappedFetcher(source_fetcher, max_chars=config.search.fetch_body_max_chars)
         if config.search.verify_sources and source_fetcher is not None
         else None
     )
@@ -552,10 +555,13 @@ def _cache_max_chars(config: Config) -> int:
     is then handed a view that applies its own (`fetch.CappedFetcher`). The resolver
     ladder uses the same number, or a body reached through an open-access mirror would
     be bounded differently from one fetched directly (D-writer-source-reads).
+
+    Verification's cap is `fetch_body_max_chars`, the retained body, not the
+    `fetch_max_chars` one critic is shown of it (D-claim-anchored-excerpts).
     """
     if config.search.read_sources:
-        return max(config.search.fetch_max_chars, config.search.read_max_chars)
-    return config.search.fetch_max_chars
+        return max(config.search.fetch_body_max_chars, config.search.read_max_chars)
+    return config.search.fetch_body_max_chars
 
 
 def _build_resolver(config: Config, warnings: list[str]):
@@ -1562,6 +1568,7 @@ def _critique_one(
         attempt=attempt,
         current_date=run_date,
         source_char_budget=rt.config.search.source_char_budget,
+        excerpt_chars=rt.config.search.fetch_max_chars,
     )
 
     # A cited URL that a definitive not-found (404/410) does not resolve is a

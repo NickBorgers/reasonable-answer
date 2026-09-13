@@ -220,8 +220,21 @@ class SearchConfig(BaseModel):
     fetch_timeout_seconds: float = Field(default=15.0, gt=0, le=120)
     #: bytes read off the wire per page
     fetch_max_bytes: int = Field(default=400_000, ge=1_000, le=10_000_000)
-    #: characters of extracted text shown to the critic per page
+    #: Characters of extracted text shown to the critic per page — as claim-anchored
+    #: excerpts, not the page's first N characters (D-claim-anchored-excerpts). The
+    #: opening of the page is always shown; the rest of this budget goes to the passages
+    #: that best match the report's own sentences citing the source, so the figure a
+    #: claim attributes to a page is in front of the critic wherever on the page it sits.
     fetch_max_chars: int = Field(default=6_000, ge=500, le=100_000)
+    #: Characters of extracted text *retained* per page: the pool those excerpts are
+    #: chosen from, and what `dispute.adjudicate_mechanical`'s containment test searches.
+    #: Must be at least `fetch_max_chars`. Sized so that an ordinary article or briefing
+    #: is held whole — the pages behind ten of twenty-two terminal
+    #: `misrepresented_source` findings measured on production ran 13,000–44,000
+    #: characters, with the cited figure past the 6,000 the critic used to see. Bounded
+    #: because a model-chosen URL is still an egress and `fetch_max_bytes` above already
+    #: caps what is read off the wire; this caps what is kept of it.
+    fetch_body_max_chars: int = Field(default=120_000, ge=500, le=2_000_000)
 
     #: Give writers a `read_source` tool (D-writer-source-reads), so a claim can be
     #: attached to a page the writer actually read rather than to a snippet. Bounded to
@@ -282,6 +295,15 @@ class SearchConfig(BaseModel):
                 "fail closed: search.support_manifest requires search.read_sources — "
                 "support spans are checked against the bodies the writer read, and "
                 "with nothing read every entry would be recorded unchecked"
+            )
+        if self.fetch_body_max_chars < self.fetch_max_chars:
+            # A retained body smaller than the excerpt budget would clip what the critic
+            # is shown back to the page's opening — silently, which is the failure
+            # D-claim-anchored-excerpts removes.
+            raise ValueError(
+                "fail closed: search.fetch_body_max_chars must be at least "
+                "search.fetch_max_chars — excerpts are chosen from the retained body, "
+                "so a smaller body would silently clip what the evidence critic is shown"
             )
         return self
 

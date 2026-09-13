@@ -492,15 +492,28 @@ def test_reading_widens_the_shared_cache_but_not_the_verification_path(tmp_path)
         verify_sources=True,
         read_sources=True,
         fetch_max_chars=1_000,
+        fetch_body_max_chars=1_000,
         read_max_chars=5_000,
     )
     assert _cache_max_chars(both) == 5_000
-    # Reading off: the cache is exactly what verification always stored, so a
-    # verification-only deployment is byte-identical to what it was.
+    # Reading off: the cache is exactly what verification stores — the retained body
+    # (D-claim-anchored-excerpts), not the smaller excerpt budget one critic is shown.
     verify_only = _config(
-        tmp_path, enabled=True, verify_sources=True, fetch_max_chars=1_000
+        tmp_path,
+        enabled=True,
+        verify_sources=True,
+        fetch_max_chars=1_000,
+        fetch_body_max_chars=1_000,
     )
     assert _cache_max_chars(verify_only) == 1_000
+    retained = _config(
+        tmp_path,
+        enabled=True,
+        verify_sources=True,
+        fetch_max_chars=1_000,
+        fetch_body_max_chars=20_000,
+    )
+    assert _cache_max_chars(retained) == 20_000
 
 
 def test_the_verification_handle_clips_to_the_critics_cap():

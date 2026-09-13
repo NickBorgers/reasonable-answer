@@ -855,6 +855,22 @@ def test_truncation_is_disclosed_so_absence_is_not_read_as_contradiction():
         [FetchedSource(url="https://example.org/a", text="x")]
     )
     assert "truncated" in block
+    # The rule the disclosure exists for is stated in both paths: the one where a body is
+    # shown from its start, and the one where it is shown as claim-anchored excerpts.
+    assert "NOT evidence that the page lacks it" in block
+
+
+def test_out_of_range_body_cap_is_rejected_at_load():
+    """A retained body smaller than the excerpt budget would clip what the critic is
+    shown back to the page's opening — the silent failure D-claim-anchored-excerpts
+    removes — so the pair is validated together."""
+    from pydantic import ValidationError
+
+    from reasonable_answer.config import SearchConfig
+
+    with pytest.raises(ValidationError, match="fetch_body_max_chars must be at least"):
+        SearchConfig(fetch_max_chars=6_000, fetch_body_max_chars=5_000)
+    assert SearchConfig(fetch_max_chars=6_000, fetch_body_max_chars=6_000).fetch_body_max_chars == 6_000
 
 
 def test_categories_sharpen_only_when_pages_are_available():

@@ -184,9 +184,23 @@ not-found above is escalated, and that escalation is the pipeline's, not the mod
 now surfaced under its own `SourceOutcome` label (`BLOCKED`, `COULD NOT READ`, …) rather than one
 flat "could not fetch", and an opt-in tier (`sources.enabled` **and** `sources.pdf.enabled`, both off
 by default, fatal at startup without `pypdf`) **reads** a cited PDF rather than reporting it as an
-unreadable content type — so "a body this cannot read" narrows to formats no converter handles. Page
-text is truncated and the critic is told so, so a claim it cannot see is not read as a claim the page
-contradicts.
+unreadable content type — so "a body this cannot read" narrows to formats no converter handles.
+
+**What the critic is shown of a page is chosen by the claims, not by position
+(D-claim-anchored-excerpts).** A fetched body is retained up to `search.fetch_body_max_chars`, and
+one critic is shown at most `search.fetch_max_chars` of it — as the page's opening plus the passages
+that best match the report's own sentences citing that source (`excerpt.select`: deterministic,
+numbers weighted above content words, whole sentences, document order), each under its character
+range, with `[…]` marking what is not shown and a header stating how much of the page is. Every
+entry is labelled with the bibliography number(s) the report lists the URL under. Before this, the
+critic saw the first `fetch_max_chars` characters of each page, was told the text was truncated, and
+was asked not to read absence as contradiction; measured on fifteen production runs it did so
+anyway — ten of twenty-two terminal `misrepresented_source` findings named a figure the page states
+past the cap. The rule the critic is given is unchanged in substance and sharpened in wording: a
+page shown in part is truncated, and a claim missing from the excerpts is not evidence that the page
+lacks it — `misrepresented_source` is raised only where an excerpt addresses the same point and
+states something materially different. `dispute.adjudicate_mechanical` and `support.check` search
+the retained body, not the excerpts.
 
 **Existence is checkable even when the body is not (D-existence-vs-body, off by default).** With `sources.enabled`
 and `sources.identifiers.enabled` both true, a cited URL that carries a DOI or PMID and would not
