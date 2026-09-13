@@ -397,8 +397,10 @@ arbitrary-URL reader, and a refused URL never reaches the network or costs budge
 but unbounded by default; optional `search.read_budget` adds a whole-run call cap. Two character
 bounds always apply: `search.read_char_budget` characters of page text in total (default 200,000),
 and `search.read_max_chars` per page (default 6,000). Raising
-`read_max_chars` above `fetch_max_chars` widens what the *writer* sees and nothing else — the
-evidence lens and mechanical dispute adjudication stay clipped to `fetch_max_chars`. Reading
+`read_max_chars` above `fetch_body_max_chars` widens what the *writer* sees and nothing else — the
+verification path and mechanical dispute adjudication stay clipped to the retained body cap,
+`fetch_body_max_chars`. The evidence critic sees at most `fetch_max_chars` characters selected
+from that body as claim-anchored excerpts. Reading
 egresses through the same fetch boundary `verify_sources` uses, so the same network-layer caveat
 applies, which is why the shipped roster leaves it off.
 
