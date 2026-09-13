@@ -330,7 +330,7 @@ class PdfSourceConfig(BaseModel):
     #: critic, and only the extracted text is retained.
     max_bytes: int = Field(default=25_000_000, ge=100_000, le=100_000_000)
     #: Pages read before the rest is dropped. A thousand-page appendix would otherwise
-    #: spend real time producing text that `fetch_max_chars` throws away anyway.
+    #: spend real time producing text that `fetch_body_max_chars` throws away anyway.
     max_pages: int = Field(default=40, ge=1, le=2_000)
 
 
