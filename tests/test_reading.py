@@ -482,7 +482,7 @@ def test_reading_on_forwards_the_default_unbounded_call_budget(tmp_path):
 
 def test_reading_widens_the_shared_cache_but_not_the_verification_path(tmp_path):
     """One fetcher, two caps. The cache must hold the larger, or the reader would be
-    silently clipped to the critic's cap — but the cap has to travel with the *handle*,
+    silently clipped to the verification cap — but the cap has to travel with the *handle*,
     or raising `read_max_chars` would widen what the evidence lens is shown."""
     from reasonable_answer.graph import _cache_max_chars
 
@@ -492,19 +492,32 @@ def test_reading_widens_the_shared_cache_but_not_the_verification_path(tmp_path)
         verify_sources=True,
         read_sources=True,
         fetch_max_chars=1_000,
+        fetch_body_max_chars=1_000,
         read_max_chars=5_000,
     )
     assert _cache_max_chars(both) == 5_000
-    # Reading off: the cache is exactly what verification always stored, so a
-    # verification-only deployment is byte-identical to what it was.
+    # Reading off: the cache is exactly what verification stores — the retained body
+    # (D-claim-anchored-excerpts), not the smaller excerpt budget one critic is shown.
     verify_only = _config(
-        tmp_path, enabled=True, verify_sources=True, fetch_max_chars=1_000
+        tmp_path,
+        enabled=True,
+        verify_sources=True,
+        fetch_max_chars=1_000,
+        fetch_body_max_chars=1_000,
     )
     assert _cache_max_chars(verify_only) == 1_000
+    retained = _config(
+        tmp_path,
+        enabled=True,
+        verify_sources=True,
+        fetch_max_chars=1_000,
+        fetch_body_max_chars=20_000,
+    )
+    assert _cache_max_chars(retained) == 20_000
 
 
-def test_the_verification_handle_clips_to_the_critics_cap():
-    """`fetch_max_chars` is what the evidence lens and mechanical adjudication see,
+def test_the_verification_handle_clips_to_its_configured_cap():
+    """The verification handle bounds what verification and mechanical adjudication see,
     whatever the shared cache holds. The stakes are not cosmetic: a longer body makes
     `dispute.adjudicate_mechanical`'s containment test more likely to uphold a dispute,
     and an upheld dispute suppresses a defect — so an unclipped handle would give
@@ -521,6 +534,79 @@ def test_the_verification_handle_clips_to_the_critics_cap():
     # The cache itself is untouched, so the reader still gets the whole stored body.
     assert "TAIL MARKER" in inner.fetch(READ_URL).text
     assert capped.fetch_all([READ_URL])[0].text == seen.text
+
+
+def test_build_runtime_gives_verification_the_retained_body(tmp_path, identities, monkeypatch):
+    """The runtime cap is the retained body, not the smaller critic excerpt budget."""
+    from fakes import FakeClient
+
+    from reasonable_answer import fetch
+    from reasonable_answer.graph import build_runtime
+    from reasonable_answer.schemas import CritiqueOutput
+
+    body = "A" * 15_000
+    monkeypatch.setattr(
+        fetch.SourceFetcher,
+        "_resolved",
+        lambda self, url, depth=0: _body(url, body),
+    )
+    config = _config(
+        tmp_path,
+        verify_sources=True,
+        fetch_max_chars=1_000,
+        fetch_body_max_chars=20_000,
+    )
+    client = FakeClient(
+        identities=identities,
+        critique_fn=lambda a, u: CritiqueOutput(issues=[]),
+        report_fn=lambda n: DRAFT,
+    )
+
+    runtime = build_runtime(config, run_id="run-retained-body-test", client=client)
+
+    assert runtime.fetcher is not None
+    assert runtime.fetcher.fetch(READ_URL).text == body
+
+
+def test_build_runtime_caps_the_arbiters_page_smaller_than_the_retained_body(
+    tmp_path, identities, monkeypatch
+):
+    """The dispute arbiter renders its evidence page verbatim (`prompts.arbiter_user`), unlike
+    the evidence critic's claim-anchored excerpt of the same retained body, so it must keep the
+    smaller `fetch_max_chars` cap even though `runtime.fetcher` was widened to
+    `fetch_body_max_chars` for verification and mechanical adjudication
+    (D-claim-anchored-excerpts). A shared handle here would silently 20x the untrusted page text
+    an arbiter's `dispute_upheld` verdict — which suppresses a defect outright — turns on."""
+    from fakes import FakeClient
+
+    from reasonable_answer import fetch
+    from reasonable_answer.graph import build_runtime
+    from reasonable_answer.schemas import CritiqueOutput
+
+    body = "A" * 15_000
+    monkeypatch.setattr(
+        fetch.SourceFetcher,
+        "_resolved",
+        lambda self, url, depth=0: _body(url, body),
+    )
+    config = _config(
+        tmp_path,
+        verify_sources=True,
+        fetch_max_chars=1_000,
+        fetch_body_max_chars=20_000,
+    )
+    client = FakeClient(
+        identities=identities,
+        critique_fn=lambda a, u: CritiqueOutput(issues=[]),
+        report_fn=lambda n: DRAFT,
+    )
+
+    runtime = build_runtime(config, run_id="run-dispute-fetcher-test", client=client)
+
+    assert runtime.dispute_fetcher is not None
+    assert len(runtime.dispute_fetcher.fetch(READ_URL).text) == 1_000
+    # Same underlying page, same run-lifetime cache — only the view differs.
+    assert runtime.fetcher.fetch(READ_URL).text == body
 
 
 @pytest.mark.parametrize(

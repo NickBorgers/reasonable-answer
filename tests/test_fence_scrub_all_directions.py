@@ -148,6 +148,15 @@ def test_source_read_block_scrubs_hostile_page_text():
     assert SCRUBBED in prompt
 
 
+# --------------------------------------------------------------- claim_check_user
+
+
+def test_claim_check_user_scrubs_sentence_paragraph_and_page_text():
+    prompt = prompts.claim_check_user(BREAKOUT, BREAKOUT, 1, "https://example.org/a", BREAKOUT)
+    assert BREAKOUT not in prompt
+    assert prompt.count(SCRUBBED) == 3
+
+
 # -------------------------------------------------------------------- arbiter_user
 
 

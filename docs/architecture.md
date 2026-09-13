@@ -81,7 +81,8 @@ Invariants (enforced in code, covered by tests):
 | **intake** | question + **markdown** seed | normalized `question` / `seed`; routing | none | deterministic |
 | **generate** | question + latest report + **defect list**; with retrieval on, its own `web_search` results and — with `search.read_sources` — the pages it read from them (D-writer-source-reads) | next report (with citations) — under `revision.mode: patch` only the paragraphs a fix task named — and the passages that restate the same claim (D-claim-scoped-patch) — are edited, the rest returned byte-identical (D-scoped-revision); plus, with `search.support_manifest`, an **audit-side** support manifest | non-author (alternating) | LLM (untrusted output) |
 | **adjudicate** *(D-writer-disputes, opt-in)* | pending disputes + finding + one paragraph | `AdjudicationRecord[]` | mechanical fetch-check, else an arbiter ≠ disputer ≠ raiser | mechanical, or LLM inside a closed 2-field schema |
-| **critique** | report + question + **one lens** + taxonomy | `Issue[]` per critic | `review.depth` non-author models per lens, drawn as one slate (`roles.critic_slate`) | LLM (untrusted output) |
+| **critique** | report + question + **one lens** + taxonomy; the evidence lens also gets the cited pages as claim-anchored excerpts (D-claim-anchored-excerpts) | `Issue[]` per critic | `review.depth` non-author models per lens, drawn as one slate (`roles.critic_slate`) | LLM (untrusted output) |
+| ↳ **claim check** *(D-claim-level-verification, opt-in)* | one citing sentence + its paragraph + one fetched page, per pair | a closed `ClaimVerdict` per pair, minted into `misrepresented_source` on the evidence critic's `LensResult` (`claimcheck`) | the evidence critic's own model, one fresh context per pair, memoised per resolved identity and complete prompt | LLM inside a closed 4-way schema; `supported` and `contradicted` must quote the shown page verbatim or the pair is unchecked; `absent` and `unreadable` carry no page quote |
 | **triage** | this tick's `Issue[]` (minus **upheld-adjudication suppressions**, D-writer-disputes) | `OrchestratorView` + `DefectList` | none — **mechanical** | deterministic |
 | **orchestrate** | `OrchestratorView` **only** | recommendation (minor-polish judgment) | LLM, blind | LLM inside guardrails |
 | **controller** | `ControllerInput` | decision + terminal status | none | **deterministic — owns termination** |
@@ -384,9 +385,16 @@ lens receives fetched pages and whether a dispute can be settled mechanically. W
 verification are both on they share one `SourceFetcher`, so a page is downloaded once and both see
 the same bytes; `Runtime.fetcher` is nevertheless set only for verification, so turning reading on
 cannot switch the critic-facing channel on by accident. They share the cache but not the cap: it
-stores the larger of `fetch_max_chars` and `read_max_chars`, and verification is handed a
-`fetch.CappedFetcher` view clipped back to `fetch_max_chars`, so `read_max_chars` never widens what
-a critic reads or what `dispute.adjudicate_mechanical` searches.
+stores the larger of `fetch_body_max_chars` and `read_max_chars`, and verification is handed a
+`fetch.CappedFetcher` view clipped back to `fetch_body_max_chars`, so `read_max_chars` never widens
+what a critic reads or what `dispute.adjudicate_mechanical` searches. What one critic is *shown* of
+that retained body is the smaller `fetch_max_chars`, selected at render time as claim-anchored
+excerpts rather than taken from the top of the page (`excerpt.select`, D-claim-anchored-excerpts). A
+dispute's arbiter is shown a fetched page too, but verbatim rather than as an excerpt, and a
+`dispute_upheld` verdict there suppresses a defect — so it is handed its own `Runtime.dispute_fetcher`,
+a second `CappedFetcher` over the same cache clipped to `fetch_max_chars`, not `fetch_body_max_chars`;
+widening the retained body for verification and mechanical adjudication must not also widen the raw
+untrusted text an arbiter's ruling turns on.
 
 **Format conversion happens at the edge, not here.** `intake` requires markdown, because
 `report.parse` builds the `[S<n>.P<m>]` loci from `#` headings and `fetch.extract_source_urls`

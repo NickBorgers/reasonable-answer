@@ -13,7 +13,12 @@ and fix tasks routinely ask for one.
 
 from __future__ import annotations
 
-from reasonable_answer.report import RESTATEMENT_MIN_WORDS, restates, revision_scope
+from reasonable_answer.report import (
+    RESTATEMENT_MIN_WORDS,
+    only_added_words,
+    restates,
+    revision_scope,
+)
 from reasonable_answer.schemas import StructuralRef
 
 BEFORE = """## Conclusion
@@ -47,6 +52,8 @@ def test_an_in_scope_edit_is_counted_in_scope():
         "in_scope": 1,
         "restated": 0,
         "out_of_scope": 0,
+        # The rewrite dropped "despite the tunnel", so it is not merely an addition.
+        "additive_only": 0,
         "defect_loci_untouched": 0,
     }
 
@@ -138,6 +145,7 @@ def test_an_unchanged_document_reports_nothing_changed():
         "in_scope": 0,
         "restated": 0,
         "out_of_scope": 0,
+        "additive_only": 0,
         "defect_loci_untouched": 1,
     }
 
@@ -167,6 +175,9 @@ def test_several_tasks_each_resolved_in_place():
         "in_scope": 2,
         "restated": 0,
         "out_of_scope": 0,
+        # Both fixes attached a citation and changed nothing else, which is additive by
+        # construction — see `test_attaching_a_citation_is_additive_and_is_counted`.
+        "additive_only": 2,
         "defect_loci_untouched": 0,
     }
 
@@ -209,6 +220,7 @@ def test_a_fix_carried_to_every_copy_of_the_claim_is_restated_not_out_of_scope()
         "in_scope": 1,
         "restated": 2,
         "out_of_scope": 0,
+        "additive_only": 3,
         "defect_loci_untouched": 0,
     }
     assert scope.restated == (ref(1, 1), ref(2, 1))
@@ -260,3 +272,102 @@ def test_restates_needs_a_run_of_words_not_shared_vocabulary():
     assert not restates("The tunnel moves nothing.", "moves trust")
     # Nothing restates an empty span.
     assert not restates("anything at all", "")
+
+
+# --------------------------------------- additive-only edits (D-no-hedge-discharge)
+
+HEDGED = """## Conclusion
+
+Indoor LEDs suppress melatonin production by up to 40% in exposed adults [1].
+
+## Key findings
+
+Shift work correlates with elevated cardiovascular risk [2].
+
+## Sources
+
+[1] https://example.org/alan
+[2] https://example.org/shift
+"""
+
+
+def test_appending_a_hedge_to_the_flagged_claim_is_counted_additive_only():
+    """The move the decision exists to see: the claim, its magnitude and its citation
+    all survive, and a disclaimer is bolted on so the sentence stops matching the
+    finding. Every word of the old paragraph is still there, in order."""
+    after = HEDGED.replace(
+        "Indoor LEDs suppress melatonin production by up to 40% in exposed adults [1].",
+        "Indoor LEDs suppress melatonin production by up to 40% in exposed adults [1], "
+        "though this remains an extrapolation from broader ALAN research and has not "
+        "been directly established for indoor fixtures.",
+    )
+    scope = revision_scope(HEDGED, after, [ref(1, 1)])
+    fields = scope.as_event_fields()
+    assert fields["in_scope"] == 1
+    assert fields["additive_only"] == 1
+    assert scope.additive_only == (ref(1, 1),)
+
+
+def test_restricting_the_claim_instead_is_not_additive():
+    """The resolution the prompt now asks for: the population narrows and the magnitude
+    comes down, so words were taken away as well as added."""
+    after = HEDGED.replace(
+        "Indoor LEDs suppress melatonin production by up to 40% in exposed adults [1].",
+        "In the 14 adults measured overnight, blue-enriched light suppressed melatonin "
+        "by 12% [1].",
+    )
+    scope = revision_scope(HEDGED, after, [ref(1, 1)])
+    assert scope.as_event_fields()["in_scope"] == 1
+    assert scope.additive_only == ()
+
+
+def test_additive_only_never_counts_a_paragraph_nobody_flagged():
+    """A subset of the edits that were asked for. Re-rolling unflagged text is
+    `out_of_scope`, and whether that re-roll happened to be additive is not the
+    question this measurement asks."""
+    after = HEDGED.replace(
+        "Shift work correlates with elevated cardiovascular risk [2].",
+        "Shift work correlates with elevated cardiovascular risk [2], though the "
+        "direction of causation is not established.",
+    )
+    scope = revision_scope(HEDGED, after, [ref(1, 1)])
+    assert scope.as_event_fields()["out_of_scope"] == 1
+    assert scope.additive_only == ()
+
+
+def test_attaching_a_citation_is_additive_and_is_counted():
+    """Stated rather than special-cased: adding `[1]` to an uncited claim is a genuine
+    fix and is additive by construction, so the count is a rate to read against
+    `in_scope`, not a defect tally. Excluding it would need the measurement to know
+    which additions are hedges, which is the judgement it deliberately does not make."""
+    after = HEDGED.replace(
+        "Shift work correlates with elevated cardiovascular risk [2].",
+        "Shift work correlates with elevated cardiovascular risk [2][3].",
+    )
+    scope = revision_scope(HEDGED, after, [ref(2, 1)])
+    assert scope.additive_only == (ref(2, 1),)
+
+
+def test_a_deleted_paragraph_is_never_additive():
+    """Removing the claim is the other complete resolution; nothing was appended to
+    text that is gone."""
+    after = HEDGED.replace(
+        "Indoor LEDs suppress melatonin production by up to 40% in exposed adults [1].\n\n",
+        "",
+    )
+    scope = revision_scope(HEDGED, after, [ref(1, 1)])
+    assert scope.additive_only == ()
+
+
+def test_only_added_words_is_a_subsequence_test_not_a_prefix_test():
+    # A qualifier inserted mid-sentence is the same move as one appended to the end.
+    assert only_added_words(
+        "The figure is 1.2 liters per kWh [6].",
+        "The figure is 1.2 liters per kWh, though unverified, in some studies [6].",
+    )
+    # Re-wrapping and capitalisation are not edits here either.
+    assert not only_added_words("The figure is 1.2 liters.", "the  figure\nis 1.2 liters.")
+    # One word replaced is not "only added".
+    assert not only_added_words("suppresses melatonin by 40%", "suppresses melatonin by 12% overall")
+    # Identical text adds nothing.
+    assert not only_added_words("suppresses melatonin", "suppresses melatonin")

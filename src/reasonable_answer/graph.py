@@ -25,9 +25,9 @@ from typing import Any, TypedDict
 from langgraph.graph import END, START, StateGraph
 
 from . import audition as audition_mod
+from . import claimcheck, fetch, prompts, reading, resolve, roles, search, support, triage
 from . import critique as critique_mod
 from . import dispute as dispute_mod
-from . import fetch, prompts, reading, resolve, roles, search, support, triage
 from . import report as report_mod
 from .build import build_identity
 from .config import Config, ConfigError, Roster, validate_roster_health
@@ -180,13 +180,31 @@ class Runtime:
     #: reader below holds its own reference to the shared fetcher rather than reusing
     #: this field as a "something fetches" flag.
     fetcher: Any | None = None
+    #: The evidence page an arbiter is shown when adjudicating a dispute (D-writer-disputes),
+    #: capped to `fetch_max_chars` like the evidence critic's excerpt — never
+    #: `fetch_body_max_chars` like `fetcher` above. The arbiter's prompt renders this page
+    #: verbatim, with no excerpting, and a `dispute_upheld` verdict suppresses a defect; a
+    #: fetcher shared with `fetcher` would let widening the retained body for verification
+    #: and mechanical adjudication also 20x the untrusted page text an arbiter's ruling
+    #: turns on, unannounced (D-claim-anchored-excerpts). None exactly when `fetcher` is —
+    #: same on/off switch, independent cap.
+    dispute_fetcher: Any | None = None
     #: None when writers may not read sources (D-writer-source-reads); they then work
     #: from search snippets exactly as they did before.
     reader: Any | None = None
+    #: Per-runtime memo of claim-level verdicts (D-claim-level-verification), keyed on
+    #: the critic identity, the page text shown and the sentence — the three things a
+    #: checker call is a function of. Never a clean record: clearance is still minted
+    #: from the completed review of the current artifact (RC-002).
+    claim_cache: claimcheck.VerdictCache = field(default_factory=claimcheck.VerdictCache)
 
     @property
     def search_enabled(self) -> bool:
         return self.searcher is not None
+
+    @property
+    def claim_check_enabled(self) -> bool:
+        return self.config.claim_check.enabled and self.verify_sources
 
     @property
     def verify_sources(self) -> bool:
@@ -343,12 +361,25 @@ def _build_runtime(
         if (config.search.verify_sources or config.search.read_sources)
         else None
     )
-    # Verification sees `fetch_max_chars` and nothing more, whatever the cache holds.
-    # Without the cap travelling with the handle, raising `read_max_chars` would widen
-    # both the evidence lens's page text and `dispute.adjudicate_mechanical`'s
-    # containment window — and a dispute upheld there suppresses a defect, so
-    # `search.read_sources` would have a path into the stop decision it must not have.
+    # Verification sees `fetch_body_max_chars` and nothing more, whatever the cache
+    # holds. Without the cap travelling with the handle, raising `read_max_chars` would
+    # widen both the pool the evidence lens's excerpts are drawn from and
+    # `dispute.adjudicate_mechanical`'s containment window — and a dispute upheld there
+    # suppresses a defect, so `search.read_sources` would have a path into the stop
+    # decision it must not have. What one critic is *shown* of that body is the smaller
+    # `fetch_max_chars`, applied at render time as claim-anchored excerpts
+    # (D-claim-anchored-excerpts).
     fetcher = (
+        fetch.CappedFetcher(source_fetcher, max_chars=config.search.fetch_body_max_chars)
+        if config.search.verify_sources and source_fetcher is not None
+        else None
+    )
+    # The arbiter's evidence page is rendered verbatim into its prompt (`prompts.arbiter_user`),
+    # unlike the evidence critic's claim-anchored excerpt of the same retained body, so it keeps
+    # the smaller `fetch_max_chars` cap `fetcher` carried before this widened for verification
+    # and mechanical adjudication (D-claim-anchored-excerpts). Wrapping the same `source_fetcher`
+    # costs no extra fetch — the shared cache already holds the larger retained body.
+    dispute_fetcher = (
         fetch.CappedFetcher(source_fetcher, max_chars=config.search.fetch_max_chars)
         if config.search.verify_sources and source_fetcher is not None
         else None
@@ -385,7 +416,8 @@ def _build_runtime(
     for warning in warnings:
         log.warning("roster: %s", warning)
     return Runtime(config=config, client=client, identities=identities, store=store,
-                   warnings=warnings, searcher=searcher, fetcher=fetcher, reader=reader)
+                   warnings=warnings, searcher=searcher, fetcher=fetcher,
+                   dispute_fetcher=dispute_fetcher, reader=reader)
 
 
 def _degrade_roster(
@@ -552,10 +584,13 @@ def _cache_max_chars(config: Config) -> int:
     is then handed a view that applies its own (`fetch.CappedFetcher`). The resolver
     ladder uses the same number, or a body reached through an open-access mirror would
     be bounded differently from one fetched directly (D-writer-source-reads).
+
+    Verification's cap is `fetch_body_max_chars`, the retained body, not the
+    `fetch_max_chars` one critic is shown of it (D-claim-anchored-excerpts).
     """
     if config.search.read_sources:
-        return max(config.search.fetch_max_chars, config.search.read_max_chars)
-    return config.search.fetch_max_chars
+        return max(config.search.fetch_body_max_chars, config.search.read_max_chars)
+    return config.search.fetch_body_max_chars
 
 
 def _build_resolver(config: Config, warnings: list[str]):
@@ -822,6 +857,14 @@ def _scope_fields(
             "revision touched %d paragraph(s) no fix task named (of %d changed)",
             len(scope.out_of_scope),
             len(scope.changed),
+        )
+    if scope.additive_only:
+        # A task discharged by appending to the claim rather than changing it
+        # (D-no-hedge-discharge). Warn-only, like every other number here.
+        log.info(
+            "revision only added words to %d of the %d paragraph(s) it was asked to change",
+            len(scope.additive_only),
+            scope.in_scope_count + len(scope.restated),
         )
     return scope.as_event_fields()
 
@@ -1263,11 +1306,11 @@ def _adjudicate(state: State, rt: Runtime) -> dict:
                 else:
                     page = None
                     if (
-                        rt.fetcher is not None
+                        rt.dispute_fetcher is not None
                         and challenge.evidence_url
                         and challenge.evidence_url in cited_sources
                     ):
-                        page = rt.fetcher.fetch(challenge.evidence_url)
+                        page = rt.dispute_fetcher.fetch(challenge.evidence_url)
                     try:
                         ruling = dispute_mod.adjudicate_one(
                             rt.client,
@@ -1548,6 +1591,59 @@ def _critique_one(
                 ),
             )
 
+    # Claim-level verification, one sentence and one page per fresh context, under this
+    # critic's slot (D-claim-level-verification). Run before the whole-document review so
+    # an account refusal is learned before the larger call is spent. Its verdicts are
+    # merged below: a checked pair's verdict is authoritative for
+    # `misrepresented_source`, the critic's own judgement covers the rest.
+    checked: claimcheck.ClaimCheck | None = None
+    if lens is Lens.EVIDENCE and sources and rt.claim_check_enabled:
+        cc = rt.config.claim_check
+        try:
+            checked = claimcheck.check(
+                rt.client,
+                alias,
+                identity,
+                report_text,
+                sources,
+                page_max_chars=cc.page_max_chars,
+                max_pairs=cc.max_pairs,
+                max_tokens=cc.max_tokens,
+                repair_retries=rt.client.budgets.critic_repair_retries,
+                cache=rt.claim_cache,
+                current_date=run_date,
+            )
+        except ProviderAccountError as exc:
+            # The same shape `critique_once` returns for the critic's own 402, so
+            # `_defer_if_account_refused` reads it identically.
+            return LensResult(
+                lens=lens,
+                artifact_hash=artifact_hash,
+                critic_alias=alias,
+                critic_identity=identity,
+                artifact_author_identity=author_identity,
+                failed=True,
+                failure_reason=str(exc)[:400],
+                failure_class=exc.failure_class,
+                attempt=attempt,
+            )
+        counts = checked.counts()
+        rt.store.claim_check(artifact_hash, identity, attempt, checked.as_record())
+        rt.store.event("claim_check", artifact_hash=artifact_hash, critic=identity, **counts)
+        log.info(
+            "claim check by %s: %d pairs, %d checked, %d contradicted, %d absent (%d partial), "
+            "%d unreadable, %d unchecked, %d cached",
+            alias,
+            counts["pairs"],
+            counts["checked"],
+            counts["contradicted"],
+            counts["absent"],
+            counts["absent_partial"],
+            counts["unreadable"],
+            counts["unchecked"],
+            counts["cached"],
+        )
+
     result = critique_mod.critique_once(
         rt.client,
         alias,
@@ -1562,6 +1658,7 @@ def _critique_one(
         attempt=attempt,
         current_date=run_date,
         source_char_budget=rt.config.search.source_char_budget,
+        excerpt_chars=rt.config.search.fetch_max_chars,
     )
 
     # A cited URL that a definitive not-found (404/410) does not resolve is a
@@ -1571,6 +1668,11 @@ def _critique_one(
     # clear the evidence lens (issue #92, D-notfound-fabrication). Attached only to a *completed* review: a
     # failed lens is discarded and re-critiqued (rule 2), and because the fetch is cached
     # the finding is simply re-derived on the next attempt, so nothing is lost.
+    if checked is not None and not result.failed:
+        result = result.model_copy(
+            update={"issues": claimcheck.reconcile(result.issues, checked) + claimcheck.issues_from(checked)}
+        )
+
     if sources and not result.failed:
         mechanical = triage.mechanical_citation_issues(sources, report_mod.parse(report_text))
         if mechanical:

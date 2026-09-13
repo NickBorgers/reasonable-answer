@@ -47,6 +47,7 @@ def critique_once(
     attempt: int = 1,
     current_date: str | None = None,
     source_char_budget: int | None = None,
+    excerpt_chars: int | None = None,
 ) -> LensResult:
     """Run one lens in a fresh context and return an audit-side `LensResult`.
 
@@ -86,6 +87,11 @@ def critique_once(
         sources,
         current_date=current_date,
         source_char_budget=source_char_budget,
+        # The raw artifact, because the excerpt anchors are read from its `## Sources`
+        # section and its citation markers, and the loci rendering carries neither
+        # in the shape `fetch.sources_section` recognises (D-claim-anchored-excerpts).
+        report_text=report_text if excerpt_chars is not None else None,
+        excerpt_chars=excerpt_chars,
     )
 
     try:
