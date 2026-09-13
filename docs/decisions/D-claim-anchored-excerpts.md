@@ -1,50 +1,12 @@
 ## D-claim-anchored-excerpts — the evidence critic is shown the part of a page the claim would be in, not the first 6,000 characters
 
-**The finding.** A production run on the question *"Does it use fewer natural resources to use
-white cotton bath towels and throw them away every year vs dark towels replaced every four years?"*
-(`run-4783c2d9cb81`, build `417fbc9`) shipped `needs_human_review` with four blocking or major
-defects standing. An expert review of the report read the cited pages and found that three of the
-four were wrong: the EEA briefing cited as `[1]` states the 80% / 14% / 3% life-cycle split verbatim,
-and the Lindström article cited as `[5]` states "production is 50% of water consumption after 100
-washes" verbatim. The evidence critic had filed `misrepresented_source` against both, with rationales
-of the form *"source [1] does not state that the production phase accounts for 80%"* and *"the fetched
-text for source [5] is a landing page that mentions a new study but does not provide the actual
-data"*.
-
-The mechanism is in the fetch path, not the model. `search.fetch_max_chars` (6,000) capped the
-extracted text of each page, and `prompts.fetched_sources_block` showed the critic the *first* 6,000
-characters. Fetching those two pages through the project's own `fetch.SourceFetcher` with the cap
-lifted: the EEA page extracts to 31,230 characters and its 80% figure sits at offset 10,313, the 14% and
-3% figures at 14,155–14,342; the Lindström page extracts to 14,181 characters and its 50% figure sits at
-offset 8,689. The critic was shown navigation, a cookie notice and the page's introduction, was told
-"the page text is truncated — if the claim plausibly appears in a part you cannot see, do not raise
-an issue", and raised the issue.
-
-That is not one run's bad luck. Across the fifteen runs finished on prod between 2026-09-10 and
-2026-09-13, the terminal `outstanding_defects` lists carry 22 `misrepresented_source` findings with a
-resolvable citation. Refetching each cited page uncapped and searching it for the numeric tokens of
-the finding's own `claim_span`:
-
-| where the claim's figures sit in the page | findings |
-|---|---|
-| **all** past the 6,000-character cap | 5 |
-| **some** past the cap, some within | 5 |
-| within the cap | 3 |
-| absent from the body altogether | 4 |
-| page could not be fetched today | 2 |
-| claim carries no numeric token to search for | 2 |
-| citation id resolves to no entry | 1 |
-
-Ten of twenty-two were findings against a page that states the figure — past the point the critic
-could see. This is the failure QP10 names in so many words: a bound that *"silently truncat[ed]
-evidence into apparent absence"*. The prompt-level mitigation D-source-verification put in place (tell
-the critic the text is truncated) does not work with these critics, and there is no reason to expect
-a stronger sentence to work either: a critic that has been handed a page and finds the claim absent
-from it is doing exactly what it was asked to do.
-
-These figures come from the operator's own `audit.json` trail and are the motivation, not the warrant
-(QP9). The warrant is the code path, checkable offline: the critic is shown `text[:6000]` and the
-figures are past 6,000.
+**The finding.** The verification path retained only the first `search.fetch_max_chars` characters
+of each extracted page, and `prompts.fetched_sources_block` showed that fixed prefix to the critic.
+Claim-relevant text later in an otherwise successfully fetched page was therefore absent from the
+critic's evidence. This is the failure QP10 names as silently truncating evidence into apparent
+absence. The mechanism is reproducible offline with a synthetic page whose cited passage occurs
+after the prefix cap; the excerpt tests exercise that case without publishing run artifacts or user
+content.
 
 **The decision.** *Which* characters of a page the critic sees is chosen by the report's claims,
 not by position. A new module, `excerpt`, does deterministic string work and nothing else:
@@ -76,10 +38,6 @@ widens what verification or adjudication sees — holds unchanged with the large
 place. The per-artifact `source_char_budget` is untouched and now counts what is *shown*, so two
 long pages excerpted to 6,000 each are both shown where their raw bodies would have withheld one.
 
-Replayed on the motivating run's two pages, the excerpter puts the 80%, 14% and 3% figures in front
-of the critic at 5,618 of 6,000 characters, and the 50%-after-a-hundred-washes figure at 5,886 —
-seven and eight excerpts respectively, the deepest at offset 14,772.
-
 **The critic's rule, sharpened not changed.** The block's closing rules now say what an excerpt is,
 that a page shown in part is truncated, that a claim missing from the excerpts is *not* evidence the
 page lacks it, and that `misrepresented_source` is raised only where an excerpt addresses the same
@@ -96,20 +54,19 @@ sees "the pages the report cites, fetched and fenced" — a better-chosen part o
 
 **Why not the alternatives.**
 
-* *Raise `fetch_max_chars`.* Ten of the twenty-two pages ran 13,000–44,000 characters; a cap that
-  holds them all is a 50,000-character-per-page context, and `source_char_budget` would then withhold
-  every page but the first on any bibliography over one entry. Principle #6 (lost-in-the-middle) is
-  the reason the per-artifact bound exists, and it applies with more force to a page shown whole than
-  to a page shown at its relevant passages.
+* *Raise `fetch_max_chars`.* A larger fixed prefix still cannot guarantee that it includes a cited
+  passage, and it consumes more of `source_char_budget` per page. Principle #6 (lost-in-the-middle)
+  is the reason the per-artifact bound exists, and it applies with more force to a page shown whole
+  than to a page shown at its relevant passages.
 * *The per-source sub-context D-unbounded-evidence scoped as its follow-up.* Still the right end
   state — every body read, no two sharing a context — and this decision is a step toward it, not away:
   a sub-reader needs the same anchors to know what it is checking, and `excerpt` supplies them. It is
   not done here because it is a new critic surface (an extra model call per source per critic, its
-  own schema and validation, its own audition question), and the measured defect is fixed without it.
+  own schema and validation, its own audition question), and the fixed-prefix defect is addressed
+  without it.
 * *A mechanical guard in triage that drops a `misrepresented_source` whose figure is in the unshown
-  part of the body.* Rejected because it acts after the critic has been misled rather than before, and
-  because a finding's `claim_span` does not always carry a searchable token (two of the twenty-two did
-  not).
+  part of the body.* Rejected because it acts after the critic has been given incomplete evidence
+  rather than before, and because a finding's `claim_span` need not carry a searchable token.
 
 **Deliberately not done.** No change to the fetch tiers, the byte cap, the timeout or the egress
 model — the same bytes are read off the wire; more of them are kept. No change to what writers are

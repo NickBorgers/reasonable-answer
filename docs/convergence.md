@@ -228,11 +228,9 @@ one critic is shown at most `search.fetch_max_chars` of it — as the page's ope
 that best match the report's own sentences citing that source (`excerpt.select`: deterministic,
 numbers weighted above content words, whole sentences, document order), each under its character
 range, with `[…]` marking what is not shown and a header stating how much of the page is. Every
-entry is labelled with the bibliography number(s) the report lists the URL under. Before this, the
-critic saw the first `fetch_max_chars` characters of each page, was told the text was truncated, and
-was asked not to read absence as contradiction; measured on fifteen production runs it did so
-anyway — ten of twenty-two terminal `misrepresented_source` findings named a figure the page states
-past the cap. The rule the critic is given is unchanged in substance and sharpened in wording: a
+entry is labelled with the bibliography number(s) the report lists the URL under. A fixed prefix can
+omit claim-relevant text later in a page even when retrieval succeeded. The rule the critic is given
+is unchanged in substance and sharpened in wording: a
 page shown in part is truncated, and a claim missing from the excerpts is not evidence that the page
 lacks it — `misrepresented_source` is raised only where an excerpt addresses the same point and
 states something materially different. `dispute.adjudicate_mechanical` and `support.check` search
