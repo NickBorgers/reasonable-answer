@@ -222,6 +222,39 @@ def read_run(root: Path, run_id: str) -> tuple[str, str | None, dict[str, Any] |
     )
 
 
+#: A claim-check record's filename as `RunStore.claim_check` writes it: sequence, the
+#: first twelve characters of the artifact hash, the critic, the attempt.
+_CLAIMS_FILE = re.compile(r"^(\d+)-(.{12})-claims-.*\.json$")
+
+
+def read_claim_checks(root: Path, run_id: str, artifact_hash: str | None) -> list[dict[str, Any]]:
+    """Every claim-check record written for `artifact_hash`, in sequence order.
+
+    Read back for display only (D-citation-links): the verified spans become deep links on
+    the rendered report. So nothing here raises for a record that is missing or unreadable —
+    a run with claim check off, a record for another draft, a `purge --content-only` that
+    removed the directory, and a truncated file all mean the same thing to a reader, which
+    is a plain link instead of a deep one.
+    """
+    if not artifact_hash:
+        return []
+    critiques = safe_run_dir(root, run_id) / "critiques"
+    if not critiques.is_dir():
+        return []
+    found: list[tuple[int, str, dict[str, Any]]] = []
+    for path in critiques.iterdir():
+        match = _CLAIMS_FILE.match(path.name)
+        if not match or match.group(2) != artifact_hash[:12]:
+            continue
+        try:
+            record = json.loads(path.read_text())
+        except (OSError, ValueError):
+            continue
+        if isinstance(record, dict):
+            found.append((int(match.group(1)), path.name, record))
+    return [record for _, _, record in sorted(found, key=lambda t: (t[0], t[1]))]
+
+
 def load_final(path: Path) -> dict[str, Any] | None:
     """Parse a `final.json`, refusing to read a corrupt one as an absent one.
 

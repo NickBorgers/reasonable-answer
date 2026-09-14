@@ -53,6 +53,7 @@ from fastapi.responses import (
 from .. import export, ingest, shutdown
 from ..config import Config, ConfigError
 from ..llm import LLMClient
+from ..report import artifact_hash as report_hash
 from ..store import CorruptRun
 from . import assets as static_assets
 from . import push
@@ -750,6 +751,7 @@ def create_app(
         # makes this page durable too, so it gets the same honesty about an unreadable
         # record — it says so rather than printing a status nothing supports.
         final, prov = _provenance(registry, summary, run_id)
+        spans = _citation_spans(registry, run_id, report)
         # Copy markdown puts the export document — report + review record — on the
         # clipboard, the same bytes `export.md`/`Download .md` serve (D-verdict-attached). An unreadable
         # record cannot be exported as a file (the route 409s), but the page still
@@ -766,10 +768,12 @@ def create_app(
                 final,
                 run_id,
                 unreadable=prov.status == export.UNREADABLE_RECORD,
+                spans=spans,
             ),
             base_path=base_path,
             public_base=public_base,
             vapid_key=push_key if request.state.viewer else "",
+            spans=spans,
         )
 
     @app.get("/runs/{run_id}/report.md", response_class=PlainTextResponse)
@@ -786,7 +790,10 @@ def create_app(
     def export_md(run_id: str) -> PlainTextResponse:
         summary, report, final = _exportable(registry, worker, run_id)
         return PlainTextResponse(
-            export.export_markdown(summary.question, report, final, run_id),
+            export.export_markdown(
+                summary.question, report, final, run_id,
+                spans=_citation_spans(registry, run_id, report),
+            ),
             media_type="text/markdown; charset=utf-8",
             headers=_attachment(export.export_filename(summary.question, run_id, "md")),
         )
@@ -795,7 +802,10 @@ def create_app(
     def export_html(run_id: str) -> HTMLResponse:
         summary, report, final = _exportable(registry, worker, run_id)
         return HTMLResponse(
-            export.export_html(summary.question, report, final, run_id),
+            export.export_html(
+                summary.question, report, final, run_id,
+                spans=_citation_spans(registry, run_id, report),
+            ),
             headers=_attachment(export.export_filename(summary.question, run_id, "html")),
         )
 
@@ -990,6 +1000,15 @@ def _provenance(
     except CorruptRun:
         return None, export.provenance(summary.question, None, run_id, unreadable=True)
     return final, export.provenance(summary.question, final, run_id)
+
+
+def _citation_spans(registry: Registry, run_id: str, report: str) -> dict[tuple[int, str], Any]:
+    """The verified passages a rendered report's citations may deep-link to
+    (D-citation-links). Keyed to the hash of the text being rendered — which is
+    `final.json`'s `artifact_hash` by construction (`graph._finalize`) — so a record for
+    any other draft cannot lend this one a fragment, and a page whose record will not
+    parse still gets its deep links."""
+    return registry.verified_spans(run_id, report_hash(report))
 
 
 def _attachment(filename: str) -> dict[str, str]:

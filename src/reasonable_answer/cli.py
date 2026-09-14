@@ -16,12 +16,14 @@ from . import audition as audition_mod
 from . import ingest, search, shutdown
 from .audition import Assignment as Assignment_t
 from .build import build_identity
+from .citelinks import select_spans
 from .config import Config, ConfigError, validate_roster_health
 from .export import export_html, export_markdown
 from .graph import GracefulStop, ProviderAccountExhausted
 from .graph import run as run_graph
 from .llm import LLMClient, ProbeIncomplete
-from .store import CorruptRun, UnsafeRunId, expired_runs, read_run
+from .report import artifact_hash as report_hash
+from .store import CorruptRun, UnsafeRunId, expired_runs, read_claim_checks, read_run
 from .store import purge as purge_run
 from .taxonomy import Lens
 
@@ -423,8 +425,10 @@ def export(
         raise typer.Exit(code=1)
 
     render = export_html if fmt == "html" else export_markdown
+    # The same deep links the web downloads carry, from the same records (D-citation-links).
+    spans = select_spans(read_claim_checks(config.runs_dir, run_id, report_hash(report)))
     try:
-        document = render(question, report, final, run_id)
+        document = render(question, report, final, run_id, spans=spans)
     except ImportError as exc:
         # Only a *missing optional dependency* is reported as one. An ImportError from
         # inside the web layer itself is a defect, and hiding it behind installation
