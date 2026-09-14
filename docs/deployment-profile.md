@@ -133,12 +133,18 @@ The committed roster ships `search.verify_sources: false` with the whole `source
 out, and says why: fetching URLs a model chose is SSRF exposure by construction, constrained at the
 network layer rather than in the application. That default is a statement about *unknown*
 deployments. This one has the egress boundary from
-[ssrf-egress-isolation.md](./ssrf-egress-isolation.md) in place, so verification runs:
+[ssrf-egress-isolation.md](./ssrf-egress-isolation.md) in place, so verification and writer reading
+run:
 
 ```yaml
 search:
   enabled: true
   verify_sources: true
+  read_sources: true       # D-writer-source-reads — a writer reads a page before citing it
+  support_manifest: true   # D-writer-source-reads — audit-side record of where support sits
+                           # read_cited_sources stays at its default (true): with reading and
+                           # verification both on, a reviser may reopen the pages the draft cites
+                           # (D-writer-rereads-cited-sources)
 
 claim_check:             # D-claim-level-verification — each citing sentence checked against its
   enabled: true          # page in its own context; reads the pages verify_sources fetches, so it

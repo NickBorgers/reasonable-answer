@@ -394,7 +394,9 @@ SSRF exposure by construction; it is expected to be constrained at the network l
 page to *check* a claim; it does not let it read one to *make* one. Set `search.read_sources: true`
 (which requires `search.enabled`) and writers also get a `read_source` tool, so a claim can be
 attached to text the writer actually read rather than to a one-line search snippet. A writer may
-open only a URL a `web_search` result **in that same writer call** returned — there is no
+open only a URL a `web_search` result **in that same writer call** returned or, when revising with
+`search.verify_sources` also on, a URL the draft's own `## Sources` lists
+(`search.read_cited_sources`, default on; D-writer-rereads-cited-sources) — there is no
 arbitrary-URL reader, and a refused URL never reaches the network or costs budget. Calls are counted
 but unbounded by default; optional `search.read_budget` adds a whole-run call cap. Two character
 bounds always apply: `search.read_char_budget` characters of page text in total (default 200,000),

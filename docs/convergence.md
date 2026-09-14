@@ -224,6 +224,17 @@ side and the break-even where one exists, and state a counterargument's size rel
 effect; a heading claims no more than its section supports; and say which reading of an ambiguous
 question is being answered.
 
+**Citations are markers, and a revision keeps them (D-writer-citation-continuity).** `WRITER_SYSTEM`
+says a citation is the `[n]` marker inside the sentence it supports — naming a source in prose or
+listing it under Sources cites nothing — and that every entry is cited by some marker and every marker
+has an entry. Both revision modes carry `WRITER_CITATION_REVISION` inside the resolution standard: keep
+every marker on a kept claim; delete an entry only when nothing cites it; never renumber, so a patch
+does not rewrite every citing paragraph; and "remove the attribution" means re-cite, restrict, or label
+as inference, never leave the claim standing unmarked. Every `generate` event carries a citation census
+(`source_entries`, `body_markers`, `cited_entries`, `dangling_markers`, and on revisions
+`cited_sources_dropped`, `cited_sources_added`, `entries_removed`). It is warn-only: no draft is
+rejected on it, and it is not a controller input.
+
 **Headings are writer-side only, deliberately.** A section heading is not quotable: `report.parse`
 puts heading text in `Structure.section_titles` and never in a `Paragraph`, so a heading is absent
 from both the cited paragraph and `Structure.full_text`, and `triage._require_quote` would reject
@@ -256,7 +267,10 @@ well-formed/resolvable in format.
   attached to text the writer read rather than to a snippet. This does **not** move the label: a
   read page shows what a page says, not that the page is right, so the output stays
   *consensus-reviewed with retrieved sourcing*. What it changes is what the writer is entitled to
-  assert and what the run can afterwards show — see the traceability paragraph below.
+  assert and what the run can afterwards show — see the traceability paragraph below. On a revision,
+  where `verify_sources` is also on, the writer may also open the pages the draft it revises lists
+  (`search.read_cited_sources`, default on; D-writer-rereads-cited-sources), so a fix task about a
+  cited claim can be worked against the page rather than the draft's paraphrase of it.
 
 **Retrieval alone does not make the report fact-checked.** It constrains where citations come from;
 it does not establish that a cited page *supports the specific claim attached to it* — the

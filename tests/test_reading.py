@@ -1123,3 +1123,282 @@ def test_the_manifest_never_enters_another_model_context(tmp_path, identities):
             continue
         assert "support_span" not in call.user
         assert "p. 4" not in call.user
+
+
+# ---------------------------- re-reading what the draft cites (D-writer-rereads-cited-sources)
+
+SEARCHED_URL = "https://example.org/searched"
+OTHER_URL = "https://example.org/neither"
+
+
+def _reread_config(tmp_path, **kw):
+    return _config(tmp_path, enabled=True, read_sources=True, verify_sources=True, **kw)
+
+
+def _reread_runtime(tmp_path, identities, config, reader, fetcher, *, tool_script, report_fn=None):
+    from fakes import FakeClient
+
+    from reasonable_answer.graph import Runtime
+    from reasonable_answer.schemas import CritiqueOutput
+    from reasonable_answer.store import RunStore
+
+    client = FakeClient(
+        identities=identities,
+        critique_fn=lambda a, u: CritiqueOutput(issues=[]),
+        report_fn=report_fn or (lambda n: DRAFT),
+        tool_script=tool_script,
+    )
+    rt = Runtime(
+        config=config,
+        client=client,
+        identities=identities,
+        store=RunStore(tmp_path, "run-reread"),
+        searcher=_Searcher(SEARCHED_URL),
+        reader=reader,
+        fetcher=fetcher,
+    )
+    return rt, client
+
+
+def _revision_state():
+    return {"question": "q?", "round": 1, "report": DRAFT, "defects": []}
+
+
+def test_a_session_keeps_search_results_and_cited_urls_apart():
+    session = reading.ReadSession(cited=[READ_URL])
+    session.record_results([search.SearchResult(title="T", url=SEARCHED_URL, description="D")])
+    assert session.readable(READ_URL) and session.readable(SEARCHED_URL)
+    assert not session.readable(OTHER_URL)
+    # `sources_offered` keeps meaning "what search returned".
+    assert session.offered_count == 1
+    assert session.cited_count == 1
+    assert not session.offered(READ_URL)
+    assert session.is_cited(READ_URL) and not session.is_cited(SEARCHED_URL)
+
+
+def test_a_cited_url_matches_after_trailing_punctuation_and_the_clean_url_is_fetched():
+    reader, fetcher = _reader({READ_URL: _body(READ_URL, PAGE_TEXT)})
+    session = reading.ReadSession(cited=[READ_URL])
+    assert session.admitted(READ_URL + ".") == READ_URL
+    result = reader.read(READ_URL + ".", session)
+    assert result.outcome is SourceOutcome.FULL_TEXT
+    assert fetcher.calls == [READ_URL]
+
+
+def test_the_tool_definition_is_unchanged_when_nothing_is_seeded(tmp_path, identities, config):
+    from reasonable_answer.graph import _retrieval_kwargs
+
+    assert reading.read_source_tool(False) is reading.READ_SOURCE_TOOL
+    cited = reading.read_source_tool(True)
+    assert cited["function"]["name"] == "read_source"
+    assert "## Sources" in cited["function"]["description"]
+    assert "http" not in str(cited)
+    reader, _ = _reader({})
+    rt, _ = _graph_runtime(tmp_path, identities, config, searcher=_Searcher(), reader=reader)
+    tools = _retrieval_kwargs(rt, reading.ReadSession())["tools"]
+    assert tools[1] is reading.READ_SOURCE_TOOL
+    tools = _retrieval_kwargs(rt, reading.ReadSession(cited=[READ_URL]))["tools"]
+    assert tools[1] == cited
+
+
+def test_a_reviser_may_read_a_url_the_draft_cites_without_searching(tmp_path, identities):
+    from reasonable_answer.graph import _generate
+
+    reader, fetcher = _reader({READ_URL: _body(READ_URL, PAGE_TEXT)})
+    rt, client = _reread_runtime(
+        tmp_path,
+        identities,
+        _reread_config(tmp_path),
+        reader,
+        fetcher,
+        tool_script=[("read_source", f'{{"url": "{READ_URL}"}}')],
+    )
+    _generate(_revision_state(), rt)
+
+    assert PAGE_TEXT in client.tool_results[-1]
+    assert prompts.UNTRUSTED_NOTE in client.tool_results[-1]
+    assert fetcher.calls == [READ_URL]
+    assert prompts.WRITER_REREAD_ADDENDUM in client.calls[-1].system
+    # No URL enters the trusted system prompt.
+    assert READ_URL not in client.calls[-1].system
+    event = _events(rt, "generate")[-1]
+    assert event["cited_readable"] == 1
+    assert event["cited_reads"] == 1
+    assert event["sources_offered"] == 0
+    # Re-reads draw on the same whole-run budget as every other read.
+    assert reader.budget.used_calls == 1
+    assert reader.budget.used_chars == len(PAGE_TEXT)
+    assert READ_URL not in (rt.store.dir / "events.jsonl").read_text()
+
+
+def test_a_url_neither_searched_nor_cited_is_refused_before_any_fetch_or_spend(
+    tmp_path, identities
+):
+    from reasonable_answer.graph import _generate
+
+    reader, fetcher = _reader({OTHER_URL: _body(OTHER_URL)})
+    rt, client = _reread_runtime(
+        tmp_path,
+        identities,
+        _reread_config(tmp_path),
+        reader,
+        fetcher,
+        tool_script=[("read_source", f'{{"url": "{OTHER_URL}"}}')],
+    )
+    _generate(_revision_state(), rt)
+
+    assert "NOT ATTEMPTED" in client.tool_results[-1]
+    assert "listed in the draft's ## Sources" in client.tool_results[-1]
+    assert fetcher.calls == []
+    assert reader.budget.used_calls == 0
+    assert reader.budget.used_chars == 0
+
+
+def test_a_first_draft_is_seeded_with_nothing(tmp_path, identities):
+    from reasonable_answer.graph import _cited_seed, _generate
+
+    reader, fetcher = _reader({READ_URL: _body(READ_URL, PAGE_TEXT)})
+    rt, client = _reread_runtime(
+        tmp_path,
+        identities,
+        _reread_config(tmp_path),
+        reader,
+        fetcher,
+        tool_script=[("read_source", f'{{"url": "{READ_URL}"}}')],
+    )
+    assert _cited_seed(rt, None) == []
+    _generate({"question": "q?", "round": 0}, rt)
+
+    assert "NOT ATTEMPTED" in client.tool_results[-1]
+    assert fetcher.calls == []
+    assert prompts.WRITER_REREAD_ADDENDUM not in client.calls[-1].system
+    assert _events(rt, "generate")[-1]["cited_readable"] == 0
+
+
+@pytest.mark.parametrize("switch", ["verification_off", "knob_off"])
+def test_nothing_is_seeded_without_verification_or_with_the_knob_off(tmp_path, identities, switch):
+    """The seed is the set verification fetches; with verification off there is no such set,
+    and reading must not become the thing that fetches it. The knob is the rollback."""
+    from reasonable_answer.graph import _cited_seed, _generate
+
+    reader, fetcher = _reader({READ_URL: _body(READ_URL, PAGE_TEXT)})
+    if switch == "verification_off":
+        config = _config(tmp_path, enabled=True, read_sources=True)
+        runtime_fetcher = None
+    else:
+        config = _reread_config(tmp_path, read_cited_sources=False)
+        runtime_fetcher = fetcher
+    rt, client = _reread_runtime(
+        tmp_path,
+        identities,
+        config,
+        reader,
+        runtime_fetcher,
+        tool_script=[("read_source", f'{{"url": "{READ_URL}"}}')],
+    )
+    assert _cited_seed(rt, DRAFT) == []
+    _generate(_revision_state(), rt)
+
+    assert "NOT ATTEMPTED" in client.tool_results[-1]
+    assert fetcher.calls == []
+    assert prompts.WRITER_REREAD_ADDENDUM not in client.calls[-1].system
+
+
+def test_the_read_cited_sources_knob_defaults_on_and_is_not_a_budget(tmp_path):
+    from reasonable_answer.config import Budgets
+
+    assert SearchConfig().read_cited_sources is True
+    # Configs that read without verifying keep loading: there is no load-time rule.
+    assert _config(tmp_path, enabled=True, read_sources=True).search.read_cited_sources
+    # Budgets is hashed into the run fingerprint; the knob must not be there.
+    assert "read_cited_sources" not in Budgets.model_fields
+
+
+def test_the_seed_is_exactly_the_url_set_verification_fetches(tmp_path, identities):
+    from reasonable_answer import fetch
+    from reasonable_answer.graph import _cited_seed
+
+    report = (
+        "## Conclusion\n\nA [1]. B [2]. C [3].\n\n## Sources\n\n"
+        "[1] https://example.org/a.\n[2] https://example.org/b\n[3] https://example.org/c\n"
+    )
+    for limit in (200, 2):
+        config = _reread_config(tmp_path, max_source_urls=limit)
+        reader, fetcher = _reader({})
+        rt, _ = _reread_runtime(
+            tmp_path, identities, config, reader, fetcher, tool_script=[]
+        )
+        assert _cited_seed(rt, report) == fetch.extract_source_urls(report, limit=limit)
+    assert _cited_seed(rt, report) == ["https://example.org/a", "https://example.org/b"]
+
+
+def test_a_retried_reviser_may_read_what_the_draft_cites_but_not_what_its_predecessor_searched(
+    tmp_path, identities
+):
+    """The companion of `test_a_retried_writer_starts_with_an_empty_allowlist` for a
+    revision. The seed is a function of the draft both attempts hold, so attempt two may
+    read the cited page; attempt one's search results still never carry over."""
+    from reasonable_answer.graph import _generate
+
+    reader, fetcher = _reader(
+        {READ_URL: _body(READ_URL, PAGE_TEXT), SEARCHED_URL: _body(SEARCHED_URL)}
+    )
+    searched: list[str] = []
+
+    def script(alias):
+        if not searched:
+            searched.append(alias)
+            return [("web_search", '{"query": "probe"}')]
+        return [
+            ("read_source", f'{{"url": "{SEARCHED_URL}"}}'),
+            ("read_source", f'{{"url": "{READ_URL}"}}'),
+        ]
+
+    rt, client = _reread_runtime(
+        tmp_path,
+        identities,
+        _reread_config(tmp_path),
+        reader,
+        fetcher,
+        tool_script=script,
+        report_fn=lambda n: "" if n == 1 else DRAFT,
+    )
+    _generate(_revision_state(), rt)
+
+    assert client.calls[0].alias != client.calls[1].alias
+    assert "NOT ATTEMPTED" in client.tool_results[-2]
+    assert PAGE_TEXT in client.tool_results[-1]
+    assert fetcher.calls == [READ_URL]
+
+
+def test_the_manifest_is_checked_against_a_re_read_body(tmp_path, identities):
+    import json as _json
+
+    from fakes import FakeClient
+
+    from reasonable_answer.graph import Runtime, _generate
+    from reasonable_answer.schemas import CritiqueOutput, SupportManifest
+    from reasonable_answer.store import RunStore
+
+    config = _reread_config(tmp_path, support_manifest=True)
+    reader, fetcher = _reader({READ_URL: _body(READ_URL, PAGE_TEXT)})
+    client = FakeClient(
+        identities=identities,
+        critique_fn=lambda a, u: CritiqueOutput(issues=[]),
+        report_fn=lambda n: DRAFT,
+        tool_script=[("read_source", f'{{"url": "{READ_URL}"}}')],
+        support_fn=lambda a, u: SupportManifest(entries=[_entry()]),
+    )
+    rt = Runtime(
+        config=config,
+        client=client,
+        identities=identities,
+        store=RunStore(tmp_path, "run-reread-manifest"),
+        searcher=_Searcher(SEARCHED_URL),
+        reader=reader,
+        fetcher=fetcher,
+    )
+    _generate(_revision_state(), rt)
+
+    written = _json.loads((rt.store.dir / "support" / "r02.json").read_text())
+    assert written["entries"][0]["verdict"] == "supported"

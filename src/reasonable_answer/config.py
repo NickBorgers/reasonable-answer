@@ -258,6 +258,15 @@ class SearchConfig(BaseModel):
     #: total, and a long context is a correctness problem here, not a cost one
     #: (principle #6, docs/isolation.md).
     read_char_budget: int = Field(default=200_000, ge=1_000, le=5_000_000)
+    #: On a revision, let `read_source` also open the URLs the draft being revised lists in
+    #: its `## Sources` (D-writer-rereads-cited-sources), so a reviser can check the page a
+    #: kept claim cites without searching it up again. Effective only where `read_sources`
+    #: and `verify_sources` are both on: the seed is exactly the URL set verification
+    #: already fetches for that draft, so nothing new reaches the fetch boundary. A rollback
+    #: switch, not a posture — hence default on and no load-time rule, since a config that
+    #: reads without verifying must keep loading. Deliberately here and not in `Budgets`,
+    #: which `graph._run_fingerprint` hashes.
+    read_cited_sources: bool = True
 
     #: Ask the writer, in a separate structured pass, where each cited claim's support
     #: actually sits: citation id -> URL -> locator -> verbatim span -> claim. Checked

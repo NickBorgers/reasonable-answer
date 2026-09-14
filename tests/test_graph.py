@@ -888,3 +888,56 @@ def test_a_seeded_run_stores_the_exact_bytes_it_hashed(identities, config):
     seed = "# Draft\n\nBody."
     final = run(config, question="Does it hold?", seed=seed, client=make_client(identities))
     assert (Path(final["run_dir"]) / "seed.md").read_text() == seed
+
+
+# ------------------------------------ citation census (D-writer-citation-continuity)
+
+
+def _generate_events(cfg, final):
+    return [e for e in _events(cfg, final) if e["kind"] == "generate"]
+
+
+def test_every_generate_event_carries_the_citation_census(identities, tmp_path, roster):
+    cfg = Config(
+        roster=roster,
+        budgets=Budgets(min_ticks=2, hard_cap=4),
+        runs_dir=tmp_path / "runs",
+    )
+    client = make_client(identities, critique_fn=always_material)
+    client.report_fn = lambda _n: REPORT
+    final = run(cfg, question="Is it so?", client=client)
+
+    generations = _generate_events(cfg, final)
+    assert len(generations) >= 2
+    first, revision = generations[0], generations[1]
+    for event in (first, revision):
+        assert event["source_entries"] == 1
+        assert event["body_markers"] == 1
+        assert event["cited_entries"] == 1
+        assert event["dangling_markers"] == 0
+    # The comparison needs a draft to compare with.
+    assert "cited_sources_dropped" not in first
+    assert revision["cited_sources_dropped"] == 0
+    assert revision["cited_sources_added"] == 0
+    assert revision["entries_removed"] == 0
+
+
+def test_a_writer_that_strips_every_marker_is_visible_and_not_rejected(
+    identities, tmp_path, roster, caplog
+):
+    """Warn-only: the draft ships to review as written, and the event says what happened."""
+    cfg = Config(
+        roster=roster,
+        budgets=Budgets(min_ticks=2, hard_cap=4),
+        runs_dir=tmp_path / "runs",
+    )
+    client = make_client(identities, critique_fn=always_material)
+    client.report_fn = lambda _n: REPORT.replace(" [1]", "")
+    with caplog.at_level("WARNING"):
+        final = run(cfg, question="Is it so?", seed=REPORT, client=client)
+
+    revision = _generate_events(cfg, final)[0]
+    assert revision["body_markers"] == 0
+    assert revision["source_entries"] == 1
+    assert revision["cited_sources_dropped"] == 1
+    assert "its body carries no [n] marker" in caplog.text

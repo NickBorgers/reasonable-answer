@@ -75,8 +75,8 @@ residual (a bias the rulebook does not describe passes through).
 ```mermaid
 flowchart TB
     subgraph GEN["Writer (from writer pool, ≠ last writer)"]
-        Gin["SEES: question + latest report + DEFECT LIST (fix-tasks)<br/>+ its OWN search results, and the pages it read from them (D-writer-source-reads)"]
-        Gno["NEVER: raw critique prose · other reports' history · who critiqued<br/>· a page another writer's search found"]
+        Gin["SEES: question + latest report + DEFECT LIST (fix-tasks)<br/>+ its OWN search results, and the pages it read from them (D-writer-source-reads)<br/>+ on a revision, pages listed in the draft it revises (D-writer-rereads-cited-sources)"]
+        Gno["NEVER: raw critique prose · other reports' history · who critiqued<br/>· a page another writer's search found that the draft does not cite"]
     end
     subgraph CRIT["Per-lens critics — 3 lenses × review.depth models, each its own fresh context"]
         Cin["SEES: report + question + its ONE lens + taxonomy"]
@@ -275,12 +275,17 @@ body of it: with `search.read_sources: true` a writer holds a `read_source` tool
 of a page it chose enters the **writer's** context, which is the one role that emits free text
 downstream. Four things bound it, and only the first is new:
 
-- **The allowlist is the writer's own search results, in the same call.** `read_source` resolves a
-  URL only if a `web_search` result in that `complete()` call listed it — `reading.ReadSession` is
-  both the allowlist and the read log, and it is created and discarded per call. There is no
+- **The allowlist is the writer's own search results in the same call, plus — on a revision — the
+  URLs the draft it revises lists.** `read_source` resolves a URL only if a `web_search` result in
+  that `complete()` call listed it, or, when the call revises a draft and the run both reads and
+  verifies sources, the draft's `## Sources` lists it (D-writer-rereads-cited-sources) — the same URL
+  set verification fetches for that draft. `reading.ReadSession` is both the allowlist and the read
+  log, holds the two sets separately, and is created and discarded per call. There is no
   arbitrary-URL reader, and a refused URL never reaches the fetch boundary. Per-call rather than
   per-run is a deliberate tightening: a run-wide list would let a later writer open a page an
-  earlier one found, giving up a fresh-context property (#6) to buy nothing.
+  earlier one merely found, giving up a fresh-context property (#6) to buy nothing. The cited seed
+  does not reopen that: it is a function of the draft the reviser already holds, carries no other
+  writer's searches or reads, and never enters trusted prompt text as a URL list.
 - **The output channel is unchanged.** A writer emits free-text markdown with or without the tool,
   so reading adds evidence, not a new way to emit anything — the same argument that bounds the
   evidence critic below. What the writer may be *persuaded* to write is the residual, and it is the

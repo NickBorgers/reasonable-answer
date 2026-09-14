@@ -31,6 +31,12 @@ since a writer has to name a URL and can only have learned one by searching. A r
 reaches the fetch boundary and costs no budget — otherwise a writer could exhaust the run's
 reads on addresses it was never offered and arrive at the real ones with nothing to spend.
 
+> Superseded in part by **D-writer-rereads-cited-sources**. A reviser has learned URLs another way:
+> it holds the draft. On a revision, with `verify_sources` also on, the allowlist additionally
+> holds the URLs the draft's `## Sources` lists — exactly the set verification fetches for that
+> draft. Search results still never outlive the call that returned them, and a refused URL still
+> reaches no fetch and spends no budget.
+
 *Bounded three ways.* `search.read_budget` caps reads per run; `search.read_char_budget` caps
 the total page text handed to writers, because a per-page cap cannot see the total and retrieval
 degrades when relevant information is buried in long context
@@ -132,6 +138,10 @@ manifest" is a legitimate outcome and does not mean its claims went unsupported.
 forward across rounds would fix the shape at the cost of the per-call allowlist, and was not worth
 that trade.
 
+> Superseded in part by **D-writer-rereads-cited-sources**: a revision round may now re-read the
+> pages its draft cites, and a manifest from such a round is checked against those re-read bodies.
+> Reads themselves still do not carry forward; the reviser opens the page again, under its own budget.
+
 **Deliberately not done.** No arbitrary-URL reader, no reading for critics (the evidence lens has
 its own fetch path and its own reasons), no manifest-derived defect category, and no change to
 what the controller counts. Reading is not offered on the dispute-elicitation call, which is a
@@ -156,6 +166,10 @@ findings.
   it open a page attempt one's search found and would let its manifest be checked against bodies it
   never saw. The session is therefore constructed inside the loop, and
   `test_a_retried_writer_starts_with_an_empty_allowlist` drives exactly that path.
+
+    > Superseded in part by **D-writer-rereads-cited-sources**: on a revision each attempt's
+    > session is seeded with the draft's cited URLs. The seed is a function of the draft every
+    > attempt already holds, so it carries nothing between attempts; search results still do not.
 * *Building a fetcher for reading could switch on the evidence-lens page channel by accident.*
   `Runtime.fetcher` is set only when `verify_sources`; the reader holds the shared instance
   separately, and the existing verification tests are what would catch a regression.
