@@ -14,7 +14,8 @@ from dataclasses import dataclass, field
 from pathlib import Path
 from typing import Any, Literal
 
-from ..store import load_final
+from ..citelinks import VerifiedSpan, select_spans
+from ..store import load_final, read_claim_checks
 from ..taxonomy import LENSES
 
 Status = Literal["queued", "running", "interrupted", "abandoned", "accepted",
@@ -339,6 +340,14 @@ class Registry:
         """
         path = self.dir(run_id) / "owner.txt"
         return path.read_text().strip() or None if path.exists() else None
+
+    def verified_spans(
+        self, run_id: str, artifact_hash: str | None
+    ) -> dict[tuple[int, str], VerifiedSpan]:
+        """The page passages claim check verified for `artifact_hash`, keyed by (bibliography
+        number, citing sentence) — what a rendered citation may deep-link to
+        (D-citation-links). Empty whenever there is nothing verified to point at."""
+        return select_spans(read_claim_checks(self.runs_dir, run_id, artifact_hash))
 
     def drafts(self, run_id: str) -> list[tuple[str, str]]:
         """(filename, body) for every draft, oldest first."""

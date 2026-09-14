@@ -8,6 +8,7 @@ from __future__ import annotations
 
 import html
 import json
+import re
 
 import pytest
 import yaml
@@ -15,6 +16,7 @@ from conftest import WEB_IDENTITY, web_client
 from typer.testing import CliRunner
 
 from reasonable_answer import cli, export
+from reasonable_answer.citelinks import VerifiedSpan
 from reasonable_answer.store import CorruptRun, RunStore, purge
 from reasonable_answer.web.app import create_app
 from reasonable_answer.web.registry import Registry
@@ -329,6 +331,55 @@ def test_the_html_export_carries_the_verdict_too():
 
     assert "needs human review" in document
     assert "Cite or drop the 40% figure." in document
+
+
+# ------------------------------------------------------------------ citation links
+
+LINKED_REPORT = """# Answer
+
+## Conclusion
+
+Output rose 3% in 2024 [1].
+
+## Sources
+
+[1] Alpha report. https://example.org/alpha
+"""
+
+LINKED_SPANS = {
+    (1, "Output rose 3% in 2024 [1]."): VerifiedSpan("https://example.org/alpha", "output rose by 3%")
+}
+
+DEEP_LINK = "https://example.org/alpha#:~:text=output%20rose%20by%203%25"
+
+
+def test_the_markdown_export_carries_citation_links():
+    """Copy markdown and `Download .md` carry the links too (D-citation-links)."""
+    document = export.export_markdown("Q?", LINKED_REPORT, FINAL, "run-shared", spans=LINKED_SPANS)
+
+    assert f"Output rose 3% in 2024 [[1]]({DEEP_LINK})." in document
+    assert "[1] Alpha report. <https://example.org/alpha>" in document
+
+
+def test_the_markdown_export_links_plainly_without_verified_spans():
+    document = export.export_markdown("Q?", LINKED_REPORT, FINAL, "run-shared")
+
+    assert "Output rose 3% in 2024 [[1]](https://example.org/alpha)." in document
+    assert ":~:text=" not in document
+
+
+def test_the_html_export_links_citations_and_sends_no_referrer():
+    document = export.export_html("Q?", LINKED_REPORT, FINAL, "run-shared", spans=LINKED_SPANS)
+
+    assert f'<a href="{DEEP_LINK}" rel="noreferrer noopener">[1]</a>' in document
+    assert (
+        '<a href="https://example.org/alpha" rel="noreferrer noopener">https://example.org/alpha</a>'
+        in document
+    )
+    article = document.split('<article class="report">', 1)[1].split("</article>", 1)[0]
+    anchors = re.findall(r"<a [^>]*>", article)
+    assert len(anchors) == 2
+    assert all('rel="noreferrer noopener"' in a for a in anchors)
 
 
 # ---------------------------------------------------------------------- print

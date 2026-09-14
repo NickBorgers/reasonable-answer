@@ -28,6 +28,7 @@ import time
 from dataclasses import dataclass, field
 from typing import Any
 
+from . import citelinks
 from .build import describe_build
 
 #: Not a terminal status — no controller rule produces it. It is what an export says
@@ -325,16 +326,19 @@ def export_markdown(
     *,
     exported_on: str | None = None,
     unreadable: bool = False,
+    spans: citelinks.Spans | None = None,
 ) -> str:
     """`final.md` with its review record appended, as one pasteable document.
 
     Deliberately not the same bytes as `report.md`: that route stays the raw shipped
-    artifact, for anything that hashes or diffs it.
+    artifact, for anything that hashes or diffs it. The body's citations are links here
+    (D-citation-links), deep links where `spans` holds a verified passage.
     """
     prov = provenance(question, final, run_id, exported_on=exported_on, unreadable=unreadable)
+    body = citelinks.linked_markdown(report, spans).strip()
     # The title is flattened: a question containing a newline would otherwise end the
     # `#` heading and let the rest of it start blocks of its own.
-    lines = [f"# {_oneline(prov.question)}", "", report.strip(), "", "---", "", "## Review record", ""]
+    lines = [f"# {_oneline(prov.question)}", "", body, "", "---", "", "## Review record", ""]
 
     # Empty bullets are dropped rather than emitted blank: a blank line inside a
     # markdown list splits it into two lists wherever it lands.
@@ -519,6 +523,7 @@ def export_html(
     *,
     exported_on: str | None = None,
     unreadable: bool = False,
+    spans: citelinks.Spans | None = None,
 ) -> str:
     """One self-contained file: no stylesheet, font, script or image is fetched.
 
@@ -543,7 +548,7 @@ def export_html(
     {(" · " + _esc(prov.label)) if prov.label else ""}</p>
 </section>
 <section class="panel reading">
-  <article class="report">{to_html(report)}</article>
+  <article class="report">{to_html(citelinks.linked_markdown(report, spans))}</article>
 </section>
 {provenance_html(prov)}"""
 
