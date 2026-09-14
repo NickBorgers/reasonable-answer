@@ -79,7 +79,7 @@ Invariants (enforced in code, covered by tests):
 | Node | Reads | Produces | Model | Trust model |
 |------|-------|----------|-------|-------------|
 | **intake** | question + **markdown** seed | normalized `question` / `seed`; routing | none | deterministic |
-| **generate** | question + latest report + **defect list**; with retrieval on, its own `web_search` results and — with `search.read_sources` — the pages it read from them (D-writer-source-reads) | next report (with citations) — under `revision.mode: patch` only the paragraphs a fix task named — and the passages that restate the same claim (D-claim-scoped-patch) — are edited, the rest returned byte-identical (D-scoped-revision); plus, with `search.support_manifest`, an **audit-side** support manifest | non-author (alternating) | LLM (untrusted output) |
+| **generate** | question + latest report + **defect list**; with retrieval on, its own `web_search` results and — with `search.read_sources` — the pages it read from them (D-writer-source-reads), and on a revision with `verify_sources` on, the pages the draft's `## Sources` lists (D-writer-rereads-cited-sources) | next report (with citations) — under `revision.mode: patch` only the paragraphs a fix task named — and the passages that restate the same claim (D-claim-scoped-patch) — are edited, the rest returned byte-identical (D-scoped-revision); plus, with `search.support_manifest`, an **audit-side** support manifest; every draft's `generate` event carries a warn-only citation census (D-writer-citation-continuity) | non-author (alternating) | LLM (untrusted output) |
 | **adjudicate** *(D-writer-disputes, opt-in)* | pending disputes + finding + one paragraph | `AdjudicationRecord[]` | mechanical fetch-check, else an arbiter ≠ disputer ≠ raiser | mechanical, or LLM inside a closed 2-field schema |
 | **critique** | report + question + **one lens** + taxonomy; the evidence lens also gets the cited pages as claim-anchored excerpts (D-claim-anchored-excerpts) | `Issue[]` per critic | `review.depth` non-author models per lens, drawn as one slate (`roles.critic_slate`) | LLM (untrusted output) |
 | ↳ **claim check** *(D-claim-level-verification, opt-in)* | one citing sentence + its paragraph + one fetched page, per pair | a closed `ClaimVerdict` per pair, minted into `misrepresented_source` on the evidence critic's `LensResult` (`claimcheck`) | the evidence critic's own model, one fresh context per pair, memoised per resolved identity and complete prompt | LLM inside a closed 4-way schema; `supported` and `contradicted` must quote the shown page verbatim or the pair is unchecked; `absent` and `unreadable` carry no page quote, settle nothing unless the page was shown whole and uncut, and never retire the critic's own finding; a pass stops after `claim_check.max_consecutive_failures` unchecked calls in a row (D-claim-check-inconclusive-verdicts) |
@@ -365,7 +365,7 @@ Retrieval reaches the writer in two steps, each its own opt-in switch and each o
 ```mermaid
 flowchart LR
     W["writer call (one fresh context)"] --> S["web_search<br/>title · URL · snippet"]
-    S --> SES["ReadSession — the URLs THIS call was offered"]
+    S --> SES["ReadSession — the URLs THIS call was offered<br/>+ on a revision, the URLs the draft cites"]
     SES --> R["read_source<br/>only a URL in the session"]
     R --> F["fetch.SourceFetcher → fetch.http_get<br/>(the one egress point; cache shared with verification)"]
     F --> P["prompts.source_read_block<br/>fenced untrusted page text"]
@@ -378,7 +378,11 @@ flowchart LR
 
 `search.enabled` gives the writer `web_search`, so a cited URL is one a result returned.
 `search.read_sources` adds `read_source`, whose allowlist is `reading.ReadSession` — the URLs that
-writer call's own searches returned, and nothing else. Both tools are driven by one
+writer call's own searches returned and, on a revision where `verify_sources` is also on, the URLs the
+draft under revision lists (`graph._cited_seed`, the same set `graph._verified_urls` hands verification;
+D-writer-rereads-cited-sources), and nothing else. The seeded URLs never appear in trusted prompt text:
+`writer_system(..., reread=True)` and `reading.read_source_tool(True)` only point the writer at the
+fenced draft. Both tools are driven by one
 `(name, arguments) -> text` handler assembled in `graph._retrieval_kwargs`, which is where the
 composition lives so `search` and `reading` need not import each other. The optional whole-run
 `read_budget` call cap is unbounded by default; `read_char_budget` remains a mandatory whole-run

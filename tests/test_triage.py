@@ -513,6 +513,10 @@ def test_one_url_listed_twice_is_a_duplicate_entry():
     duplicate = issues[0]
     assert duplicate.severity is Severity.MINOR
     assert duplicate.citation_id == "[2], [3]"
+    # The writer is also told never to renumber (D-writer-citation-continuity); a fix task
+    # that asked for renumbering would hand it two opposite instructions.
+    assert "lower-numbered" in duplicate.instruction
+    assert "Do not renumber" in duplicate.instruction
     assert_quotable(issues, report)
 
 
