@@ -104,6 +104,17 @@ def test_text_is_truncated_to_the_configured_limit(monkeypatch):
     )
     result = SourceFetcher(max_chars=100).fetch("https://example.org/a")
     assert len(result.text) <= 100
+    # And says so: a clipped body is a prefix of the page, never the page
+    # (D-claim-check-inconclusive-verdicts).
+    assert result.truncated
+
+
+def test_a_page_that_fits_every_cap_is_not_marked_cut(monkeypatch):
+    monkeypatch.setattr(
+        urllib.request.OpenerDirector, "open", lambda self, *a, **k: _stub(PAGE)
+    )
+    result = SourceFetcher().fetch("https://example.org/a")
+    assert result.ok and not result.truncated
 
 
 def test_results_are_cached_per_url(monkeypatch):
@@ -202,14 +213,46 @@ def test_a_truncated_pdf_is_refused_not_parsed(monkeypatch):
         lambda self, *a, **k: _stub(b"%PDF-1.4" + b"x" * 5_000, ctype="application/pdf"),
     )
     monkeypatch.setattr(
-        "reasonable_answer.textconv.pdf_to_markdown",
-        lambda *a, **k: parsed.append(1) or "should never be reached",
+        "reasonable_answer.textconv.pdf_to_markdown_bounded",
+        lambda *a, **k: (parsed.append(1) or "should never be reached", False),
     )
     result = _pdf_fetcher(pdf_max_bytes=1_000).fetch("https://example.org/paper.pdf")
 
     assert not parsed, "the parser must never see a body that hit the cap"
     assert result.outcome is SourceOutcome.UNREADABLE
     assert "cap" in result.error
+
+
+def test_a_pdf_that_lost_pages_to_the_cap_is_marked_cut(monkeypatch):
+    """Forty pages of a sixty-page report are a prefix of the document, and the reader
+    is told so the same way a byte-capped HTML body tells it."""
+    monkeypatch.setattr(
+        urllib.request.OpenerDirector,
+        "open",
+        lambda self, *a, **k: _stub(b"%PDF-1.4 stub", ctype="application/pdf"),
+    )
+    monkeypatch.setattr(
+        "reasonable_answer.textconv.pdf_to_markdown_bounded", lambda *a, **k: ("prose", True)
+    )
+    result = _pdf_fetcher().fetch("https://example.org/paper.pdf")
+    assert result.ok and result.text == "prose" and result.truncated
+
+
+def test_the_bounded_pdf_converter_reports_dropped_pages():
+    pypdf = pytest.importorskip("pypdf")
+    from io import BytesIO
+
+    from reasonable_answer import textconv
+
+    writer = pypdf.PdfWriter()
+    writer.add_blank_page(width=200, height=200)
+    writer.add_blank_page(width=200, height=200)
+    buffer = BytesIO()
+    writer.write(buffer)
+    data = buffer.getvalue()
+    assert textconv.pdf_to_markdown_bounded(data, max_pages=1)[1] is True
+    assert textconv.pdf_to_markdown_bounded(data, max_pages=2)[1] is False
+    assert textconv.pdf_to_markdown_bounded(data)[1] is False
 
 
 def test_a_scanned_pdf_says_so_rather_than_looking_empty(monkeypatch):
@@ -222,7 +265,7 @@ def test_a_scanned_pdf_says_so_rather_than_looking_empty(monkeypatch):
         "open",
         lambda self, *a, **k: _stub(b"%PDF-1.4 fake", ctype="application/pdf"),
     )
-    monkeypatch.setattr("reasonable_answer.textconv.pdf_to_markdown", lambda *a, **k: "   ")
+    monkeypatch.setattr("reasonable_answer.textconv.pdf_to_markdown_bounded", lambda *a, **k: ("   ", False))
     result = _pdf_fetcher().fetch("https://example.org/scan.pdf")
 
     assert result.outcome is SourceOutcome.UNREADABLE
@@ -238,7 +281,7 @@ def test_a_pdf_served_as_octet_stream_is_still_read(monkeypatch):
         lambda self, *a, **k: _stub(b"%PDF-1.4 fake", ctype="application/octet-stream"),
     )
     monkeypatch.setattr(
-        "reasonable_answer.textconv.pdf_to_markdown", lambda *a, **k: "Real prose."
+        "reasonable_answer.textconv.pdf_to_markdown_bounded", lambda *a, **k: ("Real prose.", False)
     )
     result = _pdf_fetcher().fetch("https://repo.example/files/paper.pdf?download=1")
 
@@ -269,7 +312,9 @@ def test_the_larger_pdf_cap_applies_only_to_pdfs(monkeypatch, ctype, body, expec
     monkeypatch.setattr(
         urllib.request.OpenerDirector, "open", lambda self, *a, **k: _stub(body, ctype=ctype)
     )
-    monkeypatch.setattr("reasonable_answer.textconv.pdf_to_markdown", lambda *a, **k: "prose")
+    monkeypatch.setattr(
+        "reasonable_answer.textconv.pdf_to_markdown_bounded", lambda *a, **k: ("prose", False)
+    )
     monkeypatch.setattr(fetch_mod, "http_get", recording)
 
     _pdf_fetcher(max_bytes=400_000, pdf_max_bytes=25_000_000).fetch("https://example.org/a.pdf")
@@ -363,6 +408,9 @@ def test_byte_cap_bounds_what_is_read_off_the_wire():
     # body that just fits from one that was cut off. Only the cap's worth is kept.
     assert read_sizes == [501], "read() must be given the byte cap, not called unbounded"
     assert len(result.text) < 1_000
+    # The wire cut is carried, not discarded: what survived may fit a checker's page
+    # budget and must still never be called whole (D-claim-check-inconclusive-verdicts).
+    assert result.truncated
 
 
 def test_a_redirect_out_of_http_is_refused(monkeypatch):

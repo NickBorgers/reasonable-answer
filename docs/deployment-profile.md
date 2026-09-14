@@ -140,6 +140,13 @@ search:
   enabled: true
   verify_sources: true
 
+claim_check:             # D-claim-level-verification — each citing sentence checked against its
+  enabled: true          # page in its own context; reads the pages verify_sources fetches, so it
+                         # is on wherever verification is. Safe to run since
+                         # D-claim-check-inconclusive-verdicts: an inconclusive verdict retires
+                         # nothing, a cut page is never called whole, a dead proxy is a few
+                         # failures rather than one per pair.
+
 sources:
   enabled: true          # master switch; each tier still opts in separately
   identifiers:           # D-existence-vs-body — ask a registry whether the cited source exists

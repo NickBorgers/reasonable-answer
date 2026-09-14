@@ -55,13 +55,19 @@ in its own context.
    unreadable page, a failed call, past the cap — and dropped for the pairs it did
    (`claimcheck.reconcile`: same paragraph, the critic's span inside the checked sentence). One claim
    is never counted twice under two spans, and where the checker could not act the lens is exactly
-   what it was.
+   what it was. *Amended by D-claim-check-inconclusive-verdicts:* as shipped, `reconcile` keyed on
+   `checked`, which includes `unreadable` and `absent`-in-part, so the code dropped findings this
+   item says are kept. "Settle" now has a definition — `supported`, `contradicted`, or `absent`
+   from a page shown whole (`PairVerdict.settled`) — and `reconcile` reads that.
 5. **Every failure lands toward the writer.** A call that fails, answers outside the schema, or
    quotes a span the page lacks leaves the pair unchecked and mints nothing; the lens stays
    completed on the strength of the critic's own review. The one exception is the one every model
    call already has: a 402 during checking fails the lens with the account failure class, before the
    critic's larger call is spent, so `_defer_if_account_refused` defers the run
-   (D-credit-exhaustion-defers).
+   (D-credit-exhaustion-defers). *Amended by D-claim-check-inconclusive-verdicts:* after
+   `claim_check.max_consecutive_failures` calls in a row have ended unchecked, the remaining pairs
+   of the pass are recorded `aborted` without a call; and a page cut before its end
+   (`FetchedSource.truncated`) is never "shown whole", so `absent` on it is `absent_partial`.
 6. **Verdicts are memoised for the runtime**, keyed on the critic's resolved identity and hashes of
    the complete system and user prompts. The key therefore covers the sentence, its paragraph,
    source number and URL, rendered page text, current date, and prompt wording. Re-running an

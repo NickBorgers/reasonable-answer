@@ -1612,6 +1612,7 @@ def _critique_one(
                 repair_retries=rt.client.budgets.critic_repair_retries,
                 cache=rt.claim_cache,
                 current_date=run_date,
+                max_consecutive_failures=cc.max_consecutive_failures,
             )
         except ProviderAccountError as exc:
             # The same shape `critique_once` returns for the critic's own 402, so
@@ -1632,7 +1633,7 @@ def _critique_one(
         rt.store.event("claim_check", artifact_hash=artifact_hash, critic=identity, **counts)
         log.info(
             "claim check by %s: %d pairs, %d checked, %d contradicted, %d absent (%d partial), "
-            "%d unreadable, %d unchecked, %d cached",
+            "%d unreadable, %d unchecked (%d aborted), %d cached",
             alias,
             counts["pairs"],
             counts["checked"],
@@ -1641,6 +1642,7 @@ def _critique_one(
             counts["absent_partial"],
             counts["unreadable"],
             counts["unchecked"],
+            counts["aborted"],
             counts["cached"],
         )
 

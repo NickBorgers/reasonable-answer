@@ -296,6 +296,17 @@ def pdf_to_markdown(data: bytes, *, max_pages: int | None = None) -> str:
     appendix would spend real time producing text that is then discarded. A seed passes
     `None`, because a seed *is* the document.
     """
+    return pdf_to_markdown_bounded(data, max_pages=max_pages)[0]
+
+
+def pdf_to_markdown_bounded(data: bytes, *, max_pages: int | None = None) -> tuple[str, bool]:
+    """`pdf_to_markdown`, plus whether `max_pages` dropped any page.
+
+    The second value is what lets a fetched PDF say it is a prefix of the document
+    (`FetchedSource.truncated`): a reader shown forty pages of a sixty-page report has
+    not been shown the report, and absence from what it saw is not absence from the
+    document (D-claim-check-inconclusive-verdicts).
+    """
     try:
         import pypdf
     except ImportError as exc:
@@ -308,6 +319,7 @@ def pdf_to_markdown(data: bytes, *, max_pages: int | None = None) -> str:
         if reader.is_encrypted:
             raise ConversionError("the PDF is encrypted; supply an unlocked copy")
         wanted = reader.pages if max_pages is None else reader.pages[:max_pages]
+        dropped = max_pages is not None and len(reader.pages) > max_pages
         pages = [page.extract_text() or "" for page in wanted]
     except ConversionError:
         raise
@@ -320,4 +332,4 @@ def pdf_to_markdown(data: bytes, *, max_pages: int | None = None) -> str:
             collapsed = re.sub(r"[ \t]*\n[ \t]*", " ", block).strip()
             if collapsed:
                 blocks.append(collapsed)
-    return "\n\n".join(blocks)
+    return "\n\n".join(blocks), dropped

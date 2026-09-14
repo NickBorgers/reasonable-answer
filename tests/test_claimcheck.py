@@ -19,7 +19,7 @@ from pydantic import ValidationError
 from reasonable_answer import claimcheck, triage
 from reasonable_answer.config import ClaimCheckConfig, Config, ConfigError, SearchConfig
 from reasonable_answer.fetch import FetchedSource
-from reasonable_answer.graph import Runtime, _critique_one
+from reasonable_answer.graph import Runtime, _critique_one, _run_fingerprint
 from reasonable_answer.llm import ModelCallError, ProviderAccountError
 from reasonable_answer.schemas import ClaimVerdict, CritiqueOutput, RawIssue, StructuralRef
 from reasonable_answer.store import RunStore
@@ -149,6 +149,7 @@ def test_supported_unreadable_and_unchecked_mint_nothing():
         "absent_partial": 0,
         "unreadable": 1,
         "unchecked": 2,
+        "aborted": 0,
         "cached": 0,
     }
 
@@ -211,6 +212,35 @@ def test_a_checked_pair_supersedes_the_critics_own_misrepresentation_finding():
         "projected to reach roughly 90%",
     ]
     assert kept_issues[1].category is Category.UNCITED_CLAIM
+
+
+@pytest.mark.parametrize(
+    "verdict,complete,kept_by_critic",
+    [
+        ("supported", True, False),
+        ("contradicted", False, False),
+        ("absent", True, False),
+        # Not readings of the page: the checker was shown no body, or only part of one.
+        # Neither mints a finding, so neither may retire the critic's
+        # (D-claim-check-inconclusive-verdicts).
+        ("absent", False, True),
+        ("unreadable", False, True),
+    ],
+)
+def test_only_a_settled_verdict_retires_the_critics_own_finding(verdict, complete, kept_by_critic):
+    kept, _ = claimcheck.pairs(REPORT)
+    span = "x" if verdict in ("supported", "contradicted") else None
+    check = claimcheck.ClaimCheck(verdicts=[_verdict(kept[1], verdict, span, complete=complete)])
+    critic = [_critic_issue(1, 1, "projected to reach roughly 90%", citation_id="1")]
+    assert (claimcheck.reconcile(critic, check) == critic) is kept_by_critic
+    # Whichever way it goes, the sentence is never counted under two spans and never
+    # under none while a critic stood behind a finding: dropped means minted, or the
+    # verdict was `supported`.
+    minted = claimcheck.issues_from(check)
+    if not kept_by_critic and verdict != "supported":
+        assert len(minted) == 1
+    if kept_by_critic:
+        assert minted == []
 
 
 def test_nothing_checked_means_the_critic_is_untouched():
@@ -369,6 +399,111 @@ def test_a_failed_call_leaves_the_pair_unchecked_and_an_account_refusal_propagat
         )
 
 
+def test_consecutive_failures_abort_the_pass_instead_of_timing_out_per_pair(identities):
+    """One dead proxy must cost a few timeouts inside the critic's slot, not `max_pairs`
+    of them each with its own retry budget (D-claim-check-inconclusive-verdicts). A
+    verdict in between resets the streak, because a streak is the signal and a lone
+    failure is not."""
+    calls: list[str] = []
+    script = iter(["fail", "ok", "fail", "fail", "never reached"])
+
+    def flaky(alias, user):
+        step = next(script)
+        calls.append(step)
+        if step == "fail":
+            raise ModelCallError("down", failure_class="timeout")
+        return _supported(user)
+
+    result = claimcheck.check(
+        _client(identities, flaky),
+        "evidence-spec",
+        identities["evidence-spec"],
+        REPORT,
+        _sources(),
+        page_max_chars=30_000,
+        max_pairs=200,
+        max_tokens=800,
+        repair_retries=0,
+        max_consecutive_failures=2,
+    )
+    assert calls == ["fail", "ok", "fail", "fail"]
+    reasons = [v.unchecked_reason for v in result.verdicts]
+    assert reasons == ["timeout", None, "timeout", "timeout", "aborted"]
+    counts = result.counts()
+    assert (counts["checked"], counts["unchecked"], counts["aborted"]) == (1, 4, 1)
+    assert claimcheck.issues_from(result) == []
+
+
+def test_a_cache_hit_neither_resets_nor_advances_the_failure_streak(identities):
+    cache = claimcheck.VerdictCache()
+    middle = "The cached claim is supported [1]."
+    sources = [page("https://example.test/emals", EMALS_PAGE)]
+    kwargs = dict(page_max_chars=30_000, max_pairs=200, max_tokens=800, repair_retries=0,
+                  max_consecutive_failures=2, cache=cache)
+    priming_report = f"## Findings\n\n{middle}\n\n## Sources\n\n[1] https://example.test/emals"
+    claimcheck.check(_client(identities, lambda alias, user: _supported(user)), "evidence-spec",
+                     identities["evidence-spec"], priming_report, sources, **kwargs)
+
+    calls = 0
+
+    def fail(alias, user):
+        nonlocal calls
+        calls += 1
+        raise ModelCallError("down", failure_class="timeout")
+
+    report = f"""## Findings
+
+The first call fails [1].
+
+{middle}
+
+The second call fails [1].
+
+This pair must be aborted [1].
+
+## Sources
+
+[1] https://example.test/emals
+"""
+    result = claimcheck.check(_client(identities, fail), "evidence-spec",
+                              identities["evidence-spec"], report, sources, **kwargs)
+    assert calls == 2
+    assert [v.unchecked_reason for v in result.verdicts] == ["timeout", None, "timeout", "aborted"]
+    assert result.verdicts[1].cached
+
+
+def test_a_page_cut_at_the_fetch_cap_is_never_shown_whole(identities):
+    """A body that fits `page_max_chars` is not the page when the fetch stopped at its
+    byte cap or a PDF at its page cap. Absence from what survived is not absence from
+    the page, so `absent` mints nothing — and the checker is told the page goes on."""
+    seen: list[str] = []
+
+    def absent(alias, user):
+        seen.append(user)
+        return ClaimVerdict(verdict="absent", reason="not in what I was shown")
+
+    cut = FetchedSource(url="https://example.test/emals", text=EMALS_PAGE, status=200, truncated=True)
+    result = claimcheck.check(
+        _client(identities, absent),
+        "evidence-spec",
+        identities["evidence-spec"],
+        REPORT,
+        [cut, page("https://example.test/fleet", FLEET_PAGE)],
+        page_max_chars=30_000,
+        max_pairs=200,
+        max_tokens=800,
+        repair_retries=0,
+    )
+    emals = [v for v in result.verdicts if v.pair.url == cut.url]
+    assert emals and all(v.verdict == "absent" and not v.complete for v in emals)
+    fleet = [v for v in result.verdicts if v.pair.url != cut.url]
+    assert fleet and all(v.complete for v in fleet)
+    # The whole fleet page mints; the cut EMALS page mints nothing.
+    assert {i.citation_id for i in claimcheck.issues_from(result)} == {"2"}
+    assert result.counts()["absent_partial"] == len(emals)
+    assert any("continues past the last character retained" in u for u in seen)
+
+
 def test_the_cache_returns_an_unchanged_pair_without_a_call_and_is_keyed_on_identity(identities):
     calls = []
 
@@ -447,11 +582,18 @@ def test_the_checker_is_off_by_default_and_requires_verification(roster):
 
 @pytest.mark.parametrize(
     "field,value",
-    [("page_max_chars", 1_000), ("max_pairs", 0), ("max_tokens", 100)],
+    [("page_max_chars", 1_000), ("max_pairs", 0), ("max_tokens", 100),
+     ("max_consecutive_failures", 0), ("max_consecutive_failures", 101)],
 )
 def test_claim_check_config_bounds(field, value):
     with pytest.raises(ValidationError):
         ClaimCheckConfig(**{field: value})
+
+
+def test_the_failure_limit_is_not_part_of_the_run_identity(config):
+    changed = config.model_copy(update={"claim_check": config.claim_check.model_copy(
+        update={"max_consecutive_failures": 7})})
+    assert _run_fingerprint(config, "q", None) == _run_fingerprint(changed, "q", None)
 
 
 # ------------------------------------------------------------------ the lens

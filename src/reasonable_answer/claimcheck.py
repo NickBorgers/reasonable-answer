@@ -22,10 +22,17 @@ not-found becomes ``fabricated_citation`` (D-notfound-fabrication):
 
 Everything fails **toward the writer, never against it**: a checker call that fails,
 answers outside the schema, or quotes a span that is not in the page leaves the pair
-*unchecked*, and an unchecked pair mints nothing. The critic's own whole-document
-``misrepresented_source`` judgement is kept exactly for the pairs the checker did not
-settle, and dropped for the ones it did — a checked pair's verdict is authoritative
-for that category, so a claim is never counted twice under two spans.
+*unchecked*, and an unchecked pair mints nothing. After ``max_consecutive_failures``
+such calls in a row the rest of the pass is skipped as ``aborted`` rather than met with
+one timeout per pair (D-claim-check-inconclusive-verdicts). The critic's own
+whole-document ``misrepresented_source`` judgement is kept exactly for the pairs the
+checker did not *settle*, and dropped for the ones it did — a settled verdict is
+authoritative for that category, so a claim is never counted twice under two spans.
+Settled means ``supported``, ``contradicted``, or ``absent`` from a page shown whole:
+``unreadable`` and ``absent`` from a page shown in part are not readings of the page,
+so they neither mint a finding nor retire one a critic made
+(D-claim-check-inconclusive-verdicts). A page cut before its end — at the fetch byte
+cap, at a PDF's page cap — is never "shown whole", however short what survived.
 
 Verdicts are cached for the run per (critic identity, page, sentence): the call is a
 pure function of those three, and re-running it on an unchanged sentence against an
@@ -86,6 +93,18 @@ class PairVerdict:
     def checked(self) -> bool:
         return self.verdict in ("supported", "contradicted", "absent", "unreadable")
 
+    @property
+    def settled(self) -> bool:
+        """The verdict is a reading of what the page says about the sentence — the only
+        kind that may stand in for the critic's own judgement of that sentence
+        (D-claim-check-inconclusive-verdicts). `unreadable` says the checker was shown
+        no body to read, and `absent` from a page shown in part says only that the
+        excerpts do not address the point; neither reads the page, so neither may
+        retire a finding a critic made about it."""
+        if self.verdict in ("supported", "contradicted"):
+            return True
+        return self.verdict == "absent" and self.complete
+
 
 @dataclass
 class ClaimCheck:
@@ -105,6 +124,7 @@ class ClaimCheck:
             "absent_partial": 0,
             "unreadable": 0,
             "unchecked": self.over_cap,
+            "aborted": 0,
             "cached": 0,
         }
         for v in self.verdicts:
@@ -112,6 +132,8 @@ class ClaimCheck:
                 out["cached"] += 1
             if not v.checked:
                 out["unchecked"] += 1
+                if v.unchecked_reason == "aborted":
+                    out["aborted"] += 1
                 continue
             out["checked"] += 1
             if v.verdict == "absent" and not v.complete:
@@ -239,6 +261,7 @@ def check(
     cache: VerdictCache | None = None,
     current_date: str | None = None,
     on_pair: Callable[[PairVerdict], None] | None = None,
+    max_consecutive_failures: int | None = None,
 ) -> ClaimCheck:
     """Check every claim/page pair of `report_text` under one critic slot.
 
@@ -246,14 +269,25 @@ def check(
     the deployment, and the caller defers the run exactly as it does for the critic's
     own call (D-credit-exhaustion-defers). Every other failure lands on the pair as
     `unchecked`.
+
+    `max_consecutive_failures` is the circuit breaker (D-claim-check-inconclusive-verdicts):
+    once that many calls in a row have ended unchecked — a transport failure, or output
+    outside the schema past the repair budget — the remaining pairs are recorded
+    `aborted` without a call. A dead proxy is then met with a few timeouts inside the
+    critic's slot, not `max_pairs` of them each with its own retry budget. A memo hit
+    is not a call and neither breaks nor resets the streak; a verdict resets it.
     """
     by_url = {s.url: s for s in sources}
     kept, dropped = pairs(report_text, limit=max_pairs)
     result = ClaimCheck(over_cap=dropped)
+    failures = 0
+    aborted = False
     for pair in kept:
         source = by_url.get(pair.url)
         if source is None or not source.ok or not source.text:
             verdict = PairVerdict(pair, "unchecked", unchecked_reason="page_not_read")
+        elif aborted:
+            verdict = PairVerdict(pair, "unchecked", unchecked_reason="aborted")
         else:
             verdict = _check_pair(
                 client,
@@ -267,6 +301,20 @@ def check(
                 cache=cache,
                 current_date=current_date,
             )
+            if verdict.cached:
+                pass
+            elif verdict.checked:
+                failures = 0
+            else:
+                failures += 1
+                if max_consecutive_failures is not None and failures >= max_consecutive_failures:
+                    aborted = True
+                    log.warning(
+                        "claim check by %s: %d consecutive calls ended unchecked; "
+                        "skipping the remaining pairs of this pass",
+                        alias,
+                        failures,
+                    )
         result.verdicts.append(verdict)
         if on_pair is not None:
             on_pair(verdict)
@@ -286,7 +334,11 @@ def _check_pair(
     cache: VerdictCache | None,
     current_date: str | None,
 ) -> PairVerdict:
-    excerpted = excerpt.select(source.text, [pair.sentence], budget=page_max_chars)
+    # A body cut before its end is never "shown whole", however short what survived:
+    # absence from a prefix of the page is not absence from the page.
+    excerpted = excerpt.select(
+        source.text, [pair.sentence], budget=page_max_chars, truncated=source.truncated
+    )
     shown = excerpt.render(excerpted)
     user = prompts.claim_check_user(
         pair.sentence,
@@ -400,21 +452,24 @@ def issues_from(check_result: ClaimCheck) -> list[RawIssue]:
 def reconcile(critic_issues: list[RawIssue], check_result: ClaimCheck) -> list[RawIssue]:
     """Drop a critic's own `misrepresented_source` findings on pairs the checker settled.
 
-    A checked pair's verdict is authoritative for that category: the checker read the
-    page for that sentence in its own context, and the critic read excerpts of every
-    page in one. Keeping both would count one claim twice under two spans. Findings on
-    pairs the checker could not settle — no page, an unreadable page, a failed call —
-    keep the critic's judgement exactly as before. Every other category passes through.
+    A settled verdict is authoritative for that category: the checker read the page for
+    that sentence in its own context, and the critic read excerpts of every page in
+    one. Keeping both would count one claim twice under two spans. Findings on pairs
+    the checker did not settle keep the critic's judgement exactly as before — no
+    page, a failed call, past the cap, and also `unreadable` and `absent` from a page
+    shown in part (`PairVerdict.settled`): those verdicts are not readings of the page,
+    and a finding retired by one would be a finding suppressed by nothing
+    (D-claim-check-inconclusive-verdicts). Every other category passes through.
     """
-    checked = [v for v in check_result.verdicts if v.checked]
-    if not checked:
+    settled = [v for v in check_result.verdicts if v.settled]
+    if not settled:
         return list(critic_issues)
     out: list[RawIssue] = []
     for issue in critic_issues:
         if issue.category is not Category.MISREPRESENTED_SOURCE:
             out.append(issue)
             continue
-        if any(_covers(v, issue) for v in checked):
+        if any(_covers(v, issue) for v in settled):
             continue
         out.append(issue)
     return out

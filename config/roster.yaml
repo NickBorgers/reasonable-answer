@@ -355,6 +355,10 @@ claim_check:
   # Anti-pathological: pairs past it are recorded unchecked and left to the critic.
   max_pairs: 200
   max_tokens: 1200
+  # Consecutive checker calls that may end unchecked before the rest of the pass is
+  # skipped as `aborted` (D-claim-check-inconclusive-verdicts). A dead proxy is met
+  # with this many timeouts, not max_pairs of them; skipped pairs mint nothing.
+  max_consecutive_failures: 3
 
 # Critic auditioning (docs/architecture.md). Measures whether each rostered critic can
 # actually find a planted defect and stay quiet on a sound report — the question neither

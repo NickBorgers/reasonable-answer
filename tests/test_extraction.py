@@ -195,7 +195,9 @@ def test_rendered_text_obeys_the_critic_facing_character_cap(monkeypatch):
         extraction_budget=QueryBudget(4),
         max_chars=600,
     )
-    assert len(resolver.resolve(URL, BLOCKED, _never_fetched).text) == 600
+    result = resolver.resolve(URL, BLOCKED, _never_fetched)
+    assert len(result.text) == 600
+    assert result.truncated
 
 
 def test_the_registry_is_open_but_names_nothing_by_default():

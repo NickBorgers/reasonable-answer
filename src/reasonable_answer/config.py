@@ -740,6 +740,14 @@ class ClaimCheckConfig(BaseModel):
     #: past it are recorded as unchecked; the critic's own judgement covers them.
     max_pairs: int = Field(default=200, ge=1, le=2_000)
     max_tokens: int = Field(default=1_200, ge=200, le=8_000)
+    #: Consecutive checker calls that may end unchecked — a transport failure, or output
+    #: outside the schema past the repair budget — before the rest of the pass is
+    #: recorded `aborted` without a call (D-claim-check-inconclusive-verdicts). Calls
+    #: run serially inside one critic's slot, each with the client's own retry budget,
+    #: so without this a dead proxy is met with `max_pairs` timeouts in a row. Skipped
+    #: pairs mint nothing and the critic's own review still runs; nothing here changes
+    #: what a verdict means. Not under `budgets`, which `_run_fingerprint` hashes.
+    max_consecutive_failures: int = Field(default=3, ge=1, le=100)
 
 
 class RevisionConfig(BaseModel):

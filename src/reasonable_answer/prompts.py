@@ -1020,7 +1020,9 @@ def _shown_text(source, report: str | None, excerpt_chars: int | None, numbers: 
     if report is None or excerpt_chars is None:
         return f"Page text (truncated):\n{source.text}"
     anchors = excerpt.anchors_for(report, source.url, numbers)
-    return excerpt.render(excerpt.select(source.text, anchors, budget=excerpt_chars))
+    return excerpt.render(
+        excerpt.select(source.text, anchors, budget=excerpt_chars, truncated=source.truncated)
+    )
 
 
 #: Outcomes in which a registry has corroborated the citation's existence. Rendered with
