@@ -575,6 +575,11 @@ def test_an_unnumbered_bibliography_with_an_address_still_counts_as_references()
     assert [i.category for i in bibliography_issues(report)] == [Category.UNCITED_CLAIM]
 
 
+def test_a_numbered_bibliography_without_an_address_still_counts_as_references():
+    report = "# T\n\nA claim with nothing behind it.\n\n## Sources\n\n[1] Author, Title, 2020.\n"
+    assert [i.category for i in bibliography_issues(report)] == [Category.UNCITED_CLAIM]
+
+
 def test_a_long_emphasized_first_sentence_stays_quotable():
     sentence = "**Fluoridation " + "at community scale " * 40 + "is set at 0.7 mg/L.**"
     report = UNMARKED_BIBLIOGRAPHY.replace(
