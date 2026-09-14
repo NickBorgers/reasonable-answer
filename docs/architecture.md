@@ -449,6 +449,14 @@ carried no headings is accepted with a warning; the warning rides the run's exis
   round** — i.e. at least three writers — or one flaky response is an aborted run rather than a
   retry. This is a sizing recommendation, not a fail-closed check: a two-writer roster is legal and
   still runs, it just has no lateral move when its one eligible writer misbehaves.
+- **Model call timing (D-model-call-timing):** `LLMClient` reports every HTTP attempt to a call
+  sink, and `build_runtime` points the sink at the run's event log. Each attempt becomes a
+  `model_call` event: `purpose` (`writer`, `critic:<lens>`, `claim_check`, `support_manifest`,
+  `dispute`, `arbiter`, `orchestrator`), `alias`, `attempt`, `outcome` (`ok` or a failure class),
+  `seconds`, token counts, and the serving `provider` when OpenRouter reports one. Records are per
+  attempt, so a timeout that a retry recovered from is still visible. The graph sets `purpose`
+  with the `llm.call_purpose` context manager around each call site, inside the pool thread for
+  critique. Records hold no content, and a sink failure never fails the call.
 - **Concurrency/limits:** bounded concurrency (a pass fans out over every critic slot — `review.depth`
   per lens — as one flat work list under `budgets.max_concurrency`, so raising the depth costs
   wall-clock and never instantaneous proxy load), per-call timeout + retry budget, token/context
