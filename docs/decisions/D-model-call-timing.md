@@ -46,11 +46,20 @@ at the run's event log, so each attempt becomes one `model_call` event with thes
 * **Startup probes are not recorded.** They run before the run store exists.
 
 **What this deliberately does not change.** No timeout, retry budget, or routing changes. The same
-data argues against the obvious quick fix of one shorter timeout for critic calls. glm-5.2 made 11
-healthy critic calls that took over 120s, and deepseek-v4-flash critiques are sometimes long. A
-single critic timeout would cut off working calls and add strikes toward
-D-failing-critic-sidelined. Any timeout or routing change should be made on per-alias evidence,
-and this event is how that evidence gets collected.
+data does suggest one. The LiteLLM log records how long each call would have taken with no client
+timeout, because the upstream keeps generating after the client hangs up. Replaying those durations
+against candidate timeouts, with three attempts per call:
+
+* Writer-sized deepseek-v4-flash calls fail all three attempts about 2.5% of the time at 300s, and
+  about 0% at 900s, at the same mean wall time.
+* gemma4 critic calls wait a mean 38s (p95 302s) at 300s, and a mean 20s (p95 124s) at 120s, with
+  no change in how often a call fails.
+* glm-5.2 and critic-sized deepseek-v4-flash calls are unaffected either way. A slow attempt is
+  retried; it is not a strike toward D-failing-critic-sidelined, which counts only a pass in which
+  every call from the alias failed after its retries.
+
+So a longer writer timeout and a shorter critic timeout look like a gain. That change belongs in its
+own decision, and this event is how its effect gets measured.
 
 **Not part of the run's identity.** No configuration is added, so `_run_fingerprint` is unchanged
 and paused runs resume across the deploy.
