@@ -941,3 +941,28 @@ def test_a_writer_that_strips_every_marker_is_visible_and_not_rejected(
     assert revision["source_entries"] == 1
     assert revision["cited_sources_dropped"] == 1
     assert "its body carries no [n] marker" in caplog.text
+
+
+def test_a_polish_pass_that_drops_a_cited_source_is_logged_not_rejected(caplog):
+    """The polish goal says "remove no citation". A whole-document polish that drops one
+    anyway is the motivating failure shape of D-writer-citation-continuity: it is counted
+    and warned about, and nothing rejects the draft."""
+    from reasonable_answer.graph import _citation_fields
+
+    with caplog.at_level("WARNING"):
+        fields = _citation_fields(REPORT, REPORT.replace(" [1]", ""), polish=True)
+
+    assert fields["cited_sources_dropped"] == 1
+    assert "polish pass dropped 1 cited source" in caplog.text
+
+
+def test_a_revision_that_drops_a_cited_source_is_not_warned_about_as_a_polish(caplog):
+    """Dropping a citation is a legitimate revision when a task removes the claim; only a
+    polish pass was told to keep every citation."""
+    from reasonable_answer.graph import _citation_fields
+
+    with caplog.at_level("WARNING"):
+        fields = _citation_fields(REPORT, REPORT.replace(" [1]", ""), polish=False)
+
+    assert fields["cited_sources_dropped"] == 1
+    assert "polish pass dropped" not in caplog.text

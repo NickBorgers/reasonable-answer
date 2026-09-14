@@ -415,3 +415,14 @@ def test_an_entry_without_a_url_is_identified_by_its_text_not_its_number():
     after = "## Conclusion\n\nA [2]. B [1].\n\n## Sources\n\n1. Beta book.\n2. Alpha book.\n"
     assert excerpt.citation_changes(before, after)["cited_sources_dropped"] == 0
     assert excerpt.citation_changes(before, after)["entries_removed"] == 0
+
+
+def test_switching_url_less_entries_from_bullets_to_numbers_is_not_a_drop():
+    """A URL-less entry's identity is its text with the list marker removed, whether that
+    marker is a bullet or a number — so restyling the list loses no source."""
+    before = "## Conclusion\n\nA [1]. B [2].\n\n## Sources\n\n- Alpha book.\n- Beta book.\n"
+    after = "## Conclusion\n\nA [1]. B [2].\n\n## Sources\n\n1. Alpha book.\n2. Beta book.\n"
+    changes = excerpt.citation_changes(before, after)
+    assert changes["cited_sources_dropped"] == 0
+    assert changes["cited_sources_added"] == 0
+    assert changes["entries_removed"] == 0

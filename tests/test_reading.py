@@ -1304,6 +1304,20 @@ def test_nothing_is_seeded_without_verification_or_with_the_knob_off(tmp_path, i
     assert prompts.WRITER_REREAD_ADDENDUM not in client.calls[-1].system
 
 
+def test_nothing_is_seeded_when_the_writer_cannot_read(tmp_path):
+    """Verification alone is not reading. A run that fetches for the evidence lens but gives
+    writers no reader seeds nothing, so no re-read addendum or widened tool description
+    reaches a writer that holds no `read_source` tool."""
+    from reasonable_answer.graph import _cited_seed
+
+    config = _reread_config(tmp_path)
+    readless = SimpleNamespace(read_sources=False, verify_sources=True, config=config)
+    reading_rt = SimpleNamespace(read_sources=True, verify_sources=True, config=config)
+
+    assert _cited_seed(readless, DRAFT) == []
+    assert _cited_seed(reading_rt, DRAFT) != []
+
+
 def test_the_read_cited_sources_knob_defaults_on_and_is_not_a_budget(tmp_path):
     from reasonable_answer.config import Budgets
 
