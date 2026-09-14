@@ -25,7 +25,7 @@ from typing import Any, TypedDict
 from langgraph.graph import END, START, StateGraph
 
 from . import audition as audition_mod
-from . import claimcheck, fetch, prompts, reading, resolve, roles, search, support, triage
+from . import claimcheck, excerpt, fetch, prompts, reading, resolve, roles, search, support, triage
 from . import critique as critique_mod
 from . import dispute as dispute_mod
 from . import report as report_mod
@@ -39,6 +39,7 @@ from .llm import (
     ModelCallError,
     ProbeIncomplete,
     ProviderAccountError,
+    call_purpose,
 )
 from .schemas import (
     AdjudicationRecord,
@@ -388,6 +389,11 @@ def _build_runtime(
 
     run_id = run_id or f"run-{uuid.uuid4().hex[:12]}"
     store = RunStore(config.runs_dir, run_id)
+    # Every HTTP attempt from here on lands in the audit trail as a `model_call` event —
+    # alias, purpose, outcome, seconds, tokens, serving provider — so how long a run
+    # waited on which model and host is read from `audit.json`, not reconstructed from
+    # container logs that outlive it by two days (D-model-call-timing).
+    client.set_call_sink(lambda record: store.event("model_call", **record.as_event()))
     store.event(
         "startup",
         identities=identities,
@@ -892,7 +898,7 @@ def _retrieval_kwargs(rt: Runtime, session: reading.ReadSession) -> dict[str, An
     reader = rt.reader
     if reader is not None:
         handlers["read_source"] = reading.make_tool_handler(reader, session)
-        tools.append(reading.READ_SOURCE_TOOL)
+        tools.append(reading.read_source_tool(session.cited_count > 0))
 
     def route(name: str, raw_arguments: str) -> str:
         handler = handlers.get(name)
@@ -963,6 +969,12 @@ def _generate(state: State, rt: Runtime) -> dict:
     # bounding these attempts by the pool size made the whole budget 1 and one empty
     # completion aborted the run (D-provider-retry). Re-asking a pool member never re-asks the
     # previous author: `writer_pool` excluded them before this ran.
+    # The draft's cited URLs, readable on this revision (D-writer-rereads-cited-sources).
+    # Computed once, from state, outside the retry loop: it is a function of the draft every
+    # attempt already holds, so it carries nothing from one attempt to another. What must
+    # never carry — one attempt's search results — still lives in the per-attempt session.
+    cited_seed = _cited_seed(rt, previous)
+
     attempts = cfg.budgets.writer_attempts
     alias = ""
     completion = None
@@ -978,16 +990,19 @@ def _generate(state: State, rt: Runtime) -> dict:
         # support manifest be checked against bodies the drafting model never saw — the
         # cross-context affordance the per-call allowlist exists to refuse
         # (D-writer-source-reads, principle #6).
-        session = reading.ReadSession()
+        session = reading.ReadSession(cited=cited_seed)
         search_kwargs = _retrieval_kwargs(rt, session)
         try:
-            reply = rt.client.complete(
-                alias,
-                system=prompts.writer_system(rt.search_enabled, rt.read_sources),
-                user=user,
-                max_tokens=32000,
-                **search_kwargs,
-            )
+            with call_purpose("writer"):
+                reply = rt.client.complete(
+                    alias,
+                    system=prompts.writer_system(
+                        rt.search_enabled, rt.read_sources, reread=bool(cited_seed)
+                    ),
+                    user=user,
+                    max_tokens=32000,
+                    **search_kwargs,
+                )
         except ModelCallError as exc:
             last_failure = f"generator {alias} failed: {exc}"
             failure_class = getattr(exc, "failure_class", "call_failed")
@@ -1056,6 +1071,9 @@ def _generate(state: State, rt: Runtime) -> dict:
         # Counts only — a URL is content and events.jsonl outlives a content purge.
         **_read_fields(session),
         **_scope_fields(cfg, previous, text, defects, polish=polish, full_rewrite=full_rewrite),
+        # Every generation, polish and rewrite included: a whole-document regeneration is
+        # where markers get lost (D-writer-citation-continuity).
+        **_citation_fields(previous, text, polish=polish),
     )
 
     _record_support(rt, alias, state["question"], text, round_no, session)
@@ -1086,6 +1104,53 @@ def _generate(state: State, rt: Runtime) -> dict:
     }
 
 
+def _citation_fields(previous: str | None, text: str, *, polish: bool) -> dict[str, int]:
+    """Warn-only citation census for the `generate` event (D-writer-citation-continuity).
+
+    Integers only, so `events.jsonl` still carries no URL and no text (RA-016). The census
+    is on every draft; the comparison with the draft it replaced only on a revision. Nothing
+    gates on any of it — a draft is never rejected here — because a repair turn costs a
+    writer attempt and the critics and the bibliography checks already own the defect.
+    """
+    fields = excerpt.citation_census(text)
+    if previous:
+        fields.update(excerpt.citation_changes(previous, text))
+    if fields["body_markers"] == 0 and fields["source_entries"] > 0:
+        log.warning(
+            "draft lists %d source(s) and its body carries no [n] marker",
+            fields["source_entries"],
+        )
+    if polish and fields.get("cited_sources_dropped", 0) > 0:
+        log.warning(
+            "polish pass dropped %d cited source(s) it was told to keep",
+            fields["cited_sources_dropped"],
+        )
+    return fields
+
+
+def _verified_urls(config: Config, report_text: str) -> list[str]:
+    """The cited URLs source verification fetches for one artifact — every one, up to the
+    anti-pathological ceiling (D-unbounded-evidence). One definition, shared with the
+    writer's re-read seed, so the seed can never name a URL verification would not."""
+    return fetch.extract_source_urls(report_text, limit=config.search.max_source_urls)
+
+
+def _cited_seed(rt: Runtime, previous: str | None) -> list[str]:
+    """The URLs a revising writer may re-read because the draft cites them
+    (D-writer-rereads-cited-sources), or `[]`.
+
+    Empty on a first draft, and empty unless the writer reads *and* the run verifies: the
+    seed is exactly the set verification fetches for this draft through the same boundary,
+    which is what keeps it from being a new egress. `search.read_cited_sources` is the
+    rollback switch.
+    """
+    if not previous or not rt.read_sources or not rt.verify_sources:
+        return []
+    if not rt.config.search.read_cited_sources:
+        return []
+    return _verified_urls(rt.config, previous)
+
+
 def _read_fields(session: reading.ReadSession) -> dict[str, Any]:
     """What this draft's writer read, as counts and a closed-vocabulary tally.
 
@@ -1095,8 +1160,11 @@ def _read_fields(session: reading.ReadSession) -> dict[str, Any]:
     operator can read the two tallies side by side.
     """
     reads = session.reads
+    # How many of the draft's cited URLs this call could re-read, and how many attempts it
+    # spent on them (D-writer-rereads-cited-sources) — so a budget spent on re-reads shows.
+    cited = {"cited_readable": session.cited_count}
     if not reads:
-        return {"read_attempts": 0, "bodies_read": 0}
+        return {"read_attempts": 0, "bodies_read": 0, **cited}
     outcomes: dict[str, int] = {}
     for source in reads.values():
         key = source.outcome.value
@@ -1110,6 +1178,8 @@ def _read_fields(session: reading.ReadSession) -> dict[str, Any]:
         "bodies_read": outcomes.get(fetch.SourceOutcome.FULL_TEXT.value, 0),
         "sources_offered": session.offered_count,
         "read_outcomes": outcomes,
+        **cited,
+        "cited_reads": sum(1 for url in reads if session.is_cited(url)),
     }
 
 
@@ -1158,13 +1228,14 @@ def _record_support(
         used += len(source.text)
 
     try:
-        manifest = rt.client.structured(
-            alias,
-            system=prompts.writer_system(False),
-            user=prompts.writer_support(question, report_text, shown),
-            schema=SupportManifest,
-            max_tokens=8000,
-        )
+        with call_purpose("support_manifest"):
+            manifest = rt.client.structured(
+                alias,
+                system=prompts.writer_system(False),
+                user=prompts.writer_support(question, report_text, shown),
+                schema=SupportManifest,
+                max_tokens=8000,
+            )
     except (ModelCallError, MalformedOutputError) as exc:
         # Only the exception TYPE, never `str(exc)` — `MalformedOutputError`'s message is
         # a sanitized validator summary as of D-validator-error-hygiene, but a
@@ -1211,13 +1282,14 @@ def _elicit_disputes(
     ):
         return []
     try:
-        raw = rt.client.structured(
-            alias,
-            system=prompts.writer_system(False),
-            user=prompts.writer_dispute(state["question"], revised, defects),
-            schema=WriterDisputes,
-            max_tokens=8000,
-        )
+        with call_purpose("dispute"):
+            raw = rt.client.structured(
+                alias,
+                system=prompts.writer_system(False),
+                user=prompts.writer_dispute(state["question"], revised, defects),
+                schema=WriterDisputes,
+                max_tokens=8000,
+            )
     except (ModelCallError, MalformedOutputError) as exc:
         # Record only the exception TYPE — never `str(exc)`. `MalformedOutputError`'s
         # message is a sanitized validator summary as of D-validator-error-hygiene, but a
@@ -1312,16 +1384,17 @@ def _adjudicate(state: State, rt: Runtime) -> dict:
                     ):
                         page = rt.dispute_fetcher.fetch(challenge.evidence_url)
                     try:
-                        ruling = dispute_mod.adjudicate_one(
-                            rt.client,
-                            arbiters[0],
-                            defect,
-                            challenge,
-                            _paragraph_containing(structure, defect.claim_span),
-                            state["question"],
-                            evidence_page=page,
-                            max_tokens=rt.config.disputes.arbiter_max_tokens,
-                        )
+                        with call_purpose("arbiter"):
+                            ruling = dispute_mod.adjudicate_one(
+                                rt.client,
+                                arbiters[0],
+                                defect,
+                                challenge,
+                                _paragraph_containing(structure, defect.claim_span),
+                                state["question"],
+                                evidence_page=page,
+                                max_tokens=rt.config.disputes.arbiter_max_tokens,
+                            )
                     except (ModelCallError, MalformedOutputError):
                         verdict, method = "dismissed", "arbiter_failed"
                     else:
@@ -1542,9 +1615,7 @@ def _critique_one(
             # appear in `fetched_sources_block` at all, and the evidence critic judges it
             # on its face — which is how a 12-source cap turned a growing bibliography
             # into a self-sustaining supply of `fabricated_citation`.
-            urls = fetch.extract_source_urls(
-                report_text, limit=rt.config.search.max_source_urls
-            )
+            urls = _verified_urls(rt.config, report_text)
             sources = rt.fetcher.fetch_all(urls) if urls else None
             if sources:
                 # `FetchedSource.url` is the URL that was *asked for*, preserved by the
@@ -1600,20 +1671,21 @@ def _critique_one(
     if lens is Lens.EVIDENCE and sources and rt.claim_check_enabled:
         cc = rt.config.claim_check
         try:
-            checked = claimcheck.check(
-                rt.client,
-                alias,
-                identity,
-                report_text,
-                sources,
-                page_max_chars=cc.page_max_chars,
-                max_pairs=cc.max_pairs,
-                max_tokens=cc.max_tokens,
-                repair_retries=rt.client.budgets.critic_repair_retries,
-                cache=rt.claim_cache,
-                current_date=run_date,
-                max_consecutive_failures=cc.max_consecutive_failures,
-            )
+            with call_purpose("claim_check"):
+                checked = claimcheck.check(
+                    rt.client,
+                    alias,
+                    identity,
+                    report_text,
+                    sources,
+                    page_max_chars=cc.page_max_chars,
+                    max_pairs=cc.max_pairs,
+                    max_tokens=cc.max_tokens,
+                    repair_retries=rt.client.budgets.critic_repair_retries,
+                    cache=rt.claim_cache,
+                    current_date=run_date,
+                    max_consecutive_failures=cc.max_consecutive_failures,
+                )
         except ProviderAccountError as exc:
             # The same shape `critique_once` returns for the critic's own 402, so
             # `_defer_if_account_refused` reads it identically.
@@ -1960,18 +2032,21 @@ def _critique(state: State, rt: Runtime) -> dict:
                 attempt=slot.attempt,
             )
             return result.model_copy(update={"confirm_state": True}) if confirming else result
-        result = _critique_one(
-            rt,
-            slot.lens,
-            slot.alias,
-            question,
-            report_text,
-            artifact_hash,
-            author_identity,
-            slot.attempt,
-            run_date=run_date,
-            coverage_sink=coverage_by_artifact,
-        )
+        # Set here, inside the pool's thread: a context variable set around `pool.map`
+        # would not reach it.
+        with call_purpose(f"critic:{slot.lens.value}"):
+            result = _critique_one(
+                rt,
+                slot.lens,
+                slot.alias,
+                question,
+                report_text,
+                artifact_hash,
+                author_identity,
+                slot.attempt,
+                run_date=run_date,
+                coverage_sink=coverage_by_artifact,
+            )
         return result.model_copy(update={"confirm_state": True}) if confirming else result
 
     # Bounded by `max_concurrency` exactly as before — review depth multiplies the
@@ -2149,13 +2224,14 @@ def _orchestrate_call(client: LLMClient, alias: str, view: OrchestratorView) -> 
     """The blind LLM's entire interface. It takes an OrchestratorView and returns a
     boolean. There is deliberately no parameter through which content could arrive."""
     try:
-        rec = client.structured(
-            alias,
-            system=prompts.ORCHESTRATOR_SYSTEM,
-            user=prompts.orchestrator_user(view.model_dump_json(indent=2)),
-            schema=OrchestratorRecommendation,
-            max_tokens=4000,
-        )
+        with call_purpose("orchestrator"):
+            rec = client.structured(
+                alias,
+                system=prompts.ORCHESTRATOR_SYSTEM,
+                user=prompts.orchestrator_user(view.model_dump_json(indent=2)),
+                schema=OrchestratorRecommendation,
+                max_tokens=4000,
+            )
     except (ModelCallError, MalformedOutputError):
         return False  # no recommendation ⇒ no polish; the LLM can only *enable* rule 9
     return rec.polish_recommended

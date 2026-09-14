@@ -232,7 +232,9 @@ the report's author, so under QP4 it is a provenance assertion rather than an in
 its entries and deterministic verdicts remain audit-only and cannot affect acceptance. Under QP10,
 `supported` requires a non-empty normalized claim in the report and a non-empty normalized span in
 the fetched body of the cited URL; parametric recollection and empty-string containment establish
-nothing.
+nothing. D-writer-rereads-cited-sources lets a reviser open the pages the draft it revises cites; under
+QP5 those bodies take the same fence, and the seed is the draft's own untrusted text rather than another
+context's retrieval, so no critic output and no other writer's searches or reads cross over.
 
 ## 3. Refreshing the evidence base
 

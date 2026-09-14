@@ -787,8 +787,9 @@ def mechanical_bibliography_issues(
                     "a reader counting the sources behind a claim counts it twice."
                 ),
                 instruction=(
-                    "Merge the entries and renumber, updating every in-text marker that "
-                    "pointed at the duplicate."
+                    "Merge the two entries into the lower-numbered one: point every in-text "
+                    "marker that cited the higher number at the lower, delete the higher "
+                    "entry, and leave its number unused. Do not renumber the other entries."
                 ),
             )
         )
