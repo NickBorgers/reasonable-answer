@@ -82,6 +82,9 @@ class Call:
     user: str
     schema: str | None = None
     tools: list[str] = field(default_factory=list)
+    #: the per-call `timeout` the caller passed, or None for the client default
+    #: (D-role-call-timeouts)
+    timeout: float | None = None
 
 
 @dataclass
@@ -195,7 +198,7 @@ class FakeClient:
         self.calls.append(
             Call(alias, system, user, tools=[
                 t["function"]["name"] for t in (kwargs.get("tools") or [])
-            ])
+            ], timeout=kwargs.get("timeout"))
         )
         self.generations += 1
         # Drive the handler once when one is supplied, so tests can assert on what a
@@ -232,7 +235,9 @@ class FakeClient:
         **kwargs: Any,
     ):
         def produce(attempt_user: str):
-            self.calls.append(Call(alias, system, attempt_user, schema.__name__))
+            self.calls.append(
+                Call(alias, system, attempt_user, schema.__name__, timeout=kwargs.get("timeout"))
+            )
             if schema is OrchestratorRecommendation:
                 return OrchestratorRecommendation(
                     polish_recommended=self.polish_recommended,

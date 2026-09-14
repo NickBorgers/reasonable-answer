@@ -520,6 +520,16 @@ budgets:
   retry_backoff_max_seconds: 30.0
   max_concurrency: 3
 
+# Per-role overrides of `budgets.timeout_seconds` for one call attempt (D-role-call-timeouts).
+# Set from a replay of three days of upstream call durations (the LiteLLM log keeps
+# generating after the client hangs up, so it records how long a call would have taken):
+# writer-sized calls failed every attempt ~2.5% of the time at 300s and none at 900s; gemma4
+# critic calls that ran past 180s were runaways to their output cap, 45 of 45. Kept out of
+# `budgets` so changing them never abandons a paused run.
+call_timeouts:
+  writer_seconds: 900
+  critic_seconds: 180
+
 # Identity comes from a header set by whatever fronts the app — Cloudflare Access or
 # `tailscale serve` — and a request carrying neither is refused (D-identity-header,
 # docs/authentication.md). `dev_identity` gives such a request an identity instead:

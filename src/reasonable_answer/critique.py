@@ -21,7 +21,7 @@ from pydantic import ValidationError
 
 from . import prompts, triage
 from . import report as report_mod
-from .llm import LLMClient, MalformedOutputError, ModelCallError
+from .llm import LLMClient, MalformedOutputError, ModelCallError, per_call_timeout
 from .schemas import CritiqueOutput, IssueRepairs, LensResult
 from .taxonomy import Lens
 
@@ -48,8 +48,12 @@ def critique_once(
     current_date: str | None = None,
     source_char_budget: int | None = None,
     excerpt_chars: int | None = None,
+    timeout: float | None = None,
 ) -> LensResult:
     """Run one lens in a fresh context and return an audit-side `LensResult`.
+
+    `timeout` bounds each call attempt of the review and its repair turns; `None` keeps
+    the client default (D-role-call-timeouts).
 
     Failure is recorded as a **failed lens**, never as "no issues found" — a failed
     review can never manufacture a clean record. That distinction is what the harness
@@ -110,6 +114,7 @@ def critique_once(
             schema=CritiqueOutput,
             max_tokens=CRITIC_MAX_TOKENS,
             repair_retries=client.budgets.critic_repair_retries,
+            **per_call_timeout(timeout),
         )
         output = _repair_until_valid(
             client,
@@ -118,6 +123,7 @@ def critique_once(
             output=output,
             validate=validate,
             budget=client.budgets.critic_repair_retries,
+            timeout=timeout,
         )
     except (ModelCallError, MalformedOutputError, ValidationError) as exc:
         reason = str(exc)[:400]
@@ -145,6 +151,7 @@ def _repair_until_valid(
     output: CritiqueOutput,
     validate,
     budget: int,
+    timeout: float | None = None,
 ) -> CritiqueOutput:
     """Validate, and on rejection ask the critic to patch the offending field.
 
@@ -198,6 +205,7 @@ def _repair_until_valid(
                     schema=IssueRepairs,
                     max_tokens=CRITIC_MAX_TOKENS,
                     repair_retries=client.budgets.critic_repair_retries,
+                    **per_call_timeout(timeout),
                 )
             except (MalformedOutputError, ValidationError) as repair_exc:
                 raise MalformedOutputError(

@@ -994,6 +994,31 @@ class RefineConfig(BaseModel):
         return self.alias or roster.orchestrator_alias
 
 
+class CallTimeouts(BaseModel):
+    """Per-role overrides of `budgets.timeout_seconds` for one call attempt
+    (D-role-call-timeouts).
+
+    One timeout cannot fit both roles. A writer draft on a slow upstream host legitimately
+    generates for 10–20 minutes, and a 300-second cut throws that work away and bills it
+    anyway, because the upstream keeps generating after the client hangs up. A critic
+    call that runs past three minutes is almost always a runaway to its output cap, and
+    waiting 300 seconds for it holds up the whole critique pass. `None` keeps the client
+    default for that role, so a config without this section behaves exactly as before.
+
+    `critic_seconds` covers the critique call, its repair turns, and the claim checks run
+    under the evidence critic's slot. Every other call — support manifest, disputes,
+    arbiter, orchestrator, probes — keeps `budgets.timeout_seconds`.
+
+    Not under `budgets`: `_run_fingerprint` hashes `budgets`, and a new field there would
+    abandon every paused run at the deploy that shipped it.
+    """
+
+    model_config = ConfigDict(extra="forbid")
+
+    writer_seconds: float | None = Field(default=None, gt=0, le=7200)
+    critic_seconds: float | None = Field(default=None, gt=0, le=7200)
+
+
 class Config(BaseModel):
     model_config = ConfigDict(extra="forbid")
 
@@ -1011,6 +1036,7 @@ class Config(BaseModel):
     claim_check: ClaimCheckConfig = Field(default_factory=ClaimCheckConfig)
     refine: RefineConfig = Field(default_factory=RefineConfig)
     push: PushConfig = Field(default_factory=PushConfig)
+    call_timeouts: CallTimeouts = Field(default_factory=CallTimeouts)
     runs_dir: Path = Path("runs")
     retention_days: int = 14
     #: How often the web server's background sweep content-purges runs past

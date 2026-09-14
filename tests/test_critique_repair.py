@@ -266,6 +266,46 @@ def test_the_patch_schema_call_uses_the_critic_repair_budget():
     assert patch_budgets == [client.budgets.critic_repair_retries]
 
 
+def test_the_repair_turn_keeps_the_critic_timeout():
+    """D-role-call-timeouts: a repair is part of the critic's call, so it is bounded by the
+    same timeout — a runaway on the patch turn would otherwise hold the pass for the
+    client default."""
+    client = _client(issues=[_issue(INVENTED)], patches=[(0, VERBATIM)], repairs=2)
+
+    result = critique_mod.critique_once(
+        client,
+        "critic",
+        "vendor-x/critic",
+        Lens.COMPLETENESS,
+        "What are the health effects of fluoridating water?",
+        REPORT,
+        "h" * 64,
+        "vendor-a/author",
+        timeout=180.0,
+    )
+
+    assert not result.failed
+    assert {c.schema for c in client.calls} == {"CritiqueOutput", "IssueRepairs"}
+    assert all(c.timeout == 180.0 for c in client.calls)
+
+
+def test_without_a_critic_timeout_no_timeout_is_passed():
+    """The audition harness calls `critique_once` with no timeout, and its stubs take no
+    `timeout` keyword: omitting it, not sending None, is what keeps them working."""
+    client = _client(issues=[_issue(INVENTED)], patches=[(0, VERBATIM)], repairs=2)
+    seen = []
+    structured = client.structured
+
+    def record(*args, **kwargs):
+        seen.append("timeout" in kwargs)
+        return structured(*args, **kwargs)
+
+    client.structured = record
+
+    assert not _run(client).failed
+    assert seen and not any(seen)
+
+
 def test_an_empty_patch_leaves_the_issue_rejected():
     """A critic that cannot anchor the issue returns nothing rather than inventing a
     span, and the lens fails closed on the next pass — the direction that must hold."""

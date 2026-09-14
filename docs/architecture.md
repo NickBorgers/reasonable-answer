@@ -453,7 +453,10 @@ carried no headings is accepted with a warning; the warning rides the run's exis
   per lens — as one flat work list under `budgets.max_concurrency`, so raising the depth costs
   wall-clock and never instantaneous proxy load), per-call timeout + retry budget, token/context
   budgeting for the slow local model, backpressure so parallel lenses don't overload one
-  proxy/model.
+  proxy/model. The per-call timeout is `budgets.timeout_seconds`, overridable per role by
+  `call_timeouts.writer_seconds` (the writer's draft call, every tool round) and
+  `call_timeouts.critic_seconds` (the critique call, its repair turns, and claim checks); every
+  other call keeps the default (D-role-call-timeouts).
 - **Review depth (D-front-loaded-depth):** `review.depth` (default 2, per-lens overridable) is how
   many eligible non-author critics read each lens on **every** draft. Depth is a ceiling clamped by
   the fresh eligible pool, so it can never turn a `roster_limited` lens into an abort; every slot is
