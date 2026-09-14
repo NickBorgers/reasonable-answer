@@ -15,12 +15,19 @@ from pathlib import Path
 from types import SimpleNamespace
 
 import httpx
+import pytest
 from fakes import FakeClient
 from openai import APITimeoutError
 
 from reasonable_answer.config import Budgets, Config, ProxyConfig, Roster
 from reasonable_answer.graph import run
-from reasonable_answer.llm import CallRecord, LLMClient, call_purpose, current_call_purpose
+from reasonable_answer.llm import (
+    CallRecord,
+    LLMClient,
+    ModelCallError,
+    call_purpose,
+    current_call_purpose,
+)
 from reasonable_answer.schemas import CritiqueOutput
 
 REPORT = """# Answer
@@ -131,6 +138,48 @@ def test_an_empty_completion_keeps_the_tokens_it_spent(tmp_path):
     assert records[0].completion_tokens == 16384
     assert records[0].provider == "DeepInfra"
     assert records[1].outcome == "ok"
+
+
+def test_an_identity_mismatch_is_recorded_with_response_metadata(tmp_path):
+    client, records = _client(tmp_path, [0.0, 1.0])
+    client._identities["writer-a"] = "provider/writer-a"
+    response = _reply(provider="DeepInfra")
+    response.model = "provider/different-model"
+    _install(client, response)
+
+    with pytest.raises(ModelCallError, match="identity mismatch") as caught:
+        client.complete("writer-a", system="s", user="u")
+
+    assert caught.value.failure_class == "identity_mismatch"
+    assert [(record.outcome, record.provider) for record in records] == [
+        ("identity_mismatch", "DeepInfra")
+    ]
+
+
+def test_unparsed_tool_markup_is_recorded_for_every_attempt(tmp_path):
+    client, records = _client(tmp_path, [0.0, 1.0, 2.0, 3.0, 4.0, 5.0])
+    markup = "<｜tool▁calls▁begin｜>x<｜tool▁call▁end｜>"
+    _install(client, _reply(markup), _reply(markup), _reply(markup))
+
+    with pytest.raises(ModelCallError, match="exhausted call retries") as caught:
+        client.complete("writer-a", system="s", user="u")
+
+    assert caught.value.failure_class == "unparsed_tool_markup"
+    assert [record.outcome for record in records] == ["unparsed_tool_markup"] * 3
+
+
+def test_a_malformed_successful_response_is_still_recorded(tmp_path):
+    client, records = _client(tmp_path, [0.0, 1.0])
+    response = _reply(provider="DeepInfra")
+    response.choices = []
+    _install(client, response)
+
+    with pytest.raises(IndexError):
+        client.complete("writer-a", system="s", user="u")
+
+    assert [(record.outcome, record.provider) for record in records] == [
+        ("malformed_response", "DeepInfra")
+    ]
 
 
 def test_every_record_is_metadata_only(tmp_path):

@@ -672,19 +672,29 @@ class LLMClient:
                         f"{alias}: {exc}", failure_class=f"http_{_status_of(exc)}"
                     ) from exc
                 continue
-            usage = resp.usage
-            reported = getattr(resp, "model", None) or alias
-            # "No silent fallback to a duplicate" (RA-017): if the proxy served this
-            # request from a different model than the alias we pinned at startup,
-            # every downstream identity claim — author exclusion, distinct-reviewer
-            # counting — is false. Fail closed rather than believe the alias map.
-            if not _identity_matches(reported, alias, self._identities.get(alias)):
-                self._record_call(alias, attempt, started, "identity_mismatch", resp)
-                raise ModelCallError(
-                    f"identity mismatch: alias '{alias}' was served by '{reported}'",
-                    failure_class="identity_mismatch",
-                )
-            message = _message_dict(resp.choices[0].message)
+            recorded = False
+            try:
+                usage = resp.usage
+                reported = getattr(resp, "model", None) or alias
+                # "No silent fallback to a duplicate" (RA-017): if the proxy served this
+                # request from a different model than the alias we pinned at startup,
+                # every downstream identity claim — author exclusion, distinct-reviewer
+                # counting — is false. Fail closed rather than believe the alias map.
+                if not _identity_matches(reported, alias, self._identities.get(alias)):
+                    self._record_call(alias, attempt, started, "identity_mismatch", resp)
+                    recorded = True
+                    raise ModelCallError(
+                        f"identity mismatch: alias '{alias}' was served by '{reported}'",
+                        failure_class="identity_mismatch",
+                    )
+                message = _message_dict(resp.choices[0].message)
+            except Exception:
+                # A successful HTTP exchange can still carry a response shape the SDK
+                # surface does not satisfy. Preserve the existing exception, but do not
+                # let that attempt disappear from the audit trail (D-model-call-timing).
+                if not recorded:
+                    self._record_call(alias, attempt, started, "malformed_response", resp)
+                raise
             # A 200 carrying neither prose nor a tool call is a failed call that
             # forgot to say so — small models in the roster do this intermittently.
             # It costs a caller its whole run if it escapes as "success", so it is
