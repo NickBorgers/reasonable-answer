@@ -44,6 +44,12 @@ revision modes hold it (D-no-hedge-discharge placed the standard there for the s
   never leave it standing as fact with no marker;
 - a listed source may be cited for another claim it supports, read first where `read_source` is available.
 
+*One mechanical instruction changes with it.* The duplicate-address finding D-bibliography-integrity mints
+told the writer to "merge the entries and renumber", which the rule above now forbids — a writer handed
+both would be told opposite things. Its instruction now merges into the lower-numbered entry, points the
+higher number's markers at it and leaves that number unused. Category, severity, locus and span are
+unchanged; only the fixed instruction text differs.
+
 `WRITER_REWRITE_CLOSE` and `WRITER_PATCH_CLOSE` are untouched, so the D-scoped-revision A/B still
 differs in exactly its close: both arms' prompts grow by the same standard and by nothing else. No
 critic prompt changes, so no audition verdict goes stale.
