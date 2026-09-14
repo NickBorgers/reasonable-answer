@@ -198,7 +198,8 @@ unparsed tool-call markup (the `_unparsed_tool_call` failure mode
 [architecture.md](./architecture.md) and [deployment-profile.md](./deployment-profile.md)
 describe — a proxy that does not parse a model's native tool-call syntax hands the raw markup
 back as message content). Fixed by pinning `provider.order` in the deployment's LiteLLM config,
-not in application code — `LLMClient` has no notion of upstream host, by design.
+not in application code. `LLMClient` does not control upstream-host routing; it only records a
+sanitized, best-effort provider name when a completed response exposes one (D-model-call-timing).
 
 ### 2. A forced-tool-call fallback delivered the right payload under the wrong key
 

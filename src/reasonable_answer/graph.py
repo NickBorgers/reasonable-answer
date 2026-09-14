@@ -39,6 +39,7 @@ from .llm import (
     ModelCallError,
     ProbeIncomplete,
     ProviderAccountError,
+    call_purpose,
 )
 from .schemas import (
     AdjudicationRecord,
@@ -388,6 +389,11 @@ def _build_runtime(
 
     run_id = run_id or f"run-{uuid.uuid4().hex[:12]}"
     store = RunStore(config.runs_dir, run_id)
+    # Every HTTP attempt from here on lands in the audit trail as a `model_call` event —
+    # alias, purpose, outcome, seconds, tokens, serving provider — so how long a run
+    # waited on which model and host is read from `audit.json`, not reconstructed from
+    # container logs that outlive it by two days (D-model-call-timing).
+    client.set_call_sink(lambda record: store.event("model_call", **record.as_event()))
     store.event(
         "startup",
         identities=identities,
@@ -987,15 +993,16 @@ def _generate(state: State, rt: Runtime) -> dict:
         session = reading.ReadSession(cited=cited_seed)
         search_kwargs = _retrieval_kwargs(rt, session)
         try:
-            reply = rt.client.complete(
-                alias,
-                system=prompts.writer_system(
-                    rt.search_enabled, rt.read_sources, reread=bool(cited_seed)
-                ),
-                user=user,
-                max_tokens=32000,
-                **search_kwargs,
-            )
+            with call_purpose("writer"):
+                reply = rt.client.complete(
+                    alias,
+                    system=prompts.writer_system(
+                        rt.search_enabled, rt.read_sources, reread=bool(cited_seed)
+                    ),
+                    user=user,
+                    max_tokens=32000,
+                    **search_kwargs,
+                )
         except ModelCallError as exc:
             last_failure = f"generator {alias} failed: {exc}"
             failure_class = getattr(exc, "failure_class", "call_failed")
@@ -1221,13 +1228,14 @@ def _record_support(
         used += len(source.text)
 
     try:
-        manifest = rt.client.structured(
-            alias,
-            system=prompts.writer_system(False),
-            user=prompts.writer_support(question, report_text, shown),
-            schema=SupportManifest,
-            max_tokens=8000,
-        )
+        with call_purpose("support_manifest"):
+            manifest = rt.client.structured(
+                alias,
+                system=prompts.writer_system(False),
+                user=prompts.writer_support(question, report_text, shown),
+                schema=SupportManifest,
+                max_tokens=8000,
+            )
     except (ModelCallError, MalformedOutputError) as exc:
         # Only the exception TYPE, never `str(exc)` — `MalformedOutputError`'s message is
         # a sanitized validator summary as of D-validator-error-hygiene, but a
@@ -1274,13 +1282,14 @@ def _elicit_disputes(
     ):
         return []
     try:
-        raw = rt.client.structured(
-            alias,
-            system=prompts.writer_system(False),
-            user=prompts.writer_dispute(state["question"], revised, defects),
-            schema=WriterDisputes,
-            max_tokens=8000,
-        )
+        with call_purpose("dispute"):
+            raw = rt.client.structured(
+                alias,
+                system=prompts.writer_system(False),
+                user=prompts.writer_dispute(state["question"], revised, defects),
+                schema=WriterDisputes,
+                max_tokens=8000,
+            )
     except (ModelCallError, MalformedOutputError) as exc:
         # Record only the exception TYPE — never `str(exc)`. `MalformedOutputError`'s
         # message is a sanitized validator summary as of D-validator-error-hygiene, but a
@@ -1375,16 +1384,17 @@ def _adjudicate(state: State, rt: Runtime) -> dict:
                     ):
                         page = rt.dispute_fetcher.fetch(challenge.evidence_url)
                     try:
-                        ruling = dispute_mod.adjudicate_one(
-                            rt.client,
-                            arbiters[0],
-                            defect,
-                            challenge,
-                            _paragraph_containing(structure, defect.claim_span),
-                            state["question"],
-                            evidence_page=page,
-                            max_tokens=rt.config.disputes.arbiter_max_tokens,
-                        )
+                        with call_purpose("arbiter"):
+                            ruling = dispute_mod.adjudicate_one(
+                                rt.client,
+                                arbiters[0],
+                                defect,
+                                challenge,
+                                _paragraph_containing(structure, defect.claim_span),
+                                state["question"],
+                                evidence_page=page,
+                                max_tokens=rt.config.disputes.arbiter_max_tokens,
+                            )
                     except (ModelCallError, MalformedOutputError):
                         verdict, method = "dismissed", "arbiter_failed"
                     else:
@@ -1661,20 +1671,21 @@ def _critique_one(
     if lens is Lens.EVIDENCE and sources and rt.claim_check_enabled:
         cc = rt.config.claim_check
         try:
-            checked = claimcheck.check(
-                rt.client,
-                alias,
-                identity,
-                report_text,
-                sources,
-                page_max_chars=cc.page_max_chars,
-                max_pairs=cc.max_pairs,
-                max_tokens=cc.max_tokens,
-                repair_retries=rt.client.budgets.critic_repair_retries,
-                cache=rt.claim_cache,
-                current_date=run_date,
-                max_consecutive_failures=cc.max_consecutive_failures,
-            )
+            with call_purpose("claim_check"):
+                checked = claimcheck.check(
+                    rt.client,
+                    alias,
+                    identity,
+                    report_text,
+                    sources,
+                    page_max_chars=cc.page_max_chars,
+                    max_pairs=cc.max_pairs,
+                    max_tokens=cc.max_tokens,
+                    repair_retries=rt.client.budgets.critic_repair_retries,
+                    cache=rt.claim_cache,
+                    current_date=run_date,
+                    max_consecutive_failures=cc.max_consecutive_failures,
+                )
         except ProviderAccountError as exc:
             # The same shape `critique_once` returns for the critic's own 402, so
             # `_defer_if_account_refused` reads it identically.
@@ -2021,18 +2032,21 @@ def _critique(state: State, rt: Runtime) -> dict:
                 attempt=slot.attempt,
             )
             return result.model_copy(update={"confirm_state": True}) if confirming else result
-        result = _critique_one(
-            rt,
-            slot.lens,
-            slot.alias,
-            question,
-            report_text,
-            artifact_hash,
-            author_identity,
-            slot.attempt,
-            run_date=run_date,
-            coverage_sink=coverage_by_artifact,
-        )
+        # Set here, inside the pool's thread: a context variable set around `pool.map`
+        # would not reach it.
+        with call_purpose(f"critic:{slot.lens.value}"):
+            result = _critique_one(
+                rt,
+                slot.lens,
+                slot.alias,
+                question,
+                report_text,
+                artifact_hash,
+                author_identity,
+                slot.attempt,
+                run_date=run_date,
+                coverage_sink=coverage_by_artifact,
+            )
         return result.model_copy(update={"confirm_state": True}) if confirming else result
 
     # Bounded by `max_concurrency` exactly as before — review depth multiplies the
@@ -2210,13 +2224,14 @@ def _orchestrate_call(client: LLMClient, alias: str, view: OrchestratorView) -> 
     """The blind LLM's entire interface. It takes an OrchestratorView and returns a
     boolean. There is deliberately no parameter through which content could arrive."""
     try:
-        rec = client.structured(
-            alias,
-            system=prompts.ORCHESTRATOR_SYSTEM,
-            user=prompts.orchestrator_user(view.model_dump_json(indent=2)),
-            schema=OrchestratorRecommendation,
-            max_tokens=4000,
-        )
+        with call_purpose("orchestrator"):
+            rec = client.structured(
+                alias,
+                system=prompts.ORCHESTRATOR_SYSTEM,
+                user=prompts.orchestrator_user(view.model_dump_json(indent=2)),
+                schema=OrchestratorRecommendation,
+                max_tokens=4000,
+            )
     except (ModelCallError, MalformedOutputError):
         return False  # no recommendation ⇒ no polish; the LLM can only *enable* rule 9
     return rec.polish_recommended
