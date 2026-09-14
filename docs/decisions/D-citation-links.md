@@ -50,10 +50,12 @@ fragment to the shipped one — and a page whose `final.json` will not parse sti
 
 **Fragment encoding.** Whitespace is collapsed. A span of at most ten words is matched whole; a
 longer one as `textStart,textEnd` from its first and last five words, so a small difference between
-the extracted page text and the live page's DOM inside the span does not break the match. Each term
-is percent-encoded with `-`, `,` and `&` escaped, as the text-fragment syntax requires. A URL that
-already has a `#fragment` gets `:~:text=…` appended to it rather than a second `#`; a URL that
-already carries a `:~:` directive is left alone.
+the extracted page text and the live page's DOM inside the span is outside the two matching terms.
+This follows the text-fragment directive's `textStart,textEnd` range form and its percent-encoding
+requirements ([WICG text-fragment specification](https://wicg.github.io/scroll-to-text-fragment/)).
+The implementation additionally encodes `-`, `,` and `&` so they cannot be read as directive
+delimiters. A URL that already has a `#fragment` gets `:~:text=…` appended to it rather than a
+second `#`; a URL that already carries a `:~:` directive is left alone.
 
 **Why `rel="noreferrer noopener"` on every rendered link.** No Referrer-Policy is set anywhere
 (`web/render.py`, D-base-path), and a report page's URL carries the run id, which is the credential
@@ -61,18 +63,21 @@ for reading the run (D-id-as-credential). Until now the report body produced few
 this decision produces one per citation, so without the attribute following a source would send
 the page URL, run id included, to the cited site in the `Referer` header. The `link_open` renderer
 rule sets it on the token, so no report text can omit it, and it holds in the exported HTML file
-too. `html=False`, the disabled `image` rule and markdown-it's default link validator are unchanged;
-a link is still inert until a reader clicks it, so the "opening a report makes no request" property
+too. The HTML Standard defines `noreferrer` to suppress the `Referer` header when following the
+link ([WHATWG, link type `noreferrer`](https://html.spec.whatwg.org/multipage/links.html#link-type-noreferrer)).
+`html=False`, the disabled `image` rule and markdown-it's default link validator are unchanged; a
+link is still inert until a reader clicks it, so the "opening a report makes no request" property
 (D-verdict-attached) is untouched.
 
 **Degradation.** Deep links are best-effort and fail to plain links, never to broken ones:
 
 - claim check off, the pair over `max_pairs`, the page unread, or the verdict `absent`,
   `unreadable` or `unchecked` → a plain link to the entry URL;
-- a `.pdf` URL → a plain link, since PDF viewers generally ignore text fragments and a fragment
-  would promise a jump that never happens;
-- a browser without text-fragment support, or a page whose live text differs from the extracted
-  body → the page opens at the top;
+- a `.pdf` URL → a plain link, because this decision does not establish text-fragment behavior for
+  non-HTML document viewers and therefore does not promise a passage jump there;
+- a browser without text-fragment support, or a page where the directive does not match the live
+  text → the fragment has no highlighting or scroll effect
+  ([MDN, Text fragments](https://developer.mozilla.org/en-US/docs/Web/URI/Reference/Fragment/Text_fragments));
 - `purge --content-only` removes `critiques/` → plain links; it removes `final.md` too, so a purged
   run has no report to render in the first place;
 - a missing, truncated or malformed record file → skipped, never raised (`store.read_claim_checks`).

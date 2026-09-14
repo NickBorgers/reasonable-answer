@@ -15,8 +15,9 @@ import yaml
 from conftest import WEB_IDENTITY, web_client
 from typer.testing import CliRunner
 
-from reasonable_answer import cli, export
+from reasonable_answer import claimcheck, cli, export
 from reasonable_answer.citelinks import VerifiedSpan
+from reasonable_answer.report import artifact_hash as report_hash
 from reasonable_answer.store import CorruptRun, RunStore, purge
 from reasonable_answer.web.app import create_app
 from reasonable_answer.web.registry import Registry
@@ -544,6 +545,41 @@ def test_ra_export_writes_a_shareable_document(cli_config):
     assert result.exit_code == 0
     assert "A claim that is fully supported" in result.stdout
     assert "needs human review" in result.stdout
+
+
+def test_ra_export_links_plain_and_verified_citations(cli_config, config):
+    report = """# Answer
+
+Output rose 3% in 2024 [1]. Costs fell [2].
+
+## Sources
+
+[1] Alpha report. https://example.org/alpha
+[2] Beta report. https://example.org/beta
+"""
+    shipped = report_hash(report)
+    store = RunStore(config.runs_dir, "run-shared")
+    store.final(report, dict(FINAL, artifact_hash=shipped))
+    pairs, _ = claimcheck.pairs(report)
+    [alpha] = [pair for pair in pairs if pair.number == 1]
+    record = claimcheck.ClaimCheck(
+        verdicts=[
+            claimcheck.PairVerdict(
+                alpha,
+                "supported",
+                "output rose by 3%",
+                reason="checked",
+                complete=True,
+            )
+        ]
+    ).as_record()
+    store.claim_check(shipped, "vendor-d/evidence", 1, record)
+
+    result = runner.invoke(cli.app, ["export", "run-shared", "--config", str(cli_config)])
+
+    assert result.exit_code == 0
+    assert "[[1]](https://example.org/alpha#:~:text=output%20rose%20by%203%25)" in result.stdout
+    assert "[[2]](https://example.org/beta)" in result.stdout
 
 
 def test_ra_export_html_to_a_file(cli_config, tmp_path):
