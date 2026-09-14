@@ -17,12 +17,15 @@ from conftest import WEB_IDENTITY, access_headers, web_client
 from fakes import FakeClient
 from pydantic import ValidationError
 
+from reasonable_answer import claimcheck
+from reasonable_answer.citelinks import VerifiedSpan
 from reasonable_answer.config import DEFAULT_PUSH_ENDPOINT_HOSTS, PushConfig
 from reasonable_answer.export import STATUS_MEANING
 from reasonable_answer.graph import GracefulStop, ResumeMismatch
 from reasonable_answer.graph import run as run_graph
+from reasonable_answer.report import artifact_hash as report_hash
 from reasonable_answer.schemas import CritiqueOutput
-from reasonable_answer.store import RunStore, expired_runs, sweep_expired
+from reasonable_answer.store import RunStore, expired_runs, purge, sweep_expired
 from reasonable_answer.web import assets, push
 from reasonable_answer.web.app import create_app
 from reasonable_answer.web.registry import Registry
@@ -474,6 +477,103 @@ def test_a_report_that_contains_html_is_rendered_as_text_not_markup(config, iden
             # the moment the page loads, so image syntax stays literal text too.
             assert "<img" not in page
             assert "127.0.0.1:9/pixel.png" in page  # rendered, but as text
+    finally:
+        worker.shutdown()
+
+
+# ------------------------------------------------------------------ citation links (D-citation-links)
+
+CITED_REPORT = """# Answer
+
+## Conclusion
+
+Output rose 3% in 2024 [1]. Costs fell [2].
+
+## Sources
+
+[1] Alpha report. https://example.org/alpha
+[2] Beta paper https://example.net/beta.pdf
+"""
+
+ALPHA_SENTENCE = "Output rose 3% in 2024 [1]."
+ALPHA_DEEP_LINK = "https://example.org/alpha#:~:text=output%20rose%20by%203%25"
+
+
+def _claim_record(report: str, verdicts: dict[int, tuple[str, str | None]]) -> dict:
+    """A record exactly as `_critique_one` writes one: `ClaimCheck.as_record()` over the
+    report's own pairs, so a change to the record shape fails here."""
+    pairs, _ = claimcheck.pairs(report)
+    return claimcheck.ClaimCheck(
+        verdicts=[
+            claimcheck.PairVerdict(p, *verdicts[p.number], reason="checked", complete=True)
+            for p in pairs
+            if p.number in verdicts
+        ]
+    ).as_record()
+
+
+def test_verified_spans_read_only_the_rendered_artifacts_claim_records(config):
+    store = RunStore(config.runs_dir, "run-spans")
+    shipped = report_hash(CITED_REPORT)
+    stale = report_hash("# An earlier draft\n")
+    store.claim_check(
+        shipped, "vendor-d/evidence", 1, _claim_record(CITED_REPORT, {1: ("supported", "output rose by 3%")})
+    )
+    store.claim_check(
+        stale, "vendor-d/evidence", 1, _claim_record(CITED_REPORT, {2: ("supported", "a stale span")})
+    )
+    store.claim_check(
+        shipped, "vendor-e/evidence", 1, _claim_record(CITED_REPORT, {1: ("supported", "a later span")})
+    )
+    (store.dir / "critiques" / f"999-{shipped[:12]}-claims-broken-a1.json").write_text("{not json")
+    registry = Registry(config.runs_dir)
+
+    # The earliest record for this artifact wins; the stale draft's and the corrupt file add nothing.
+    assert registry.verified_spans("run-spans", shipped) == {
+        (1, ALPHA_SENTENCE): VerifiedSpan("https://example.org/alpha", "output rose by 3%")
+    }
+    assert list(registry.verified_spans("run-spans", stale)) == [(2, "Costs fell [2].")]
+    assert registry.verified_spans("run-spans", None) == {}
+
+    purge(config.runs_dir, "run-spans", content_only=True)
+    assert registry.verified_spans("run-spans", shipped) == {}
+
+
+def test_the_report_page_links_citations_while_report_md_stays_the_stored_bytes(config, identities):
+    store = RunStore(config.runs_dir, "run-links")
+    store.question("Linked?")
+    store.owner(WEB_IDENTITY)
+    store.event("intake", path="question")
+    shipped = report_hash(CITED_REPORT)
+    store.claim_check(
+        shipped,
+        "vendor-d/evidence",
+        1,
+        _claim_record(CITED_REPORT, {1: ("supported", "output rose by 3%"), 2: ("supported", "costs fell")}),
+    )
+    store.final(CITED_REPORT, {"terminal_status": "accepted", "chosen_round": 1, "artifact_hash": shipped})
+
+    worker = RunWorker(config, max_concurrent=1, runner=lambda *a, **k: None)
+    app = create_app(config, worker=worker)
+    try:
+        with web_client(app) as c:
+            # The shipped artifact is untouched: no model-facing or hashing consumer sees a link.
+            assert c.get("/runs/run-links/report.md").text == CITED_REPORT
+
+            page = c.get("/runs/run-links/report").text
+            assert f'<a href="{ALPHA_DEEP_LINK}" rel="noreferrer noopener">[1]</a>' in page
+            # A PDF entry is linked, never deep-linked.
+            assert '<a href="https://example.net/beta.pdf" rel="noreferrer noopener">[2]</a>' in page
+            assert (
+                '<a href="https://example.org/alpha" rel="noreferrer noopener">https://example.org/alpha</a>'
+                in page
+            )
+            # Copy markdown carries the same links as the page and both downloads.
+            assert f"[[1]]({ALPHA_DEEP_LINK})" in page
+            assert f"[[1]]({ALPHA_DEEP_LINK})" in c.get("/runs/run-links/export.md").text
+            assert f'<a href="{ALPHA_DEEP_LINK}" rel="noreferrer noopener">[1]</a>' in c.get(
+                "/runs/run-links/export.html"
+            ).text
     finally:
         worker.shutdown()
 

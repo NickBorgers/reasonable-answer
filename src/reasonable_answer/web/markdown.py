@@ -14,7 +14,17 @@ left as literal text instead.
 
 Tables and strikethrough are enabled on top of CommonMark because reports use them.
 Linkify is deliberately left off: it would pull in another dependency to turn bare
-URLs into links, and reports cite with explicit `[1]` markers and a Sources section.
+URLs into links, and would link every URL a model writes anywhere in the body. The links a
+reader follows are built mechanically before rendering instead (`citelinks`,
+D-citation-links): body `[n]` markers become links to their bibliography entry, and the
+URLs inside `## Sources` become autolinks. They arrive here as ordinary markdown and pass
+the same validator as any other link.
+
+**Every rendered link carries `rel="noreferrer noopener"`.** No Referrer-Policy is set
+anywhere, and a report page's URL carries its run id — the credential for reading the run
+(D-id-as-credential). Without this, following a citation would hand that id to the cited
+site in the `Referer` header. The attribute is set on the token, by the renderer, so no
+report text can omit it, and it applies to the exported HTML file as well as the page.
 
 A table is the one construct a model can write that is wider than any phone, so every
 table is wrapped in a scrolling `<div>` here rather than left to the stylesheet. Doing it
@@ -49,8 +59,14 @@ def _table_close(tokens: Any, idx: int, options: Any, env: Any) -> str:
     return _RENDER_TOKEN(tokens, idx, options, env) + "</div>"
 
 
+def _link_open(tokens: Any, idx: int, options: Any, env: Any) -> str:
+    tokens[idx].attrSet("rel", "noreferrer noopener")
+    return _RENDER_TOKEN(tokens, idx, options, env)
+
+
 _MD.renderer.rules["table_open"] = _table_open
 _MD.renderer.rules["table_close"] = _table_close
+_MD.renderer.rules["link_open"] = _link_open
 
 
 def to_html(markdown: str) -> str:
