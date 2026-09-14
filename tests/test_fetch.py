@@ -1376,7 +1376,9 @@ def test_no_mechanical_issue_for_the_unreadable_class(source):
     assert triage.mechanical_citation_issues([source], structure) == []
 
 
-_TWELVE = "# T\n\nClaim.\n\n## Sources\n\n" + "\n".join(
+#: The body cites every entry, so the fixture isolates the fetch outcome: a Sources list
+#: the body never cites is its own finding (D-uncited-bibliography).
+_TWELVE = "# T\n\nClaim [1-12].\n\n## Sources\n\n" + "\n".join(
     f"[{i}] https://x.test/page-{i}" for i in range(1, 13)
 )
 
@@ -1529,6 +1531,72 @@ def test_a_failed_evidence_lens_is_not_promoted_by_a_bibliography_finding(
     )
     result = _critique_one(
         rt, Lens.EVIDENCE, "evidence-spec", "q?", _ORPHANED, "h" * 64, "vendor-a/model-a", attempt=1
+    )
+
+    assert result.failed
+    assert result.issues == []
+
+
+_UNMARKED = (
+    "# T\n\nThe first claim stands here. It is not cited.\n\nA second claim, also uncited.\n\n"
+    "## Sources\n\n"
+    "[1] A page. https://x.test/page-1\n"
+    "[2] Another page. https://x.test/page-2\n"
+)
+
+
+def test_an_uncited_bibliography_is_one_finding_with_verification_off(tmp_path, identities, config):
+    """No fetch is needed, so verification off still mints it; and a critic's own
+    `uncited_claim` on another sentence is kept beside it, never dropped in its favour
+    (D-uncited-bibliography)."""
+    from reasonable_answer.graph import _critique_one
+    from reasonable_answer.schemas import CritiqueOutput, RawIssue, StructuralRef
+    from reasonable_answer.taxonomy import Category, Severity
+
+    rt, client = _runtime(tmp_path, identities, config, fetcher=None)
+    critic_finding = RawIssue(
+        category=Category.UNCITED_CLAIM,
+        severity=Severity.MAJOR,
+        locus=StructuralRef(section=1, paragraph=2),
+        claim_span="A second claim, also uncited.",
+        rationale="no citation attached",
+        instruction="cite a source or remove the claim",
+    )
+    client.critique_fn = lambda a, u: CritiqueOutput(issues=[critic_finding])
+    result = _critique_one(
+        rt, Lens.EVIDENCE, "evidence-spec", "q?", _UNMARKED, "h" * 64, "vendor-a/model-a", attempt=1
+    )
+
+    assert not rt.verify_sources
+    assert not result.failed
+    assert [(i.category, i.locus, i.claim_span) for i in result.issues] == [
+        (Category.UNCITED_CLAIM, StructuralRef(section=1, paragraph=1), "The first claim stands here."),
+        (Category.UNCITED_CLAIM, StructuralRef(section=1, paragraph=2), "A second claim, also uncited."),
+    ]
+
+
+def test_a_failed_evidence_lens_is_not_promoted_by_an_uncited_bibliography_finding(
+    tmp_path, identities, config
+):
+    from fakes import FakeClient
+
+    from reasonable_answer.graph import Runtime, _critique_one
+    from reasonable_answer.llm import ModelCallError
+    from reasonable_answer.store import RunStore
+
+    def boom(alias, user):
+        raise ModelCallError("critic unavailable")
+
+    client = FakeClient(identities=identities, critique_fn=boom, report_fn=lambda n: _UNMARKED)
+    rt = Runtime(
+        config=config,
+        client=client,
+        identities=identities,
+        store=RunStore(tmp_path, "run-unmarked-fail"),
+        fetcher=None,
+    )
+    result = _critique_one(
+        rt, Lens.EVIDENCE, "evidence-spec", "q?", _UNMARKED, "h" * 64, "vendor-a/model-a", attempt=1
     )
 
     assert result.failed

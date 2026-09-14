@@ -34,6 +34,15 @@ lens already own. The complete number-to-entry map resolves body markers, while 
 `search.max_source_urls` entries receive the per-entry checks and duplicate scan. This keeps the
 anti-pathological work ceiling from manufacturing missing-entry findings for valid later entries.
 
+> Superseded in part by **D-uncited-bibliography**. The claim above that the writer template and
+> the completeness lens own a body with no citation marker at all was wrong: the completeness lens
+> has no citation category, and prod run `run-116cc0ea4cac` shipped eleven entries and no marker
+> without any mechanical finding. A report whose `## Sources` lists at least one real reference (a
+> URL or an explicit number), under a body with no marker, now mints exactly **one** `uncited_claim`
+> at `major`, anchored at the first quotable body sentence, and no per-entry findings. A report with
+> no `## Sources` section still mints nothing, and the three checks below are unchanged once any
+> marker exists.
+
 **Every minted field is bounded on construction.** `excerpt._ENTRY_NUMBER` accepts a digit run of
 any length, so a bibliography number can be longer than the fields that would interpolate it. A
 number is cut to a short label (`_citation_label`, `_LABEL_MAX`) before it enters `citation_id`,
