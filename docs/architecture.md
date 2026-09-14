@@ -345,6 +345,19 @@ independently, so `_record_coverage` arbitrates: one record per artifact, the ob
 reached furthest, and an audit event only for a tally that took the record. It is observation only:
 no controller rule reads it, no `OrchestratorView` field carries it, and it mints no defect.
 
+**Citations become links on the way out, never in the artifact (D-citation-links).** The stored
+report keeps plain `[n]` markers, because critics and disputes quote it verbatim and link syntax
+would make a sentence unquotable. At render time `citelinks.linked_markdown` turns each body
+marker into one `[n]` link per cited number, to that entry's URL, and each URL in `## Sources`
+into an autolink. A marker link carries a `#:~:text=` fragment only for a (number, sentence) pair
+that a claim-check record for the rendered text's hash (`critiques/*-claims-*.json`, read by
+`store.read_claim_checks` and `Registry.verified_spans`) found `supported` with a verbatim span,
+and that no record found `contradicted`; `.pdf` URLs never get one. The report page, Copy markdown,
+`export.md`, `export.html` and `ra export` all link from the same spans, and
+`GET /runs/<id>/report.md` stays the raw artifact. `web/markdown.py` puts `rel="noreferrer noopener"`
+on every rendered link, because no Referrer-Policy is set and the page URL carries the run id.
+Nothing here reaches a model, the event trail or the controller.
+
 ## Writer retrieval: search, then read, then trace (D-retrieval-opt-in, D-writer-source-reads)
 
 Retrieval reaches the writer in two steps, each its own opt-in switch and each off by default.

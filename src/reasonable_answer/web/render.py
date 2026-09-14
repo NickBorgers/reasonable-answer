@@ -12,6 +12,7 @@ import re
 import time
 from typing import Any
 
+from .. import citelinks
 from ..config import Config
 
 # The same words describe a status on the page and in an exported file, and `export.py`
@@ -697,6 +698,7 @@ def render_report(
     base_path: str = "",
     public_base: str | None = None,
     vapid_key: str = "",
+    spans: citelinks.Spans | None = None,
 ) -> str:
     """The report on its own page — the thing to hand to someone who wants to *read* it,
     rather than watch the pipeline that produced it. The *only* page that renders it:
@@ -721,7 +723,9 @@ def render_report(
     <span class="dim mono">{esc(summary.run_id)}{provenance}</span>
   </div>
   <div class="share screen-only">{_copy_control(copy_markdown or report)}{_share_links(summary.run_id, public_base)}</div>"""
-    report_html = to_html(report)
+    # Citations become links here and in both exports, from the same `spans`, so the page,
+    # Copy markdown and the downloads link identically (D-citation-links, D-verdict-attached).
+    report_html = to_html(citelinks.linked_markdown(report, spans))
     sections = _split_sections(report_html)
     if sections is None:
         # Fail-open path: a report that does not follow the D-report-template frame gets
