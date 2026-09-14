@@ -1185,6 +1185,16 @@ def test_a_cited_url_matches_after_trailing_punctuation_and_the_clean_url_is_fet
     assert fetcher.calls == [READ_URL]
 
 
+def test_a_searched_url_matches_after_trailing_punctuation_and_the_clean_url_is_fetched():
+    reader, fetcher = _reader({SEARCHED_URL: _body(SEARCHED_URL, PAGE_TEXT)})
+    session = reading.ReadSession()
+    session.record_results([search.SearchResult(title="T", url=SEARCHED_URL, description="D")])
+    assert session.admitted(SEARCHED_URL + ".") == SEARCHED_URL
+    result = reader.read(SEARCHED_URL + ".", session)
+    assert result.outcome is SourceOutcome.FULL_TEXT
+    assert fetcher.calls == [SEARCHED_URL]
+
+
 def test_the_tool_definition_is_unchanged_when_nothing_is_seeded(tmp_path, identities, config):
     from reasonable_answer.graph import _retrieval_kwargs
 
