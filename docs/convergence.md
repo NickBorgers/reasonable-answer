@@ -328,6 +328,7 @@ on or off, because none of them needs a fetch:
 | a `[n]` cited in the body with no entry numbered `n` | `uncited_claim` | major | first citing paragraph |
 | an entry the body never cites | `unclear_structure` | minor | the paragraph listing it |
 | two entries under one URL | `unclear_structure` | minor | the paragraph listing the duplicate |
+| a Sources list with a real reference (a URL or an explicit number) and no marker anywhere in the body (D-uncited-bibliography) | `uncited_claim` | major | first sentence of the first quotable body paragraph |
 
 No category is added to the taxonomy table, and each finding is minted **at** its category's floor,
 so the clamp is a no-op and RC-005's direction is untouched. These are pipeline-authored facts, not
@@ -336,10 +337,13 @@ model-authored fields, and like it they never attach to a failed lens. Every fie
 bounded on construction — a bibliography number of any length is cut to a short label before it is
 interpolated — so minting can never raise out of the critique node. Markers are read with
 `excerpt`'s parser (ranges expanded, the Sources section excluded), entries are numbered as
-`excerpt.entry_numbers` numbers them, and at most `search.max_source_urls` entries are considered.
-A report with no `## Sources` section, or whose body carries no citation marker at all, mints
-nothing here — that is a different defect, and the writer template and the completeness lens already
-own it.
+`excerpt.entry_numbers` numbers them, and at most `search.max_source_urls` entries are considered
+for per-entry orphan and duplicate checks. A report with no `## Sources` section mints nothing here.
+A body with no citation marker at all is the last row: that check scans the complete parsed Sources
+list and reports its full entry count, minting **one** finding and no per-entry orphans or duplicates,
+because every entry would otherwise be an orphan and one defect would be counted once per entry. A
+Sources section whose only content is not a reference ("None.") mints nothing. The evidence
+critic's own `uncited_claim` findings are kept alongside it, never dropped in its favour.
 
 **What the critic is shown of a page is chosen by the claims, not by position
 (D-claim-anchored-excerpts).** A fetched body is retained up to `search.fetch_body_max_chars`, and

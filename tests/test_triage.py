@@ -9,6 +9,7 @@ from reasonable_answer.schemas import (
     MAX_CITATION_ID,
     MAX_INSTRUCTION,
     MAX_RATIONALE,
+    MAX_SPAN,
     LensResult,
     RawIssue,
     StructuralRef,
@@ -524,11 +525,103 @@ def test_a_report_with_no_sources_section_mints_nothing():
     assert bibliography_issues(REPORT) == []
 
 
-def test_a_report_whose_body_cites_nothing_mints_nothing():
-    """Every entry would be an orphan; a bibliography attached to a body with no
-    markers at all is a different defect, and not this one's to report."""
-    report = CLEAN_BIBLIOGRAPHY.replace(" [1]", "").replace(" [2]", "")
+UNMARKED_BIBLIOGRAPHY = CLEAN_BIBLIOGRAPHY.replace(" [1]", "").replace(" [2]", "")
+
+
+def test_a_bibliography_the_body_never_cites_is_one_uncited_claim():
+    """Every entry would be an orphan; the defect is one fact — no claim can be traced to
+    a source — so it is exactly one `uncited_claim` at the first body sentence, with no
+    per-entry findings beside it (D-uncited-bibliography)."""
+    issues = bibliography_issues(UNMARKED_BIBLIOGRAPHY)
+    assert len(issues) == 1
+    finding = issues[0]
+    assert finding.category is Category.UNCITED_CLAIM
+    assert finding.severity is Severity.MAJOR
+    assert finding.locus == StructuralRef(section=2, paragraph=1)
+    assert finding.claim_span == "Community water fluoridation is set at 0.7 mg/L in the United States."
+    assert finding.citation_id is None
+    assert "lists 2 entries" in finding.rationale
+    assert "No new source is needed" in finding.instruction
+    assert not [i for i in issues if i.category is Category.UNCLEAR_STRUCTURE]
+    assert_quotable(issues, UNMARKED_BIBLIOGRAPHY)
+
+
+def test_an_entrys_own_marker_inside_sources_is_not_a_citation():
+    report = UNMARKED_BIBLIOGRAPHY.replace(
+        "[2] WHO (2004). Fluoride in Drinking-water.",
+        "[2] WHO (2004). Fluoride in Drinking-water, revising [1].",
+    )
+    issues = bibliography_issues(report)
+    assert [(i.category, i.locus.section) for i in issues] == [(Category.UNCITED_CLAIM, 2)]
+
+
+@pytest.mark.parametrize("listing", ["None.", "No sources were consulted.", "- None found"])
+def test_a_sources_section_that_lists_no_reference_mints_nothing(listing):
+    report = "# T\n\nA claim with nothing behind it.\n\n## Sources\n\n" + listing + "\n"
     assert bibliography_issues(report) == []
+
+
+def test_one_body_marker_brings_back_the_per_entry_checks():
+    report = CLEAN_BIBLIOGRAPHY.replace(" [2]", "")
+    issues = bibliography_issues(report)
+    assert [(i.category, i.citation_id) for i in issues] == [(Category.UNCLEAR_STRUCTURE, "[2]")]
+
+
+def test_an_unnumbered_bibliography_with_an_address_still_counts_as_references():
+    report = (
+        "# T\n\nA claim with nothing behind it.\n\n## Sources\n\n"
+        "- CDC. Community Water Fluoridation. https://www.cdc.gov/fluoridation/index.html\n"
+    )
+    assert [i.category for i in bibliography_issues(report)] == [Category.UNCITED_CLAIM]
+
+
+def test_a_numbered_bibliography_without_an_address_still_counts_as_references():
+    report = "# T\n\nA claim with nothing behind it.\n\n## Sources\n\n[1] Author, Title, 2020.\n"
+    assert [i.category for i in bibliography_issues(report)] == [Category.UNCITED_CLAIM]
+
+
+def test_a_long_emphasized_first_sentence_stays_quotable():
+    sentence = "**Fluoridation " + "at community scale " * 40 + "is set at 0.7 mg/L.**"
+    report = UNMARKED_BIBLIOGRAPHY.replace(
+        "Community water fluoridation is set at 0.7 mg/L in the United States.",
+        sentence + " A second sentence follows.",
+    )
+    issues = bibliography_issues(report)
+    assert len(issues) == 1
+    assert len(issues[0].claim_span) <= MAX_SPAN
+    assert len(issues[0].rationale) <= MAX_RATIONALE
+    assert len(issues[0].instruction) <= MAX_INSTRUCTION
+    assert_quotable(issues, report)
+
+
+def test_a_paragraph_with_no_quotable_text_is_passed_over_for_the_next():
+    report = UNMARKED_BIBLIOGRAPHY.replace("## Findings\n\n", "## Findings\n\n**\n\n")
+    issues = bibliography_issues(report)
+    assert [i.locus for i in issues] == [StructuralRef(section=2, paragraph=2)]
+    assert_quotable(issues, report)
+
+
+def test_a_body_with_no_quotable_sentence_mints_nothing():
+    report = "# T\n\n**\n\n## Sources\n\n[1] A source. https://example.org/one\n"
+    assert bibliography_issues(report) == []
+
+
+def test_two_critics_of_one_lens_count_an_uncited_bibliography_once():
+    minted = bibliography_issues(UNMARKED_BIBLIOGRAPHY)
+    results = [
+        result(Lens.EVIDENCE, list(minted), critic="vendor-x/critic"),
+        result(Lens.EVIDENCE, list(minted), critic="vendor-y/critic"),
+    ]
+    assert len(distinct_issues(results)) == 1
+    per_category, totals = tally(results)
+    assert per_category["uncited_claim"].major == 1
+    assert totals.major == 1
+
+
+def test_a_failed_evidence_review_contributes_no_uncited_bibliography_finding():
+    minted = bibliography_issues(UNMARKED_BIBLIOGRAPHY)
+    assert minted
+    assert distinct_issues([result(Lens.EVIDENCE, list(minted), failed=True)]) == []
 
 
 def test_the_entry_budget_bounds_the_work():
@@ -580,6 +673,11 @@ def test_every_minted_finding_is_at_its_own_severity_floor():
     assert {i.category for i in minted} == {Category.UNCITED_CLAIM, Category.UNCLEAR_STRUCTURE}
     assert len(minted) == 4  # dangling [4], orphan [3], orphan [5], duplicate [5]
     assert clamp(minted) == minted
+
+    # The one finding for a bibliography the body never cites (D-uncited-bibliography).
+    unmarked = bibliography_issues(UNMARKED_BIBLIOGRAPHY)
+    assert [i.category for i in unmarked] == [Category.UNCITED_CLAIM]
+    assert clamp(unmarked) == unmarked
 
 
 def test_two_long_numbered_entries_under_one_url_still_mint_a_bounded_duplicate():

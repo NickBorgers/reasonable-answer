@@ -113,7 +113,8 @@ Each lens runs on the head of its assigned pool, in a **fresh context**, blind t
 emit `Issue[]` against a closed schema. On a completed evidence review, deterministic bibliography
 checks may add mechanically authored findings, including `unclear_structure`, to the evidence
 result (D-bibliography-integrity); the category still describes the defect even though no critic
-minted it. `stylistic` (cosmetic preference, ignored for convergence) is not listed above per lens
+minted it. A bibliography the body never cites is one `uncited_claim`, not one finding per entry
+(D-uncited-bibliography). `stylistic` (cosmetic preference, ignored for convergence) is not listed above per lens
 because it attaches to all three — any lens may raise it.
 
 At `review.depth: 2` (the default, D-front-loaded-depth) each of those boxes is **two** critics
