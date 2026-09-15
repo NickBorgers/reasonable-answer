@@ -53,7 +53,13 @@ from typing import Any
 from . import excerpt, prompts
 from . import report as report_mod
 from .fetch import _SOURCES_HEADING, FetchedSource
-from .llm import LLMClient, MalformedOutputError, ModelCallError, ProviderAccountError
+from .llm import (
+    LLMClient,
+    MalformedOutputError,
+    ModelCallError,
+    ProviderAccountError,
+    per_call_timeout,
+)
 from .schemas import MAX_RATIONALE, MAX_SPAN, ClaimVerdict, RawIssue, StructuralRef
 from .taxonomy import Category, Severity
 from .triage import _normalize
@@ -262,6 +268,7 @@ def check(
     current_date: str | None = None,
     on_pair: Callable[[PairVerdict], None] | None = None,
     max_consecutive_failures: int | None = None,
+    timeout: float | None = None,
 ) -> ClaimCheck:
     """Check every claim/page pair of `report_text` under one critic slot.
 
@@ -300,6 +307,7 @@ def check(
                 repair_retries=repair_retries,
                 cache=cache,
                 current_date=current_date,
+                timeout=timeout,
             )
             if verdict.cached:
                 pass
@@ -333,6 +341,7 @@ def _check_pair(
     repair_retries: int,
     cache: VerdictCache | None,
     current_date: str | None,
+    timeout: float | None = None,
 ) -> PairVerdict:
     # A body cut before its end is never "shown whole", however short what survived:
     # absence from a prefix of the page is not absence from the page.
@@ -381,6 +390,8 @@ def _check_pair(
             max_tokens=max_tokens,
             repair_retries=repair_retries,
             validate=validate,
+            # The evidence critic's slot, so the critic's timeout (D-role-call-timeouts).
+            **per_call_timeout(timeout),
         )
     except ProviderAccountError:
         raise

@@ -1001,6 +1001,9 @@ def _generate(state: State, rt: Runtime) -> dict:
                     ),
                     user=user,
                     max_tokens=32000,
+                    # A draft on a slow host can generate for many minutes; cutting it at the
+                    # shared default discards the work and bills it anyway (D-role-call-timeouts).
+                    timeout=cfg.call_timeouts.writer_seconds,
                     **search_kwargs,
                 )
         except ModelCallError as exc:
@@ -1685,6 +1688,7 @@ def _critique_one(
                     cache=rt.claim_cache,
                     current_date=run_date,
                     max_consecutive_failures=cc.max_consecutive_failures,
+                    timeout=rt.config.call_timeouts.critic_seconds,
                 )
         except ProviderAccountError as exc:
             # The same shape `critique_once` returns for the critic's own 402, so
@@ -1733,6 +1737,7 @@ def _critique_one(
         current_date=run_date,
         source_char_budget=rt.config.search.source_char_budget,
         excerpt_chars=rt.config.search.fetch_max_chars,
+        timeout=rt.config.call_timeouts.critic_seconds,
     )
 
     # A cited URL that a definitive not-found (404/410) does not resolve is a

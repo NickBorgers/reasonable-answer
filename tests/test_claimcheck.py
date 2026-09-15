@@ -315,6 +315,21 @@ def test_each_pair_is_one_fresh_call_holding_one_sentence_and_one_page(identitie
     assert FLEET_PAGE in fleet_call and "EMALS overview" not in fleet_call
 
 
+def test_every_checker_call_carries_the_critic_timeout(identities):
+    """D-role-call-timeouts: claim checks run under the evidence critic's slot, so they are
+    bounded like the critic's own call; without one, none is passed."""
+    client = _client(identities, lambda alias, user: ClaimVerdict(verdict="absent", reason="none"))
+    args = dict(page_max_chars=30_000, max_pairs=200, max_tokens=800, repair_retries=0)
+
+    claimcheck.check(client, "evidence-spec", identities["evidence-spec"], REPORT, _sources(),
+                     timeout=180.0, **args)
+    assert client.calls and {c.timeout for c in client.calls} == {180.0}
+
+    client.calls.clear()
+    claimcheck.check(client, "evidence-spec", identities["evidence-spec"], REPORT, _sources(), **args)
+    assert client.calls and all(c.timeout is None for c in client.calls)
+
+
 def test_a_verdict_must_quote_the_page_or_the_pair_is_unchecked(identities):
     def claim_fn(alias, user):
         return ClaimVerdict(verdict="contradicted", support_span="not in the page", reason="r")

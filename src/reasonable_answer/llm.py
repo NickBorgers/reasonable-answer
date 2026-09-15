@@ -176,6 +176,17 @@ def _failure_class(exc: Exception) -> str:
     return "call_failed"
 
 
+def per_call_timeout(timeout: float | None) -> dict[str, float]:
+    """`{"timeout": timeout}` when one is set, otherwise nothing.
+
+    For callers that pass a role's timeout through to `structured`/`complete`. Omitting
+    the key rather than sending `timeout=None` keeps every test double with a fixed
+    signature working, the same reason `LLMClient._invoke_create` gives
+    (D-role-call-timeouts).
+    """
+    return {} if timeout is None else {"timeout": timeout}
+
+
 def _retry_after(exc: Exception) -> float | None:
     """The provider's own `Retry-After`, in seconds, when it sent a usable one.
 
