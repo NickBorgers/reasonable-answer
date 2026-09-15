@@ -13,6 +13,7 @@ Two things this module owns:
 
 from __future__ import annotations
 
+import contextvars
 import json
 import logging
 import random
@@ -20,8 +21,9 @@ import re
 import secrets
 import time
 import urllib.request
-from collections.abc import Callable
-from dataclasses import dataclass
+from collections.abc import Callable, Iterator
+from contextlib import contextmanager
+from dataclasses import asdict, dataclass
 from typing import Any, TypeVar
 
 from openai import APIConnectionError, APITimeoutError, OpenAI
@@ -237,6 +239,81 @@ class _Reply:
     completion_tokens: int
 
 
+#: What the caller is doing when it makes a call — "writer", "critic:logic",
+#: "claim_check", … — set by the graph around each call site with `call_purpose`. A
+#: context variable rather than a parameter because the label has to reach `_create`
+#: through `structured`, `complete` and the tool loop without every signature in
+#: between growing a field only the audit trail reads (D-model-call-timing).
+_PURPOSE: contextvars.ContextVar[str | None] = contextvars.ContextVar("call_purpose", default=None)
+
+#: A serving-provider name as OpenRouter reports it ("DeepInfra", "Google AI Studio").
+#: Anything else is dropped rather than recorded: the value arrives in a provider
+#: response, and the audit trail keeps metadata, never free text.
+_PROVIDER_NAME = re.compile(r"[A-Za-z0-9 ._()/-]{1,80}")
+
+
+@contextmanager
+def call_purpose(label: str) -> Iterator[None]:
+    """Label every model call made inside the block. Nests: the innermost label wins.
+
+    Context variables do not follow work into a `ThreadPoolExecutor`, so a caller that
+    fans out sets the label inside the submitted function, not around `pool.map`.
+    """
+    token = _PURPOSE.set(label)
+    try:
+        yield
+    finally:
+        _PURPOSE.reset(token)
+
+
+def current_call_purpose() -> str | None:
+    """The label `call_purpose` has in force on this thread, or None."""
+    return _PURPOSE.get()
+
+
+@dataclass(frozen=True)
+class CallRecord:
+    """One HTTP attempt against the proxy, as the audit trail's `model_call` event.
+
+    Per attempt, not per call: a call that timed out twice and then answered is three
+    records, which is the only way the time a retry cost is visible after the fact. A
+    tool loop's rounds are separate calls to `_create`, so each round is its own record
+    with `attempt` restarting at 1. Counts, a duration and a failure class only — no
+    prompt, no completion, no provider prose (D-model-call-timing).
+    """
+
+    purpose: str | None
+    alias: str
+    #: 1-based, within one `_create` call's retry budget
+    attempt: int
+    #: "ok", or the failure class the attempt ended on (`timeout`, `http_502`,
+    #: `empty_completion`, …) — the same tokens `ModelCallError.failure_class` carries
+    outcome: str
+    #: wall-clock seconds from sending the request to classifying the response
+    seconds: float
+    prompt_tokens: int
+    completion_tokens: int
+    #: the upstream host that served the request, when the proxy passed it through
+    provider: str | None
+
+    def as_event(self) -> dict[str, Any]:
+        return asdict(self)
+
+
+def _serving_provider(resp: Any) -> str | None:
+    """OpenRouter's top-level `provider` field, which LiteLLM copies onto its response
+    and the OpenAI SDK keeps as an extra attribute. Absent for every other backend."""
+    value = getattr(resp, "provider", None)
+    if isinstance(value, str) and _PROVIDER_NAME.fullmatch(value):
+        return value
+    return None
+
+
+def _token_count(usage: Any, field: str) -> int:
+    value = getattr(usage, field, 0) if usage else 0
+    return value if isinstance(value, int) else 0
+
+
 class LLMClient:
     def __init__(
         self,
@@ -244,6 +321,7 @@ class LLMClient:
         *,
         sleep: Callable[[float], None] = time.sleep,
         jitter: Callable[[], float] = lambda: random.uniform(0.5, 1.0),  # noqa: S311 - not crypto
+        clock: Callable[[], float] = time.monotonic,
     ) -> None:
         self._config = config
         self._client = OpenAI(
@@ -256,6 +334,8 @@ class LLMClient:
         # suite must be able to assert the wait without serving it.
         self._sleep = sleep
         self._jitter = jitter
+        self._clock = clock
+        self._call_sink: Callable[[CallRecord], None] | None = None
         self._identities: dict[str, str] = {}
         self._modes: dict[str, str] = {}
         self._tool_capable: dict[str, bool] = {}
@@ -284,6 +364,36 @@ class LLMClient:
         """The budgets this client was built with, for callers that need to size their
         own retry against the same config the client uses (e.g. `critique_once`)."""
         return self._config.budgets
+
+    def set_call_sink(self, sink: Callable[[CallRecord], None] | None) -> None:
+        """Receive a `CallRecord` for every HTTP attempt from here on (D-model-call-timing).
+
+        The graph points this at the run's event log once the store exists, so startup
+        probes made before that go unrecorded. The sink is called from whichever thread
+        made the call, and a sink that raises is logged and ignored: losing a timing
+        record must never fail the call it describes.
+        """
+        self._call_sink = sink
+
+    def _record_call(self, alias: str, attempt: int, started: float, outcome: str, resp: Any = None) -> None:
+        sink = self._call_sink
+        if sink is None:
+            return
+        usage = getattr(resp, "usage", None)
+        record = CallRecord(
+            purpose=_PURPOSE.get(),
+            alias=alias,
+            attempt=attempt + 1,
+            outcome=outcome,
+            seconds=round(max(0.0, self._clock() - started), 3),
+            prompt_tokens=_token_count(usage, "prompt_tokens"),
+            completion_tokens=_token_count(usage, "completion_tokens"),
+            provider=_serving_provider(resp),
+        )
+        try:
+            sink(record)
+        except Exception:
+            log.warning("call sink failed for %s; the call is unaffected", alias, exc_info=True)
 
     def backoff_between_writer_attempts(self, attempt: int) -> None:
         """Serve the same wait `_create` uses, for a caller retrying at its own layer.
@@ -553,10 +663,13 @@ class LLMClient:
             # to wait.
             if attempt > 0:
                 self._backoff(attempt, _retry_after(last) if last else None)
+            # Taken after the backoff, so `seconds` is the provider's time, not ours.
+            started = self._clock()
             try:
                 resp = self._client.chat.completions.create(**kwargs)
             except Exception as exc:  # transport / provider error
                 last = exc
+                self._record_call(alias, attempt, started, _failure_class(exc))
                 log.warning("call to %s failed (attempt %d): %s", alias, attempt + 1, exc)
                 if _status_of(exc) in _ACCOUNT_STATUSES:
                     # A backoff measured in seconds cannot outwait a balance someone has
@@ -570,18 +683,29 @@ class LLMClient:
                         f"{alias}: {exc}", failure_class=f"http_{_status_of(exc)}"
                     ) from exc
                 continue
-            usage = resp.usage
-            reported = getattr(resp, "model", None) or alias
-            # "No silent fallback to a duplicate" (RA-017): if the proxy served this
-            # request from a different model than the alias we pinned at startup,
-            # every downstream identity claim — author exclusion, distinct-reviewer
-            # counting — is false. Fail closed rather than believe the alias map.
-            if not _identity_matches(reported, alias, self._identities.get(alias)):
-                raise ModelCallError(
-                    f"identity mismatch: alias '{alias}' was served by '{reported}'",
-                    failure_class="identity_mismatch",
-                )
-            message = _message_dict(resp.choices[0].message)
+            recorded = False
+            try:
+                usage = resp.usage
+                reported = getattr(resp, "model", None) or alias
+                # "No silent fallback to a duplicate" (RA-017): if the proxy served this
+                # request from a different model than the alias we pinned at startup,
+                # every downstream identity claim — author exclusion, distinct-reviewer
+                # counting — is false. Fail closed rather than believe the alias map.
+                if not _identity_matches(reported, alias, self._identities.get(alias)):
+                    self._record_call(alias, attempt, started, "identity_mismatch", resp)
+                    recorded = True
+                    raise ModelCallError(
+                        f"identity mismatch: alias '{alias}' was served by '{reported}'",
+                        failure_class="identity_mismatch",
+                    )
+                message = _message_dict(resp.choices[0].message)
+            except Exception:
+                # A successful HTTP exchange can still carry a response shape the SDK
+                # surface does not satisfy. Preserve the existing exception, but do not
+                # let that attempt disappear from the audit trail (D-model-call-timing).
+                if not recorded:
+                    self._record_call(alias, attempt, started, "malformed_response", resp)
+                raise
             # A 200 carrying neither prose nor a tool call is a failed call that
             # forgot to say so — small models in the roster do this intermittently.
             # It costs a caller its whole run if it escapes as "success", so it is
@@ -591,6 +715,7 @@ class LLMClient:
                 last = ModelCallError(
                     f"{alias}: empty completion", failure_class="empty_completion"
                 )
+                self._record_call(alias, attempt, started, "empty_completion", resp)
                 log.warning("call to %s returned empty content (attempt %d)", alias, attempt + 1)
                 continue
             # The same failure wearing prose's clothes: the model emitted its tool call
@@ -604,12 +729,14 @@ class LLMClient:
                     f"{alias}: emitted unparsed tool-call markup as content",
                     failure_class="unparsed_tool_markup",
                 )
+                self._record_call(alias, attempt, started, "unparsed_tool_markup", resp)
                 log.warning(
                     "call to %s returned unparsed tool-call markup (attempt %d)",
                     alias,
                     attempt + 1,
                 )
                 continue
+            self._record_call(alias, attempt, started, "ok", resp)
             return _Reply(
                 message=message,
                 reported=reported,

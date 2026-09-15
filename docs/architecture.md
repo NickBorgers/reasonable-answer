@@ -79,7 +79,7 @@ Invariants (enforced in code, covered by tests):
 | Node | Reads | Produces | Model | Trust model |
 |------|-------|----------|-------|-------------|
 | **intake** | question + **markdown** seed | normalized `question` / `seed`; routing | none | deterministic |
-| **generate** | question + latest report + **defect list**; with retrieval on, its own `web_search` results and — with `search.read_sources` — the pages it read from them (D-writer-source-reads) | next report (with citations) — under `revision.mode: patch` only the paragraphs a fix task named — and the passages that restate the same claim (D-claim-scoped-patch) — are edited, the rest returned byte-identical (D-scoped-revision); plus, with `search.support_manifest`, an **audit-side** support manifest | non-author (alternating) | LLM (untrusted output) |
+| **generate** | question + latest report + **defect list**; with retrieval on, its own `web_search` results and — with `search.read_sources` — the pages it read from them (D-writer-source-reads), and on a revision with `verify_sources` on, the pages the draft's `## Sources` lists (D-writer-rereads-cited-sources) | next report (with citations) — under `revision.mode: patch` only the paragraphs a fix task named — and the passages that restate the same claim (D-claim-scoped-patch) — are edited, the rest returned byte-identical (D-scoped-revision); plus, with `search.support_manifest`, an **audit-side** support manifest; every draft's `generate` event carries a warn-only citation census (D-writer-citation-continuity) | non-author (alternating) | LLM (untrusted output) |
 | **adjudicate** *(D-writer-disputes, opt-in)* | pending disputes + finding + one paragraph | `AdjudicationRecord[]` | mechanical fetch-check, else an arbiter ≠ disputer ≠ raiser | mechanical, or LLM inside a closed 2-field schema |
 | **critique** | report + question + **one lens** + taxonomy; the evidence lens also gets the cited pages as claim-anchored excerpts (D-claim-anchored-excerpts) | `Issue[]` per critic | `review.depth` non-author models per lens, drawn as one slate (`roles.critic_slate`) | LLM (untrusted output) |
 | ↳ **claim check** *(D-claim-level-verification, opt-in)* | one citing sentence + its paragraph + one fetched page, per pair | a closed `ClaimVerdict` per pair, minted into `misrepresented_source` on the evidence critic's `LensResult` (`claimcheck`) | the evidence critic's own model, one fresh context per pair, memoised per resolved identity and complete prompt | LLM inside a closed 4-way schema; `supported` and `contradicted` must quote the shown page verbatim or the pair is unchecked; `absent` and `unreadable` carry no page quote, settle nothing unless the page was shown whole and uncut, and never retire the critic's own finding; a pass stops after `claim_check.max_consecutive_failures` unchecked calls in a row (D-claim-check-inconclusive-verdicts) |
@@ -113,7 +113,8 @@ Each lens runs on the head of its assigned pool, in a **fresh context**, blind t
 emit `Issue[]` against a closed schema. On a completed evidence review, deterministic bibliography
 checks may add mechanically authored findings, including `unclear_structure`, to the evidence
 result (D-bibliography-integrity); the category still describes the defect even though no critic
-minted it. `stylistic` (cosmetic preference, ignored for convergence) is not listed above per lens
+minted it. A bibliography the body never cites is one `uncited_claim`, not one finding per entry
+(D-uncited-bibliography). `stylistic` (cosmetic preference, ignored for convergence) is not listed above per lens
 because it attaches to all three — any lens may raise it.
 
 At `review.depth: 2` (the default, D-front-loaded-depth) each of those boxes is **two** critics
@@ -345,6 +346,19 @@ independently, so `_record_coverage` arbitrates: one record per artifact, the ob
 reached furthest, and an audit event only for a tally that took the record. It is observation only:
 no controller rule reads it, no `OrchestratorView` field carries it, and it mints no defect.
 
+**Citations become links on the way out, never in the artifact (D-citation-links).** The stored
+report keeps plain `[n]` markers, because critics and disputes quote it verbatim and link syntax
+would make a sentence unquotable. At render time `citelinks.linked_markdown` turns each body
+marker into one `[n]` link per cited number, to that entry's URL, and each URL in `## Sources`
+into an autolink. A marker link carries a `#:~:text=` fragment only for a (number, sentence) pair
+that a claim-check record for the rendered text's hash (`critiques/*-claims-*.json`, read by
+`store.read_claim_checks` and `Registry.verified_spans`) found `supported` with a verbatim span,
+and that no record found `contradicted`; `.pdf` URLs never get one. The report page, Copy markdown,
+`export.md`, `export.html` and `ra export` all link from the same spans, and
+`GET /runs/<id>/report.md` stays the raw artifact. `web/markdown.py` puts `rel="noreferrer noopener"`
+on every rendered link, because no Referrer-Policy is set and the page URL carries the run id.
+Nothing here reaches a model, the event trail or the controller.
+
 ## Writer retrieval: search, then read, then trace (D-retrieval-opt-in, D-writer-source-reads)
 
 Retrieval reaches the writer in two steps, each its own opt-in switch and each off by default.
@@ -352,7 +366,7 @@ Retrieval reaches the writer in two steps, each its own opt-in switch and each o
 ```mermaid
 flowchart LR
     W["writer call (one fresh context)"] --> S["web_search<br/>title · URL · snippet"]
-    S --> SES["ReadSession — the URLs THIS call was offered"]
+    S --> SES["ReadSession — the URLs THIS call was offered<br/>+ on a revision, the URLs the draft cites"]
     SES --> R["read_source<br/>only a URL in the session"]
     R --> F["fetch.SourceFetcher → fetch.http_get<br/>(the one egress point; cache shared with verification)"]
     F --> P["prompts.source_read_block<br/>fenced untrusted page text"]
@@ -365,7 +379,11 @@ flowchart LR
 
 `search.enabled` gives the writer `web_search`, so a cited URL is one a result returned.
 `search.read_sources` adds `read_source`, whose allowlist is `reading.ReadSession` — the URLs that
-writer call's own searches returned, and nothing else. Both tools are driven by one
+writer call's own searches returned and, on a revision where `verify_sources` is also on, the URLs the
+draft under revision lists (`graph._cited_seed`, the same set `graph._verified_urls` hands verification;
+D-writer-rereads-cited-sources), and nothing else. The seeded URLs never appear in trusted prompt text:
+`writer_system(..., reread=True)` and `reading.read_source_tool(True)` only point the writer at the
+fenced draft. Both tools are driven by one
 `(name, arguments) -> text` handler assembled in `graph._retrieval_kwargs`, which is where the
 composition lives so `search` and `reading` need not import each other. The optional whole-run
 `read_budget` call cap is unbounded by default; `read_char_budget` remains a mandatory whole-run
@@ -449,6 +467,14 @@ carried no headings is accepted with a warning; the warning rides the run's exis
   round** — i.e. at least three writers — or one flaky response is an aborted run rather than a
   retry. This is a sizing recommendation, not a fail-closed check: a two-writer roster is legal and
   still runs, it just has no lateral move when its one eligible writer misbehaves.
+- **Model call timing (D-model-call-timing):** `LLMClient` reports every HTTP attempt to a call
+  sink, and `build_runtime` points the sink at the run's event log. Each attempt becomes a
+  `model_call` event: `purpose` (`writer`, `critic:<lens>`, `claim_check`, `support_manifest`,
+  `dispute`, `arbiter`, `orchestrator`), `alias`, `attempt`, `outcome` (`ok` or a failure class),
+  `seconds`, token counts, and the serving `provider` when OpenRouter reports one. Records are per
+  attempt, so a timeout that a retry recovered from is still visible. The graph sets `purpose`
+  with the `llm.call_purpose` context manager around each call site, inside the pool thread for
+  critique. Records hold no content, and a sink failure never fails the call.
 - **Concurrency/limits:** bounded concurrency (a pass fans out over every critic slot — `review.depth`
   per lens — as one flat work list under `budgets.max_concurrency`, so raising the depth costs
   wall-clock and never instantaneous proxy load), per-call timeout + retry budget, token/context

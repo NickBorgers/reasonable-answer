@@ -15,7 +15,13 @@ from typing import Any
 from pydantic import ValidationError
 
 from reasonable_answer.config import Budgets, ConfigError
-from reasonable_answer.llm import Completion, MalformedOutputError, ProbeIncomplete
+from reasonable_answer.llm import (
+    CallRecord,
+    Completion,
+    MalformedOutputError,
+    ProbeIncomplete,
+    current_call_purpose,
+)
 from reasonable_answer.schemas import (
     ArbiterVerdict,
     ClaimVerdict,
@@ -85,6 +91,8 @@ class Call:
     #: the per-call `timeout` the caller passed, or None for the client default
     #: (D-role-call-timeouts)
     timeout: float | None = None
+    #: the `llm.call_purpose` label in force when the call was made (D-model-call-timing)
+    purpose: str | None = field(default_factory=current_call_purpose)
 
 
 @dataclass
@@ -150,11 +158,18 @@ class FakeClient:
     #: writer fallback runs at full speed while still being able to assert the pause
     #: happened (D-provider-retry).
     writer_backoffs: list[int] = field(default_factory=list)
+    #: what the graph handed `set_call_sink` (D-model-call-timing)
+    call_sink: Callable[[CallRecord], None] | None = None
 
     # ---- the LLMClient surface the graph uses -----------------------------
 
     def resolve_identities(self, aliases: list[str]) -> dict[str, str]:
         return {a: self.identities[a] for a in aliases}
+
+    def set_call_sink(self, sink: Callable[[CallRecord], None] | None) -> None:
+        """Held, never called: this fake makes no HTTP attempts, so there is nothing to
+        time. Kept so a test can drive the sink the graph installed."""
+        self.call_sink = sink
 
     def identity(self, alias: str) -> str:
         return self.identities[alias]

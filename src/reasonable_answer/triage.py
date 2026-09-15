@@ -589,6 +589,62 @@ def _minted(**fields) -> RawIssue:
     return RawIssue(**fields)
 
 
+def _is_reference(entry: _Entry) -> bool:
+    """Whether a `## Sources` line claims to be a reference at all: it carries an address
+    or says what number it is. "None." or "No sources were consulted." is neither — a
+    bibliography that lists nothing is not one the body failed to cite."""
+    return entry.url is not None or excerpt._ENTRY_NUMBER.match(entry.text) is not None
+
+
+def _unmarked_bibliography(
+    entries: list[_Entry], structure: Structure, sources_section: int
+) -> list[RawIssue]:
+    """The one finding for a bibliography the body never cites (D-uncited-bibliography).
+
+    Every entry would otherwise be an orphan, and N orphan findings each saying "cite
+    this or remove it" invite the writer to delete the list rather than attach it. The
+    defect is one fact about the report — no claim can be traced to a source — so it is
+    one `uncited_claim`, anchored at the first sentence of the first body paragraph that
+    has quotable text: the place a writer starts attaching markers.
+
+    Nothing is minted when no body paragraph has a quotable sentence: a finding the
+    writer cannot locate is worse than none (the `_entry_anchor` argument).
+    """
+    if not any(_is_reference(entry) for entry in entries):
+        return []
+    for paragraph in structure.paragraphs:
+        if paragraph.section == sources_section:
+            continue
+        for sentence in excerpt._SENTENCE_END.split(paragraph.text):
+            span = sentence.strip()[:MAX_SPAN]
+            if not _normalize(span):
+                continue
+            # Confirmed against this paragraph alone, under the normalization
+            # `validate_issue` quotes against, so the locus is the span's own paragraph.
+            locus = _locate_text(span, Structure((paragraph,), structure.section_titles))
+            if locus is None:
+                continue
+            return [
+                _minted(
+                    category=Category.UNCITED_CLAIM,
+                    severity=Severity.MAJOR,
+                    locus=locus,
+                    claim_span=span,
+                    rationale=(
+                        f"## Sources lists {len(entries)} entries and no body sentence carries a "
+                        "[n] marker, so no claim can be traced to or checked against its source."
+                    ),
+                    instruction=(
+                        "Starting with this sentence, put the [n] of the listed entry that "
+                        "supports it inside each material claim. Weaken, or label as the "
+                        "report's own inference, any claim no listed entry supports. Remove "
+                        "entries no sentence then cites. No new source is needed."
+                    ),
+                )
+            ]
+    return []
+
+
 def mechanical_bibliography_issues(
     report_text: str,
     structure: Structure,
@@ -622,10 +678,13 @@ def mechanical_bibliography_issues(
     does; `tests/test_triage.py` runs every minted finding through it anyway, so a
     change here cannot quietly make one unquotable.
 
-    Nothing is minted for a report with no `## Sources` section and nothing for one
-    whose body carries no citation marker at all: that report has a defect, and it is
-    the one the writer template and the completeness lens already own, not a
-    referential-integrity slip.
+    Nothing is minted for a report with no `## Sources` section. A report whose body
+    carries no citation marker at all, under a Sources list with at least one real
+    reference (an address or an explicit number), gets exactly **one** `uncited_claim`
+    at the first quotable body sentence and nothing per entry (`_unmarked_bibliography`,
+    D-uncited-bibliography, superseding in part D-bibliography-integrity's claim that
+    the writer template and the completeness lens own that case — no lens has a
+    category for it, so nothing reported it).
     """
     sources_section = _sources_section(structure)
     if sources_section is None or not fetch.sources_section(report_text).strip():
@@ -636,7 +695,9 @@ def mechanical_bibliography_issues(
     entries = all_entries[:limit]
     cited = _citations(structure, sources_section)
     if not cited:
-        return []
+        # The whole list is unattached, which is one defect, not one per entry
+        # (D-uncited-bibliography). The per-entry checks wait until a marker exists.
+        return _unmarked_bibliography(all_entries, structure, sources_section)
 
     # Marker resolution is a cheap lookup over the complete bibliography. The limit
     # bounds only the per-entry checks below; applying it here would turn every valid
@@ -726,8 +787,9 @@ def mechanical_bibliography_issues(
                     "a reader counting the sources behind a claim counts it twice."
                 ),
                 instruction=(
-                    "Merge the entries and renumber, updating every in-text marker that "
-                    "pointed at the duplicate."
+                    "Merge the two entries into the lower-numbered one: point every in-text "
+                    "marker that cited the higher number at the lower, delete the higher "
+                    "entry, and leave its number unused. Do not renumber the other entries."
                 ),
             )
         )

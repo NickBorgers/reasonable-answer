@@ -224,6 +224,17 @@ side and the break-even where one exists, and state a counterargument's size rel
 effect; a heading claims no more than its section supports; and say which reading of an ambiguous
 question is being answered.
 
+**Citations are markers, and a revision keeps them (D-writer-citation-continuity).** `WRITER_SYSTEM`
+says a citation is the `[n]` marker inside the sentence it supports — naming a source in prose or
+listing it under Sources cites nothing — and that every entry is cited by some marker and every marker
+has an entry. Both revision modes carry `WRITER_CITATION_REVISION` inside the resolution standard: keep
+every marker on a kept claim; delete an entry only when nothing cites it; never renumber, so a patch
+does not rewrite every citing paragraph; and "remove the attribution" means re-cite, restrict, or label
+as inference, never leave the claim standing unmarked. Every `generate` event carries a citation census
+(`source_entries`, `body_markers`, `cited_entries`, `dangling_markers`, and on revisions
+`cited_sources_dropped`, `cited_sources_added`, `entries_removed`). It is warn-only: no draft is
+rejected on it, and it is not a controller input.
+
 **Headings are writer-side only, deliberately.** A section heading is not quotable: `report.parse`
 puts heading text in `Structure.section_titles` and never in a `Paragraph`, so a heading is absent
 from both the cited paragraph and `Structure.full_text`, and `triage._require_quote` would reject
@@ -256,7 +267,10 @@ well-formed/resolvable in format.
   attached to text the writer read rather than to a snippet. This does **not** move the label: a
   read page shows what a page says, not that the page is right, so the output stays
   *consensus-reviewed with retrieved sourcing*. What it changes is what the writer is entitled to
-  assert and what the run can afterwards show — see the traceability paragraph below.
+  assert and what the run can afterwards show — see the traceability paragraph below. On a revision,
+  where `verify_sources` is also on, the writer may also open the pages the draft it revises lists
+  (`search.read_cited_sources`, default on; D-writer-rereads-cited-sources), so a fix task about a
+  cited claim can be worked against the page rather than the draft's paraphrase of it.
 
 **Retrieval alone does not make the report fact-checked.** It constrains where citations come from;
 it does not establish that a cited page *supports the specific claim attached to it* — the
@@ -314,6 +328,7 @@ on or off, because none of them needs a fetch:
 | a `[n]` cited in the body with no entry numbered `n` | `uncited_claim` | major | first citing paragraph |
 | an entry the body never cites | `unclear_structure` | minor | the paragraph listing it |
 | two entries under one URL | `unclear_structure` | minor | the paragraph listing the duplicate |
+| a Sources list with a real reference (a URL or an explicit number) and no marker anywhere in the body (D-uncited-bibliography) | `uncited_claim` | major | first sentence of the first quotable body paragraph |
 
 No category is added to the taxonomy table, and each finding is minted **at** its category's floor,
 so the clamp is a no-op and RC-005's direction is untouched. These are pipeline-authored facts, not
@@ -322,10 +337,13 @@ model-authored fields, and like it they never attach to a failed lens. Every fie
 bounded on construction — a bibliography number of any length is cut to a short label before it is
 interpolated — so minting can never raise out of the critique node. Markers are read with
 `excerpt`'s parser (ranges expanded, the Sources section excluded), entries are numbered as
-`excerpt.entry_numbers` numbers them, and at most `search.max_source_urls` entries are considered.
-A report with no `## Sources` section, or whose body carries no citation marker at all, mints
-nothing here — that is a different defect, and the writer template and the completeness lens already
-own it.
+`excerpt.entry_numbers` numbers them, and at most `search.max_source_urls` entries are considered
+for per-entry orphan and duplicate checks. A report with no `## Sources` section mints nothing here.
+A body with no citation marker at all is the last row: that check scans the complete parsed Sources
+list and reports its full entry count, minting **one** finding and no per-entry orphans or duplicates,
+because every entry would otherwise be an orphan and one defect would be counted once per entry. A
+Sources section whose only content is not a reference ("None.") mints nothing. The evidence
+critic's own `uncited_claim` findings are kept alongside it, never dropped in its favour.
 
 **What the critic is shown of a page is chosen by the claims, not by position
 (D-claim-anchored-excerpts).** A fetched body is retained up to `search.fetch_body_max_chars`, and

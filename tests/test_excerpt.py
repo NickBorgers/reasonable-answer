@@ -330,3 +330,99 @@ def test_critique_once_hands_the_raw_report_to_the_prompt(monkeypatch):
         _Client(), "alias", "p/m", Lens.EVIDENCE, "q?", REPORT, "hash", "author"
     )
     assert seen["report_text"] is None and seen["excerpt_chars"] is None
+
+
+# ------------------------------------ citation census (D-writer-citation-continuity)
+
+
+def test_the_census_of_a_fully_cited_report():
+    assert excerpt.citation_census(REPORT) == {
+        "source_entries": 3,
+        "body_markers": 4,
+        "cited_entries": 3,
+        "dangling_markers": 0,
+    }
+
+
+def test_a_bibliography_with_no_body_marker_is_counted_as_one():
+    """The run-116cc shape: eleven entries, and not one sentence carrying a marker."""
+    body, sources = REPORT.split("## Sources")
+    stripped = body.replace(" [1]", "").replace(" [2]", "").replace(" [3]", "")
+    census = excerpt.citation_census(stripped + "## Sources" + sources)
+    assert census["source_entries"] == 3
+    assert census["body_markers"] == 0
+    assert census["cited_entries"] == 0
+
+
+def test_ranges_and_lists_cite_every_entry_they_name():
+    report = (
+        "## Conclusion\n\nOne [1-3]. Two [2, 3].\n\n## Sources\n\n"
+        "[1] https://example.org/a\n[2] https://example.org/b\n[3] https://example.org/c\n"
+    )
+    census = excerpt.citation_census(report)
+    assert census["body_markers"] == 2
+    assert census["cited_entries"] == 3
+
+
+def test_a_marker_with_no_entry_is_dangling_and_counted_once_per_number():
+    report = (
+        "## Conclusion\n\nOne [1]. Two [4]. Again [4].\n\n## Sources\n\n"
+        "[1] https://example.org/a\n"
+    )
+    census = excerpt.citation_census(report)
+    assert census["dangling_markers"] == 1
+    assert census["cited_entries"] == 1
+
+
+def test_the_census_carries_integers_only():
+    for value in excerpt.citation_census(REPORT).values():
+        assert type(value) is int
+    for value in excerpt.citation_changes(REPORT, REPORT).values():
+        assert type(value) is int
+
+
+def test_renumbering_a_bibliography_is_not_a_drop():
+    """Identity is the entry's URL, not its number — so a reviser that reorders the list
+    and moves every marker with it has lost nothing."""
+    renumbered = (
+        REPORT.replace("[1]", "[@1]").replace("[3]", "[1]").replace("[@1]", "[3]")
+    )
+    assert renumbered != REPORT
+    assert excerpt.citation_changes(REPORT, renumbered) == {
+        "cited_sources_dropped": 0,
+        "cited_sources_added": 0,
+        "entries_removed": 0,
+    }
+
+
+def test_a_dropped_marker_and_a_removed_entry_are_counted_by_source():
+    revised = REPORT.replace(" [3]", "").replace(
+        "[3] Hashem & Farag (2025). Cotton bleaching. https://example.org/bleach\n", ""
+    )
+    assert excerpt.citation_changes(REPORT, revised) == {
+        "cited_sources_dropped": 1,
+        "cited_sources_added": 0,
+        "entries_removed": 1,
+    }
+    uncited = REPORT.replace(" [3]", "")
+    assert excerpt.citation_changes(REPORT, uncited)["cited_sources_dropped"] == 1
+    assert excerpt.citation_changes(REPORT, uncited)["entries_removed"] == 0
+    assert excerpt.citation_changes(uncited, REPORT)["cited_sources_added"] == 1
+
+
+def test_an_entry_without_a_url_is_identified_by_its_text_not_its_number():
+    before = "## Conclusion\n\nA [1]. B [2].\n\n## Sources\n\n1. Alpha book.\n2. Beta book.\n"
+    after = "## Conclusion\n\nA [2]. B [1].\n\n## Sources\n\n1. Beta book.\n2. Alpha book.\n"
+    assert excerpt.citation_changes(before, after)["cited_sources_dropped"] == 0
+    assert excerpt.citation_changes(before, after)["entries_removed"] == 0
+
+
+def test_switching_url_less_entries_from_bullets_to_numbers_is_not_a_drop():
+    """A URL-less entry's identity is its text with the list marker removed, whether that
+    marker is a bullet or a number — so restyling the list loses no source."""
+    before = "## Conclusion\n\nA [1]. B [2].\n\n## Sources\n\n- Alpha book.\n- Beta book.\n"
+    after = "## Conclusion\n\nA [1]. B [2].\n\n## Sources\n\n1. Alpha book.\n2. Beta book.\n"
+    changes = excerpt.citation_changes(before, after)
+    assert changes["cited_sources_dropped"] == 0
+    assert changes["cited_sources_added"] == 0
+    assert changes["entries_removed"] == 0

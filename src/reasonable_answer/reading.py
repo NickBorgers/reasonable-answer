@@ -10,7 +10,8 @@ matching were therefore unavailable at the one moment they decide what the repor
 This module closes that gap and nothing wider. Four properties are load-bearing:
 
 1. **No arbitrary-URL reader.** `read_source` accepts only a URL that a `web_search`
-   result *in the same writer call* listed. The allowlist is the
+   result *in the same writer call* listed, or — on a revision — a URL the `## Sources`
+   of the draft being revised lists (D-writer-rereads-cited-sources). The allowlist is the
    :class:`ReadSession`, which is created per `complete()` call and thrown away with
    it — see the class docstring for why per-call rather than per-run.
 2. **One egress path.** Every byte still leaves through `fetch.SourceFetcher`, hence
@@ -28,7 +29,7 @@ This module closes that gap and nothing wider. Four properties are load-bearing:
 
 Every outcome the verification path distinguishes survives to the writer unchanged
 (body read, registry metadata only, paywalled, blocked, not found, unreadable, budget
-spent), plus one this path adds: `not_retrieved`, for a URL the writer never saw.
+spent), plus one this path adds: `not_retrieved`, for a URL the writer was never offered.
 Collapsing them would be the same mistake `SourceOutcome` exists to prevent — a writer
 told "could not read" for a page that does not exist will keep the claim.
 """
@@ -42,7 +43,7 @@ from collections.abc import Callable, Iterable
 from dataclasses import replace
 
 from . import prompts
-from .fetch import FetchedSource, SourceOutcome
+from .fetch import FetchedSource, SourceOutcome, _clean_url
 
 log = logging.getLogger(__name__)
 
@@ -137,10 +138,17 @@ class ReadSession:
     The read log is the other half of the job: :mod:`.support` needs the bodies this
     writer actually saw in order to check its support spans against them, and the
     session is the only place that knows.
+
+    `cited` seeds a second, separate set: the URLs the draft under revision lists in its
+    `## Sources` (D-writer-rereads-cited-sources). It is a function of the draft, which
+    every attempt in the retry loop already holds, so seeding it carries nothing from one
+    attempt to the next. It is kept apart from `_offered` so `offered_count` still means
+    "what search returned".
     """
 
-    def __init__(self) -> None:
+    def __init__(self, cited: Iterable[str] = ()) -> None:
         self._offered: set[str] = set()
+        self._cited: frozenset[str] = frozenset(url for url in cited if url)
         self._read: dict[str, FetchedSource] = {}
         self._lock = threading.Lock()
 
@@ -155,6 +163,28 @@ class ReadSession:
     def offered(self, url: str) -> bool:
         with self._lock:
             return url in self._offered
+
+    def admitted(self, url: str) -> str | None:
+        """The allowlisted address `url` names, or None when it names none.
+
+        Exact first, then after `fetch._clean_url`, because a writer copying a URL out of
+        a sentence brings its trailing punctuation with it. What is returned is always a
+        member of one of the two sets, so the string that reaches the fetcher is one the
+        allowlist holds — never the writer's variant of it.
+        """
+        cleaned = _clean_url(url)
+        with self._lock:
+            for candidate in (url, cleaned):
+                if candidate in self._offered or candidate in self._cited:
+                    return candidate
+        return None
+
+    def readable(self, url: str) -> bool:
+        return self.admitted(url) is not None
+
+    def is_cited(self, url: str) -> bool:
+        """`url` is one the draft under revision lists (the seed, not search)."""
+        return url in self._cited or _clean_url(url) in self._cited
 
     def record_read(self, source: FetchedSource) -> None:
         with self._lock:
@@ -174,6 +204,10 @@ class ReadSession:
     def offered_count(self) -> int:
         with self._lock:
             return len(self._offered)
+
+    @property
+    def cited_count(self) -> int:
+        return len(self._cited)
 
 
 class SourceReader:
@@ -211,15 +245,17 @@ class SourceReader:
         # The allowlist, checked before anything else and before any budget is spent:
         # refusing costs nothing, and a refusal must not be purchasable by exhausting
         # the budget first.
-        if not session.offered(url):
+        admitted = session.admitted(url)
+        if admitted is None:
             return FetchedSource(
                 url=url,
                 error=(
-                    "this URL was not returned by any web_search in this conversation, "
-                    "so it was not read. Only search results can be read."
+                    "this URL was not returned by a search in this conversation or listed "
+                    "in the draft's ## Sources, so it was not read. Only those can be read."
                 ),
                 outcome=SourceOutcome.NOT_RETRIEVED,
             )
+        url = admitted
 
         # Re-asking for a page already read in this call is free and returns the same
         # bytes. Charging it again would let a loop spend the run's budget on one page,
@@ -273,6 +309,7 @@ class SourceReader:
 
 
 #: The OpenAI-format tool definition handed to the model, alongside `search.SEARCH_TOOL`.
+#: Exactly what every call is offered when no cited URL was seeded — see `read_source_tool`.
 READ_SOURCE_TOOL = {
     "type": "function",
     "function": {
@@ -297,6 +334,44 @@ READ_SOURCE_TOOL = {
         },
     },
 }
+
+
+#: What changes when the allowlist was seeded with the draft's cited URLs
+#: (D-writer-rereads-cited-sources). No address appears here: the definition is trusted
+#: text, and the addresses are the draft's, which is not.
+_CITED_DESCRIPTION = (
+    "Read the text of a page a previous web_search result listed, or a page listed in "
+    "the '## Sources' section of the draft report you are revising, so you can quote it "
+    "and cite the exact place the support appears. A snippet shows that a page exists; "
+    "only the body shows what it says. Use this before attaching a source to a specific "
+    "claim."
+)
+_CITED_URL_DESCRIPTION = (
+    "The URL, copied exactly from a search result in this conversation or from the "
+    "draft report's ## Sources. No other URL can be read."
+)
+
+
+def read_source_tool(cited: bool) -> dict:
+    """The tool definition for one writer call. `cited` says its session was seeded with
+    the draft's cited URLs; without that, today's `READ_SOURCE_TOOL`, unchanged."""
+    if not cited:
+        return READ_SOURCE_TOOL
+    function = READ_SOURCE_TOOL["function"]
+    parameters = function["parameters"]
+    return {
+        "type": "function",
+        "function": {
+            **function,
+            "description": _CITED_DESCRIPTION,
+            "parameters": {
+                **parameters,
+                "properties": {
+                    "url": {**parameters["properties"]["url"], "description": _CITED_URL_DESCRIPTION}
+                },
+            },
+        },
+    }
 
 
 def make_tool_handler(

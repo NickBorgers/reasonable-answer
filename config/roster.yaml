@@ -196,7 +196,8 @@ search:
   # what to claim having never seen the page — which is where bibliography-level
   # citations and over-narrow claim/source pairings come from.
   #
-  # Bounded to URLs a web_search returned IN THE SAME WRITER CALL: there is no
+  # Bounded to URLs a web_search returned IN THE SAME WRITER CALL (plus, on a revision,
+  # the URLs the draft being revised lists — read_cited_sources below): there is no
   # arbitrary-URL reader, and a refused URL never reaches the network. It egresses
   # through the same fetch boundary verify_sources uses, so the same caveat applies —
   # these are model-chosen URLs, and the egress boundary is a deployment concern
@@ -210,6 +211,11 @@ search:
   #                            # fetch_body_max_chars widens the writer's view only, never
   #                            # the evidence lens's or mechanical adjudication's
   # read_char_budget: 200000   # whole-run page text handed to writers
+  # read_cited_sources: true   # on a revision, read_source may also open the URLs the
+  #                            # draft's ## Sources lists (D-writer-rereads-cited-sources).
+  #                            # Effective only with read_sources AND verify_sources on:
+  #                            # it is exactly the set verification already fetches, so
+  #                            # nothing new reaches the network. A rollback switch.
   #
   # And the audit half: after each draft, ask its writer where each cited claim's
   # support actually sits — citation id, URL, locator, verbatim span, claim — and check

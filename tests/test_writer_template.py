@@ -227,3 +227,54 @@ def test_currency_is_checked_against_the_run_date():
     assert "more than a year older" in addendum
     assert "how recent the evidence you are relying on is" in addendum
     assert "Check currency" not in prompts.writer_system(False)
+
+
+# ------------------------- citation continuity (D-writer-citation-continuity)
+
+
+def test_a_citation_is_a_marker_in_the_sentence_it_supports():
+    """A production report kept its `## Sources` list and lost every inline marker. Nothing
+    in the system prompt said a listed source cites nothing by itself."""
+    for search in (False, True):
+        system = prompts.writer_system(search)
+        assert "A citation is the [n] marker inside the sentence it supports" in system
+        assert "or listing it under Sources, cites nothing" in system
+        assert "Every Sources entry is cited by at least one marker in the body" in system
+        assert "every marker in the body has an entry with that number" in system
+    assert "per source the body cites with an inline marker" in prompts.REPORT_SKELETON
+
+
+def test_revising_keeps_markers_never_renumbers_and_defines_removing_an_attribution():
+    rules = prompts.WRITER_CITATION_REVISION
+    assert "Keep every [n] marker on a claim you keep" in rules
+    assert "remove a marker only together with the claim it supports" in rules
+    assert "Delete a Sources entry only when no remaining sentence cites it" in rules
+    assert "Never renumber" in rules
+    assert "a new source takes the next number after the highest one" in rules
+    assert "Where a task says to remove an attribution" in rules
+    assert "Never leave the claim standing as fact with no marker" in rules
+    assert "read it first when `read_source` is available" in rules
+
+
+def test_both_revision_modes_carry_the_citation_rules_and_the_closes_do_not():
+    """Carried inside the resolution standard, so the D-scoped-revision A/B still differs
+    in exactly its close."""
+    assert prompts.WRITER_CITATION_REVISION in prompts.WRITER_RESOLUTION_STANDARD
+    for mode in ("patch", "rewrite"):
+        text = prompts.writer_revision("q", "r", [_defect()], polish=False, mode=mode)
+        assert prompts.WRITER_CITATION_REVISION in text
+    assert "Never renumber" not in prompts.WRITER_PATCH_CLOSE
+    assert "Never renumber" not in prompts.WRITER_REWRITE_CLOSE
+
+
+def test_the_reread_addendum_is_offered_only_to_a_reviser_that_reads():
+    """D-writer-rereads-cited-sources. The addendum names no URL: the addresses are the
+    draft's, and the draft is untrusted text fenced in the user prompt."""
+    addendum = prompts.WRITER_REREAD_ADDENDUM
+    assert "http" not in addendum
+    assert addendum in prompts.writer_system(True, True, reread=True)
+    assert addendum not in prompts.writer_system(True, True)
+    assert addendum not in prompts.writer_system(True, False, reread=True)
+    assert addendum not in prompts.writer_system(False, False, reread=True)
+    # The system prompt a non-rereading writer receives is unchanged by the flag's existence.
+    assert prompts.writer_system(True, True, reread=False) == prompts.writer_system(True, True)

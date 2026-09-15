@@ -163,6 +163,93 @@ def anchors_for(report: str, url: str, numbers: dict[str, list[int]] | None = No
     return anchors
 
 
+# ------------------------------------------------------------------ citation census
+
+
+def _numbered_entries(report: str) -> list[tuple[int, str]]:
+    """Each bibliography entry with its number, by the rule `entry_numbers` applies."""
+    out: list[tuple[int, str]] = []
+    for position, entry in enumerate(fetch.source_entries(report), 1):
+        match = _ENTRY_NUMBER.match(entry)
+        explicit = (match.group(1) or match.group(2)) if match else None
+        out.append((int(explicit) if explicit else position, entry))
+    return out
+
+
+def _source_key(entry: str) -> str:
+    """What an entry is *about*, independent of the number it sits under.
+
+    Its cleaned URL when it has one, so renumbering a bibliography is never read as
+    removing a source; otherwise its whitespace-normalized text with the list marker or
+    number taken off the front.
+    """
+    url = fetch.entry_url(entry)
+    if url is not None:
+        return url
+    text = re.sub(r"^\s*[-*+]\s+", "", entry)
+    text = _ENTRY_NUMBER.sub("", text, count=1)
+    return " ".join(text.split()).casefold()
+
+
+def _body_citations(report: str) -> tuple[int, set[int]]:
+    """How many markers the body carries, and every entry number they cite."""
+    markers = _MARKER.findall(_body(report))
+    cited: set[int] = set()
+    for marker in markers:
+        cited |= _cited(marker)
+    return len(markers), cited
+
+
+def _cited_keys(report: str) -> tuple[set[str], set[str]]:
+    """(every entry's source key, the keys of the entries the body cites)."""
+    _, cited = _body_citations(report)
+    entries = _numbered_entries(report)
+    return (
+        {_source_key(entry) for _, entry in entries},
+        {_source_key(entry) for number, entry in entries if number in cited},
+    )
+
+
+def citation_census(report: str) -> dict[str, int]:
+    """How the draft's body markers and its `## Sources` entries agree
+    (D-writer-citation-continuity). Counts only — never a URL or a character of text — because these land in
+    `events.jsonl`, which outlives a content purge (RA-016).
+
+    * `source_entries` — entries in `## Sources`;
+    * `body_markers` — marker occurrences before the Sources heading (`[1, 3]` is one);
+    * `cited_entries` — entries whose number at least one body marker cites;
+    * `dangling_markers` — distinct numbers the body cites that no entry carries.
+    """
+    markers, cited = _body_citations(report)
+    entries = _numbered_entries(report)
+    numbers = {number for number, _ in entries}
+    return {
+        "source_entries": len(entries),
+        "body_markers": markers,
+        "cited_entries": sum(1 for number, _ in entries if number in cited),
+        "dangling_markers": len(cited - numbers),
+    }
+
+
+def citation_changes(previous: str, report: str) -> dict[str, int]:
+    """What a revision did to the draft's citations, by source rather than by number.
+
+    A source is identified by its entry URL (`_source_key`), so a bibliography renumbered
+    from 1..n to some other order counts as neither a drop nor an addition.
+
+    * `cited_sources_dropped` — sources the previous body cited and this body does not;
+    * `cited_sources_added` — sources this body cites and the previous body did not;
+    * `entries_removed` — sources listed before and no longer listed at all.
+    """
+    before_listed, before_cited = _cited_keys(previous)
+    after_listed, after_cited = _cited_keys(report)
+    return {
+        "cited_sources_dropped": len(before_cited - after_cited),
+        "cited_sources_added": len(after_cited - before_cited),
+        "entries_removed": len(before_listed - after_listed),
+    }
+
+
 def _body(report: str) -> str:
     match = fetch._SOURCES_HEADING.search(report or "")
     return report[: match.start()] if match else (report or "")
