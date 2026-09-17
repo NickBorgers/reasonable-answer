@@ -339,6 +339,9 @@ def serve(
             host=host,
             port=port,
             timeout_graceful_shutdown=int(shutdown.grace_seconds() * 0.8),
+            # The app writes its own access line, with the caller's identity on it
+            # (D-access-log-identity); uvicorn's would be a second, anonymous copy.
+            access_log=False,
         )
     except SystemExit as exc:
         # uvicorn calls `sys.exit(3)` itself when the lifespan startup hook raised, which

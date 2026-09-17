@@ -57,6 +57,7 @@ from ..report import artifact_hash as report_hash
 from ..store import CorruptRun
 from . import assets as static_assets
 from . import push
+from .accesslog import AccessLogMiddleware
 from .identity import resolve_identity
 from .refine import RefinementService
 from .registry import Registry, RunSummary
@@ -331,8 +332,9 @@ def create_app(
 
         `HTTPException` is not available here — it is raised past the exception
         middleware that would turn it into a response — so the refusal is returned
-        directly. Nothing is logged about the failed attempt: the header is
-        attacker-controlled, and a rejected request has no identity to attribute.
+        directly. The outer access-log middleware records the refused request without
+        a `user=` field: the header is attacker-controlled, and a rejected request has
+        no identity to attribute.
         """
         if request.url.path in _UNAUTHENTICATED_PATHS:
             return await call_next(request)
@@ -350,6 +352,10 @@ def create_app(
             return PlainTextResponse("authentication required", status_code=403)
         request.state.viewer = viewer
         return await call_next(request)
+
+    # Added after `authenticate`, so it wraps it: a refused request is logged too, and
+    # every line is written once `request.state.viewer` is settled (D-access-log-identity).
+    app.add_middleware(AccessLogMiddleware)
 
     # ------------------------------------------------------------------ pages
 
