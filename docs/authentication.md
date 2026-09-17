@@ -35,6 +35,12 @@ identity provider reports something other than the address your Access policy li
 same person becomes two owners, each seeing half their runs. Worth checking once, on the
 index: sign in each way and confirm *signed in as* reads identically.
 
+**Every request is logged under the identity the app resolved.** The access line ends in
+`user=<identity>` when there is one, and has no `user=` field when there is none
+(D-access-log-identity). Logs are not a public route, so this does not break the rule that
+no public route names a person. It inherits the header's trust level: the line names who
+the proxy said the caller is, not who was verified.
+
 ## What "reachable only through the proxy" means
 
 `compose.yaml` publishes `127.0.0.1:8080` — the port is not on any external interface,

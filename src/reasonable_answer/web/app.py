@@ -57,6 +57,7 @@ from ..report import artifact_hash as report_hash
 from ..store import CorruptRun
 from . import assets as static_assets
 from . import push
+from .accesslog import AccessLogMiddleware
 from .identity import resolve_identity
 from .refine import RefinementService
 from .registry import Registry, RunSummary
@@ -350,6 +351,10 @@ def create_app(
             return PlainTextResponse("authentication required", status_code=403)
         request.state.viewer = viewer
         return await call_next(request)
+
+    # Added after `authenticate`, so it wraps it: a refused request is logged too, and
+    # every line is written once `request.state.viewer` is settled (D-access-log-identity).
+    app.add_middleware(AccessLogMiddleware)
 
     # ------------------------------------------------------------------ pages
 

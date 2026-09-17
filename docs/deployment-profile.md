@@ -196,6 +196,13 @@ from code. The level is safe to raise because no INFO site emits run material: s
 *lengths* and counts (RA-016), controller decisions derive only from the blind `OrchestratorView`,
 and `structured()`'s schema-violation log names the exception class, never the rejected value.
 
+Every HTTP request writes one access line, and the app writes it, not uvicorn
+(D-access-log-identity). The line ends in `user=<identity>` when the request carried one. A
+refused request, the healthcheck, and an anonymous public read carry no `user=` field. The
+identity is the one the auth middleware resolved, so a header the app rejected never appears
+as a user. The line still names the path, and a run id in a path is a read credential
+(D-id-as-credential). That was already true of uvicorn's line, and this change does not alter it.
+
 Two things stdout is still **not** a substitute for. The per-run `events.jsonl` remains the audit
 trail — logs are lossy, unowned, and outside the mode-0700 run tree. And a `MalformedOutputError`
 message still embeds the validator's own error text, which reaches container logs at WARNING via

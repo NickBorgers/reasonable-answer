@@ -2816,3 +2816,64 @@ def test_the_run_page_stays_entirely_under_the_prefix(config, fake_client):
         # The live stream is the `connect-src 'self'` target; it has to stay under the prefix
         # too or the EventSource escapes it.
         assert f'data-stream="{BASE}/runs/{run_id}/stream"' in run_page
+
+
+# ------------------------------------------------------------ access log identity
+
+
+def _access_lines(caplog) -> list[str]:
+    return [r.getMessage() for r in caplog.records if r.name == "reasonable_answer.web.accesslog"]
+
+
+def test_an_access_line_names_the_signed_in_user(client, caplog):
+    """D-access-log-identity: a request an identity made is logged under that identity."""
+    caplog.set_level("INFO", logger="reasonable_answer.web.accesslog")
+    assert client.get("/?x=1").status_code == 200
+    lines = _access_lines(caplog)
+    assert len(lines) == 1
+    assert lines[0].endswith(f'"GET /?x=1 HTTP/1.1" 200 user={WEB_IDENTITY}')
+
+
+def test_an_access_line_without_an_identity_names_nobody(config, caplog):
+    """A refused request and an anonymous public read have no identity to log, and the
+    header a refused caller sent is never reported as if it were one."""
+    worker = RunWorker(config, max_concurrent=1, runner=lambda *a, **k: None)
+    app = create_app(config, worker=worker)
+    caplog.set_level("INFO", logger="reasonable_answer.web.accesslog")
+    try:
+        with web_client(app, identity=None) as c:
+            assert c.get("/healthz").status_code == 200
+            assert c.get("/", headers={"Tailscale-User-Login": "x" * 400}).status_code == 403
+            assert c.get("/runs/nope").status_code == 404
+    finally:
+        worker.shutdown(timeout=0.1)
+    lines = _access_lines(caplog)
+    assert [line.split('"')[1] for line in lines] == [
+        "GET /healthz HTTP/1.1",
+        "GET / HTTP/1.1",
+        "GET /runs/nope HTTP/1.1",
+    ]
+    assert all("user=" not in line for line in lines)
+
+
+def test_a_public_read_by_a_signed_in_caller_names_them(client, caplog):
+    """The public door still resolves an identity when one arrives (D-id-as-credential)."""
+    caplog.set_level("INFO", logger="reasonable_answer.web.accesslog")
+    client.get("/runs/nope")
+    assert _access_lines(caplog)[-1].endswith(f"404 user={WEB_IDENTITY}")
+
+
+def test_serve_leaves_the_access_log_to_the_app(config, monkeypatch):
+    """uvicorn's own access line would be a second copy with no user on it."""
+    import uvicorn
+    from typer.testing import CliRunner
+
+    from reasonable_answer import cli, shutdown, web
+
+    seen = {}
+    monkeypatch.setattr(cli.Config, "load", lambda _: config)
+    monkeypatch.setattr(web, "create_app", lambda *args, **kwargs: object())
+    monkeypatch.setattr(uvicorn, "run", lambda *args, **kwargs: seen.update(kwargs))
+    monkeypatch.setattr(shutdown, "exit_process", lambda status: None)
+    CliRunner().invoke(cli.app, ["serve"])
+    assert seen["access_log"] is False
