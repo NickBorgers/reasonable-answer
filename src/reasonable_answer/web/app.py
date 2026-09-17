@@ -332,8 +332,9 @@ def create_app(
 
         `HTTPException` is not available here — it is raised past the exception
         middleware that would turn it into a response — so the refusal is returned
-        directly. Nothing is logged about the failed attempt: the header is
-        attacker-controlled, and a rejected request has no identity to attribute.
+        directly. The outer access-log middleware records the refused request without
+        a `user=` field: the header is attacker-controlled, and a rejected request has
+        no identity to attribute.
         """
         if request.url.path in _UNAUTHENTICATED_PATHS:
             return await call_next(request)
