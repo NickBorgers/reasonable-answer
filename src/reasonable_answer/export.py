@@ -46,8 +46,8 @@ UNREADABLE_RECORD = "unreadable_record"
 #: families", "the model that wrote it", "blocking" — just without the internal nouns.
 STATUS_MEANING = {
     "accepted": (
-        "two different models, from different model families and neither the one that wrote it, "
-        "checked the final draft from every angle and found nothing material left to fix"
+        "every review dimension was cleared by two models from different model families, neither "
+        "of them the model that wrote the final draft, with nothing material left to fix"
     ),
     "converged_unconfirmed": (
         "every check passed, but on at least one angle only a single model family was eligible "
