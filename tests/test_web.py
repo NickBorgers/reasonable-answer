@@ -1466,6 +1466,39 @@ def test_the_url_field_is_hidden_unless_url_seeds_are_enabled(config):
     assert 'name="seed_url"' in render_index([], queue_depth=0, config=config)
 
 
+def test_the_seed_fields_fold_closed_behind_a_summary(config):
+    """A first-time visitor sees the question box and one button; the optional
+    "improve a draft instead" half of the form sits in a closed fold (D-plain-front-door)."""
+    from reasonable_answer.web.render import render_index
+
+    config.seed.allow_url = True
+    page = render_index([], queue_depth=0, config=config)
+    assert '<details class="fold seed-fold">' in page
+    assert "<details open" not in page
+    fold_start = page.index('<details class="fold seed-fold">')
+    fold_end = page.index("<button type=\"submit\">", fold_start)
+    fold = page[fold_start:fold_end]
+    assert "Have a draft already?" in fold
+    assert 'id="seed"' in fold
+    assert 'name="seed_url"' in fold
+    # Nothing from the fold leaks in front of the question box itself.
+    assert page.index('id="question"') < fold_start
+
+
+def test_the_roster_panel_folds_closed_behind_a_summary(config):
+    """The 'which models do the work' doctrine sits in a closed fold under the question
+    box and the run table, not open on every visit (D-plain-front-door)."""
+    from reasonable_answer.web.render import render_index
+
+    page = render_index([], queue_depth=0, config=config)
+    assert '<details class="fold">' in page
+    fold_start = page.index('<details class="fold">')
+    fold = page[fold_start:]
+    assert "Which models do the work" in fold
+    assert 'class="roster-grid"' in fold
+    assert "writers" in fold
+
+
 def test_resume_restores_the_seed(config, tmp_path):
     """A seeded run used to be unresumable from the web UI: `resume` dropped the seed,
     so `_run_fingerprint` computed a different identity, `ResumeMismatch` was raised,

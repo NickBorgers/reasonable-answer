@@ -8,7 +8,8 @@ needed to tell a visitor what they would get back and that they could leave.
 The report page had the mirror problem: a reader who came back for their answer met the status
 badge, a run id, a "shipped from round" note and four take-it-away buttons between the answer card
 and the report's second section. D-answer-card had already moved the conclusion above that
-furniture; the furniture itself was still a screen of controls most readers never press. And the
+furniture; the furniture itself was still a screen of controls a reader has to look past on every
+visit, whether or not that visit is the one where they need them. And the
 status sentence a stranger reads first — "every lens cleared by two cross-family non-author models
 on the final artifact" — was written in the vocabulary of `docs/convergence.md`, not in theirs.
 
