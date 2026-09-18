@@ -12,8 +12,11 @@ from __future__ import annotations
 
 import argparse
 import sys
-import time
 from pathlib import Path
+from types import SimpleNamespace
+
+
+FIXTURE_NOW = 1_750_000_000.0
 
 
 def main() -> None:
@@ -28,13 +31,16 @@ def main() -> None:
     from reasonable_answer import export
     from reasonable_answer.config import Config
     from reasonable_answer.web.registry import LensSnapshot, RoundSnapshot, RunSummary
-    from reasonable_answer.web.render import render_index, render_report, render_run
+    from reasonable_answer.web import render
 
     cfg = Config.load(args.config)
     lens_names = list(cfg.roster.critics)
     writers = cfg.roster.writers
     critics = {lens: pool for lens, pool in cfg.roster.critics.items()}
-    now = time.time()
+    # Keep relative timestamps identical across the separate base and head renders. Replacing
+    # only this module's clock leaves the process-wide time module untouched.
+    render.time = SimpleNamespace(time=lambda: FIXTURE_NOW)
+    now = FIXTURE_NOW
     question = "Is remote work better for software team productivity?"
 
     def critic(lens: str, i: int) -> str:
@@ -64,7 +70,7 @@ def main() -> None:
 
     # 1. The front door.
     (out / "index.html").write_text(
-        render_index(runs, 0, cfg, viewer="nick@example.org")
+        render.render_index(runs, 0, cfg, viewer="nick@example.org")
     )
 
     # 2. A run in flight, one round reviewed and a second being written.
@@ -83,7 +89,7 @@ def main() -> None:
     ]
     live = RunSummary("run-1d8e44c0", "running", runs[1].question, 2, now - 600, None)
     (out / "run-live.html").write_text(
-        render_run(live, timeline, None, lens_names)
+        render.render_run(live, timeline, None, lens_names)
     )
 
     # 3. The finished report someone came back for.
@@ -137,7 +143,7 @@ def main() -> None:
     done = RunSummary("run-9f3c2a7b", "accepted", question, 3, now - 5400, now - 4300)
     prov = export.provenance(question, final, done.run_id, exported_on="2026-09-18")
     (out / "report.html").write_text(
-        render_report(
+        render.render_report(
             done, report, final,
             record=export.provenance_html(prov),
             copy_markdown=report,

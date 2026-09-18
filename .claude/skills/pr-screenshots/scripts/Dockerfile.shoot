@@ -18,7 +18,7 @@ FROM mcr.microsoft.com/playwright/python:v1.63.0-jammy
 
 # The base image ships the browser binaries (under /ms-playwright) but not the `playwright`
 # Python package itself — pin it to the exact tag above so the driver matches the browsers.
-RUN pip install --no-cache-dir "playwright==1.63.0" "pillow>=11.0"
+RUN pip install --no-cache-dir "playwright==1.63.0" "pillow==12.3.0"
 
 COPY --from=scripts shoot.py /shoot/shoot.py
 
