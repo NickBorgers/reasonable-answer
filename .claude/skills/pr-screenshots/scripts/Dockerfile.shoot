@@ -1,0 +1,26 @@
+# syntax=docker/dockerfile:1
+#
+# Sandbox for the screenshot step. The "after" HTML that shoot.py loads was produced by
+# PR-controlled renderer code, and Chromium executes it with JavaScript on; even with
+# render_pages.py sandboxed and network-isolated, a malicious renderer can still emit
+# markup (a form, an <img src>, a fetch()) that Chromium — if launched with normal network
+# access — will happily send to a public, loopback, or private-network target reachable from
+# whatever host is generating screenshots (security/sec-ssrf-1). So this container gets no
+# network either, and shoot.py itself is copied in from the `scripts` build context (see
+# SKILL.md step 1's trusted snapshot), never installed from a PR-controlled working tree
+# (security/sec-supply-chain-1).
+#
+# Pinned to the locked `playwright` version (pyproject.toml's `screenshots` group / uv.lock)
+# so the browser build matches what `uv pip install --require-hashes` would otherwise fetch.
+#   docker build -t ra-pr-shoot -f .claude/skills/pr-screenshots/scripts/Dockerfile.shoot \
+#     --build-context scripts=<trusted-scripts-snapshot> .
+FROM mcr.microsoft.com/playwright/python:v1.63.0-jammy
+
+# The base image ships the browser binaries (under /ms-playwright) but not the `playwright`
+# Python package itself — pin it to the exact tag above so the driver matches the browsers.
+RUN pip install --no-cache-dir "playwright==1.63.0" "pillow>=11.0"
+
+COPY --from=scripts shoot.py /shoot/shoot.py
+
+WORKDIR /shoot
+ENTRYPOINT ["python", "/shoot/shoot.py"]
