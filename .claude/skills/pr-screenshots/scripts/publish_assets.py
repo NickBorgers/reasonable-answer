@@ -41,22 +41,36 @@ def main() -> None:
     if not pngs:
         raise SystemExit(f"no .png files in {args.dir}")
 
-    tree_entries = []
+    published_entries = []
     for png in pngs:
         blob = gh(
             "POST", f"repos/{repo}/git/blobs",
             content=base64.b64encode(png.read_bytes()).decode(), encoding="base64",
         )
-        tree_entries.append(
+        published_entries.append(
             {"path": f"{args.prefix}/{png.name}", "mode": "100644", "type": "blob", "sha": blob["sha"]}
         )
 
+    tree_entries = list(published_entries)
     ref = gh("GET", f"repos/{repo}/git/ref/heads/{branch}")
     parents, base_tree = [], {}
     if ref:
         head = ref["object"]["sha"]
         parents = [head]
-        base_tree = {"base_tree": gh("GET", f"repos/{repo}/git/commits/{head}")["tree"]["sha"]}
+        base_tree_sha = gh("GET", f"repos/{repo}/git/commits/{head}")["tree"]["sha"]
+        base_tree = {"base_tree": base_tree_sha}
+        existing_tree = gh("GET", f"repos/{repo}/git/trees/{base_tree_sha}?recursive=1")
+        if existing_tree.get("truncated"):
+            raise SystemExit("pr-assets tree is too large to replace a prefix safely")
+        replacement_paths = {entry["path"] for entry in tree_entries}
+        prefix = f"{args.prefix}/"
+        tree_entries.extend(
+            {"path": entry["path"], "mode": "100644", "type": "blob", "sha": None}
+            for entry in existing_tree["tree"]
+            if entry["type"] == "blob"
+            and entry["path"].startswith(prefix)
+            and entry["path"] not in replacement_paths
+        )
     tree = gh("POST", f"repos/{repo}/git/trees", tree=tree_entries, **base_tree)
     commit = gh(
         "POST", f"repos/{repo}/git/commits",
@@ -67,7 +81,7 @@ def main() -> None:
     else:
         gh("POST", f"repos/{repo}/git/refs", ref=f"refs/heads/{branch}", sha=commit["sha"])
 
-    for entry in tree_entries:
+    for entry in published_entries:
         print(f"https://raw.githubusercontent.com/{repo}/{branch}/{entry['path']}")
 
 

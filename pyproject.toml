@@ -64,6 +64,13 @@ docs = [
     # so this must not ride on mkdocs-material happening to depend on it.
     "pymdown-extensions>=10.0",
 ]
+# Creates PR screenshots. Kept out of the default groups so normal development and
+# CI do not install a browser toolchain; the screenshot skill installs this group
+# from uv.lock into its throwaway environment.
+screenshots = [
+    "pillow>=11.0",
+    "playwright>=1.49",
+]
 
 [build-system]
 requires = ["hatchling"]

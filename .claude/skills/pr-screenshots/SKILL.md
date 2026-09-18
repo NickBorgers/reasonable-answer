@@ -36,8 +36,10 @@ The scripts live in `.claude/skills/pr-screenshots/scripts/`.
    fixture data (four runs, a two-round live timeline, a framed report with a review record).
    If the change adds a page or a state, add a fixture there — that file is the list of what
    gets reviewed.
-3. **Screenshot and stitch** with a throwaway venv that has `playwright` (plus
-   `python -m playwright install chromium`) and `pillow`:
+3. **Screenshot and stitch** with a throwaway venv populated from the lock-backed `screenshots`
+   dependency group (`uv export --frozen --only-group screenshots --no-emit-project`, then
+   `uv pip install --require-hashes` into that venv). Install the Chromium build selected by the
+   locked Playwright (`python -m playwright install chromium`), then run:
    `python scripts/shoot.py --before <scratch>/html/before --after <scratch>/html/after --out <scratch>/shots`.
    Produces one labelled before|after PNG per page per width (390 and 1100 by default).
 4. **Look at every stitched image** before publishing. The point is a human-readable

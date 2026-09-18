@@ -29,8 +29,10 @@ procedure. This file is what you do with it.
    If the render fails on one side because a function signature changed, fix the fixture
    script for that side in the scratchpad — do not edit the repo copy unless the PR itself
    changed the signature, in which case the repo copy needs the same fix.
-5. Make a throwaway venv for the browser: `uv venv <scratch>/venv`, then
-   `uv pip install --python <scratch>/venv/bin/python playwright pillow`, then
+5. Make a throwaway venv for the browser: `uv venv <scratch>/venv`, then export the dedicated
+   dependency group from the repository lock and install that exact set into the venv:
+   `uv export --frozen --only-group screenshots --no-emit-project --output-file <scratch>/screenshots.txt`,
+   `uv pip install --python <scratch>/venv/bin/python --require-hashes -r <scratch>/screenshots.txt`, then
    `<scratch>/venv/bin/python -m playwright install chromium`. Reuse it if it already exists.
 6. Shoot and stitch:
    `<scratch>/venv/bin/python .claude/skills/pr-screenshots/scripts/shoot.py --before <scratch>/html/before --after <scratch>/html/after --out <scratch>/shots`.
