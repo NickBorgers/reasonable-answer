@@ -1677,8 +1677,8 @@ def test_a_shared_run_names_nobody(owned):
 
 
 def test_only_the_owner_can_resume_a_run(config, monkeypatch):
-    """Reading costs nothing; resuming spends the owner's tokens for another 10-25
-    minutes, so it stays with the person who started it."""
+    """Reading costs nothing; resuming spends the owner's tokens for another long
+    run, so it stays with the person who started it."""
     # Boot recovery would otherwise pick the run up as the first client starts the
     # app's lifespan, leaving nothing interrupted for the owner to resume by hand.
     monkeypatch.setenv("RA_RESUME_ON_BOOT", "0")

@@ -40,7 +40,7 @@ document, and they demonstrate nothing on their own:
 | Value question as either/or | "Is it better to lead with data or with intuition?" | A value question with nothing for the evidence machinery to converge on; tends to exhaust unresolved. |
 | Settled verification | "Did Apollo 11 land on the Moon?" | The literal question is settled; the draft's real energy goes to the adjacent question (why a contrary belief persists) — likely closer to what a genuine asker cares about. |
 
-Runs take 10–25 minutes and burn a bounded confirmation budget. A ~3-second
+Runs are long-running and burn a bounded confirmation budget. A ~3-second
 suggestion that turns "Why is it illegal to keep backyard chickens here?" into
 "Is it actually against the local rules to keep backyard chickens, and what are
 my options if it is?" removes the premise the real run of this shape exhausted
@@ -338,7 +338,7 @@ though enabling it stays a human decision.
   required between requests. Server: identity-keyed rate
   limits, TTL cache (including cached empties), coalesced in-flight misses,
   ~700-token completions on the orchestrator-class alias. Negligible next to
-  a 10–25-minute run, and strongly positive whenever it averts a
+  a full run, and strongly positive whenever it averts a
   framing-driven exhaustion.
 - Prompt-injection surface: the question is already treated as untrusted
   everywhere downstream; the refine prompt fences it identically. Model

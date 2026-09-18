@@ -556,7 +556,7 @@ call_timeouts:
 # motivated the feature: run-75eb136b9bfb (false either/or, 7 rounds, needs human
 # review), run-40de6a7cdbf9 (unverified premise plus a buried practical goal, 8 rounds,
 # exhausted), run-3e184fb11a36 and run-5af587189b89 (unscoped "net X" scalar verdicts).
-# A ~3-second suggestion is cheap next to a 10-25 minute run that was unanswerable as
+# A ~3-second suggestion is cheap next to a long-running run that was unanswerable as
 # asked.
 #
 # One availability consequence of turning this on, stated plainly: when enabled, the
