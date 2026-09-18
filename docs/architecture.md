@@ -181,8 +181,8 @@ retries/replay faking convergence). A checkpointer persists state for resuming t
 ## Surviving a redeploy
 
 The service is continuously deployed: it receives SIGTERM, a grace window, and then
-SIGKILL, none of which it controls. A run is 30–90 minutes, so finishing one inside the
-grace window is not achievable and is not attempted.
+SIGKILL, none of which it controls. A run is a long-running operation, so finishing one
+inside the grace window is not achievable and is not attempted.
 
 The guarantee comes from the checkpointer, not the grace period. State is persisted at
 every node boundary, so a hard kill costs at most the node in flight — never the run.
