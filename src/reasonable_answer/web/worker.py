@@ -1,6 +1,6 @@
 """The job queue.
 
-A run is 10–25 minutes of mostly-blocking model calls, so it cannot happen inside a
+A run is 30–90 minutes of mostly-blocking model calls, so it cannot happen inside a
 request. Submissions go on a queue; a small pool of threads drains it. The pool is
 deliberately small: every concurrent run multiplies load on one LiteLLM proxy, and
 the roster's local models are the bottleneck the whole design is built around.
