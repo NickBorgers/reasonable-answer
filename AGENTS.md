@@ -89,6 +89,12 @@ introduces or implements one. PRs are required; fill in every section of
 `.github/pull_request_template.md` — the invariant reviewer diffs your "Invariants touched" list
 against the code, so an inaccurate list is worse than an empty one.
 
+A PR that changes what a page looks like — `web/render.py`, its stylesheet, `export.py`'s HTML,
+page copy — carries before/after screenshots in its body. `/pr-screenshots`
+(`.claude/skills/pr-screenshots/SKILL.md`) renders both sides from the same fixtures, hosts the
+images on the `pr-assets` orphan branch, and returns the block to paste; a Sonnet subagent does
+the work.
+
 If you are a CI agent, the last line of the PR body must be exactly
 `Author-Session: ${AGENT}/${RUN_ID}` — that trailer is how the fixer resumes your session instead
 of falling back to a cold agent with no context.
