@@ -69,7 +69,7 @@ would have been two settings that can disagree, and the disagreeing combination 
 **Ownership scopes the index; it does not scope reads.** You see your own runs listed. Anyone
 signed in who holds a run id can read that run — sharing a link is the intended way to show
 someone a report, with export/publish to follow. Resume is the one exception: reading costs
-nothing, but resuming spends the owner's tokens for another 10–25 minutes, so it stays with the
+nothing, but resuming spends the owner's tokens for another long run, so it stays with the
 person who started it.
 
 > **D-id-as-credential** kept this and dropped the "signed in": holding the id is the whole credential. Resume
