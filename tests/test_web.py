@@ -28,7 +28,8 @@ from reasonable_answer.schemas import CritiqueOutput
 from reasonable_answer.store import RunStore, expired_runs, purge, sweep_expired
 from reasonable_answer.web import assets, push
 from reasonable_answer.web.app import create_app
-from reasonable_answer.web.registry import Registry
+from reasonable_answer.web.registry import Registry, RunSummary
+from reasonable_answer.web.render import render_run
 from reasonable_answer.web.retention import RetentionSweeper
 from reasonable_answer.web.worker import QueueFull, RateLimited, RateLimiter, RunWorker
 
@@ -394,6 +395,22 @@ def test_a_finished_run_points_at_the_report_instead_of_repeating_it(client):
     assert '<details class="fold">' not in page
     assert 'id="progress"' in page
     assert "Review record" in page  # the verdict still travels with the run page
+
+
+def test_only_a_live_run_says_that_the_models_are_working():
+    fields = {
+        "run_id": "run-waiting",
+        "question": "Still working?",
+        "rounds": 0,
+        "started_at": None,
+        "finished_at": None,
+    }
+
+    live_page = render_run(RunSummary(status="running", **fields), [], None, [])
+    finished_page = render_run(RunSummary(status="accepted", **fields), [], None, [])
+
+    assert "The models are working" in live_page
+    assert "The models are working" not in finished_page
 
 
 def test_the_run_page_offers_no_downloads(client):
@@ -1464,6 +1481,39 @@ def test_the_url_field_is_hidden_unless_url_seeds_are_enabled(config):
     assert 'name="seed_url"' not in render_index([], queue_depth=0, config=config)
     config.seed.allow_url = True
     assert 'name="seed_url"' in render_index([], queue_depth=0, config=config)
+
+
+def test_the_seed_fields_fold_closed_behind_a_summary(config):
+    """A first-time visitor sees the question box and one button; the optional
+    "improve a draft instead" half of the form sits in a closed fold (D-plain-front-door)."""
+    from reasonable_answer.web.render import render_index
+
+    config.seed.allow_url = True
+    page = render_index([], queue_depth=0, config=config)
+    assert '<details class="fold seed-fold">' in page
+    assert "<details open" not in page
+    fold_start = page.index('<details class="fold seed-fold">')
+    fold_end = page.index("<button type=\"submit\">", fold_start)
+    fold = page[fold_start:fold_end]
+    assert "Have a draft already?" in fold
+    assert 'id="seed"' in fold
+    assert 'name="seed_url"' in fold
+    # Nothing from the fold leaks in front of the question box itself.
+    assert page.index('id="question"') < fold_start
+
+
+def test_the_roster_panel_folds_closed_behind_a_summary(config):
+    """The 'which models do the work' doctrine sits in a closed fold under the question
+    box and the run table, not open on every visit (D-plain-front-door)."""
+    from reasonable_answer.web.render import render_index
+
+    page = render_index([], queue_depth=0, config=config)
+    assert '<details class="fold">' in page
+    fold_start = page.index('<details class="fold">')
+    fold = page[fold_start:]
+    assert "Which models do the work" in fold
+    assert 'class="roster-grid"' in fold
+    assert "writers" in fold
 
 
 def test_resume_restores_the_seed(config, tmp_path):

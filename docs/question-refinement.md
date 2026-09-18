@@ -208,6 +208,13 @@ inside the graph.
   alias name alone proves nothing about isolation and can even add contention
   via model swapping; any finer-grained prioritization between refinement and
   run traffic is the proxy's scheduling concern, not this service's.
+- **Provider choice for `refine.alias`**: the refine alias has no degrade path (above),
+  so an availability failure during its structured-output probe blocks web boot. When
+  the alias uses a router that can select among upstream providers, validate the
+  availability of the route used for `response_format: json_schema`, not merely the
+  model's general availability. In particular, confirm that the eligible route has the
+  redundancy and capacity the deployment requires before assigning it this
+  boot-blocking role.
 - **Cache**: a bounded, thread-safe TTL cache inside the service, keyed by
   (normalized question text, prompt/schema version, effective alias,
   `max_suggestions`, `enabled_transforms`). Validated successes are cached
