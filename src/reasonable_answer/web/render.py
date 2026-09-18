@@ -316,7 +316,7 @@ def render_index(
   material defect &mdash; never because one declared it good &mdash; and plain code, not an LLM,
   makes that call; a run that hits the round cap ships its selected draft with the defects it
   could not resolve recorded against it instead. {sources_note} Expect this to take
-  <strong>10&ndash;25 minutes</strong>.</p>
+  <strong>30&ndash;90 minutes</strong>, sometimes longer.</p>
   <form method="post" action="{base_path}/runs">
     <label for="question">Question</label>
     <textarea id="question" name="question" rows="3" required maxlength="{config.max_question_chars}"
