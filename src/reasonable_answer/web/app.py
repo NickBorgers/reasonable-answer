@@ -541,8 +541,8 @@ def create_app(
         _reject_cross_site(request)
         summary = _require(registry, worker, run_id)
         # The one place ownership gates more than the index. Reading a run costs
-        # nothing, but resuming one spends its owner's tokens for another 10–25
-        # minutes, so it stays with the person who started it. 404 rather than 403,
+        # nothing, but resuming one spends its owner's tokens for another long run,
+        # so it stays with the person who started it. 404 rather than 403,
         # matching `_require`: a stranger learns nothing about which ids are real.
         if summary.owner != request.state.viewer:
             raise HTTPException(status_code=404, detail=f"no such run: {run_id}")
@@ -917,7 +917,7 @@ def _reject_cross_site(request: Request) -> None:
 
     A plain HTML form POST triggers no CORS preflight, and the CSP's `form-action 'self'`
     only constrains forms *this* app serves — neither stops a foreign page from
-    auto-submitting a run to a guessable hostname and burning a full 10–25-minute run.
+    auto-submitting a run to a guessable hostname and burning a full, long-running run.
     This matters more since D-identity-header, not less: Cloudflare Access sets a `CF_Authorization`
     cookie, so such a POST now arrives *authenticated*, as a real user, and would create
     a run they own. The app sets no session cookie of its own to hang a SameSite
