@@ -1,6 +1,6 @@
 """Web Push notification of a stopped run (D-stop-notification).
 
-A run takes 30-90 minutes and the interface makes it easy to start several. Before this
+A run is long-running and the interface makes it easy to start several. Before this
 module the only way to learn one had finished was to be looking at its page, where the SSE
 stream (`app.stream`) reloads it. Close the tab -- or background the installed app on a
 phone, where iOS suspends it -- and nothing ever said. This is the piece that says it.
