@@ -19,16 +19,31 @@ procedure. This file is what you do with it.
 ## Steps
 
 1. Make a scratch directory under the session scratchpad (never in the repo).
-2. Snapshot the base tree: `git archive <base> src config | tar -x -C <scratch>/base`. If
-   `after` is a branch rather than the working tree, snapshot it the same way into
-   `<scratch>/after-tree`; otherwise the after tree is the repo root.
-3. Make sure the project venv exists: `uv sync --frozen --extra web --group dev`.
-4. Render both sides with the **project** interpreter, one command per side, using absolute
-   paths (the worktree hook refuses shell variables in front of `python`):
-   `.venv/bin/python .claude/skills/pr-screenshots/scripts/render_pages.py --src <tree>/src --config <tree>/config/roster.yaml --out <scratch>/html/<side>`.
+2. Snapshot the base tree: `git archive <base> src config pyproject.toml uv.lock README.md |
+   tar -x -C <scratch>/base` — the lock and pyproject files are only needed if you end up
+   building step 3's sandbox image from this snapshot. If `after` is a branch rather than the
+   working tree, snapshot it the same way into `<scratch>/after-tree`; otherwise the after tree
+   is the repo root.
+3. Build the render sandbox image, from a **trusted** checkout only — `main`, or the merge-base
+   you snapshotted in step 2, never the PR branch or working tree: if you're on the PR branch
+   right now, build from `<scratch>/base` instead of the repo root.
+   `docker build -t ra-pr-render -f .claude/skills/pr-screenshots/scripts/Dockerfile --build-context scripts=.claude/skills/pr-screenshots/scripts <trusted-checkout>`
+   (the `scripts` context always comes from your own working tree's skill copy, not from
+   `<trusted-checkout>`, since that snapshot only has `src/` and `config/`).
+   Skip this if `ra-pr-render` already exists and the project's `web` dependencies haven't
+   changed since — reuse it across PRs.
+4. Render both sides **inside that sandbox**, never by importing a PR's `src/` in-process: doing
+   that in this session would hand a malicious PR whatever credentials and network access this
+   session has (security/sec-supply-chain-1). One `docker run` per side, `src/` and `config/`
+   mounted read-only, network off, nothing from the host environment passed through:
+   `docker run --rm --network none --read-only --user "$(id -u):$(id -g)" -v "<tree>/src:/render/src:ro" -v "<tree>/config:/render/config:ro" -v "<scratch>/html/<side>:/render/out" ra-pr-render --src /render/src --config /render/config/roster.yaml --out /render/out`.
    If the render fails on one side because a function signature changed, fix the fixture
-   script for that side in the scratchpad — do not edit the repo copy unless the PR itself
-   changed the signature, in which case the repo copy needs the same fix.
+   script (`.claude/skills/pr-screenshots/scripts/render_pages.py`, which the image already has
+   baked in) for that side in the scratchpad and rebuild the image from that trusted copy — do
+   not edit the repo copy unless the PR itself changed the signature, in which case the repo
+   copy needs the same fix. If a side fails because the PR changed a dependency
+   `render_pages.py` needs, that's expected: the sandbox never installs a PR's own
+   `pyproject.toml`/`uv.lock`, so report it rather than working around it.
 5. Make a throwaway venv for the browser: `uv venv <scratch>/venv`, then export the dedicated
    dependency group from the repository lock and install that exact set into the venv:
    `uv export --frozen --only-group screenshots --no-emit-project --output-file <scratch>/screenshots.txt`,

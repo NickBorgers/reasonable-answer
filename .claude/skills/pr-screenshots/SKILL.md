@@ -31,13 +31,29 @@ The scripts live in `.claude/skills/pr-screenshots/scripts/`; every command belo
 `cd` into that directory first and drop the prefix).
 
 1. **A snapshot of the base tree**, without touching the checkout:
-   `git archive <base> src config | tar -x -C <scratch>/base`.
-2. **Render pages from both trees** with the project venv — no server, no proxy, no network:
-   `.venv/bin/python .claude/skills/pr-screenshots/scripts/render_pages.py --src <tree>/src --config <tree>/config/roster.yaml --out <scratch>/html/{before,after}`.
+   `git archive <base> src config pyproject.toml uv.lock README.md | tar -x -C <scratch>/base`.
+   `pyproject.toml`/`uv.lock`/`README.md` are only needed if step 2's sandbox image has to be
+   built from this snapshot (working tree or PR branch checked out); they cost nothing to
+   include otherwise.
+2. **Render pages from both trees inside the sandbox** — no server, no proxy, no network, and no
+   credentials. `--src` and `--after`'s tree can both be a PR's own head, and `render_pages.py`
+   imports whatever is under `--src`; running that in-process in the same shell that has `gh`
+   auth would hand a malicious PR everything it needs to exfiltrate it
+   (security/sec-supply-chain-1). Instead:
+   - Build the sandbox image **once, from `main`** (never from the PR branch — this is what
+     keeps a malicious `pyproject.toml`/`uv.lock` from ever being installed):
+     `docker build -t ra-pr-render -f .claude/skills/pr-screenshots/scripts/Dockerfile --build-context scripts=.claude/skills/pr-screenshots/scripts .`
+     (run from a `main` checkout, or `git worktree` a clean copy of it). Reuse the image across
+     PRs; only rebuild when the project's own web dependencies change.
+   - Render each side with that image, `src/` and `config/` bind-mounted **read-only**, network
+     fully off, and nothing from the host environment passed through:
+     `docker run --rm --network none --read-only --user "$(id -u):$(id -g)" -v "<tree>/src:/render/src:ro" -v "<tree>/config:/render/config:ro" -v "<scratch>/html/<side>:/render/out" ra-pr-render --src /render/src --config /render/config/roster.yaml --out /render/out`.
    `render_pages.py` calls `render_index`, `render_run` and `render_report` directly with fixed
    fixture data (four runs, a two-round live timeline, a framed report with a review record).
    If the change adds a page or a state, add a fixture there — that file is the list of what
-   gets reviewed.
+   gets reviewed. If the PR's own web dependencies changed (new import `render_pages.py` needs),
+   the sandbox run fails cleanly with an ImportError; rebuild the image from `main` after the PR
+   merges, not from the PR branch.
 3. **Screenshot and stitch** with a throwaway venv populated from the lock-backed `screenshots`
    dependency group (`uv export --frozen --only-group screenshots --no-emit-project`, then
    `uv pip install --require-hashes` into that venv). Install the Chromium build selected by the
@@ -61,3 +77,7 @@ The scripts live in `.claude/skills/pr-screenshots/scripts/`; every command belo
   of its inputs and that is what makes before/after comparable.
 - The "before" side is always the base ref, not a guess at what the page used to look like.
 - Scratch files go in the session scratchpad, not in the repo.
+- **Never import a PR's `src/` in-process.** Step 2's sandbox container is what stands between a
+  malicious PR and the credentials/network of whatever session is generating screenshots; running
+  `render_pages.py` directly against a PR's `--src` outside that container defeats the whole
+  point (security/sec-supply-chain-1).
