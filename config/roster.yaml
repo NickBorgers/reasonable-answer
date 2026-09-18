@@ -575,6 +575,12 @@ call_timeouts:
 # is exactly the shape of this task. Naming a different alias here would only buy real
 # isolation from run traffic if that alias is routed to a dedicated backend/resource
 # pool — the name alone proves nothing (see D-question-refinement's isolation accounting).
+#
+# If you do point this at a faster cloud model: this alias has no degrade path (a bad
+# probe fails web boot closed, not just refinement), so avoid one whose structured-output
+# serving depends on OpenRouter unless you've confirmed more than one of its endpoints
+# actually supports structured_outputs. See docs/question-refinement.md's "Provider choice
+# for refine.alias" note for a production incident where this took the whole service down.
 refine:
   enabled: true
   alias: ""
