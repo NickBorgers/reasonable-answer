@@ -39,12 +39,29 @@ UNREADABLE_RECORD = "unreadable_record"
 #: What each status *is*. Lives here rather than in the renderer because the CLI needs
 #: it without the web extra installed, and because these words end up in a file someone
 #: keeps — they are part of the result, not part of the page.
+#:
+#: Plain words, because the first reader of a status is usually someone who was handed a
+#: link and has never seen this vocabulary (D-plain-front-door). Each sentence still states
+#: exactly the condition docs/convergence.md defines for that status — "different model
+#: families", "the model that wrote it", "blocking" — just without the internal nouns.
 STATUS_MEANING = {
-    "accepted": "every lens cleared by two cross-family non-author models on the final artifact",
-    "converged_unconfirmed": "every lens cleared, but a lens had only one eligible model family",
-    "exhausted_unresolved": "reached the cap or stagnated with only non-blocking issues left",
-    "needs_human_review": "reached the cap, stagnated or cycled with blocking issues present",
-    "aborted": "fatal: a model was unavailable or a review could not be completed",
+    "accepted": (
+        "every review dimension was cleared by two models from different model families, neither "
+        "of them the model that wrote the final draft, with nothing material left to fix"
+    ),
+    "converged_unconfirmed": (
+        "every check passed, but on at least one angle only a single model family was eligible "
+        "to review, so that part rests on one opinion"
+    ),
+    "exhausted_unresolved": (
+        "stopped at the round limit or because progress stalled; no blocking problems remain, "
+        "and the issues still open are listed in the review record"
+    ),
+    "needs_human_review": (
+        "stopped at the round limit, stalled or went in circles with blocking problems still "
+        "open; read them before relying on this"
+    ),
+    "aborted": "failed partway: a model was unavailable or a review could not be completed",
     "queued": "waiting for a worker",
     "running": "in progress",
     "interrupted": "the process stopped before finishing; this run can be resumed",

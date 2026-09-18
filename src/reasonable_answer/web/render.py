@@ -274,8 +274,8 @@ def render_index(
     # Omitted entirely when URL seeds are off, so the form never offers something the
     # handler will reject.
     seed_url_field = (
-        """<label for="seed_url">&hellip;or a URL <span class="hint">a web page, PDF or
-      .docx to fetch and convert</span></label>
+        """<label for="seed_url">&hellip;or the address of one <span class="hint">a web page,
+      PDF or .docx</span></label>
     <input type="url" id="seed_url" name="seed_url" placeholder="https://example.org/report.pdf">"""
         if config.seed.allow_url
         else ""
@@ -300,39 +300,48 @@ def render_index(
     # (docs/convergence.md). So this claim is config-derived, unlike the static header tagline:
     # here `render_index` has the `Config` the tagline's element does not.
     sources_note = (
-        "Addressable cited pages are fetched up to the source limit and checked by the evidence "
-        "lens against what the report says they say; some citations may remain unchecked, and "
-        "none of this checks that a page is right."
+        "The pages a report cites are fetched and checked against what the report says they "
+        "say. Nothing here checks that a page is itself right, and some citations may go "
+        "unchecked."
         if config.search.verify_sources
-        else "Whether a cited page actually supports the claim attached to it is not checked."
+        else "Whether a cited page really says what the report claims is not checked."
     )
+    # Plain words on purpose. The doctrine — author exclusion, blind controller, cross-family
+    # confirmation — is the docs' job (`how this works` in the header); this paragraph's job
+    # is to tell a first-time visitor what they get back and how long it takes, then get out
+    # of the way of the question box (D-plain-front-door). Two words are load-bearing:
+    # "drafts" (models check *drafts*; they never argue with each other — QP6) and
+    # "different" (a draft is never reviewed by the model that wrote it).
     body = f"""
 <section class="panel">
   <h1>Ask a question</h1>
-  <p class="lede">A roster of LLMs from different families researches, writes and critiques
-  &mdash; none reviewing its own draft, each critic in a fresh context with one narrow question.
-  That split is the point: spotting a specific flaw is what an LLM is sharp at, and grading its
-  own work is what it is worst at. An answer ships when no eligible reviewer can still find a
-  material defect &mdash; never because one declared it good &mdash; and plain code, not an LLM,
-  makes that call; a run that hits the round cap ships its selected draft with the defects it
-  could not resolve recorded against it instead. {sources_note} Expect this to be
-  <strong>long-running</strong>.</p>
+  <p class="lede">Several different AI models research your question and write a report, then
+  check each other&rsquo;s drafts for mistakes. No model ever reviews its own writing, and the
+  report is accepted only when the reviewers can find nothing material left to fix; if the review
+  limit is reached first, you still get a report with the remaining objections recorded. You get a
+  short answer up top, the strongest case against it, and the sources &mdash; plus a record of
+  anything the reviewers still objected to. Expect <strong>10&ndash;25 minutes</strong>; you can
+  close this tab and come back.</p>
   <form method="post" action="{base_path}/runs">
-    <label for="question">Question</label>
+    <label for="question">Your question</label>
     <textarea id="question" name="question" rows="3" required maxlength="{config.max_question_chars}"
       placeholder="Is remote work better for software team productivity?"></textarea>{refine_block}
-    <label for="seed">Seed report <span class="hint">optional &mdash; an existing draft to improve
-      instead of starting from scratch</span></label>
-    <textarea id="seed" name="seed" rows="5" maxlength="{config.max_report_chars}"
-      placeholder="Paste a draft &mdash; Markdown or HTML.&#10;&#10;Leave empty to write from scratch."></textarea>
-    {seed_url_field}
+    <details class="fold seed-fold">
+      <summary>Have a draft already? Improve it instead of starting fresh</summary>
+      <label for="seed">Your draft <span class="hint">Markdown or HTML &mdash; the models revise
+        this rather than writing from scratch</span></label>
+      <textarea id="seed" name="seed" rows="5" maxlength="{config.max_report_chars}"
+        placeholder="Paste a draft here."></textarea>
+      {seed_url_field}
+    </details>
     <button type="submit">Start run</button>
   </form>
+  <p class="lede fine">{sources_note}</p>
   {depth}
 </section>
 
 <section class="panel">
-  <h2>Your runs {signed_in}</h2>
+  <h2>Your questions {signed_in}</h2>
   <table class="runs">
     <thead><tr><th>status</th><th>question</th><th>rounds</th><th>started</th><th></th></tr></thead>
     {rows}
@@ -340,15 +349,17 @@ def render_index(
 </section>
 
 <section class="panel roster">
-  <h2>Roster</h2>
-  <p class="lede">A report is never critiqued &mdash; on any lens &mdash; by the LLM that wrote it,
-  and full acceptance needs two <em>different</em> non-author LLMs to clear the same final text.
-  One LLM's approval is an opinion; two finding nothing is evidence.</p>
-  <div class="roster-grid">
-    <div><h3>writers</h3><ul>{_model_list(config.roster.writers)}</ul></div>
-    {"".join(f"<div><h3>{esc(lens)}</h3><ul>{_model_list(pool)}</ul></div>"
-             for lens, pool in config.roster.critics.items())}
-  </div>
+  <details class="fold">
+    <summary>Which models do the work</summary>
+    <p class="lede">A draft is never reviewed by the model that wrote it. For a final draft to count
+    as accepted, every review dimension must be cleared by two non-author models from different
+    model families. One model&rsquo;s approval is an opinion; independent confirmation adds evidence.</p>
+    <div class="roster-grid">
+      <div><h3>writers</h3><ul>{_model_list(config.roster.writers)}</ul></div>
+      {"".join(f"<div><h3>{esc(lens)}</h3><ul>{_model_list(pool)}</ul></div>"
+               for lens, pool in config.roster.critics.items())}
+    </div>
+  </details>
 </section>
 """
     # The notification control moved to the shell (D-header-optin), so it is passed through `push`
@@ -484,11 +495,20 @@ def render_run(
 {render_run_progress(summary, timeline, lens_names)}
 </section>"""
 
+    # The page a first-time user lands on after pressing Start run, so it is where they
+    # learn what happens now: nothing to do, safe to leave (D-plain-front-door).
+    waiting = (
+        '<p class="lede">The models are working. This page updates itself &mdash; you can close '
+        "it and come back from the front page. A link to the report appears here when it is done.</p>"
+        if summary.is_live
+        else ""
+    )
     body = f"""
 <section class="panel run-head">
   <div class="run-title">
     <h1>{esc(summary.question)}</h1>
     {_status_block(summary.status, summary.terminal_note)}
+    {waiting}
     <div class="run-meta">
       <span class="dim mono">{esc(summary.run_id)}</span>
       <span class="dim">started {_ago(summary.started_at)}</span>
@@ -713,16 +733,25 @@ def render_report(
     from `public_base`: a recipient who can open this page can follow every link on it.
     """
     public_base = base_path if public_base is None else public_base
-    chosen = (final or {}).get("chosen_round")
-    provenance = f" · shipped from round {esc(chosen)}" if chosen else ""
+    # Between the answer and the rest of the report sit the verdict and one link to the run
+    # that produced it — nothing else. The run id and the shipped round already appear in
+    # the review record below, and the four take-it-away controls live in a closed fold at
+    # the end of the report (D-plain-front-door): someone who came back for the answer gets
+    # the answer, and someone who wants a file finds it where they finish reading. `final`
+    # stays in the signature, unused, so the route's call site is unchanged.
     furniture = f"""<div class="screen-only">
     {_status_block(summary.status, summary.terminal_note)}
   </div>
   <div class="run-meta screen-only">
-    <a class="dim" href="{public_base}/runs/{esc(summary.run_id)}">back to the run</a>
-    <span class="dim mono">{esc(summary.run_id)}{provenance}</span>
-  </div>
-  <div class="share screen-only">{_copy_control(copy_markdown or report)}{_share_links(summary.run_id, public_base)}</div>"""
+    <a class="dim" href="{public_base}/runs/{esc(summary.run_id)}">how this answer was produced</a>
+  </div>"""
+    # The copy button and its off-screen source textarea travel together inside the fold:
+    # `execCommand('copy')` needs a rendered selection, and the fold is open by the time
+    # anyone can press the button.
+    share = f"""<details class="fold share-fold screen-only">
+    <summary>Save, share or check this report</summary>
+    <div class="share">{_copy_control(copy_markdown or report)}{_share_links(summary.run_id, public_base)}</div>
+  </details>"""
     # Citations become links here and in both exports, from the same `spans`, so the page,
     # Copy markdown and the downloads link identically (D-citation-links, D-verdict-attached).
     report_html = to_html(citelinks.linked_markdown(report, spans))
@@ -731,7 +760,8 @@ def render_report(
         # Fail-open path: a report that does not follow the D-report-template frame gets
         # the page exactly as it was before the answer card existed.
         article = f"""{furniture}
-  <article class="report">{report_html}</article>"""
+  <article class="report">{report_html}</article>
+  {share}"""
     else:
         # The conclusion-first frame, rendered conclusion-first: on a phone the old order
         # spent ~1.5 screens of page furniture before the report's first sentence. The
@@ -741,7 +771,8 @@ def render_report(
         middle_article = f'\n  <article class="report">{middle}</article>' if middle else ""
         article = f"""<article class="report answer-card">{answer}</article>
   {furniture}{middle_article}
-  {sources_block}"""
+  {sources_block}
+  {share}"""
     body = f"""
 {print_header}
 <section class="panel reading">
@@ -1520,6 +1551,17 @@ table.runs { width: 100%; border-collapse: collapse; }
 .fold > summary:hover { color: var(--ink); }
 .fold[open] > summary { margin-bottom: .6rem; }
 .fold #progress h2 { margin-top: 0; }
+/* The optional half of the ask form and the report's take-it-away row both fold closed by
+   default (D-plain-front-door): a first visit shows one box and one button, and a reader
+   who came back for the answer is not offered four ways to leave with it before the
+   answer's second paragraph. Both are plain <details>, so they need no script. */
+.seed-fold { margin-top: .9rem; }
+.seed-fold > summary { font-size: .9rem; }
+.seed-fold label:first-of-type { margin-top: .4rem; }
+.share-fold { margin-top: 1.2rem; }
+.share-fold[open] > summary { margin-bottom: .8rem; }
+.share-fold .share { margin-bottom: .4rem; }
+.lede.fine { font-size: .85rem; margin: .9rem 0 0; }
 /* `width: 100%` is not redundant next to `margin: 0 auto`. `main` is a grid, and an auto
    inline margin makes a grid item size itself to fit-content instead of stretching — which
    on a phone meant this panel sized to the report's widest line and took the page with it.
