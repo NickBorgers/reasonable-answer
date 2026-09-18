@@ -1,7 +1,7 @@
 """Cooperative shutdown.
 
 This process is continuously deployed: it gets a SIGTERM, some grace time, and then
-a SIGKILL, all decided outside its own locus of control. A run is 10-25 minutes of
+a SIGKILL, all decided outside its own locus of control. A run consists of many
 mostly-blocking model calls, so "just finish first" is not on the table.
 
 The design leans on the checkpointer rather than on the grace period. LangGraph

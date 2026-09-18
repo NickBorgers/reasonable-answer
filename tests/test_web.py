@@ -28,7 +28,8 @@ from reasonable_answer.schemas import CritiqueOutput
 from reasonable_answer.store import RunStore, expired_runs, purge, sweep_expired
 from reasonable_answer.web import assets, push
 from reasonable_answer.web.app import create_app
-from reasonable_answer.web.registry import Registry
+from reasonable_answer.web.registry import Registry, RunSummary
+from reasonable_answer.web.render import render_run
 from reasonable_answer.web.retention import RetentionSweeper
 from reasonable_answer.web.worker import QueueFull, RateLimited, RateLimiter, RunWorker
 
@@ -394,6 +395,22 @@ def test_a_finished_run_points_at_the_report_instead_of_repeating_it(client):
     assert '<details class="fold">' not in page
     assert 'id="progress"' in page
     assert "Review record" in page  # the verdict still travels with the run page
+
+
+def test_only_a_live_run_says_that_the_models_are_working():
+    fields = {
+        "run_id": "run-waiting",
+        "question": "Still working?",
+        "rounds": 0,
+        "started_at": None,
+        "finished_at": None,
+    }
+
+    live_page = render_run(RunSummary(status="running", **fields), [], None, [])
+    finished_page = render_run(RunSummary(status="accepted", **fields), [], None, [])
+
+    assert "The models are working" in live_page
+    assert "The models are working" not in finished_page
 
 
 def test_the_run_page_offers_no_downloads(client):
@@ -1710,8 +1727,8 @@ def test_a_shared_run_names_nobody(owned):
 
 
 def test_only_the_owner_can_resume_a_run(config, monkeypatch):
-    """Reading costs nothing; resuming spends the owner's tokens for another 10-25
-    minutes, so it stays with the person who started it."""
+    """Reading costs nothing; resuming spends the owner's tokens for another long
+    run, so it stays with the person who started it."""
     # Boot recovery would otherwise pick the run up as the first client starts the
     # app's lifespan, leaving nothing interrupted for the owner to resume by hand.
     monkeypatch.setenv("RA_RESUME_ON_BOOT", "0")

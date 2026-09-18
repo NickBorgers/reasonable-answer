@@ -17,7 +17,7 @@ real energy went to the adjacent and more interesting question of why the belief
 The questions themselves are paraphrased here rather than quoted, and the run IDs left out: they
 are a private operator's own queries, and this repository is public. In every case the category
 was already nameable — `unexamined_presupposition` (D-social-bias) would tag some of these on sight — but
-the finding lands 10–25 minutes and several critique rounds after the one party who could cheaply
+the finding lands long after several critique rounds, after the one party who could cheaply
 reframe the question, the asker, has already walked away from the keyboard. The
 fix that costs nothing is upstream: catch the same framing before the run starts, while the asker
 is still there to accept, ignore, or edit it.

@@ -31,8 +31,8 @@ on the final artifact" — was written in the vocabulary of `docs/convergence.md
 3. *The report page keeps only the verdict and one link between the answer and the body.* The run
    id and the shipped round come out of the page chrome — the review record below states both.
    Copy markdown, the two downloads and `audit.json` move into one closed fold at the *end* of the
-   report, after the sources. Every control is still on the page and still a public GET; the
-   fold changes where a reader meets them, not whether.
+   report, after the sources. The download and audit links remain public GETs, and the client-side
+   copy control remains available on the page; the fold changes where a reader meets them, not whether.
 4. *The status sentences are rewritten in plain words.* `STATUS_MEANING` is what a stranger reads
    first, on screen and in the exported file (D-verdict-attached), so each entry now says the
    condition without the internal nouns — every review dimension is cleared by two models from
