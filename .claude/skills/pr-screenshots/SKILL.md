@@ -26,12 +26,14 @@ If you are opening the PR yourself, run the agent first so the body is complete 
 
 ## What the agent does (for when you have to do it by hand)
 
-The scripts live in `.claude/skills/pr-screenshots/scripts/`.
+The scripts live in `.claude/skills/pr-screenshots/scripts/`; every command below is invoked as
+`<repo-root>/.claude/skills/pr-screenshots/scripts/<name>.py`, run from the repository root (or
+`cd` into that directory first and drop the prefix).
 
 1. **A snapshot of the base tree**, without touching the checkout:
    `git archive <base> src config | tar -x -C <scratch>/base`.
 2. **Render pages from both trees** with the project venv — no server, no proxy, no network:
-   `.venv/bin/python scripts/render_pages.py --src <tree>/src --config <tree>/config/roster.yaml --out <scratch>/html/{before,after}`.
+   `.venv/bin/python .claude/skills/pr-screenshots/scripts/render_pages.py --src <tree>/src --config <tree>/config/roster.yaml --out <scratch>/html/{before,after}`.
    `render_pages.py` calls `render_index`, `render_run` and `render_report` directly with fixed
    fixture data (four runs, a two-round live timeline, a framed report with a review record).
    If the change adds a page or a state, add a fixture there — that file is the list of what
@@ -40,12 +42,12 @@ The scripts live in `.claude/skills/pr-screenshots/scripts/`.
    dependency group (`uv export --frozen --only-group screenshots --no-emit-project`, then
    `uv pip install --require-hashes` into that venv). Install the Chromium build selected by the
    locked Playwright (`python -m playwright install chromium`), then run:
-   `python scripts/shoot.py --before <scratch>/html/before --after <scratch>/html/after --out <scratch>/shots`.
+   `python .claude/skills/pr-screenshots/scripts/shoot.py --before <scratch>/html/before --after <scratch>/html/after --out <scratch>/shots`.
    Produces one labelled before|after PNG per page per width (390 and 1100 by default).
 4. **Look at every stitched image** before publishing. The point is a human-readable
    comparison; a broken fixture or an empty page is a finding, not an artifact to ship.
 5. **Host the images** on the `pr-assets` orphan branch through the GitHub API, never through
-   the local checkout: `python scripts/publish_assets.py --repo <owner/name> --dir <scratch>/shots --prefix <slug>`.
+   the local checkout: `python .claude/skills/pr-screenshots/scripts/publish_assets.py --repo <owner/name> --dir <scratch>/shots --prefix <slug>`.
    It prints `raw.githubusercontent.com` URLs. The branch is never merged and triggers no
    workflow (every push-triggered workflow here is `branches: [main]`). Re-running with the
    same prefix replaces the files.
