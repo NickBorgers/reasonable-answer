@@ -317,7 +317,8 @@ def render_index(
   <h1>Ask a question</h1>
   <p class="lede">Several different AI models research your question and write a report, then
   check each other&rsquo;s drafts for mistakes. No model ever reviews its own writing, and the
-  report is finished only when the reviewers can find nothing material left to fix. You get a
+  report is accepted only when the reviewers can find nothing material left to fix; if the review
+  limit is reached first, you still get a report with the remaining objections recorded. You get a
   short answer up top, the strongest case against it, and the sources &mdash; plus a record of
   anything the reviewers still objected to. Expect <strong>10&ndash;25 minutes</strong>; you can
   close this tab and come back.</p>
@@ -350,9 +351,9 @@ def render_index(
 <section class="panel roster">
   <details class="fold">
     <summary>Which models do the work</summary>
-    <p class="lede">A draft is never reviewed by the model that wrote it, and a final draft counts as
-    accepted only when two different models &mdash; neither of them the author &mdash; both find
-    nothing left to fix. One model&rsquo;s approval is an opinion; two finding nothing is evidence.</p>
+    <p class="lede">A draft is never reviewed by the model that wrote it. For a final draft to count
+    as accepted, every review dimension must be cleared by two non-author models from different
+    model families. One model&rsquo;s approval is an opinion; independent confirmation adds evidence.</p>
     <div class="roster-grid">
       <div><h3>writers</h3><ul>{_model_list(config.roster.writers)}</ul></div>
       {"".join(f"<div><h3>{esc(lens)}</h3><ul>{_model_list(pool)}</ul></div>"
