@@ -41,9 +41,31 @@ def _page(report: str) -> str:
 def test_a_framed_report_leads_with_the_answer_card():
     page = _page(FRAMED)
     assert '<article class="report answer-card"><h2>Conclusion</h2>' in page
-    # The card sits above the page's own furniture — status, run link, share row.
+    # The card sits above the page's own furniture — status, run link, share fold.
     assert page.index("answer-card") < page.index("Run status")
-    assert page.index("answer-card") < page.index("back to the run")
+    assert page.index("answer-card") < page.index("how this answer was produced")
+
+
+def test_the_share_controls_fold_closed_after_the_report():
+    """Someone who came back for the answer gets the answer; the four ways of taking the
+    report away sit in a closed fold at the end of it (D-plain-front-door). Every control
+    is still on the page — the fold hides nothing from a reader who wants a file."""
+    page = _page(FRAMED)
+    assert '<details class="fold share-fold screen-only">' in page
+    assert "<details open" not in page
+    fold = page.index('class="fold share-fold')
+    assert page.index('<article class="report">') < fold
+    assert page.index('class="sources-fold') < fold
+    for control in ('id="copy-md"', "/export.md", "/export.html", "/audit.json"):
+        assert page.index(control) > fold
+    # The run id and shipped round are the review record's to state, not the page chrome's.
+    assert "shipped from round" not in page.split('class="fold share-fold')[0]
+
+
+def test_an_unframed_report_still_ends_with_the_share_fold():
+    plain = "# Answer\n\nA claim [1].\n\n## Sources\n\n1. <https://example.org>\n"
+    page = _page(plain)
+    assert page.index('<article class="report">') < page.index('class="fold share-fold')
 
 
 def test_the_counterargument_is_boxed_where_it_stands():

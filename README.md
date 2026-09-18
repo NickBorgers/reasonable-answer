@@ -142,8 +142,9 @@ whose clean records key to that exact artifact, and any outstanding defects. As 
 product, so it travels with the text (D-verdict-attached).
 
 The report is rendered on exactly one page — `/runs/<id>/report` — and that is where all of this
-lives. `/runs/<id>` is the run itself: the verdict, the round-by-round trail, `audit.json`, `Ask
-this again`, and a link to the report.
+lives, folded behind **Save, share or check this report** at the end of the text so the answer
+comes first (D-plain-front-door). `/runs/<id>` is the run itself: the verdict, the round-by-round
+trail, `audit.json`, `Ask this again`, and a link to the report.
 
 | from the report page | what you get |
 |---|---|
