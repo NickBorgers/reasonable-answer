@@ -208,22 +208,13 @@ inside the graph.
   alias name alone proves nothing about isolation and can even add contention
   via model swapping; any finer-grained prioritization between refinement and
   run traffic is the proxy's scheduling concern, not this service's.
-- **Provider choice for `refine.alias`** (2026-09-18 operational finding): because the
-  refine alias has no degrade path (above), pointing it at a model whose
-  structured-output serving on OpenRouter turned out to be capacity-constrained took
-  down the entire web boot, not just refinement — the same failure mode a *roster*
-  alias would merely be dropped for. Observed in production: OpenRouter's
-  `response_format: json_schema` routing for a given model often narrows to a single
-  provider (checkable via `GET /api/v1/models/<id>/endpoints` — look at
-  `supported_parameters` per endpoint, not just whether the model itself is listed),
-  and that one provider's shared capacity pool was rate-limited for well over an
-  hour with no OpenRouter-side fallback to try next. This happened independently to
-  two different models routed through OpenRouter the same day. If `refine.alias`
-  names an OpenRouter-routed model, confirm more than one of its endpoints actually
-  supports `structured_outputs` before relying on it for a boot-blocking role; a
-  first-party API (OpenAI, Anthropic, Mistral, etc.) does not carry this specific
-  failure mode, since there is no OpenRouter routing layer to be capacity-constrained
-  before your own request even reaches the model's real backend.
+- **Provider choice for `refine.alias`**: the refine alias has no degrade path (above),
+  so an availability failure during its structured-output probe blocks web boot. When
+  the alias uses a router that can select among upstream providers, validate the
+  availability of the route used for `response_format: json_schema`, not merely the
+  model's general availability. In particular, confirm that the eligible route has the
+  redundancy and capacity the deployment requires before assigning it this
+  boot-blocking role.
 - **Cache**: a bounded, thread-safe TTL cache inside the service, keyed by
   (normalized question text, prompt/schema version, effective alias,
   `max_suggestions`, `enabled_transforms`). Validated successes are cached

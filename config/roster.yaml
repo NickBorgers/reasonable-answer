@@ -577,10 +577,9 @@ call_timeouts:
 # pool — the name alone proves nothing (see D-question-refinement's isolation accounting).
 #
 # If you do point this at a faster cloud model: this alias has no degrade path (a bad
-# probe fails web boot closed, not just refinement), so avoid one whose structured-output
-# serving depends on OpenRouter unless you've confirmed more than one of its endpoints
-# actually supports structured_outputs. See docs/question-refinement.md's "Provider choice
-# for refine.alias" note for a production incident where this took the whole service down.
+# probe fails web boot closed, not just refinement). For a routed model, confirm that its
+# structured-output route has the availability this boot-blocking role requires; see
+# docs/question-refinement.md's "Provider choice for refine.alias" note.
 refine:
   enabled: true
   alias: ""
