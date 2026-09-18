@@ -7,7 +7,7 @@ second is the one that matters.
 It was hard to reach: with a dozen runs listed, the control sat below a screenful of rows, on the one
 page a person visits least once they have started something. And it was *absent* exactly where it was
 wanted. Starting a run redirects to `/runs/<id>`; the moment someone decides they want telling is the
-moment they have just kicked off a 10-25 minute run and are about to put the phone down. On that page
+moment they have just kicked off a long run and are about to put the phone down. On that page
 there was no control at all, and no way to get to one without navigating back.
 
 **Installed to a home screen there is no navigating back.** A standalone app has no address bar, no

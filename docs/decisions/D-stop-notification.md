@@ -1,6 +1,6 @@
 ## D-stop-notification — a run that stops says so, on a device that was not watching
 
-**The problem.** A run is 10–25 minutes and the index makes it easy to start several. The only
+**The problem.** A run is long-running and the index makes it easy to start several. The only
 mechanism that ever said a run had finished was `GET /runs/<id>/stream`, which pushes progress into
 a page that is currently open and reloads it on `done`. Close the tab and nothing says anything;
 background the installed app on a phone and iOS suspends it, so nothing *can*. The interface's own

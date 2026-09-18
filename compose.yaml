@@ -20,7 +20,7 @@ services:
         RA_BUILD_SHA: "${RA_BUILD_SHA:-}"
     image: reasonable-answer:latest
     restart: unless-stopped
-    # A run is 10-25 minutes, so no grace period can "wait for it to finish". This
+    # A run is long-running, so no grace period can "wait for it to finish". This
     # buys enough time for the in-flight node — roughly one model call — to land and
     # checkpoint, after which the restart resumes the run automatically. Correctness
     # does not depend on the number: the checkpointer bounds a hard kill to the node in
