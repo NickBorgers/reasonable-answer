@@ -232,8 +232,13 @@ every marker on a kept claim; delete an entry only when nothing cites it; never 
 does not rewrite every citing paragraph; and "remove the attribution" means re-cite, restrict, or label
 as inference, never leave the claim standing unmarked. Every `generate` event carries a citation census
 (`source_entries`, `body_markers`, `cited_entries`, `dangling_markers`, and on revisions
-`cited_sources_dropped`, `cited_sources_added`, `entries_removed`). It is warn-only: no draft is
-rejected on it, and it is not a controller input.
+`cited_sources_dropped`, `cited_sources_added`, `entries_removed`). No draft is rejected on it and it is
+not a controller input, but since D-census-gated-repair a marker-less body with sources
+(`body_markers == 0 and source_entries > 0`) spends up to `revision.repair.repair_cap` extra calls
+(default 1) to the same writer before the draft
+ships to any critic — see
+[isolation.md](isolation.md#scoping-the-edit-is-not-narrowing-the-review-d-scoped-revision) for the gate
+and the out-of-scope one alongside it.
 
 **Headings are writer-side only, deliberately.** A section heading is not quotable: `report.parse`
 puts heading text in `Structure.section_titles` and never in a `Paragraph`, so a heading is absent

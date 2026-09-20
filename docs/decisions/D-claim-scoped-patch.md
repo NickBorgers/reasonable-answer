@@ -60,8 +60,10 @@ near-verbatim, because the frame asks for the same finding three times and write
 paragraphs on the same topic share vocabulary and not a sentence. It is matched against the old
 text because that is where the copy was; what the writer turned it into is not the question. The
 check stays **warn-only**, exactly as D-scoped-revision and D-refine-audition set it: nothing
-rejects a draft on its verdict. With no spans given the report is what it was, so every existing
-caller and every pre-existing audit number keeps its meaning.
+rejects a draft on its verdict. (D-census-gated-repair later consumes `out_of_scope` as a bounded
+repair gate; `restated` stays excluded from it, so a fix carried to every copy of a claim never trips
+that gate, and still nothing rejects a draft.) With no spans given the report is what it was, so every
+existing caller and every pre-existing audit number keeps its meaning.
 
 **Why this is the patch licence corrected and not the rewrite licence returning.** D-scoped-revision's
 arithmetic still holds: re-rolling forty paragraphs to fix five grows as many defects as it retires.

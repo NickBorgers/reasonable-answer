@@ -100,6 +100,16 @@ numbers say the prompt does not hold. The check is silent for the three generati
 touch everything — the first draft, a rule-9 polish pass, and a rule-13 rewrite — so an absent field
 means "not applicable" rather than "in scope".
 
+> Superseded in part by **D-census-gated-repair**: "an enforcing tier is worth building only if these
+> numbers say the prompt does not hold" is the case a production patch revision went on to make by
+> rewriting most of a report outside its fix tasks. A patch-mode revision whose `out_of_scope` exceeds a
+> configured ceiling (`revision.repair.max_out_of_scope`) now spends up to `revision.repair.repair_cap`
+> bounded repair calls to the same writer; the draft is still never *rejected*, `writer_attempts` is
+> untouched, and the exemption for the first draft, a polish pass and a rule-13 rewrite carries over
+> unchanged — the new gate only ever applies where this measurement was already non-silent, and the
+> repair prompt asks for byte-for-byte restoration only under the same patch-licence condition this
+> file's close uses. `additive_only` and the rest of D-no-hedge-discharge's measurement stay warn-only.
+
 **Known residual: framing lock-in.** One model's voice and framing now persist across a patch chain
 instead of being re-rolled every round, and `loaded_language` floors at `minor` under D-social-bias
 precisely so a noisy critic cannot force revisions on judgment-laden framing. So a framing bias that

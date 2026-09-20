@@ -81,9 +81,19 @@ pass drops a cited source. Nothing rejects a draft, triggers a repair turn, or r
 critics and the bibliography checks already own, and the census has to come first to show how often it
 happens — the D-scoped-revision warn-only doctrine.
 
+> Superseded in part by **D-census-gated-repair**. The census had shown that a marker-less body
+> happens; a later production run showed what it costs downstream — the bibliography and claim checks
+> pair nothing, and the next writer "resolved" the resulting findings by deleting most of the report.
+> `body_markers == 0 and source_entries > 0` now spends up to `revision.repair.repair_cap` bounded
+> repair calls to the same writer before any critic reads the draft. The census itself, its fields, and
+> the "no critic, no `OrchestratorView`, no controller" boundary are unchanged; only "nothing rejects a
+> draft, triggers a repair turn" no longer holds for this one condition. `revision.repair.enabled:
+> false` restores this section exactly.
+
 **Deliberately not done.**
 
-- A generate-time gate or repair turn, for the reason above.
+- A generate-time gate or repair turn, for the reason above — narrowed by D-census-gated-repair to the
+  marker-less-body condition specifically; a "too few markers" threshold below is still not done.
 - A "too few markers" threshold. Partial coverage already draws per-entry orphan findings
   (D-bibliography-integrity); a report with *no* marker drawing one finding is a separate, later decision.
 - Tolerating a numbered `## 10. Sources` heading.

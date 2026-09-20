@@ -83,6 +83,48 @@ def test_writer_revision_scrubbing_holds_in_patch_mode_too():
     assert SCRUBBED in prompt
 
 
+# ---------------------------------------------------------- writer_repair_turn
+
+
+def _repair_prompt(question="q?", draft="draft", previous=None, defect=None):
+    return prompts.writer_repair_turn(
+        question,
+        draft,
+        previous,
+        [defect or _defect()],
+        markerless=True,
+        scope_gate=False,
+        source_entries=1,
+        body_markers=0,
+        cited_sources_dropped=0,
+        out_of_scope=0,
+    )
+
+
+def test_writer_repair_turn_scrubs_the_question():
+    prompt = _repair_prompt(question=BREAKOUT)
+    assert BREAKOUT not in prompt
+    assert SCRUBBED in prompt
+
+
+def test_writer_repair_turn_scrubs_the_draft():
+    prompt = _repair_prompt(draft=BREAKOUT)
+    assert BREAKOUT not in prompt
+    assert SCRUBBED in prompt
+
+
+def test_writer_repair_turn_scrubs_the_previous_draft():
+    prompt = _repair_prompt(previous=BREAKOUT)
+    assert BREAKOUT not in prompt
+    assert SCRUBBED in prompt
+
+
+def test_writer_repair_turn_scrubs_a_critic_authored_rationale():
+    prompt = _repair_prompt(defect=_defect(rationale=BREAKOUT))
+    assert BREAKOUT not in prompt
+    assert SCRUBBED in prompt
+
+
 # -------------------------------------------------------------- writer_dispute
 
 
