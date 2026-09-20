@@ -842,11 +842,13 @@ def _scope_fields(
     polish: bool,
     full_rewrite: bool,
 ) -> dict[str, int]:
-    """Warn-only scope measurement for the `generate` event (D-scoped-revision).
+    """Scope measurement for the `generate` event (D-scoped-revision).
 
     Silent for the three generations that legitimately touch everything — the first
     draft, a rule-9 polish pass, and a rule-13 rewrite — so an absent field means "not
     applicable" rather than "in scope", and the A/B never averages those rounds in.
+    `additive_only` stays warn-only; `out_of_scope` also feeds the out-of-scope repair
+    gate a caller may check against it (D-census-gated-repair).
     """
     if cfg.revision.scope_check == "off" or not previous or polish or full_rewrite:
         return {}
@@ -1052,6 +1054,28 @@ def _generate(state: State, rt: Runtime) -> dict:
     if len(text) > cfg.max_report_chars:
         text = text[: cfg.max_report_chars]
 
+    # Census-gated repair (D-census-gated-repair): the same two measurements that used
+    # to be warn-only now get one chance to fix what they find before anything else
+    # reads this draft. `text` may come back unchanged — repair_fields says whether it
+    # tried and whether it worked; the census/scope fields below always describe
+    # whichever text actually shipped.
+    citation_fields = _citation_fields(previous, text, polish=polish)
+    scope_fields = _scope_fields(cfg, previous, text, defects, polish=polish, full_rewrite=full_rewrite)
+    text, citation_fields, scope_fields, repair_fields = _repair_draft(
+        rt,
+        cfg,
+        alias,
+        state["question"],
+        previous,
+        defects,
+        text=text,
+        citation_fields=citation_fields,
+        scope_fields=scope_fields,
+        polish=polish,
+        full_rewrite=full_rewrite,
+        run_date=run_date,
+    )
+
     h = report_mod.artifact_hash(text)
     history = [*state.get("hash_history", []), h]
     # A tick is one *draft*, counted here rather than at triage: a writer that
@@ -1073,10 +1097,13 @@ def _generate(state: State, rt: Runtime) -> dict:
         # And the deeper version of the same question: did it read any of them?
         # Counts only — a URL is content and events.jsonl outlives a content purge.
         **_read_fields(session),
-        **_scope_fields(cfg, previous, text, defects, polish=polish, full_rewrite=full_rewrite),
         # Every generation, polish and rewrite included: a whole-document regeneration is
         # where markers get lost (D-writer-citation-continuity).
-        **_citation_fields(previous, text, polish=polish),
+        **scope_fields,
+        **citation_fields,
+        # Present only when a gate fired (D-census-gated-repair): repair_attempted (0/1),
+        # repair_reason (markerless/out_of_scope/both), repair_resolved (0/1).
+        **repair_fields,
     )
 
     _record_support(rt, alias, state["question"], text, round_no, session)
@@ -1108,12 +1135,13 @@ def _generate(state: State, rt: Runtime) -> dict:
 
 
 def _citation_fields(previous: str | None, text: str, *, polish: bool) -> dict[str, int]:
-    """Warn-only citation census for the `generate` event (D-writer-citation-continuity).
+    """Citation census for the `generate` event (D-writer-citation-continuity).
 
     Integers only, so `events.jsonl` still carries no URL and no text (RA-016). The census
-    is on every draft; the comparison with the draft it replaced only on a revision. Nothing
-    gates on any of it — a draft is never rejected here — because a repair turn costs a
-    writer attempt and the critics and the bibliography checks already own the defect.
+    is on every draft; the comparison with the draft it replaced only on a revision. A
+    draft is never *rejected* here — the census only feeds the marker-less gate a caller
+    may check against it (D-census-gated-repair); the critics and the bibliography checks
+    still own the defect either way.
     """
     fields = excerpt.citation_census(text)
     if previous:
@@ -1129,6 +1157,158 @@ def _citation_fields(previous: str | None, text: str, *, polish: bool) -> dict[s
             fields["cited_sources_dropped"],
         )
     return fields
+
+
+# ------------------------------------------------------------- census-gated repair
+
+
+def _repair_gates(
+    cfg: Config, citation_fields: dict[str, int], scope_fields: dict[str, int]
+) -> tuple[bool, bool]:
+    """Whether gate 1 (marker-less body) or gate 2 (out-of-scope rewrite) fires
+    (D-census-gated-repair).
+
+    Gate 1 applies to every draft `_citation_fields` measures, first draft included.
+    Gate 2 only to a patch-mode revision `_scope_fields` did not stay silent for — the
+    same first-draft/polish/rule-13-rewrite exemption already built into that dict, plus
+    `revision.mode == "patch"`: under `mode: rewrite` a writer is *asked* to touch
+    everything, so a high `out_of_scope` there is the mode working, not a defect.
+    """
+    markerless = citation_fields["body_markers"] == 0 and citation_fields["source_entries"] > 0
+    out_of_scope = scope_fields.get("out_of_scope")
+    scope_gate = (
+        cfg.revision.mode == "patch"
+        and out_of_scope is not None
+        and out_of_scope > cfg.revision.repair.max_out_of_scope
+    )
+    return markerless, scope_gate
+
+
+def _writer_repair(
+    rt: Runtime,
+    alias: str,
+    *,
+    question: str,
+    draft: str,
+    previous: str | None,
+    defects: list[Defect],
+    markerless: bool,
+    scope_gate: bool,
+    citation_fields: dict[str, int],
+    scope_fields: dict[str, int],
+    run_date: str | None,
+) -> str | None:
+    """One extra call to the writer that just produced `draft` (D-census-gated-repair).
+
+    Same alias, same system prompt shape, same timeout as the generation it repairs —
+    nothing about the call machinery differs, only the prompt. No tool is offered: the
+    job is to restore text the writer already produced, not to research further, so the
+    writer sees nothing beyond its own draft, the previous artifact and the fix tasks it
+    already had (no critic identity, no new source text — RA-010).
+
+    Never raises. A repair must not abort a run that would otherwise have continued, so
+    any call failure or empty completion is reported as `None` and the caller keeps the
+    unrepaired draft.
+    """
+    user = prompts.writer_repair_turn(
+        question,
+        draft,
+        previous,
+        defects,
+        markerless=markerless,
+        scope_gate=scope_gate,
+        source_entries=citation_fields.get("source_entries", 0),
+        body_markers=citation_fields.get("body_markers", 0),
+        cited_sources_dropped=citation_fields.get("cited_sources_dropped", 0),
+        out_of_scope=scope_fields.get("out_of_scope", 0),
+        current_date=run_date,
+    )
+    try:
+        with call_purpose("writer"):
+            reply = rt.client.complete(
+                alias,
+                system=prompts.writer_system(False),
+                user=user,
+                max_tokens=32000,
+                timeout=rt.config.call_timeouts.writer_seconds,
+            )
+    except ModelCallError as exc:
+        log.warning("writer repair call to %s failed: %s", alias, exc)
+        return None
+    text = reply.text.strip()
+    if not text:
+        log.warning("writer repair call to %s returned an empty report", alias)
+        return None
+    return text
+
+
+def _repair_draft(
+    rt: Runtime,
+    cfg: Config,
+    alias: str,
+    question: str,
+    previous: str | None,
+    defects: list[Defect],
+    *,
+    text: str,
+    citation_fields: dict[str, int],
+    scope_fields: dict[str, int],
+    polish: bool,
+    full_rewrite: bool,
+    run_date: str | None,
+) -> tuple[str, dict[str, int], dict[str, int], dict[str, int | str]]:
+    """Census-gated repair turn (D-census-gated-repair): spend at most
+    `revision.repair.repair_cap` extra writer calls fixing a draft that fails gate 1 or
+    gate 2, before any critic sees it.
+
+    Returns the text that ships (repaired or not), its citation/scope fields re-measured
+    against that text, and the `repair_*` fields for the `generate` event — empty when
+    repair is off or neither gate fired. Whether or not the repair resolves the gate, the
+    repaired draft ships either way: this never loops chasing a clean measurement, it
+    spends its budget and moves on.
+    """
+    repair_cfg = cfg.revision.repair
+    if not repair_cfg.enabled:
+        return text, citation_fields, scope_fields, {}
+
+    markerless, scope_gate = _repair_gates(cfg, citation_fields, scope_fields)
+    if not (markerless or scope_gate):
+        return text, citation_fields, scope_fields, {}
+
+    reason = "both" if markerless and scope_gate else ("markerless" if markerless else "out_of_scope")
+    resolved = 0
+    for _ in range(repair_cfg.repair_cap):
+        repaired = _writer_repair(
+            rt,
+            alias,
+            question=question,
+            draft=text,
+            previous=previous,
+            defects=defects,
+            markerless=markerless,
+            scope_gate=scope_gate,
+            citation_fields=citation_fields,
+            scope_fields=scope_fields,
+            run_date=run_date,
+        )
+        if repaired is None:
+            break
+        text = repaired
+        if len(text) > cfg.max_report_chars:
+            text = text[: cfg.max_report_chars]
+        citation_fields = _citation_fields(previous, text, polish=polish)
+        scope_fields = _scope_fields(cfg, previous, text, defects, polish=polish, full_rewrite=full_rewrite)
+        markerless, scope_gate = _repair_gates(cfg, citation_fields, scope_fields)
+        if not (markerless or scope_gate):
+            resolved = 1
+            break
+
+    return (
+        text,
+        citation_fields,
+        scope_fields,
+        {"repair_attempted": 1, "repair_reason": reason, "repair_resolved": resolved},
+    )
 
 
 def _verified_urls(config: Config, report_text: str) -> list[str]:

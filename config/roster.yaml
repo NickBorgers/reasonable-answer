@@ -489,6 +489,32 @@ revision:
   mode: patch
   scope_check: warn
 
+  # The census-gated repair turn (D-census-gated-repair). Production run
+  # run-05289e3ce78c's writer returned a 12-source draft with zero [n] markers in the
+  # body (`body_markers=0`); the next round's writer "resolved" the resulting
+  # uncited-claim findings by deleting most of the report (`out_of_scope=10` of 12
+  # changed paragraphs) rather than restoring the citations. Both numbers were already
+  # computed for the `generate` event and both were warn-only — nothing acted on them.
+  #
+  # Two mechanical gates, checked against those same numbers:
+  #   1. marker-less body: `body_markers == 0 and source_entries > 0`, on every draft —
+  #      the first, a patch, a polish pass, or a rule-13 rewrite.
+  #   2. out-of-scope rewrite: `out_of_scope > max_out_of_scope`, on a patch-mode
+  #      revision only (never the first draft, a polish pass, or a rewrite — the same
+  #      three cases `scope_check` above is silent for; under `mode: rewrite` a high
+  #      `out_of_scope` is the writer doing what it was asked, not a defect).
+  #
+  # Either gate spends one extra call to the *same* writer, handing back its own draft
+  # with the exact numbers and the fix tasks it already saw, and asking for the whole
+  # corrected report. The repaired draft is re-measured and ships whether or not the
+  # gate cleared — never a loop chasing a clean measurement, always at most
+  # `repair_cap` extra calls. A failed repair call keeps the original draft; a repair
+  # never aborts a run that would otherwise have continued.
+  repair:
+    enabled: true       # false restores the exact warn-only behaviour above
+    repair_cap: 1        # extra writer calls one generation may spend on repair
+    max_out_of_scope: 6  # gate 2's threshold; healthy patch revisions ran 0-4, occasionally 6
+
 budgets:
   min_ticks: 2
   hard_cap: 8

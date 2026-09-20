@@ -222,6 +222,20 @@ claim, how many came back containing every word of the old text, in order, with 
 It is a subset of `in_scope` plus `restated` — a rate to read against them, never a fourth bucket —
 and, like every other number here, it is warn-only. Nothing about who edits or who reviews moves.
 
+**Two of these measurements now buy one repair turn before any critic reads the draft
+(D-census-gated-repair).** A production run's writer returned a body with zero `[n]` markers over
+twelve listed sources; the next round's writer "resolved" the resulting findings by deleting most of
+the report rather than restoring the citations. Two mechanical gates on numbers this section and
+D-writer-citation-continuity already compute — a marker-less body with sources (every draft, first
+included), or `out_of_scope` over a configured ceiling on a patch-mode revision only — spend one extra
+call to the *same* writer, handing back its own draft with the exact counts and the fix tasks it
+already saw, and ask for the whole corrected report. The repaired draft is re-measured and ships
+whether or not the gate cleared: this is a bounded repair turn, never a loop, and `revision.repair:
+enabled: false` restores the exact warn-only behaviour above. `additive_only` is unaffected — it
+stays warn-only, and gates nothing. Nothing about who edits or who reviews moves here either: the
+repair call is the same author, offered no tool, and sees nothing beyond its own draft, the previous
+artifact and the fix tasks — never a critic's identity, never fresh source text.
+
 ## The depersonalization step (principle 1, made concrete)
 
 ```mermaid
