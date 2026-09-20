@@ -86,6 +86,12 @@ budget of six was spent in every run and whose arbiter upheld 6 of 24 disputes, 
 (D-critic-audition, D-completeness-pool-noise), which is where a critic's invented-issue rate is
 measured and acted on. Both are named here as the follow-up, not attempted.
 
+> Superseded in part by **D-ops-revision**: "no enforcing tier for placeholders or headings" is closed
+> under `revision.mode: ops`, where a placeholder cannot exist (an unnamed paragraph is never
+> reproduced) and a heading is unaddressable (no label names one, and new text that would add one is
+> refused). The claim-unit rule itself is unchanged and is now one text, `WRITER_CLAIM_UNIT`, shared by
+> the patch and ops closes.
+
 **Deliberately not done.** No change to the frame: collapsing the three restatements into one
 would be a reversal of D-report-template, and the conclusion-first shape is what the reader
 experience is built on. No critic-side change asking critics to flag every copy — that raises

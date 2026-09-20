@@ -31,8 +31,9 @@ draft, before triage, before any critic, before the `OrchestratorView` or the co
    `_citation_fields` measures — the first draft, a patch, a rule-9 polish pass, a rule-13 rewrite —
    because a body that lists sources and cites none of them violates the citation prompt on every
    kind of draft, the first tick included.
-2. **Out-of-scope rewrite.** `out_of_scope > revision.repair.max_out_of_scope`, on a **patch-mode
-   revision only**. It never fires on the first draft, a polish pass, or a rule-13 rewrite — the
+2. **Out-of-scope rewrite.** `out_of_scope > revision.repair.max_out_of_scope`, on a **patch- or
+   ops-mode revision** (D-ops-revision). It never fires on the first draft, a polish pass, or a
+   rule-13 rewrite — the
    three cases `_scope_fields` already stays silent for — and never under `revision.mode: rewrite`,
    where a writer told to regenerate the whole document is doing what it was asked when it touches
    everything. It also never fires under `revision.scope_check: off`, because `_scope_fields` then
@@ -61,10 +62,11 @@ already held or produced:
 No critic identity, no lens, no new source text (RA-010). The restore instruction — return every
 paragraph outside the fix tasks byte-for-byte from the previous artifact — is included only under the
 **patch licence**, the same condition the drafting call used to select `WRITER_PATCH_CLOSE`
-(`revision.mode == "patch"`, not a polish pass, not a rule-13 rewrite). A polish pass, a rewrite, or a
-`mode: rewrite` deployment was asked for the whole document; its repair turn asks for the whole
-corrected report and says nothing about restoring paragraphs (D-scoped-revision's exemption carries
-over unchanged).
+(`revision.mode == "patch"`, not a polish pass, not a rule-13 rewrite). Under the ops licence, the
+repair instead asks for operations on the labelled previous draft and splices the reply into that draft
+(D-ops-revision). A polish pass, a rewrite, or a `mode: rewrite` deployment was asked for the whole
+document; its repair turn asks for the whole corrected report and says nothing about restoring
+paragraphs (D-scoped-revision's exemption carries over unchanged).
 
 `graph._repair_draft` re-measures the repaired text with the same `_citation_fields`/`_scope_fields`
 functions and ships it whether or not the gate cleared. It never loops chasing a clean measurement:
@@ -116,6 +118,14 @@ delete-to-discharge shape the gate exists to catch, not a fix. The existing cens
 whichever text actually ships, repaired or not, so an A/B comparison written against the old warn-only
 fields still reads correctly. The re-measurement inside the repair loop does not repeat the census's
 log warnings, so each stays countable as one per generation.
+
+> Superseded in part by **D-ops-revision**: the licence the repair turn inherits is now three-valued.
+> Gate 2 fires under `revision.mode: patch` *or* `ops` (the splice cannot stop a writer operating on
+> many unnamed paragraphs, which is what gate 2 measures); under the ops licence the repair turn asks
+> for operations on the labelled previous draft, never for a whole document, and its reply is spliced
+> exactly as the drafting reply was. A repair reply with no applicable operation is an unresolved
+> attempt that keeps the current draft, as a failed repair call already did. Everything else here —
+> gate 1, the cap, the same-writer rule, the event fields — is unchanged.
 
 **Deliberately not done.**
 

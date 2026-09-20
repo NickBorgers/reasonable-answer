@@ -157,8 +157,11 @@ def test_the_shipped_defaults_are_patch_warn_and_one_rewrite():
 
     assert (RevisionConfig().mode, RevisionConfig().scope_check) == ("patch", "warn")
     assert Budgets().rewrite_cap == 1
-    # Both arms of the A/B are reachable from configuration alone.
+    # Every arm of the A/B is reachable from configuration alone, and adding the third
+    # (D-ops-revision) moved neither the default nor the second.
     assert RevisionConfig(mode="rewrite", scope_check="off").mode == "rewrite"
+    assert RevisionConfig(mode="ops").mode == "ops"
+    assert RevisionConfig(mode="ops").scope_check == "warn"
 
 
 def test_several_tasks_each_resolved_in_place():

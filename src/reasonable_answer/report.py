@@ -17,6 +17,7 @@ import hashlib
 import re
 from collections.abc import Iterable
 from dataclasses import dataclass
+from typing import Literal
 
 from .schemas import StructuralRef
 
@@ -52,11 +53,29 @@ class Structure:
         return None
 
 
-def parse(report: str) -> Structure:
-    """Section 0 is any preamble before the first heading; paragraphs are blank-line
-    separated blocks, numbered from 1 within their section."""
-    titles: list[str] = ["(preamble)"]
-    paragraphs: list[Paragraph] = []
+@dataclass(frozen=True)
+class Block:
+    """One block of a report in document order: a heading line, or a paragraph.
+
+    `parse` keeps heading *titles* only, which is all a locus needs, but a document
+    cannot be rebuilt from titles — the `#` depth is gone. The splice (D-ops-revision)
+    needs to put a report back together after editing some of its paragraphs, so this
+    keeps the raw heading line. A heading carries `paragraph == 0`, which is why
+    `S<n>.P0` is never a paragraph locus: it is the heading of section `n`.
+    """
+
+    kind: Literal["heading", "paragraph"]
+    section: int
+    paragraph: int
+    #: a heading: the raw line including its `#`s; a paragraph: the stripped block text
+    text: str
+
+
+def blocks(report: str) -> tuple[Block, ...]:
+    """Every heading and paragraph of `report`, in order, numbered as `parse` numbers
+    them. `parse` is a projection of this, so the two can never disagree about which
+    text `S<n>.P<m>` names."""
+    out: list[Block] = []
     section = 0
     para_no = 0
 
@@ -64,19 +83,42 @@ def parse(report: str) -> Structure:
         block = block.strip()
         if not block:
             continue
-        heading = _HEADING.match(block.splitlines()[0])
+        lines = block.splitlines()
+        heading = _HEADING.match(lines[0])
         if heading:
             section += 1
             para_no = 0
-            titles.append(heading.group(2).strip())
-            rest = "\n".join(block.splitlines()[1:]).strip()
+            out.append(Block("heading", section, 0, lines[0].strip()))
+            rest = "\n".join(lines[1:]).strip()
             if rest:
                 para_no += 1
-                paragraphs.append(Paragraph(section, para_no, rest))
+                out.append(Block("paragraph", section, para_no, rest))
             continue
         para_no += 1
-        paragraphs.append(Paragraph(section, para_no, block))
+        out.append(Block("paragraph", section, para_no, block))
 
+    return tuple(out)
+
+
+def canonical(report: str) -> str:
+    """`report` with every block separated by exactly one blank line, headings on their
+    own line, no leading or trailing whitespace. Text *inside* a paragraph is untouched.
+    This is the form the splice emits, so `splice(x, [])` equals `canonical(x)`."""
+    return "\n\n".join(b.text for b in blocks(report))
+
+
+def parse(report: str) -> Structure:
+    """Section 0 is any preamble before the first heading; paragraphs are blank-line
+    separated blocks, numbered from 1 within their section."""
+    titles: list[str] = ["(preamble)"]
+    paragraphs: list[Paragraph] = []
+    for b in blocks(report):
+        if b.kind == "heading":
+            match = _HEADING.match(b.text)
+            assert match is not None  # a heading block is one by construction
+            titles.append(match.group(2).strip())
+        else:
+            paragraphs.append(Paragraph(b.section, b.paragraph, b.text))
     return Structure(tuple(paragraphs), tuple(titles))
 
 

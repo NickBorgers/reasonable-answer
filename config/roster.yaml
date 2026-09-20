@@ -486,6 +486,14 @@ review:
 # `defect_loci_untouched`) and never rejects a draft — a rejection would burn one of
 # three `writer_attempts`.
 revision:
+  # `patch`: the writer returns the whole report and is asked to leave unnamed paragraphs
+  # byte-identical (D-scoped-revision). `rewrite`: the whole report, regenerated. `ops`:
+  # the writer returns operations on the labelled paragraphs of the draft and the splice
+  # builds the next report, so an unnamed paragraph *is* byte-identical, a heading cannot
+  # be touched, and a Sources change that would orphan a body marker is refused
+  # (D-ops-revision). Production stays on `patch` until a live A/B on this build says
+  # otherwise; the `generate` event's `revision_mode` field buckets the two, and under
+  # `ops` its `ops_applied` / `ops_refused_*` counts say which rule did the work.
   mode: patch
   scope_check: warn
 
@@ -498,7 +506,7 @@ revision:
   # Two mechanical gates, checked against those same numbers:
   #   1. marker-less body: `body_markers == 0 and source_entries > 0`, on every draft —
   #      the first, a patch, a polish pass, or a rule-13 rewrite.
-  #   2. out-of-scope rewrite: `out_of_scope > max_out_of_scope`, on a patch-mode
+  #   2. out-of-scope rewrite: `out_of_scope > max_out_of_scope`, on a patch- or ops-mode
   #      revision only (never the first draft, a polish pass, or a rewrite — the same
   #      three cases `scope_check` above is silent for; under `mode: rewrite` a high
   #      `out_of_scope` is the writer doing what it was asked, not a defect; and never
@@ -506,9 +514,10 @@ revision:
   #
   # Either gate spends up to `repair_cap` extra calls to the *same* writer with no tool,
   # handing back its own draft with the exact numbers, the previous artifact and the fix
-  # tasks it already saw, and asking for the whole corrected report. Only under the patch
-  # licence (`mode: patch`, not a polish pass, not a rewrite) is the writer also told to
-  # restore untouched paragraphs byte-for-byte. The repaired draft is re-measured and
+  # tasks it already saw. Under the patch licence (`mode: patch`, not a polish pass, not a
+  # rewrite) it asks for the whole corrected report and tells the writer to restore
+  # untouched paragraphs byte-for-byte; under `mode: ops` it asks for operations on the
+  # labelled previous draft, like the drafting call did. The repaired draft is re-measured
   # ships whether or not the gate cleared — never a loop chasing a clean measurement,
   # always at most `repair_cap` extra calls. A failed repair call keeps the latest
   # successfully repaired draft (or the original when the first attempt fails); a repair

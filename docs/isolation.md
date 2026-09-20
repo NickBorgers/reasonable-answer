@@ -227,10 +227,12 @@ and, like every other number here, it is warn-only. Nothing about who edits or w
 Sources list survived; the next round's writer "resolved" the resulting findings by deleting most of
 the report rather than restoring the citations. Two mechanical gates on numbers this section and
 D-writer-citation-continuity already compute — a marker-less body with sources (every draft, first
-included), or `out_of_scope` over a configured ceiling on a patch-mode revision only (never under
+included), or `out_of_scope` over a configured ceiling on a patch- or ops-mode revision (never under
 `revision.mode: rewrite`, and never under `scope_check: off`, which measures nothing) — spend up to
-`revision.repair.repair_cap` extra calls (default 1) to the *same* writer and ask for the whole
-corrected report. The repaired draft is re-measured and ships whether or not the gate cleared: this
+`revision.repair.repair_cap` extra calls (default 1) to the *same* writer. Under the patch licence the
+repair asks for the whole corrected report; under the ops licence it asks for operations on the
+labelled previous draft and splices them into that draft (D-ops-revision). The repaired draft is
+re-measured and ships whether or not the gate cleared: this
 is a bounded repair turn, never a loop, and `revision.repair.enabled: false` restores the exact
 warn-only behaviour above. `additive_only` is unaffected — it stays warn-only, and gates nothing.
 
@@ -243,6 +245,27 @@ like every other writer-facing block (D-fence-scrub-all-directions). The instruc
 untouched paragraphs byte-for-byte from the previous artifact appears only under the patch licence —
 the same `mode == "patch"`, not-polish, not-rewrite condition the drafting call uses to select the
 patch close (D-scoped-revision) — so a repair never carries a licence the generation it repairs did not.
+
+**Operations, not a document (D-ops-revision).** Under `revision.mode: ops` the writer does not
+return the report at all. It is shown the draft in the critics' own rendering — every paragraph
+carrying its `[S<n>.P<m>]` label — with each fix task numbered `T1`, `T2`, …, and it returns
+operations on those labels: replace a paragraph, delete it, insert one after it. `ops.splice` builds
+the next artifact from the previous one and the operations, and that spliced Markdown is what every
+critic reads, in the unchanged rendering, in a fresh blind context. What the patch close could only ask
+for is now a property of the splice: a paragraph no operation names is byte-identical because nothing
+touched it; a heading cannot be renumbered or dropped because no label addresses one; a Sources change
+that would leave a body marker citing nothing is refused; new text that would add a heading is
+refused; a copied label or an echoed section heading is stripped. A reply with no applicable
+operation is a failed writer attempt (`malformed_ops`) that moves to the next pool member, like an
+empty reply — there is no draft to ship or repair. Every count rides the `generate` event as an
+integer (`ops_applied`, `ops_refused_*`, …) beside `revision_mode`; no text, no locus, no task id.
+
+Nothing about who edits or who reviews moves here either. The handoff carries exactly what the patch
+prompt carried plus the labels the critics already read and a task ordinal per fix task; every fenced
+block is `_neutralized` (D-fence-scrub-all-directions), and no critique prose, lens name or critic
+identity is added. The census-gated repair turn under ops asks for operations on the labelled previous
+draft, never for a whole document — one output contract per mode — and its reply is spliced the same
+way. A first draft, a polish pass and a rule-13 rewrite are whole documents whatever the mode.
 
 ## The depersonalization step (principle 1, made concrete)
 

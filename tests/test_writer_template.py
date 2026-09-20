@@ -278,3 +278,111 @@ def test_the_reread_addendum_is_offered_only_to_a_reviser_that_reads():
     assert addendum not in prompts.writer_system(False, False, reread=True)
     # The system prompt a non-rereading writer receives is unchanged by the flag's existence.
     assert prompts.writer_system(True, True, reread=False) == prompts.writer_system(True, True)
+
+
+# ---------------------------------------------- operations revision (D-ops-revision)
+
+
+def _sha(text: str) -> str:
+    import hashlib
+
+    return hashlib.sha256(text.encode()).hexdigest()
+
+
+#: The A/B control arms must not drift while a third arm is added: an ops-vs-patch
+#: comparison measuring a changed patch prompt would be measuring two things at once.
+PATCH_CLOSE_SHA = "e43b460cb048d124e5b1f4438366c7a982105c47e08734d61c88e384cce015e5"
+REWRITE_CLOSE_SHA = "442f3a094160a5b4db18a723f286de393713783887458f9345c4f1540550d951"
+PINNED_REPORT = "## Conclusion\n\nWater boils at 100 degrees Celsius [1].\n\n## Sources\n\n[1] A source."
+PATCH_PROMPT_SHA = "12918356f35e046e4adb1aa62798b27cfc74414b61ed296453d32bed662c06e7"
+REWRITE_PROMPT_SHA = "20516e4dacbbea04a5ff1919b5cfdf8870e2a67e2ae3ace4eb73ef49279df4b7"
+
+
+def test_the_patch_and_rewrite_arms_are_pinned_byte_for_byte():
+    assert _sha(prompts.WRITER_PATCH_CLOSE) == PATCH_CLOSE_SHA
+    assert _sha(prompts.WRITER_REWRITE_CLOSE) == REWRITE_CLOSE_SHA
+    for mode, expected in (("patch", PATCH_PROMPT_SHA), ("rewrite", REWRITE_PROMPT_SHA)):
+        text = prompts.writer_revision(
+            "q", PINNED_REPORT, [_defect()], polish=False, mode=mode, current_date="2026-09-20"
+        )
+        assert _sha(text) == expected, mode
+
+
+def test_ops_mode_shows_the_labelled_draft_numbers_the_tasks_and_asks_for_operations():
+    text = prompts.writer_revision("q", PINNED_REPORT, [_defect()], polish=False, mode="ops")
+    assert text.endswith(prompts.WRITER_OPS_CLOSE)
+    # The draft is the critics' own rendering — every paragraph labelled.
+    assert "[S1.P1] Water boils at 100 degrees Celsius [1]." in text
+    assert "=== SECTION 1: Conclusion ===" in text
+    assert '"task_id": "T1"' in text
+    assert "Do not return the report" in text
+    assert prompts.WRITER_PATCH_CLOSE not in text
+    assert "the whole document, not a diff" not in text
+
+
+def test_the_ops_close_states_the_list_rule_the_sources_rules_and_the_claim_unit():
+    close = prompts.WRITER_OPS_CLOSE
+    assert prompts.WRITER_CLAIM_UNIT in close
+    assert prompts.WRITER_CLAIM_UNIT in prompts.WRITER_PATCH_CLOSE
+    assert "a bulleted or numbered list shown under one label is one paragraph" in close
+    assert "where the whole list sits under one label, replace the whole list" in close
+    assert "cannot be removed; such an operation is refused" in close
+    assert "Never operate on a heading and never put a heading in new text" in close
+    assert "no code fence" in close
+    # The three block forms, verbatim, so the parser and the prompt cannot drift apart.
+    for block in (
+        "@@ replace S2.P3 tasks=T1,T4",
+        "@@ delete S3.P1 tasks=T2",
+        "@@ insert-after S2.P3 tasks=T1",
+        "@@ end",
+    ):
+        assert block in close
+    # What the splice enforces, the close no longer asks for.
+    assert "byte-identical" not in close
+    assert "(no changes required)" not in close
+
+
+def test_a_polish_pass_is_never_ops():
+    text = prompts.writer_revision("q", PINNED_REPORT, [], polish=True, mode="ops")
+    assert text.endswith(prompts.WRITER_REWRITE_CLOSE)
+    assert prompts.WRITER_OPS_CLOSE not in text
+    assert "[S1.P1]" not in text
+    assert text == prompts.writer_revision("q", PINNED_REPORT, [], polish=True, mode="patch")
+
+
+def test_task_ids_appear_only_in_ops_mode():
+    defects = [_defect()]
+    for mode in ("patch", "rewrite"):
+        assert "task_id" not in prompts.writer_revision("q", PINNED_REPORT, defects, polish=False, mode=mode)
+    assert "task_index" not in prompts.writer_revision("q", PINNED_REPORT, defects, polish=False, mode="ops")
+
+
+def _repair(**overrides):
+    kwargs = dict(
+        markerless=True,
+        scope_gate=False,
+        source_entries=1,
+        body_markers=0,
+        cited_sources_dropped=1,
+        out_of_scope=0,
+    )
+    kwargs.update(overrides)
+    return prompts.writer_repair_turn("q", "draft", PINNED_REPORT, [_defect()], **kwargs)
+
+
+def test_the_ops_repair_turn_asks_for_operations_on_the_labelled_previous_draft():
+    text = _repair(ops=True)
+    assert "Return operations on the labelled PREVIOUS DRAFT below" in text
+    assert "do not return the report" in text
+    assert "Return the complete report" not in text
+    assert "byte-for-byte" not in text
+    assert "[S1.P1] Water boils at 100 degrees Celsius [1]." in text
+    assert '"task_id": "T1"' in text
+    # The writer's own failing draft is shown as it came back, unlabelled.
+    assert "YOUR DRAFT" in text
+
+
+def test_the_repair_turn_is_unchanged_when_ops_is_off():
+    assert _repair() == _repair(ops=False)
+    assert "Return the complete report" in _repair()
+    assert "task_id" not in _repair(patch_licence=False)

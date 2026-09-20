@@ -25,7 +25,19 @@ from typing import Any, TypedDict
 from langgraph.graph import END, START, StateGraph
 
 from . import audition as audition_mod
-from . import claimcheck, excerpt, fetch, prompts, reading, resolve, roles, search, support, triage
+from . import (
+    claimcheck,
+    excerpt,
+    fetch,
+    ops,
+    prompts,
+    reading,
+    resolve,
+    roles,
+    search,
+    support,
+    triage,
+)
 from . import critique as critique_mod
 from . import dispute as dispute_mod
 from . import report as report_mod
@@ -945,6 +957,10 @@ def _generate(state: State, rt: Runtime) -> dict:
     # for the whole document however `revision.mode` is set (D-scoped-revision).
     full_rewrite = state.get("full_rewrite_next", False)
     mode = "rewrite" if full_rewrite else cfg.revision.mode
+    # Under `revision.mode: ops` a revision comes back as operations on the labelled
+    # draft and the splice builds the next report (D-ops-revision). A first draft, a
+    # polish pass and a rule-13 rewrite are whole documents whatever the mode.
+    ops_mode = mode == "ops" and bool(state.get("report")) and not polish
 
     # .get(): a checkpoint from before run_date existed resumes dateless, which is
     # exactly the prior behavior.
@@ -980,6 +996,7 @@ def _generate(state: State, rt: Runtime) -> dict:
     attempts = cfg.budgets.writer_attempts
     alias = ""
     completion = None
+    spliced: ops.Splice | None = None
     last_failure = ""
     account_refused = False
     for offset in range(attempts):
@@ -1013,14 +1030,24 @@ def _generate(state: State, rt: Runtime) -> dict:
             failure_class = getattr(exc, "failure_class", "call_failed")
             account_refused = account_refused or isinstance(exc, ProviderAccountError)
         else:
-            if reply.text.strip():
+            if not reply.text.strip():
+                last_failure = f"generator {alias} returned an empty report"
+                # Not a `ModelCallError`: the call succeeded and the model answered with
+                # whitespace, which is a different defect from any `llm` raises.
+                failure_class = "empty_report"
+            elif ops_mode and (spliced := ops.revise(previous, reply.text)) is None:
+                # The call succeeded and the model answered, but with nothing the splice
+                # could apply: no operation block, or every one refused. There is no
+                # draft to ship or repair, so this is a failed attempt like an empty
+                # reply, and the next attempt goes to the next pool member — a different
+                # model family, which is the right remedy for a formatting failure
+                # (D-ops-revision).
+                last_failure = f"generator {alias} returned no applicable operations"
+                failure_class = "malformed_ops"
+            else:
                 completion = reply
                 rotation += offset
                 break
-            last_failure = f"generator {alias} returned an empty report"
-            # Not a `ModelCallError`: the call succeeded and the model answered with
-            # whitespace, which is a different defect from any `llm` raises.
-            failure_class = "empty_report"
         # Recorded per attempt: a run that silently changed authors mid-draft is
         # unauditable, and the roster's weak models are only visible from here.
         # `failure_class` is what makes them *countable*: `reason` carries the alias
@@ -1050,7 +1077,10 @@ def _generate(state: State, rt: Runtime) -> dict:
         return {"fatal": True, "fatal_reason": f"every eligible writer failed; last: {last_failure}"}
 
     identity = rt.identities[alias]
-    text = completion.text.strip()
+    # Under ops the artifact is what the splice built, never the reply itself: the reply
+    # is operations, and no critic, hash or store ever sees it (D-ops-revision).
+    text = spliced.text if spliced is not None else completion.text.strip()
+    ops_fields = spliced.fields if spliced is not None else {}
     if len(text) > cfg.max_report_chars:
         text = text[: cfg.max_report_chars]
 
@@ -1090,6 +1120,12 @@ def _generate(state: State, rt: Runtime) -> dict:
         artifact_hash=h,
         polish=polish,
         full_rewrite=full_rewrite,
+        # Which close the drafting call was held to — `patch`, `rewrite` or `ops` — so an
+        # A/B over modes can bucket by it (D-ops-revision). A rule-13 rewrite reads
+        # `rewrite` whatever the configured mode; a first draft and a polish pass carry
+        # the configured mode but are whole documents regardless (see `full_rewrite`
+        # and `polish` beside it).
+        revision_mode=mode,
         defects_applied=len(defects),
         tokens=completion.completion_tokens,
         # Auditable after the fact: did this draft's citations come from a lookup?
@@ -1104,6 +1140,9 @@ def _generate(state: State, rt: Runtime) -> dict:
         # Present only when a gate fired (D-census-gated-repair): repair_attempted (0/1),
         # repair_reason (markerless/out_of_scope/both), repair_resolved (0/1).
         **repair_fields,
+        # Present only under ops mode (D-ops-revision): what the splice applied and what
+        # it refused, integers only — no text, no locus, no task id (RA-016).
+        **ops_fields,
     )
 
     _record_support(rt, alias, state["question"], text, round_no, session)
@@ -1173,15 +1212,17 @@ def _repair_gates(
     (D-census-gated-repair).
 
     Gate 1 applies to every draft `_citation_fields` measures, first draft included.
-    Gate 2 only to a patch-mode revision `_scope_fields` did not stay silent for — the
-    same first-draft/polish/rule-13-rewrite exemption already built into that dict, plus
-    `revision.mode == "patch"`: under `mode: rewrite` a writer is *asked* to touch
-    everything, so a high `out_of_scope` there is the mode working, not a defect.
+    Gate 2 only to a patch- or ops-mode revision `_scope_fields` did not stay silent for
+    — the same first-draft/polish/rule-13-rewrite exemption already built into that
+    dict, plus `revision.mode in ("patch", "ops")`: under `mode: rewrite` a writer is
+    *asked* to touch everything, so a high `out_of_scope` there is the mode working, not
+    a defect. Under `ops` the splice cannot stop a writer from operating on many
+    paragraphs no task named, so gate 2 keeps its job there (D-ops-revision).
     """
     markerless = citation_fields["body_markers"] == 0 and citation_fields["source_entries"] > 0
     out_of_scope = scope_fields.get("out_of_scope")
     scope_gate = (
-        cfg.revision.mode == "patch"
+        cfg.revision.mode in ("patch", "ops")
         and out_of_scope is not None
         and out_of_scope > cfg.revision.repair.max_out_of_scope
     )
@@ -1198,11 +1239,11 @@ def _writer_repair(
     defects: list[Defect],
     markerless: bool,
     scope_gate: bool,
-    patch_licence: bool,
+    licence: str | None,
     citation_fields: dict[str, int],
     scope_fields: dict[str, int],
     run_date: str | None,
-) -> str | None:
+) -> tuple[str, dict[str, int]] | None:
     """One extra call to the writer that just produced `draft` (D-census-gated-repair).
 
     Same alias, same system prompt shape, same timeout as the generation it repairs —
@@ -1213,15 +1254,19 @@ def _writer_repair(
     numbers this writer already held or produced (no critic identity, no new source
     text — RA-010).
 
-    `patch_licence` is the condition the drafting call itself used to pick the patch
-    close (`revision.mode == "patch"`, not a polish pass, not a rule-13 rewrite —
-    D-scoped-revision): only then is the writer told to restore untouched paragraphs
-    byte-for-byte, so the repair never carries a licence the generation it repairs did
-    not.
+    `licence` is the close the drafting call itself was held to — `"patch"`, `"ops"`, or
+    `None` for a whole-document generation (a polish pass, a rule-13 rewrite, a `mode:
+    rewrite` deployment, a first draft — D-scoped-revision). Under `"patch"` the writer is
+    told to restore untouched paragraphs byte-for-byte; under `"ops"` it is asked for
+    operations on the labelled previous draft, and its reply is spliced into `previous`
+    exactly as the drafting reply was (D-ops-revision); under `None` it is asked for the
+    whole corrected report. The repair never carries a licence the generation it repairs
+    did not.
 
     Never raises. A repair must not abort a run that would otherwise have continued, so
-    any call failure or empty completion is reported as `None` and the caller keeps the
-    unrepaired draft.
+    any call failure, empty completion, or — under ops — a reply with no applicable
+    operation is reported as `None` and the caller keeps the unrepaired draft. Otherwise
+    the repaired text, with the splice's counts under ops (empty for the other licences).
     """
     user = prompts.writer_repair_turn(
         question,
@@ -1230,7 +1275,8 @@ def _writer_repair(
         defects,
         markerless=markerless,
         scope_gate=scope_gate,
-        patch_licence=patch_licence,
+        patch_licence=licence == "patch",
+        ops=licence == "ops",
         source_entries=citation_fields.get("source_entries", 0),
         body_markers=citation_fields.get("body_markers", 0),
         cited_sources_dropped=citation_fields.get("cited_sources_dropped", 0),
@@ -1253,7 +1299,14 @@ def _writer_repair(
     if not text:
         log.warning("writer repair call to %s returned an empty report", alias)
         return None
-    return text
+    if licence == "ops":
+        assert previous is not None  # the ops licence exists only on a revision
+        spliced = ops.revise(previous, text)
+        if spliced is None:
+            log.warning("writer repair call to %s returned no applicable operations", alias)
+            return None
+        return spliced.text, spliced.fields
+    return text, {}
 
 
 def _repair_draft(
@@ -1290,15 +1343,24 @@ def _repair_draft(
         return text, citation_fields, scope_fields, {}
 
     reason = "both" if markerless and scope_gate else ("markerless" if markerless else "out_of_scope")
-    # The same condition `_generate` used to choose the patch close for the drafting call
-    # (D-scoped-revision): the repair turn asks for byte-for-byte restoration only where
-    # the generation it repairs was held to it.
-    patch_licence = cfg.revision.mode == "patch" and not polish and not full_rewrite
+    # The same condition `_generate` used to choose the close for the drafting call
+    # (D-scoped-revision, D-ops-revision): the repair turn asks for byte-for-byte
+    # restoration only where the generation was held to the patch close, and for
+    # operations only where it was held to the ops close. A first draft has no previous
+    # artifact, so neither licence applies to it.
+    licence: str | None = None
+    if previous and not polish and not full_rewrite and cfg.revision.mode in ("patch", "ops"):
+        licence = cfg.revision.mode
     # Gate 1 is `source_entries > 0`; a repair that deletes the whole `## Sources`
     # section makes it false without restoring a single marker. That is the
     # delete-to-discharge shape this gate exists to catch, so it never counts as resolved.
     entries_before = citation_fields["source_entries"]
     resolved = 0
+    # Under the ops licence each repair reply is a splice of its own, and the shipped
+    # text may be its product rather than the drafting splice's. Its counts are summed
+    # over the repair calls and ride the event under `repair_ops_*`, so `ops_*` keeps
+    # describing the drafting call and neither set stands in for the other.
+    repair_ops: dict[str, int] = {}
     for _ in range(repair_cfg.repair_cap):
         repaired = _writer_repair(
             rt,
@@ -1309,14 +1371,17 @@ def _repair_draft(
             defects=defects,
             markerless=markerless,
             scope_gate=scope_gate,
-            patch_licence=patch_licence,
+            licence=licence,
             citation_fields=citation_fields,
             scope_fields=scope_fields,
             run_date=run_date,
         )
         if repaired is None:
             break
-        text = repaired
+        text, splice_fields = repaired
+        for key, value in splice_fields.items():
+            key = ops.REPAIR_PREFIX + key
+            repair_ops[key] = repair_ops.get(key, 0) + value
         if len(text) > cfg.max_report_chars:
             text = text[: cfg.max_report_chars]
         citation_fields = _citation_fields(previous, text, polish=polish, warn=False)
@@ -1331,7 +1396,7 @@ def _repair_draft(
         text,
         citation_fields,
         scope_fields,
-        {"repair_attempted": 1, "repair_reason": reason, "repair_resolved": resolved},
+        {"repair_attempted": 1, "repair_reason": reason, "repair_resolved": resolved, **repair_ops},
     )
 
 

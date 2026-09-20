@@ -22,7 +22,7 @@ demanding documents the writer cannot get; it was read as a licence to keep the 
 **The decision.**
 
 *Writer side.* A new `prompts.WRITER_RESOLUTION_STANDARD`, carried by every non-polish revision in
-**both** `revision.mode`s, states that a task is resolved by changing the claim or its support and
+**every** `revision.mode` (two when this was written; `ops` joined under D-ops-revision), states that a task is resolved by changing the claim or its support and
 never by appending a qualifier to a claim that is kept; that weakening means restricting the claim
 to what the support establishes — a narrower population, a smaller magnitude, the cases actually
 measured, one named source's finding — or removing it; that the four observed disclaimer forms do

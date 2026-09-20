@@ -765,9 +765,11 @@ class RepairConfig(BaseModel):
     Two mechanical gates, checked against the numbers `_citation_fields`/`_scope_fields`
     already compute for the `generate` event. Either firing spends up to `repair_cap`
     extra calls to the *same* writer that just drafted, handing back its own draft with
-    the concrete numbers and the fix tasks it already saw, and asking for the whole corrected report
-    back. The repaired draft is re-measured and used whether or not the gate cleared —
-    this is a bounded repair turn, never a loop that holds up the run chasing zero.
+    the concrete numbers and the fix tasks it already saw. Under the patch licence the
+    repair asks for the whole corrected report; under the ops licence it asks for
+    operations on the labelled previous draft. The repaired draft is re-measured and
+    used whether or not the gate cleared — this is a bounded repair turn, never a loop
+    that holds up the run chasing zero.
 
     `enabled: false` restores the warn-only behaviour D-writer-citation-continuity and
     D-scoped-revision shipped with: the numbers are still computed and logged, nothing
@@ -785,10 +787,10 @@ class RepairConfig(BaseModel):
     #: the moment neither gate fires — so this is a ceiling on wasted calls against a
     #: writer that keeps failing the same gate, not a retry target.
     repair_cap: int = Field(default=1, ge=1, le=5)
-    #: Gate 2's threshold (patch-mode revisions only — never the first draft, a rule-9
-    #: polish pass, or a rule-13 rewrite, the same three cases `_scope_fields` is silent
-    #: for). The shipped roster's value is an operator deployment choice based on private
-    #: observations; it is not a project-wide empirical claim (QP9).
+    #: Gate 2's threshold (patch- or ops-mode revisions only — never the first draft, a
+    #: rule-9 polish pass, or a rule-13 rewrite, the same three cases `_scope_fields` is
+    #: silent for). The shipped roster's value is an operator deployment choice based
+    #: on private observations; it is not a project-wide empirical claim (QP9).
     max_out_of_scope: int = Field(default=6, ge=1, le=100)
 
 
@@ -816,13 +818,25 @@ class RevisionConfig(BaseModel):
     told to carry the change to every restatement, and the scope measurement counts
     those edits as `restated`, apart from `out_of_scope`.
 
-    Both settings are here rather than in code so the two can be A/B'd from
-    configuration; `rewrite` reproduces the old prompt byte for byte.
+    `ops` narrows the *output* (D-ops-revision). The writer is shown the draft with the
+    `[S<n>.P<m>]` labels the critics read and returns operations on those paragraphs —
+    replace, delete, insert-after — instead of the document; `ops.splice` builds the next
+    report. Everything `patch` could only ask for is then enforced in code: a paragraph no
+    operation names is byte-identical by construction, a heading cannot be addressed, and
+    a Sources change that would leave a body marker citing nothing is refused. A reply
+    with no applicable operation is a failed writer attempt (`malformed_ops`) that moves
+    to the next pool member, like an empty reply. `scope_check` and `repair` apply exactly
+    as under `patch`; the census-gated repair turn returns operations too. A first draft,
+    a polish pass and a rule-13 rewrite are whole documents whatever the mode.
+
+    All three settings are here rather than in code so they can be A/B'd from
+    configuration; `rewrite` reproduces the old prompt byte for byte, and `patch` is
+    unchanged by the existence of `ops`.
     """
 
     model_config = ConfigDict(extra="forbid")
 
-    mode: Literal["patch", "rewrite"] = "patch"
+    mode: Literal["patch", "rewrite", "ops"] = "patch"
     #: The mechanical check that the writer honored the scope it was given. Warn-only:
     #: it records what changed on the `generate` event and never rejects a draft. A
     #: draft rejected here would burn one of `budgets.writer_attempts` (3), and a model

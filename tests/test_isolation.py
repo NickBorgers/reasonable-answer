@@ -200,13 +200,62 @@ def test_generator_prompt_carries_no_critique_prose(identities, config):
         rationale="no citation attached",
         instruction="cite a source or remove the claim",
     )
-    # Both revision modes (D-scoped-revision): scoping the *edit* must not widen what
-    # crosses the handoff. The patch close states a rule and its cost, never a verdict
-    # about the text it tells the writer to leave alone.
-    for mode in ("rewrite", "patch"):
+    # All three revision modes (D-scoped-revision, D-ops-revision): scoping the *edit*,
+    # or its output shape, must not widen what crosses the handoff. The patch and ops
+    # closes state a rule and its cost, never a verdict about the text they tell the
+    # writer to leave alone.
+    for mode in ("rewrite", "patch", "ops"):
         text = prompts.writer_revision("q?", CLEAN_REPORT, [defect], polish=False, mode=mode)
         for leak in ("lens", "critic", "reviewer", "logic", "evidence", "completeness"):
             assert leak not in text.lower(), (mode, leak)
+
+
+def test_the_ops_prompt_adds_only_labels_section_lines_task_ids_and_its_close():
+    """D-ops-revision: what the writer sees under ops is the patch prompt plus the
+    `[S<n>.P<m>]` labels and section lines critics already read, a task ordinal per fix
+    task, one intro clause, and the close. Nothing else may differ."""
+    import re
+
+    from reasonable_answer.schemas import Defect, StructuralRef
+    from reasonable_answer.taxonomy import Category, Severity
+
+    defect = Defect(
+        locus=StructuralRef(section=1, paragraph=1),
+        category=Category.UNCITED_CLAIM,
+        severity=Severity.MAJOR,
+        claim_span="Water boils at 100 degrees Celsius",
+        rationale="no citation attached",
+        instruction="cite a source or remove the claim",
+    )
+    # Stripped, because the label rendering strips the document and the patch prompt
+    # does not; a trailing newline is not a leak.
+    draft = CLEAN_REPORT.strip()
+    patch = prompts.writer_revision("q?", draft, [defect], polish=False, mode="patch")
+    ops = prompts.writer_revision("q?", draft, [defect], polish=False, mode="ops")
+
+    def strip(text: str, close: str, intro: str) -> str:
+        assert text.endswith(close)
+        text = text[: -len(close)]
+        assert intro in text
+        text = text.replace(intro, "")
+        text = re.sub(r"^\[S\d+\.P\d+\] ", "", text, flags=re.M)
+        # The critic rendering replaces each heading line with a section line.
+        text = re.sub(r"^=== SECTION \d+: .* ===\n\n", "", text, flags=re.M)
+        text = re.sub(r"^#{1,6} .*\n\n", "", text, flags=re.M)
+        text = re.sub(r'^\s*"task_id": "T\d+",\n', "", text, flags=re.M)
+        return "\n".join(line.rstrip() for line in text.splitlines())
+
+    patch_intro = (
+        "Below are a question, a draft report answering it, and a list of objective fix tasks "
+        "against that draft. "
+    )
+    ops_intro = (
+        "Below are a question, a draft report answering it (every paragraph labelled with its "
+        "locus), and a list of numbered fix tasks against that draft. "
+    )
+    assert strip(patch, prompts.WRITER_PATCH_CLOSE, patch_intro) == strip(
+        ops, prompts.WRITER_OPS_CLOSE, ops_intro
+    )
 
 
 # -------------------------------------------------------- prompt injection
