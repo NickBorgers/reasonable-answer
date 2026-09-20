@@ -615,9 +615,10 @@ def writer_revision(
 #: resulting uncited-claim findings by deleting most of the report. Two mechanical gates
 #: on the numbers `graph._citation_fields`/`_scope_fields` already compute — a marker-less
 #: body with sources, or a patch-mode revision touching far more than the fix tasks named
-#: — spend one extra call to the *same* writer with the exact counts, before any critic
-#: sees the draft. The writer sees nothing new: its own draft, the previous artifact, and
-#: the fix tasks it already had — no critic identity, no fresh source text.
+#: — spend up to a configured cap of extra calls to the *same* writer with the exact
+#: counts, before any critic sees the draft. The writer sees nothing new: its own draft,
+#: the previous artifact, and the fix tasks it already had — no critic identity, no
+#: fresh source text.
 def writer_repair_turn(
     question: str,
     draft: str,

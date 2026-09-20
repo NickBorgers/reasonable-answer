@@ -234,7 +234,8 @@ as inference, never leave the claim standing unmarked. Every `generate` event ca
 (`source_entries`, `body_markers`, `cited_entries`, `dangling_markers`, and on revisions
 `cited_sources_dropped`, `cited_sources_added`, `entries_removed`). No draft is rejected on it and it is
 not a controller input, but since D-census-gated-repair a marker-less body with sources
-(`body_markers == 0 and source_entries > 0`) spends one extra call to the same writer before the draft
+(`body_markers == 0 and source_entries > 0`) spends up to `revision.repair.repair_cap` extra calls
+(default 1) to the same writer before the draft
 ships to any critic — see
 [isolation.md](isolation.md#scoping-the-edit-is-not-narrowing-the-review-d-scoped-revision) for the gate
 and the out-of-scope one alongside it.

@@ -8,6 +8,7 @@ from pathlib import Path
 
 import pytest
 from fakes import FakeClient
+from pydantic import ValidationError
 
 from reasonable_answer.config import Budgets, Config, ConfigError, RepairConfig, RevisionConfig
 from reasonable_answer.graph import _lens_results, run
@@ -994,12 +995,26 @@ def _direct_generate(tmp_path, cfg, client, identities, state, run_id="run-repai
     return out, generate_event
 
 
+@pytest.mark.parametrize(
+    ("field", "value"),
+    [("repair_cap", 0), ("repair_cap", 6), ("max_out_of_scope", 0), ("max_out_of_scope", 101)],
+)
+def test_repair_config_bounds(field, value):
+    with pytest.raises(ValidationError):
+        RepairConfig(**{field: value})
+
+
 def test_a_markerless_revision_triggers_one_repair_and_ships_the_repaired_draft(
     identities, tmp_path, roster
 ):
     """Gate 1 (D-census-gated-repair): a revision that drops every [n] marker gets one
     extra call to the writer that dropped it, and the repaired draft is what ships."""
-    cfg = Config(roster=roster, budgets=Budgets(min_ticks=2, hard_cap=4), runs_dir=tmp_path / "runs")
+    cfg = Config(
+        roster=roster,
+        budgets=Budgets(min_ticks=2, hard_cap=4),
+        runs_dir=tmp_path / "runs",
+        revision=RevisionConfig(repair=RepairConfig(enabled=True)),
+    )
     markerless = REPORT.replace(" [1]", "")
     drafts = [markerless, REPORT]
     client = FakeClient(identities=identities, critique_fn=clean, report_fn=lambda n: drafts[n - 1])
@@ -1032,7 +1047,9 @@ def test_an_out_of_scope_revision_over_threshold_triggers_repair(identities, tmp
         roster=roster,
         budgets=Budgets(min_ticks=2, hard_cap=4),
         runs_dir=tmp_path / "runs",
-        revision=RevisionConfig(mode="patch", repair=RepairConfig(max_out_of_scope=6)),
+        revision=RevisionConfig(
+            mode="patch", repair=RepairConfig(enabled=True, max_out_of_scope=6)
+        ),
     )
     previous = _multi_paragraph_report(9)
     # Rewrites paragraphs 2-8 (7 of them) that no task named — one over the threshold.
@@ -1062,6 +1079,45 @@ def test_an_out_of_scope_revision_over_threshold_triggers_repair(identities, tmp
     assert event["out_of_scope"] == 0
 
 
+def test_markerless_and_out_of_scope_revision_records_both(identities, tmp_path, roster):
+    """Both mechanical gates feed the closed `repair_reason` enum and prompt path."""
+    cfg = Config(
+        roster=roster,
+        budgets=Budgets(min_ticks=2, hard_cap=4),
+        runs_dir=tmp_path / "runs",
+        revision=RevisionConfig(
+            mode="patch", repair=RepairConfig(enabled=True, max_out_of_scope=6)
+        ),
+    )
+    source_line = "\n\n## Sources\n\n[1] A real-looking source."
+    previous = _multi_paragraph_report(9) + source_line
+    failing = "\n\n".join(
+        f"Paragraph number {i} was rewritten wholesale for no stated reason."
+        if 2 <= i <= 8
+        else f"Paragraph number {i} says something specific to itself."
+        for i in range(1, 10)
+    ) + source_line
+    client = FakeClient(
+        identities=identities,
+        critique_fn=clean,
+        report_fn=lambda n: [failing, REPORT][n - 1],
+    )
+    state = {
+        "question": "Is it so?",
+        "report": previous,
+        "author_identity": identities["writer-a"],
+        "run_date": "2026-09-20",
+        "defects": [uncited(section=0, paragraph=1).model_dump(mode="json")],
+    }
+
+    _, event = _direct_generate(tmp_path, cfg, client, identities, state)
+
+    assert event["repair_reason"] == "both"
+    repair_call = [call for call in client.calls if call.schema is None][1]
+    assert "body carries 0 [n] marker(s)" in repair_call.user
+    assert "changed 7 paragraph(s)" in repair_call.user
+
+
 def test_out_of_scope_at_the_threshold_does_not_trigger_repair(identities, tmp_path, roster):
     """`out_of_scope > max_out_of_scope`, not `>=` — six rewritten paragraphs is the
     documented default ceiling, not yet an over-threshold draft."""
@@ -1069,7 +1125,9 @@ def test_out_of_scope_at_the_threshold_does_not_trigger_repair(identities, tmp_p
         roster=roster,
         budgets=Budgets(min_ticks=2, hard_cap=4),
         runs_dir=tmp_path / "runs",
-        revision=RevisionConfig(mode="patch", repair=RepairConfig(max_out_of_scope=6)),
+        revision=RevisionConfig(
+            mode="patch", repair=RepairConfig(enabled=True, max_out_of_scope=6)
+        ),
     )
     previous = _multi_paragraph_report(9)
     # Exactly six paragraphs (2-7) rewritten with no task naming them.
@@ -1144,7 +1202,12 @@ def test_a_failed_repair_call_keeps_the_original_draft(identities, tmp_path, ros
             return markerless
         raise ModelCallError("provider exploded mid-repair")
 
-    cfg = Config(roster=roster, budgets=Budgets(min_ticks=2, hard_cap=4), runs_dir=tmp_path / "runs")
+    cfg = Config(
+        roster=roster,
+        budgets=Budgets(min_ticks=2, hard_cap=4),
+        runs_dir=tmp_path / "runs",
+        revision=RevisionConfig(repair=RepairConfig(enabled=True)),
+    )
     client = FakeClient(identities=identities, critique_fn=clean, report_fn=flaky)
     state = {
         "question": "Is it so?",
@@ -1176,7 +1239,12 @@ def test_gate_2_is_exempt_where_scope_measurement_is_silent_but_gate_1_is_not(
     """`_scope_fields` stays silent for the first draft, a rule-9 polish pass and a
     rule-13 rewrite (D-scoped-revision), so gate 2 can never fire there — but gate 1
     (marker-less body) applies to every draft including these three."""
-    cfg = Config(roster=roster, budgets=Budgets(min_ticks=2, hard_cap=4), runs_dir=tmp_path / "runs")
+    cfg = Config(
+        roster=roster,
+        budgets=Budgets(min_ticks=2, hard_cap=4),
+        runs_dir=tmp_path / "runs",
+        revision=RevisionConfig(repair=RepairConfig(enabled=True)),
+    )
     source_line = "\n\n## Sources\n\n[1] A real-looking source."
     markerless = "# Answer\n\nAn unmarked claim entirely." + source_line
     repaired = "# Answer\n\nA marked claim [1]." + source_line
@@ -1207,7 +1275,7 @@ def test_repair_cap_bounds_the_number_of_extra_writer_calls(identities, tmp_path
         roster=roster,
         budgets=Budgets(min_ticks=2, hard_cap=4),
         runs_dir=tmp_path / "runs",
-        revision=RevisionConfig(repair=RepairConfig(repair_cap=2)),
+        revision=RevisionConfig(repair=RepairConfig(enabled=True, repair_cap=2)),
     )
     markerless = REPORT.replace(" [1]", "")
     client = FakeClient(identities=identities, critique_fn=clean, report_fn=lambda _n: markerless)

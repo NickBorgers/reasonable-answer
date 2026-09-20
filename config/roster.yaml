@@ -504,16 +504,18 @@ revision:
   #      three cases `scope_check` above is silent for; under `mode: rewrite` a high
   #      `out_of_scope` is the writer doing what it was asked, not a defect).
   #
-  # Either gate spends one extra call to the *same* writer, handing back its own draft
-  # with the exact numbers and the fix tasks it already saw, and asking for the whole
+  # Either gate spends up to `repair_cap` extra calls to the *same* writer, handing back
+  # its own draft with the exact numbers and the fix tasks it already saw, and asking for the whole
   # corrected report. The repaired draft is re-measured and ships whether or not the
   # gate cleared — never a loop chasing a clean measurement, always at most
-  # `repair_cap` extra calls. A failed repair call keeps the original draft; a repair
-  # never aborts a run that would otherwise have continued.
+  # `repair_cap` extra calls. A failed repair call keeps the latest successfully repaired
+  # draft (or the original when the first attempt fails); a repair never aborts a run.
+  # The code default is disabled because private observations cannot move every
+  # deployment's default (QP9); this production roster explicitly opts in.
   repair:
     enabled: true       # false restores the exact warn-only behaviour above
     repair_cap: 1        # extra writer calls one generation may spend on repair
-    max_out_of_scope: 6  # gate 2's threshold; healthy patch revisions ran 0-4, occasionally 6
+    max_out_of_scope: 6  # operator-selected gate 2 threshold; private deployment evidence (QP9)
 
 budgets:
   min_ticks: 2

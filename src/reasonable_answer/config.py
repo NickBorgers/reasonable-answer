@@ -763,9 +763,9 @@ class RepairConfig(BaseModel):
     """The census-gated repair turn (D-census-gated-repair).
 
     Two mechanical gates, checked against the numbers `_citation_fields`/`_scope_fields`
-    already compute for the `generate` event. Either firing spends one extra call to the
-    *same* writer that just drafted, handing back its own draft with the concrete
-    numbers and the fix tasks it already saw, and asking for the whole corrected report
+    already compute for the `generate` event. Either firing spends up to `repair_cap`
+    extra calls to the *same* writer that just drafted, handing back its own draft with
+    the concrete numbers and the fix tasks it already saw, and asking for the whole corrected report
     back. The repaired draft is re-measured and used whether or not the gate cleared —
     this is a bounded repair turn, never a loop that holds up the run chasing zero.
 
@@ -776,7 +776,10 @@ class RepairConfig(BaseModel):
 
     model_config = ConfigDict(extra="forbid")
 
-    enabled: bool = True
+    #: Off in the code default because the production observations motivating the gate
+    #: are private and cannot warrant changing every deployment's behaviour (QP9).
+    #: The shipped roster records the operator's explicit opt-in.
+    enabled: bool = False
     #: Extra writer calls one generation may spend chasing a clean gate. The repair
     #: never loops looking for a resolution — it re-measures after each call and stops
     #: the moment neither gate fires — so this is a ceiling on wasted calls against a
@@ -784,8 +787,8 @@ class RepairConfig(BaseModel):
     repair_cap: int = Field(default=1, ge=1, le=5)
     #: Gate 2's threshold (patch-mode revisions only — never the first draft, a rule-9
     #: polish pass, or a rule-13 rewrite, the same three cases `_scope_fields` is silent
-    #: for). Production's healthy patch revisions ran 0-4, occasionally 6, paragraphs
-    #: out of scope; the run that motivated this decision ran 15 of 20 and then 10 of 12.
+    #: for). The shipped roster's value is an operator deployment choice based on private
+    #: observations; it is not a project-wide empirical claim (QP9).
     max_out_of_scope: int = Field(default=6, ge=1, le=100)
 
 

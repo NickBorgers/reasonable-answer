@@ -1,6 +1,6 @@
 ## D-census-gated-repair — a draft that fails the citation census gets one repair turn before the critics see it
 
-**The finding.** Production run `run-05289e3ce78c`, round 7 (writer `mistral`): a revision listing
+**The private motivation.** Production run `run-05289e3ce78c`, round 7 (writer `mistral`): a revision listing
 twelve sources in `## Sources` came back with **zero** `[n]` markers in the body (`body_markers=0`,
 `cited_entries=0`, `cited_sources_dropped=13`) and touched 15 of its 20 changed paragraphs outside
 anything a fix task named (`out_of_scope=15`). Round 8 (writer `nemotron`) then "resolved" the
@@ -8,18 +8,24 @@ uncited-claim findings the evidence lens filed against that draft — the only l
 leaves the critics — by deleting most of the report (`entries_removed=9`, `out_of_scope=10` of 12
 changed paragraphs). The shipped report had one paragraph and three sources, down from twelve. Across
 the prior 48 hours, `mistral` produced a marker-less or source-less draft five times in four runs, and
-`nemotron` removed sources in five of seven revisions. Healthy patch revisions in the same window —
-`deepseek` reviser — ran `out_of_scope` at 0-4, occasionally 6, and never a marker-less body.
+`nemotron` removed sources in five of seven revisions. Patch revisions judged healthy by the operator
+in the same window — `deepseek` reviser — ran `out_of_scope` at 0-4, occasionally 6, and never a
+marker-less body. These
+observations come from a private audit trail and cannot be fetched from this repository. Under QP9
+they are motivation for an opt-in deployment setting, not evidence for a project-wide default or a
+general empirical claim.
 
 Both numbers already existed on the `generate` audit event before this decision. `_citation_fields`
 (D-writer-citation-continuity) counts `body_markers`/`source_entries`/`cited_sources_dropped` on every
 draft; `_scope_fields` (D-scoped-revision) counts `out_of_scope` on every patch-mode revision. Both are
 warn-only by explicit, argued design — D-writer-citation-continuity's "Deliberately not done" names "a
 generate-time gate or repair turn" outright, and D-scoped-revision reasoned that "an enforcing tier is
-worth building only if these numbers say the prompt does not hold." This run is that evidence. The
-prompt already forbids all of it — `WRITER_CITATION_REVISION` says keep every marker on a kept claim,
+worth building only if these numbers say the prompt does not hold." The repository-verifiable warrant
+is narrower than the private motivation: the prompt already forbids these mechanically detected
+outcomes — `WRITER_CITATION_REVISION` says keep every marker on a kept claim,
 `WRITER_PATCH_CLOSE` says change only what a task names — but a prompt rule is not enforcement, and a
-mechanical measurement with no consumer catches nothing.
+mechanical measurement with no consumer catches nothing. The prompt text, gate functions, and offline
+tests establish that mechanism without relying on the private run's rates.
 
 **Decision.** Two mechanical gates on the numbers already computed, each spending at most
 `revision.repair.repair_cap` (default 1) extra calls to the **same writer** that produced the failing
@@ -30,16 +36,21 @@ draft, before triage, before any critic, before the `OrchestratorView` or the co
    because a whole-document regeneration is exactly where D-writer-citation-continuity found markers
    get lost, and a first draft that lists sources with no marker in the body is the same defect on the
    very first tick.
-2. **Out-of-scope rewrite.** `out_of_scope > revision.repair.max_out_of_scope` (default 6), on a
+2. **Out-of-scope rewrite.** `out_of_scope > revision.repair.max_out_of_scope` (field default 6), on a
    **patch-mode revision only** — never the first draft, a polish pass, or a rule-13 rewrite, the same
    three cases `_scope_fields` already stays silent for, and additionally never under
    `revision.mode: rewrite`: a writer told to regenerate the whole document is doing what it was asked
    when it touches everything, so a high `out_of_scope` there is the mode working, not a defect. The
-   default of 6 is D-scoped-revision's own observed healthy ceiling, restated as a threshold rather
-   than left as a fact in a decision file nothing reads at runtime.
+   value of 6 in the shipped roster is the operator's deployment posture based on the private
+   observations above, not a portable healthy-range claim.
 
-**The repair turn.** `graph._writer_repair` makes one more call to the same alias, same system prompt
-shape, same call timeout as the generation it repairs — nothing about the call machinery differs, only
+`RepairConfig.enabled` defaults to `false`, preserving the prior warn-only code behaviour. The shipped
+production roster explicitly opts in with `enabled: true` and `max_out_of_scope: 6`, following the
+same QP9 pattern as `review.selection`: private operational evidence may inform a named deployment's
+choice but does not move the behaviour inherited by deployments that omit the field.
+
+**The repair turn.** `graph._writer_repair` makes up to the configured cap of calls to the same alias,
+same system prompt shape, same call timeout as the generation it repairs — nothing about the call machinery differs, only
 the prompt does. `prompts.writer_repair_turn` states the gate(s) that fired with their concrete numbers
 (only the sentence for a gate that actually fired — a run tuned to tolerate a high `out_of_scope` never
 sees that wording on a marker-only failure), then hands back exactly three things: the writer's own
@@ -53,8 +64,9 @@ something it already held before this call.
 functions and ships it whether or not the gate cleared. This never loops chasing a clean measurement —
 each pass through the bounded `repair_cap` loop either resolves or does not, and once the cap is spent
 the draft ships as it stands. A repair call that itself fails (`ModelCallError`, or an empty
-completion) is caught, logged, and treated as an unresolved attempt: the *original* draft ships, never
-a partial or malformed one, and a repair can never abort a run that would otherwise have continued.
+completion) is caught, logged, and treated as an unresolved attempt: the latest successfully repaired
+draft ships (or the original draft when the first attempt fails), never a partial or malformed
+completion, and a repair can never abort a run that would otherwise have continued.
 
 **Why the same writer.** The census and scope numbers describe what *this model* dropped from *its own*
 draft; asking a different model to reconstruct byte-identical paragraphs it never wrote would trade one
@@ -72,11 +84,10 @@ controller's own capped one (QP7). `repair_cap` defaults to 1 and is configurabl
 wants to spend more calls chasing the same gate; nothing in the mechanism assumes it is exactly one.
 
 **Why these thresholds and not a stricter gate.** Gate 1 has no tunable — a body that lists sources and
-cites none of them in prose is unconditionally a defect, on every draft. Gate 2's `max_out_of_scope: 6`
-is deliberately generous: D-scoped-revision's own healthy-run range runs 0-4, occasionally 6, so the
-default ceiling is exactly the top of the range a working patch revision already produces, not a
-tightened one. A stricter default would fire on ordinary variance and spend calls on drafts that were
-never the problem this decision was written to fix.
+cites none of them in prose violates the repository's citation prompt on every draft. Gate 2 is
+configurable because the repository has no public evidence establishing one portable threshold. Six
+is recorded only as this deployment's operator-selected ceiling; another deployment must choose from
+its own reviewable posture, and omission leaves repair disabled.
 
 **Invariants touched: none.** Blind orchestrator and author exclusion are untouched — the repair turn
 never reaches triage, the `OrchestratorView`, or the controller, and it is the *same* author repairing
