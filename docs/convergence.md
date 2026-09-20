@@ -227,8 +227,10 @@ question is being answered.
 **Citations are markers, and a revision keeps them (D-writer-citation-continuity).** `WRITER_SYSTEM`
 says a citation is the `[n]` marker inside the sentence it supports — naming a source in prose or
 listing it under Sources cites nothing — and that every entry is cited by some marker and every marker
-has an entry. Both revision modes carry `WRITER_CITATION_REVISION` inside the resolution standard: keep
-every marker on a kept claim; delete an entry only when nothing cites it; never renumber, so a patch
+has an entry. Every revision mode carries `WRITER_CITATION_REVISION` inside the resolution standard: keep
+every marker on a kept claim; delete an entry only when nothing cites it — refused mechanically under
+`revision.mode: ops`, where a Sources operation that would leave a body marker citing nothing is not
+applied (D-ops-revision); never renumber, so a patch
 does not rewrite every citing paragraph; and "remove the attribution" means re-cite, restrict, or label
 as inference, never leave the claim standing unmarked. Every `generate` event carries a citation census
 (`source_entries`, `body_markers`, `cited_entries`, `dangling_markers`, and on revisions
@@ -770,7 +772,7 @@ asked, never how many passes the budgets allow.
 | 10 | `material == 0` **and** `weak_met` (every under-cleared lens is `roster_limited`) | **converged_unconfirmed** |
 | 11 | `material == 0` (not strong, not toppable, not weak — confirmation budget spent) | **exhausted_unresolved** (clean-but-unconfirmed) |
 | 12 | `cycle_detected` | **needs_human_review** (freeze the selected version) |
-| 13 | `material > 0` **and** `stagnation_count ≥ K` **and** `rewrites_used < rewrite_cap` | **continue** (generate — a **full-document rewrite** by a fresh writer, ignoring `revision.mode`; `rewrites_used += 1`, `stagnation_count := 0`) |
+| 13 | `material > 0` **and** `stagnation_count ≥ K` **and** `rewrites_used < rewrite_cap` | **continue** (generate — a **full-document rewrite** by a fresh writer, ignoring `revision.mode` — `patch`, `rewrite` or `ops` alike; `rewrites_used += 1`, `stagnation_count := 0`) |
 | 13 | `material > 0` **and** `stagnation_count ≥ K` | early terminal: **needs_human_review** if `blocking>0` else **exhausted_unresolved** |
 | 14 | `material > 0` | **continue** (generate from defect list) |
 

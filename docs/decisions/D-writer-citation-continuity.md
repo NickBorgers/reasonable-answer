@@ -90,6 +90,12 @@ happens — the D-scoped-revision warn-only doctrine.
 > draft, triggers a repair turn" no longer holds for this one condition. `revision.repair.enabled:
 > false` restores this section exactly.
 
+> Superseded in part by **D-ops-revision**: "delete a Sources entry only when no remaining sentence
+> cites it" is mechanical under `revision.mode: ops` — a Sources operation that would raise the body's
+> count of markers citing no entry is refused at splice time and counted (`ops_refused_dangling`).
+> The prompt rule stays, for `patch` and `rewrite` and for the writer's own understanding; the census
+> on every `generate` event is unchanged.
+
 **Deliberately not done.**
 
 - A generate-time gate or repair turn, for the reason above — narrowed by D-census-gated-repair to the

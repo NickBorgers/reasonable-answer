@@ -816,13 +816,25 @@ class RevisionConfig(BaseModel):
     told to carry the change to every restatement, and the scope measurement counts
     those edits as `restated`, apart from `out_of_scope`.
 
-    Both settings are here rather than in code so the two can be A/B'd from
-    configuration; `rewrite` reproduces the old prompt byte for byte.
+    `ops` narrows the *output* (D-ops-revision). The writer is shown the draft with the
+    `[S<n>.P<m>]` labels the critics read and returns operations on those paragraphs —
+    replace, delete, insert-after — instead of the document; `ops.splice` builds the next
+    report. Everything `patch` could only ask for is then enforced in code: a paragraph no
+    operation names is byte-identical by construction, a heading cannot be addressed, and
+    a Sources change that would leave a body marker citing nothing is refused. A reply
+    with no applicable operation is a failed writer attempt (`malformed_ops`) that moves
+    to the next pool member, like an empty reply. `scope_check` and `repair` apply exactly
+    as under `patch`; the census-gated repair turn returns operations too. A first draft,
+    a polish pass and a rule-13 rewrite are whole documents whatever the mode.
+
+    All three settings are here rather than in code so they can be A/B'd from
+    configuration; `rewrite` reproduces the old prompt byte for byte, and `patch` is
+    unchanged by the existence of `ops`.
     """
 
     model_config = ConfigDict(extra="forbid")
 
-    mode: Literal["patch", "rewrite"] = "patch"
+    mode: Literal["patch", "rewrite", "ops"] = "patch"
     #: The mechanical check that the writer honored the scope it was given. Warn-only:
     #: it records what changed on the `generate` event and never rejects a draft. A
     #: draft rejected here would burn one of `budgets.writer_attempts` (3), and a model

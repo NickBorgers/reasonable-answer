@@ -244,6 +244,27 @@ untouched paragraphs byte-for-byte from the previous artifact appears only under
 the same `mode == "patch"`, not-polish, not-rewrite condition the drafting call uses to select the
 patch close (D-scoped-revision) — so a repair never carries a licence the generation it repairs did not.
 
+**Operations, not a document (D-ops-revision).** Under `revision.mode: ops` the writer does not
+return the report at all. It is shown the draft in the critics' own rendering — every paragraph
+carrying its `[S<n>.P<m>]` label — with each fix task numbered `T1`, `T2`, …, and it returns
+operations on those labels: replace a paragraph, delete it, insert one after it. `ops.splice` builds
+the next artifact from the previous one and the operations, and that spliced Markdown is what every
+critic reads, in the unchanged rendering, in a fresh blind context. What the patch close could only ask
+for is now a property of the splice: a paragraph no operation names is byte-identical because nothing
+touched it; a heading cannot be renumbered or dropped because no label addresses one; a Sources change
+that would leave a body marker citing nothing is refused; new text that would add a heading is
+refused; a copied label or an echoed section heading is stripped. A reply with no applicable
+operation is a failed writer attempt (`malformed_ops`) that moves to the next pool member, like an
+empty reply — there is no draft to ship or repair. Every count rides the `generate` event as an
+integer (`ops_applied`, `ops_refused_*`, …) beside `revision_mode`; no text, no locus, no task id.
+
+Nothing about who edits or who reviews moves here either. The handoff carries exactly what the patch
+prompt carried plus the labels the critics already read and a task ordinal per fix task; every fenced
+block is `_neutralized` (D-fence-scrub-all-directions), and no critique prose, lens name or critic
+identity is added. The census-gated repair turn under ops asks for operations on the labelled previous
+draft, never for a whole document — one output contract per mode — and its reply is spliced the same
+way. A first draft, a polish pass and a rule-13 rewrite are whole documents whatever the mode.
+
 ## The depersonalization step (principle 1, made concrete)
 
 ```mermaid

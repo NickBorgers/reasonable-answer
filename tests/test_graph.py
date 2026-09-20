@@ -10,6 +10,7 @@ import pytest
 from fakes import FakeClient
 from pydantic import ValidationError
 
+from reasonable_answer import prompts
 from reasonable_answer.config import Budgets, Config, ConfigError, RepairConfig, RevisionConfig
 from reasonable_answer.graph import _lens_results, run
 from reasonable_answer.llm import ModelCallError
@@ -1486,3 +1487,302 @@ def test_a_repair_that_deletes_the_sources_section_is_not_resolved(identities, t
     assert event["repair_reason"] == "markerless"
     assert event["repair_resolved"] == 0
     assert event["source_entries"] == 0
+
+
+# ------------------------------------------------- operations revision (D-ops-revision)
+
+
+OPS_PREVIOUS = """## Conclusion
+
+Water boils at 100 degrees Celsius at sea level [1].
+
+## Body
+
+The boiling point paragraph restates the claim about boiling [1].
+
+The freezing point paragraph says water freezes at zero degrees [2].
+
+## Sources
+
+[1] Boiling source. https://example.org/boil
+
+[2] Freezing source. https://example.org/freeze
+"""
+
+OPS_REPLY = """@@ replace S2.P2 tasks=T1
+The freezing point paragraph now says water freezes at zero degrees Celsius [2].
+@@ end
+"""
+
+OPS_SPLICED = OPS_PREVIOUS.strip().replace(
+    "The freezing point paragraph says water freezes at zero degrees [2].",
+    "The freezing point paragraph now says water freezes at zero degrees Celsius [2].",
+)
+
+
+def _ops_cfg(roster, tmp_path, **revision):
+    return Config(
+        roster=roster,
+        budgets=Budgets(min_ticks=2, hard_cap=4),
+        runs_dir=tmp_path / "runs",
+        revision=RevisionConfig(mode="ops", **revision),
+    )
+
+
+def _ops_state(identities, defects=None, **overrides):
+    return {
+        "question": "Is it so?",
+        "report": OPS_PREVIOUS,
+        "author_identity": identities["writer-a"],
+        "run_date": "2026-09-20",
+        "defects": (
+            defects if defects is not None else [uncited(section=2, paragraph=2).model_dump(mode="json")]
+        ),
+        **overrides,
+    }
+
+
+def test_an_ops_reply_is_spliced_and_the_event_carries_the_counts(identities, tmp_path, roster):
+    """The artifact is the splice, never the reply: hash, store and scope fields all
+    describe the spliced Markdown, and every `ops_*` count rides the event as an int."""
+    from reasonable_answer import ops as ops_mod
+    from reasonable_answer.report import artifact_hash
+
+    client = FakeClient(identities=identities, critique_fn=clean, report_fn=lambda _n: OPS_REPLY)
+    cfg = _ops_cfg(roster, tmp_path)
+    out, event = _direct_generate(tmp_path, cfg, client, identities, _ops_state(identities))
+
+    assert out["report"] == OPS_SPLICED
+    assert out["artifact_hash"] == artifact_hash(OPS_SPLICED)
+    assert event["artifact_hash"] == artifact_hash(OPS_SPLICED)
+    assert event["revision_mode"] == "ops"
+    for key in (*ops_mod.PARSE_FIELDS, *ops_mod.SPLICE_FIELDS):
+        assert isinstance(event[key], int), key
+    assert event["ops_total"] == 1
+    assert event["ops_applied"] == 1
+    # Scope is measured on the spliced text against the previous artifact, as under patch.
+    assert event["changed_paragraphs"] == 1
+    assert event["in_scope"] == 1
+    assert event["out_of_scope"] == 0
+    assert event["body_markers"] == 3
+    assert event["dangling_markers"] == 0
+    # The writer saw the labelled draft and the numbered tasks, and was asked for operations.
+    writer_call = [c for c in client.calls if c.schema is None][0]
+    assert "[S2.P2]" in writer_call.user
+    assert '"task_id": "T1"' in writer_call.user
+    assert "OUTPUT FORMAT — OPERATIONS ONLY" in writer_call.user
+
+
+def test_critics_see_plain_markdown_never_the_operations(identities, config):
+    """End to end on the graph: a critic flags the seed, the writer answers with
+    operations, the critics then read the spliced Markdown — never a protocol line —
+    and the run accepts the spliced report."""
+    cfg = config.model_copy(update={"revision": RevisionConfig(mode="ops")})
+    span = "The freezing point paragraph says water freezes at zero degrees"
+
+    def critique(_alias, user):
+        # `uncited_claim` is the evidence lens's category; the others fail closed on it.
+        if span not in user or lens_of(user) != "evidence":
+            return CritiqueOutput(issues=[])
+        issue = RawIssue(
+            category=Category.UNCITED_CLAIM,
+            severity=Severity.MAJOR,
+            locus=StructuralRef(section=2, paragraph=2),
+            claim_span=span,
+            rationale="the claim is unsupported as stated",
+            instruction="restate the claim precisely",
+        )
+        return CritiqueOutput(issues=[issue])
+
+    client = FakeClient(identities=identities, critique_fn=critique, report_fn=lambda _n: "")
+    # A revision under ops is answered with operations; any whole-document call (there
+    # should be none on this run, but a polish pass would be one) gets the report.
+    client.report_fn = lambda _n: (
+        OPS_REPLY if "OPERATIONS ONLY" in client.calls[-1].user else OPS_SPLICED
+    )
+    final = run(cfg, question="Is it so?", seed=OPS_PREVIOUS, client=client)
+
+    assert not final["fatal"]
+    assert final["terminal_status"] == "accepted"
+    assert final["report"] == OPS_SPLICED
+    generates = [e for e in events_of(final) if e["kind"] == "generate"]
+    assert generates and all(e["revision_mode"] == "ops" for e in generates)
+    assert generates[0]["ops_applied"] == 1
+    critic_calls = [c for c in client.calls if c.schema == "CritiqueOutput"]
+    assert critic_calls
+    for call in critic_calls:
+        assert "@@ " not in call.user
+        assert "OPERATIONS ONLY" not in call.user
+
+
+def test_a_malformed_ops_reply_is_its_own_failure_class_and_the_next_writer_authors(
+    identities, tmp_path, roster
+):
+    """No operation parsed: there is no draft to ship or repair, so the attempt fails the
+    way an empty reply does and the next pool member gets the call (D-ops-revision)."""
+    replies = ["I revised the report as you asked.", OPS_REPLY]
+    client = FakeClient(identities=identities, critique_fn=clean, report_fn=lambda n: replies[n - 1])
+    cfg = _ops_cfg(roster, tmp_path)
+    # A seeded previous draft excludes no writer, so both pool members are eligible and
+    # the retry is observably a different one.
+    state = _ops_state(identities, author_identity="external/seed")
+    out, event = _direct_generate(tmp_path, cfg, client, identities, state)
+
+    assert out["report"] == OPS_SPLICED
+    writer_calls = [c for c in client.calls if c.schema is None]
+    assert len(writer_calls) == 2
+    assert writer_calls[0].alias != writer_calls[1].alias, "the retry goes to the next pool member"
+    assert out["author_identity"] == identities[writer_calls[1].alias]
+    events = [
+        json.loads(line) for line in (tmp_path / "run-repair" / "events.jsonl").read_text().splitlines()
+    ]
+    failures = [e for e in events if e["kind"] == "generate_failed"]
+    assert [e["failure_class"] for e in failures] == ["malformed_ops"]
+    assert "no applicable operations" in failures[0]["reason"]
+    assert not any(k.startswith("ops_") for k in failures[0]), "generate_failed gains no field"
+
+
+def test_an_all_refused_ops_reply_is_malformed_too(identities, tmp_path, roster):
+    replies = ["@@ replace S9.P9 tasks=T1\nnowhere\n@@ end", OPS_REPLY]
+    client = FakeClient(identities=identities, critique_fn=clean, report_fn=lambda n: replies[n - 1])
+    cfg = _ops_cfg(roster, tmp_path)
+    out, _event = _direct_generate(tmp_path, cfg, client, identities, _ops_state(identities))
+    assert out["report"] == OPS_SPLICED
+    events = [
+        json.loads(line) for line in (tmp_path / "run-repair" / "events.jsonl").read_text().splitlines()
+    ]
+    assert [e["failure_class"] for e in events if e["kind"] == "generate_failed"] == ["malformed_ops"]
+
+
+def test_every_writer_malformed_is_fatal(identities, tmp_path, roster):
+    from reasonable_answer.graph import Runtime, _generate
+    from reasonable_answer.store import RunStore
+
+    cfg = _ops_cfg(roster, tmp_path)
+    client = FakeClient(identities=identities, critique_fn=clean, report_fn=lambda _n: "no operations here")
+    rt = Runtime(config=cfg, client=client, identities=identities, store=RunStore(tmp_path, "run-fatal"))
+    out = _generate(_ops_state(identities), rt)
+    assert out["fatal"]
+    assert "every eligible writer failed" in out["fatal_reason"]
+    assert "no applicable operations" in out["fatal_reason"]
+
+
+def test_a_first_draft_a_polish_pass_and_a_rule_13_rewrite_are_whole_documents_under_ops(
+    identities, tmp_path, roster
+):
+    """The mode narrows a *revision's* output and nothing else (D-ops-revision)."""
+    cfg = _ops_cfg(roster, tmp_path)
+
+    # First draft: the first-draft prompt, and the reply is the report.
+    client = FakeClient(identities=identities, critique_fn=clean, report_fn=lambda _n: REPORT)
+    out, event = _direct_generate(
+        tmp_path,
+        cfg,
+        client,
+        identities,
+        {"question": "Is it so?", "run_date": "2026-09-20", "defects": []},
+        "run-first",
+    )
+    assert out["report"] == REPORT.strip()
+    assert event["revision_mode"] == "ops"
+    assert "ops_total" not in event
+    assert "Write a report that answers the question below" in client.calls[0].user
+
+    # Polish: the whole-document close, and the reply is the report.
+    client = FakeClient(identities=identities, critique_fn=clean, report_fn=lambda _n: REPORT)
+    out, event = _direct_generate(
+        tmp_path, cfg, client, identities, _ops_state(identities, defects=[], polish_next=True), "run-polish"
+    )
+    assert out["report"] == REPORT.strip()
+    assert "ops_total" not in event
+    assert client.calls[0].user.endswith(prompts.WRITER_REWRITE_CLOSE)
+    assert "[S2.P2]" not in client.calls[0].user
+
+    # Rule 13: the rewrite close, no splice, and the event says `rewrite`.
+    client = FakeClient(identities=identities, critique_fn=clean, report_fn=lambda _n: REPORT)
+    out, event = _direct_generate(
+        tmp_path, cfg, client, identities, _ops_state(identities, full_rewrite_next=True), "run-rewrite"
+    )
+    assert out["report"] == REPORT.strip()
+    assert event["revision_mode"] == "rewrite"
+    assert event["full_rewrite"] is True
+    assert "ops_total" not in event
+    assert client.calls[0].user.endswith(prompts.WRITER_REWRITE_CLOSE)
+
+
+def test_deleting_a_still_cited_source_is_refused_end_to_end(identities, tmp_path, roster):
+    reply = OPS_REPLY + "\n@@ delete S3.P1 tasks=T1\n@@ end\n"
+    client = FakeClient(identities=identities, critique_fn=clean, report_fn=lambda _n: reply)
+    cfg = _ops_cfg(roster, tmp_path)
+    out, event = _direct_generate(tmp_path, cfg, client, identities, _ops_state(identities))
+    assert out["report"] == OPS_SPLICED
+    assert event["ops_total"] == 2
+    assert event["ops_applied"] == 1
+    assert event["ops_refused_dangling"] == 1
+    assert event["dangling_markers"] == 0
+    assert event["source_entries"] == 2
+
+
+def test_gate_2_fires_under_ops_and_the_repair_turn_returns_operations(identities, tmp_path, roster):
+    """The splice cannot stop a writer operating on many unnamed paragraphs, so gate 2
+    keeps its job under ops; its repair turn asks for operations on the labelled
+    previous draft and the repaired draft is again a splice of `previous`."""
+    previous = _multi_paragraph_report(9)
+    over = "".join(
+        f"@@ replace S0.P{i} tasks=T1\n"
+        f"Paragraph number {i} was rewritten wholesale for no stated reason.\n@@ end\n"
+        for i in range(2, 9)
+    )
+    # The repair reverts every one of them — operations again, not a document.
+    revert = "".join(
+        f"@@ replace S0.P{i} tasks=T1\nParagraph number {i} says something specific to itself.\n@@ end\n"
+        for i in range(2, 9)
+    )
+    replies = [over, revert]
+    client = FakeClient(identities=identities, critique_fn=clean, report_fn=lambda n: replies[n - 1])
+    cfg = _ops_cfg(roster, tmp_path, repair=RepairConfig(enabled=True, max_out_of_scope=6))
+    defects = [uncited(section=0, paragraph=1).model_dump(mode="json")]
+    state = _ops_state(identities, report=previous, defects=defects)
+    out, event = _direct_generate(tmp_path, cfg, client, identities, state)
+
+    assert out["report"] == previous
+    writer_calls = [c for c in client.calls if c.schema is None]
+    assert len(writer_calls) == 2
+    repair = writer_calls[1]
+    assert repair.alias == writer_calls[0].alias
+    assert "REPAIR REQUIRED" in repair.user
+    assert "changed 7 paragraph(s)" in repair.user
+    assert "Return operations on the labelled PREVIOUS DRAFT below" in repair.user
+    assert "[S0.P2] Paragraph number 2 says something specific to itself." in repair.user
+    assert "byte-for-byte" not in repair.user
+    assert "Return the complete report" not in repair.user
+    assert event["repair_attempted"] == 1
+    assert event["repair_reason"] == "out_of_scope"
+    assert event["repair_resolved"] == 1
+    assert event["out_of_scope"] == 0
+    # The event's ops counts describe the drafting reply; the repair is a separate call.
+    assert event["ops_total"] == 7
+
+
+def test_a_malformed_ops_repair_reply_keeps_the_draft(identities, tmp_path, roster):
+    """Gate 1 under ops with a repair reply that carries no operation: an unresolved
+    attempt, the current draft ships, the run continues."""
+    previous = OPS_PREVIOUS
+    # Drops every marker from the body (three replaces), which trips gate 1.
+    markerless = (
+        "@@ replace S1.P1 tasks=T1\nWater boils at 100 degrees Celsius at sea level.\n@@ end\n"
+        "@@ replace S2.P1 tasks=T1\nThe boiling point paragraph restates the claim.\n@@ end\n"
+        "@@ replace S2.P2 tasks=T1\nThe freezing point paragraph says water freezes.\n@@ end\n"
+    )
+    replies = [markerless, "Sorry, here is the whole report instead.\n\n## Conclusion\n\nText [1]."]
+    client = FakeClient(identities=identities, critique_fn=clean, report_fn=lambda n: replies[n - 1])
+    cfg = _ops_cfg(roster, tmp_path, repair=RepairConfig(enabled=True))
+    out, event = _direct_generate(tmp_path, cfg, client, identities, _ops_state(identities, report=previous))
+
+    assert "[1]" not in out["report"].split("## Sources")[0]
+    assert "## Sources" in out["report"], "a prose reply to an ops repair is not spliced in"
+    assert event["repair_attempted"] == 1
+    assert event["repair_reason"] == "markerless"
+    assert event["repair_resolved"] == 0
+    assert event["body_markers"] == 0
+    assert len([c for c in client.calls if c.schema is None]) == 2

@@ -83,10 +83,19 @@ def test_writer_revision_scrubbing_holds_in_patch_mode_too():
     assert SCRUBBED in prompt
 
 
+def test_writer_revision_scrubs_the_labelled_draft_rationale_and_question_in_ops_mode():
+    """D-ops-revision renders the draft with loci before fencing it; the rendering must
+    not be a way around the scrub."""
+    defect = _defect(rationale=BREAKOUT)
+    prompt = prompts.writer_revision(BREAKOUT, BREAKOUT, [defect], polish=False, mode="ops")
+    assert BREAKOUT not in prompt
+    assert prompt.count(SCRUBBED) == 3  # question, the labelled draft, the rationale
+
+
 # ---------------------------------------------------------- writer_repair_turn
 
 
-def _repair_prompt(question="q?", draft="draft", previous=None, defect=None):
+def _repair_prompt(question="q?", draft="draft", previous=None, defect=None, ops=False):
     return prompts.writer_repair_turn(
         question,
         draft,
@@ -98,6 +107,7 @@ def _repair_prompt(question="q?", draft="draft", previous=None, defect=None):
         body_markers=0,
         cited_sources_dropped=0,
         out_of_scope=0,
+        ops=ops,
     )
 
 
@@ -123,6 +133,12 @@ def test_writer_repair_turn_scrubs_a_critic_authored_rationale():
     prompt = _repair_prompt(defect=_defect(rationale=BREAKOUT))
     assert BREAKOUT not in prompt
     assert SCRUBBED in prompt
+
+
+def test_the_ops_repair_turn_scrubs_the_labelled_previous_draft_and_the_draft():
+    prompt = _repair_prompt(draft=BREAKOUT, previous=BREAKOUT, defect=_defect(rationale=BREAKOUT), ops=True)
+    assert BREAKOUT not in prompt
+    assert prompt.count(SCRUBBED) == 3  # the draft, the labelled previous draft, the rationale
 
 
 # -------------------------------------------------------------- writer_dispute

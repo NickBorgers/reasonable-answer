@@ -117,6 +117,12 @@ survives its first review is not caught as material and will ride the chain. The
 mitigation, and it is a partial one: it fires on a stalled signal, not on framing. Recorded here rather
 than papered over.
 
+> Superseded in part by **D-ops-revision**: the byte-identical rule the patch close states is, under
+> `revision.mode: ops`, a property of the splice rather than a request to the writer — a paragraph no
+> operation names is byte-identical because nothing touched it, and a heading cannot be addressed at
+> all. `patch` and `rewrite` are unchanged; `ops` is a third mode, off by default, and the scope
+> measurement records the same fields for it so the three are A/B-comparable.
+
 **Deliberately not done.** No change to what critics receive, to author exclusion, or to the blind
 orchestrator. No severity-floor changes — `omitted_counterargument` and `unexamined_presupposition` at
 `major` were 11 of the 21 outstanding defects across these runs and are worth revisiting separately.

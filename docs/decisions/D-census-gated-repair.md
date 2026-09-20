@@ -117,6 +117,14 @@ whichever text actually ships, repaired or not, so an A/B comparison written aga
 fields still reads correctly. The re-measurement inside the repair loop does not repeat the census's
 log warnings, so each stays countable as one per generation.
 
+> Superseded in part by **D-ops-revision**: the licence the repair turn inherits is now three-valued.
+> Gate 2 fires under `revision.mode: patch` *or* `ops` (the splice cannot stop a writer operating on
+> many unnamed paragraphs, which is what gate 2 measures); under the ops licence the repair turn asks
+> for operations on the labelled previous draft, never for a whole document, and its reply is spliced
+> exactly as the drafting reply was. A repair reply with no applicable operation is an unresolved
+> attempt that keeps the current draft, as a failed repair call already did. Everything else here —
+> gate 1, the cap, the same-writer rule, the event fields — is unchanged.
+
 **Deliberately not done.**
 
 - **No gate on content deleted inside a task's scope.** A writer can still discharge a fix task by

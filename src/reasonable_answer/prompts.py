@@ -16,6 +16,7 @@ import json
 from collections.abc import Sequence
 
 from . import excerpt
+from . import report as report_mod
 from .fetch import SourceOutcome
 from .schemas import REFINE_TRANSFORMS, Defect
 from .taxonomy import LENS_BRIEF, LENS_CATEGORIES, Category, Lens
@@ -481,6 +482,18 @@ WRITER_REWRITE_CLOSE = (
 #: scope, and the byte-identical rule applies to everything else. The placeholder and
 #: heading rules close two more ways a patch chain was observed to decay: a section
 #: reduced to "(No changes required.)", and headings renumbered or dropped.
+#: The claim-unit rule (D-claim-scoped-patch), shared word for word by the patch close
+#: and the ops close (D-ops-revision): the unit of a fix is the same whichever shape the
+#: revision comes back in.
+WRITER_CLAIM_UNIT = (
+    "The unit of a fix is the claim, not the paragraph. The conclusion, the key findings "
+    "and the body restate the same claims, and a task names only one of the places a "
+    "claim appears. When a task qualifies, weakens, re-cites or removes a claim, make "
+    "the same change in every other passage that restates that claim, so the report "
+    "does not say two different things about it. Those restatement edits are in scope; "
+    "nothing else is."
+)
+
 WRITER_PATCH_CLOSE = (
     "Revise by editing, not by rewriting. Change only the paragraphs a fix task names "
     "in its locus, plus anything a task's instruction explicitly requires you to touch "
@@ -488,12 +501,7 @@ WRITER_PATCH_CLOSE = (
     "paragraph must come back **byte-identical** to the draft above — do not reword it, "
     "do not re-order it, do not 'improve' it, and do not restructure sections that no "
     "task mentions. You may add a paragraph, or split one, where a task requires it.\n\n"
-    "The unit of a fix is the claim, not the paragraph. The conclusion, the key findings "
-    "and the body restate the same claims, and a task names only one of the places a "
-    "claim appears. When a task qualifies, weakens, re-cites or removes a claim, make "
-    "the same change in every other passage that restates that claim, so the report "
-    "does not say two different things about it. Those restatement edits are in scope; "
-    "nothing else is.\n\n"
+    f"{WRITER_CLAIM_UNIT}\n\n"
     "Reproduce every paragraph you are not editing in full. Never stand in for a "
     "paragraph or a section with a placeholder, an ellipsis, or a note such as "
     "'(unchanged)' or '(no changes required)'. Keep every heading's text exactly as it "
@@ -501,6 +509,53 @@ WRITER_PATCH_CLOSE = (
     "Text you did not write is not text to be fixed: rewriting a passage no task names "
     "only puts a fresh defect where there was none.\n\n"
     "Return the complete revised report in Markdown — the whole document, not a diff."
+)
+
+#: Closing instruction for `revision.mode: ops` (D-ops-revision). The scope licence is the
+#: patch close's, sentence for sentence where the sentence still applies; what changes is
+#: the output shape. The writer does not return the report at all: it returns operations
+#: on the labelled paragraphs of the draft it was shown — the same `[S<n>.P<m>]` labels
+#: the critics read — and `ops.splice` builds the next report. Every rule the patch close
+#: could only state ("byte-identical", "never renumber", "delete an entry only when
+#: nothing cites it", "keep every heading") is then either true by construction or
+#: refused mechanically, so the close no longer needs to say them; it says what a locus
+#: is, what an operation may contain, and how the Sources list is addressed.
+#:
+#: The bulleted-list sentence answers an observed failure: writers addressed one bullet
+#: of a list that sits under one label. The Sources sentences answer another: a Sources
+#: list is sometimes one paragraph and sometimes one paragraph per entry, and the writer
+#: has to be told both cases are addressed by the label it can see.
+WRITER_OPS_CLOSE = (
+    "Revise by operations, not by returning the report. Change only the paragraphs a fix "
+    "task names in its locus, plus anything a task's instruction explicitly requires you "
+    "to touch elsewhere (a '## Sources' entry, for example). A paragraph you do not name "
+    "comes back exactly as it is, by construction: you cannot and must not reproduce "
+    "it.\n\n"
+    f"{WRITER_CLAIM_UNIT}\n\n"
+    "Text you did not write is not text to be fixed: operating on a passage no task names "
+    "only puts a fresh defect where there was none.\n\n"
+    "OUTPUT FORMAT — OPERATIONS ONLY. Do not return the report. Return a sequence of "
+    "operations on the labelled draft, each one a block in exactly this form:\n\n"
+    "@@ replace S2.P3 tasks=T1,T4\n"
+    "<the complete new Markdown text of that paragraph>\n"
+    "@@ end\n\n"
+    "@@ delete S3.P1 tasks=T2\n"
+    "@@ end\n\n"
+    "@@ insert-after S2.P3 tasks=T1\n"
+    "<one new paragraph, placed after S2.P3>\n"
+    "@@ end\n\n"
+    "Rules. A locus is the [S<n>.P<m>] label shown on the draft, and only those labels "
+    "exist: a bulleted or numbered list shown under one label is one paragraph, so to "
+    "change one item you replace the whole list. Every operation names the task(s) it "
+    "serves by task_id. Write only the paragraph's new text inside a block — not its "
+    "label, and not its section heading. Each '## Sources' entry shown under its own "
+    "label is one paragraph of that section: change it with replace, remove it with "
+    "delete, add a new one with insert-after on the last entry, numbered after the "
+    "highest number in the list; where the whole list sits under one label, replace the "
+    "whole list. An entry that a paragraph you are not changing still cites cannot be "
+    "removed; such an operation is refused. Never operate on a heading and never put a "
+    "heading in new text. Output nothing outside the blocks: no preamble, no commentary, "
+    "no code fence."
 )
 
 
@@ -573,12 +628,35 @@ def writer_revision(
 ) -> str:
     """The revision prompt.
 
-    `mode` is `"patch"` or `"rewrite"` (D-scoped-revision). A polish pass ignores it and
-    always takes the whole-document wording: polish is a clarity pass over the entire
-    report by definition, so scoping it to defect loci would be incoherent — rule 9 only
-    fires when `material == 0` and there are no material loci left to name.
+    `mode` is `"patch"`, `"rewrite"` or `"ops"` (D-scoped-revision, D-ops-revision). A
+    polish pass ignores it and always takes the whole-document wording: polish is a
+    clarity pass over the entire report by definition, so scoping it to defect loci would
+    be incoherent — rule 9 only fires when `material == 0` and there are no material loci
+    left to name.
+
+    Under `"ops"` (and not polish) the draft is shown with its `[S<n>.P<m>]` labels — the
+    critics' own rendering, `report.render_with_loci` — and each fix task carries a
+    `task_id` (`T1`, `T2`, …) so an operation can name the task it serves. Nothing else
+    in the prompt changes: the patch and ops prompts differ in the labels, the task ids
+    and the close, and in nothing that crosses the handoff.
     """
-    tasks = json.dumps([_task_dump(d) for d in defects], indent=2)
+    ops_mode = mode == "ops" and not polish
+    if ops_mode:
+        tasks = json.dumps(
+            [{"task_id": f"T{i}", **_task_dump(d)} for i, d in enumerate(defects, 1)], indent=2
+        )
+        shown = report_mod.render_with_loci(report)
+        intro = (
+            "Below are a question, a draft report answering it (every paragraph labelled "
+            "with its locus), and a list of numbered fix tasks against that draft. "
+        )
+    else:
+        tasks = json.dumps([_task_dump(d) for d in defects], indent=2)
+        shown = report
+        intro = (
+            "Below are a question, a draft report answering it, and a list of objective fix "
+            "tasks against that draft. "
+        )
     goal = (
         "Only cosmetic polish remains. Improve clarity and readability. Change no "
         "substantive claim and remove no citation."
@@ -593,14 +671,18 @@ def writer_revision(
     # A polish pass has no fix tasks to discharge, so the standard has nothing to say
     # there; rule 9 fires only when `material == 0`.
     resolution = "" if polish else f"\n\n{WRITER_RESOLUTION_STANDARD}"
-    close = WRITER_PATCH_CLOSE if mode == "patch" and not polish else WRITER_REWRITE_CLOSE
+    if ops_mode:
+        close = WRITER_OPS_CLOSE
+    elif mode == "patch" and not polish:
+        close = WRITER_PATCH_CLOSE
+    else:
+        close = WRITER_REWRITE_CLOSE
     return (
         f"{UNTRUSTED_NOTE}\n\n"
         f"{date_line(current_date)}"
-        f"Below are a question, a draft report answering it, and a list of objective fix "
-        f"tasks against that draft. {goal}\n\n"
+        f"{intro}{goal}\n\n"
         f"QUESTION\n{DATA_FENCE}\n{_neutralized(question)}\n{DATA_END}\n\n"
-        f"DRAFT REPORT\n{DATA_FENCE}\n{_neutralized(report)}\n{DATA_END}\n\n"
+        f"DRAFT REPORT\n{DATA_FENCE}\n{_neutralized(shown)}\n{DATA_END}\n\n"
         f"FIX TASKS\n{DATA_FENCE}\n{_neutralized(tasks)}\n{DATA_END}\n\n"
         "Each task names a locus (section/paragraph of the draft), a defect category, and "
         "a concrete instruction. Apply them all. Where a task asks for a citation you "
@@ -632,6 +714,7 @@ def writer_repair_turn(
     cited_sources_dropped: int,
     out_of_scope: int,
     patch_licence: bool = True,
+    ops: bool = False,
     current_date: str | None = None,
 ) -> str:
     """Only the sentence for the gate that actually fired is included — a run tuned to
@@ -643,8 +726,20 @@ def writer_repair_turn(
     (D-scoped-revision: `revision.mode == "patch"`, not a polish pass, not a rule-13
     rewrite). Only then does the repair ask for untouched paragraphs back byte-for-byte
     from the previous artifact; a polish, a rewrite, or a `mode: rewrite` deployment was
-    asked for the whole document and its repair turn must not say otherwise."""
-    tasks = json.dumps([_task_dump(d) for d in defects], indent=2)
+    asked for the whole document and its repair turn must not say otherwise.
+
+    `ops` is the ops licence (D-ops-revision: `revision.mode == "ops"`, not a polish pass,
+    not a rule-13 rewrite, and a revision rather than a first draft). The repair then
+    asks for operations on the labelled previous draft — the same output contract the
+    drafting call had — never for a whole document; `patch_licence` is ignored, since
+    under ops there is no byte-for-byte to ask for. With `ops=False` the prompt is
+    byte-identical to what it was before the flag existed."""
+    if ops:
+        tasks = json.dumps(
+            [{"task_id": f"T{i}", **_task_dump(d)} for i, d in enumerate(defects, 1)], indent=2
+        )
+    else:
+        tasks = json.dumps([_task_dump(d) for d in defects], indent=2)
 
     sentences: list[str] = []
     clauses: list[str] = []
@@ -659,24 +754,33 @@ def writer_repair_turn(
         clauses.append(f"changed {out_of_scope} paragraph(s) that no fix task names")
     if clauses:
         sentences.append("It " + " and ".join(clauses) + ".")
-    restore = (
-        "Restore every paragraph outside the fix tasks byte-for-byte from PREVIOUS DRAFT "
-        "below. "
-        if previous is not None and patch_licence
-        else ""
-    )
+    if ops and previous is not None:
+        restore = (
+            "Return operations on the labelled PREVIOUS DRAFT below, in the same block "
+            "format as before, serving only the fix tasks; do not return the report. "
+        )
+        shown_previous: str | None = report_mod.render_with_loci(previous)
+        output = "Keep every [n] marker on a claim you keep."
+    else:
+        restore = (
+            "Restore every paragraph outside the fix tasks byte-for-byte from PREVIOUS DRAFT "
+            "below. "
+            if previous is not None and patch_licence
+            else ""
+        )
+        shown_previous = previous
+        output = "Keep every [n] marker on a claim you keep. Return the complete report."
     findings = " ".join(sentences)
 
     previous_block = (
-        f"PREVIOUS DRAFT\n{DATA_FENCE}\n{_neutralized(previous)}\n{DATA_END}\n\n"
-        if previous is not None
+        f"PREVIOUS DRAFT\n{DATA_FENCE}\n{_neutralized(shown_previous)}\n{DATA_END}\n\n"
+        if shown_previous is not None
         else ""
     )
     return (
         f"{UNTRUSTED_NOTE}\n\n"
         f"{date_line(current_date)}"
-        f"REPAIR REQUIRED. {findings} {restore}Keep every [n] marker on a claim you "
-        f"keep. Return the complete report.\n\n"
+        f"REPAIR REQUIRED. {findings} {restore}{output}\n\n"
         f"QUESTION\n{DATA_FENCE}\n{_neutralized(question)}\n{DATA_END}\n\n"
         f"YOUR DRAFT\n{DATA_FENCE}\n{_neutralized(draft)}\n{DATA_END}\n\n"
         f"{previous_block}"
