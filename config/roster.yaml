@@ -489,12 +489,11 @@ revision:
   mode: patch
   scope_check: warn
 
-  # The census-gated repair turn (D-census-gated-repair). Production run
-  # run-05289e3ce78c's writer returned a 12-source draft with zero [n] markers in the
-  # body (`body_markers=0`); the next round's writer "resolved" the resulting
-  # uncited-claim findings by deleting most of the report (`out_of_scope=10` of 12
-  # changed paragraphs) rather than restoring the citations. Both numbers were already
-  # computed for the `generate` event and both were warn-only — nothing acted on them.
+  # The census-gated repair turn (D-census-gated-repair). A production writer returned a
+  # draft whose body carried no [n] marker while its Sources list survived; the next
+  # round's writer "resolved" the resulting uncited-claim findings by deleting most of
+  # the report rather than restoring the citations. The census and scope numbers on the
+  # `generate` event recorded both, and both were warn-only — nothing acted on them.
   #
   # Two mechanical gates, checked against those same numbers:
   #   1. marker-less body: `body_markers == 0 and source_entries > 0`, on every draft —
@@ -502,20 +501,23 @@ revision:
   #   2. out-of-scope rewrite: `out_of_scope > max_out_of_scope`, on a patch-mode
   #      revision only (never the first draft, a polish pass, or a rewrite — the same
   #      three cases `scope_check` above is silent for; under `mode: rewrite` a high
-  #      `out_of_scope` is the writer doing what it was asked, not a defect).
+  #      `out_of_scope` is the writer doing what it was asked, not a defect; and never
+  #      under `scope_check: off`, which computes no `out_of_scope` at all).
   #
-  # Either gate spends up to `repair_cap` extra calls to the *same* writer, handing back
-  # its own draft with the exact numbers and the fix tasks it already saw, and asking for the whole
-  # corrected report. The repaired draft is re-measured and ships whether or not the
-  # gate cleared — never a loop chasing a clean measurement, always at most
-  # `repair_cap` extra calls. A failed repair call keeps the latest successfully repaired
-  # draft (or the original when the first attempt fails); a repair never aborts a run.
-  # The code default is disabled because private observations cannot move every
-  # deployment's default (QP9); this production roster explicitly opts in.
+  # Either gate spends up to `repair_cap` extra calls to the *same* writer with no tool,
+  # handing back its own draft with the exact numbers, the previous artifact and the fix
+  # tasks it already saw, and asking for the whole corrected report. Only under the patch
+  # licence (`mode: patch`, not a polish pass, not a rewrite) is the writer also told to
+  # restore untouched paragraphs byte-for-byte. The repaired draft is re-measured and
+  # ships whether or not the gate cleared — never a loop chasing a clean measurement,
+  # always at most `repair_cap` extra calls. A failed repair call keeps the latest
+  # successfully repaired draft (or the original when the first attempt fails); a repair
+  # never aborts a run. The code default is disabled: the observation above is private
+  # and cannot move every deployment's default (QP9); this production roster opts in.
   repair:
     enabled: true       # false restores the exact warn-only behaviour above
     repair_cap: 1        # extra writer calls one generation may spend on repair
-    max_out_of_scope: 6  # operator-selected gate 2 threshold; private deployment evidence (QP9)
+    max_out_of_scope: 6  # gate 2 ceiling; an operator choice, not a portable threshold
 
 budgets:
   min_ticks: 2

@@ -81,12 +81,12 @@ pass drops a cited source. Nothing rejects a draft, triggers a repair turn, or r
 critics and the bibliography checks already own, and the census has to come first to show how often it
 happens — the D-scoped-revision warn-only doctrine.
 
-> Superseded in part by **D-census-gated-repair**. The census had shown how often a marker-less body
-> happens; a later production run (`run-05289e3ce78c`) showed what it costs downstream — the
-> bibliography and claim checks pair nothing, and the next writer "resolved" the resulting findings by
-> deleting most of the report. `body_markers == 0 and source_entries > 0` now spends one bounded repair
-> call to the same writer before any critic reads the draft. The census itself, its fields, and the
-> "no critic, no `OrchestratorView`, no controller" boundary are unchanged; only "nothing rejects a
+> Superseded in part by **D-census-gated-repair**. The census had shown that a marker-less body
+> happens; a later production run showed what it costs downstream — the bibliography and claim checks
+> pair nothing, and the next writer "resolved" the resulting findings by deleting most of the report.
+> `body_markers == 0 and source_entries > 0` now spends up to `revision.repair.repair_cap` bounded
+> repair calls to the same writer before any critic reads the draft. The census itself, its fields, and
+> the "no critic, no `OrchestratorView`, no controller" boundary are unchanged; only "nothing rejects a
 > draft, triggers a repair turn" no longer holds for this one condition. `revision.repair.enabled:
 > false` restores this section exactly.
 

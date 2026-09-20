@@ -1134,7 +1134,9 @@ def _generate(state: State, rt: Runtime) -> dict:
     }
 
 
-def _citation_fields(previous: str | None, text: str, *, polish: bool) -> dict[str, int]:
+def _citation_fields(
+    previous: str | None, text: str, *, polish: bool, warn: bool = True
+) -> dict[str, int]:
     """Citation census for the `generate` event (D-writer-citation-continuity).
 
     Integers only, so `events.jsonl` still carries no URL and no text (RA-016). The census
@@ -1146,12 +1148,14 @@ def _citation_fields(previous: str | None, text: str, *, polish: bool) -> dict[s
     fields = excerpt.citation_census(text)
     if previous:
         fields.update(excerpt.citation_changes(previous, text))
-    if fields["body_markers"] == 0 and fields["source_entries"] > 0:
+    # `warn=False` on a re-measurement inside the repair loop (D-census-gated-repair), so
+    # each warning below stays countable as one per generation.
+    if warn and fields["body_markers"] == 0 and fields["source_entries"] > 0:
         log.warning(
             "draft lists %d source(s) and its body carries no [n] marker",
             fields["source_entries"],
         )
-    if polish and fields.get("cited_sources_dropped", 0) > 0:
+    if warn and polish and fields.get("cited_sources_dropped", 0) > 0:
         log.warning(
             "polish pass dropped %d cited source(s) it was told to keep",
             fields["cited_sources_dropped"],
@@ -1194,6 +1198,7 @@ def _writer_repair(
     defects: list[Defect],
     markerless: bool,
     scope_gate: bool,
+    patch_licence: bool,
     citation_fields: dict[str, int],
     scope_fields: dict[str, int],
     run_date: str | None,
@@ -1202,9 +1207,17 @@ def _writer_repair(
 
     Same alias, same system prompt shape, same timeout as the generation it repairs —
     nothing about the call machinery differs, only the prompt. No tool is offered: the
-    job is to restore text the writer already produced, not to research further, so the
-    writer sees nothing beyond its own draft, the previous artifact and the fix tasks it
-    already had (no critic identity, no new source text — RA-010).
+    job is to restore text the writer already produced, not to research further. The
+    prompt carries the question, the run date, the gate counts, the writer's own draft,
+    the previous artifact (on a revision) and the fix tasks — every one of them text or
+    numbers this writer already held or produced (no critic identity, no new source
+    text — RA-010).
+
+    `patch_licence` is the condition the drafting call itself used to pick the patch
+    close (`revision.mode == "patch"`, not a polish pass, not a rule-13 rewrite —
+    D-scoped-revision): only then is the writer told to restore untouched paragraphs
+    byte-for-byte, so the repair never carries a licence the generation it repairs did
+    not.
 
     Never raises. A repair must not abort a run that would otherwise have continued, so
     any call failure or empty completion is reported as `None` and the caller keeps the
@@ -1217,6 +1230,7 @@ def _writer_repair(
         defects,
         markerless=markerless,
         scope_gate=scope_gate,
+        patch_licence=patch_licence,
         source_entries=citation_fields.get("source_entries", 0),
         body_markers=citation_fields.get("body_markers", 0),
         cited_sources_dropped=citation_fields.get("cited_sources_dropped", 0),
@@ -1276,6 +1290,14 @@ def _repair_draft(
         return text, citation_fields, scope_fields, {}
 
     reason = "both" if markerless and scope_gate else ("markerless" if markerless else "out_of_scope")
+    # The same condition `_generate` used to choose the patch close for the drafting call
+    # (D-scoped-revision): the repair turn asks for byte-for-byte restoration only where
+    # the generation it repairs was held to it.
+    patch_licence = cfg.revision.mode == "patch" and not polish and not full_rewrite
+    # Gate 1 is `source_entries > 0`; a repair that deletes the whole `## Sources`
+    # section makes it false without restoring a single marker. That is the
+    # delete-to-discharge shape this gate exists to catch, so it never counts as resolved.
+    entries_before = citation_fields["source_entries"]
     resolved = 0
     for _ in range(repair_cfg.repair_cap):
         repaired = _writer_repair(
@@ -1287,6 +1309,7 @@ def _repair_draft(
             defects=defects,
             markerless=markerless,
             scope_gate=scope_gate,
+            patch_licence=patch_licence,
             citation_fields=citation_fields,
             scope_fields=scope_fields,
             run_date=run_date,
@@ -1296,11 +1319,12 @@ def _repair_draft(
         text = repaired
         if len(text) > cfg.max_report_chars:
             text = text[: cfg.max_report_chars]
-        citation_fields = _citation_fields(previous, text, polish=polish)
+        citation_fields = _citation_fields(previous, text, polish=polish, warn=False)
         scope_fields = _scope_fields(cfg, previous, text, defects, polish=polish, full_rewrite=full_rewrite)
         markerless, scope_gate = _repair_gates(cfg, citation_fields, scope_fields)
         if not (markerless or scope_gate):
-            resolved = 1
+            if not (entries_before > 0 and citation_fields["source_entries"] == 0):
+                resolved = 1
             break
 
     return (

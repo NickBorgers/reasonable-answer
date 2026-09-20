@@ -1032,6 +1032,9 @@ def test_a_markerless_revision_triggers_one_repair_and_ships_the_repaired_draft(
     assert len(writer_calls) == 2, "the draft, plus exactly one repair call"
     assert "REPAIR REQUIRED" in writer_calls[1].user
     assert writer_calls[1].alias == writer_calls[0].alias, "the same writer repairs its own draft"
+    # A patch-mode revision carries the patch licence, so its repair names the block to
+    # restore from (D-scoped-revision's byte-identical rule, applied to the right draft).
+    assert "byte-for-byte from PREVIOUS DRAFT" in writer_calls[1].user
     assert event["repair_attempted"] == 1
     assert event["repair_reason"] == "markerless"
     assert event["repair_resolved"] == 1
@@ -1226,24 +1229,28 @@ def test_a_failed_repair_call_keeps_the_original_draft(identities, tmp_path, ros
 
 
 @pytest.mark.parametrize(
-    "overrides",
+    ("overrides", "mode"),
     [
-        pytest.param({}, id="first_draft"),
-        pytest.param({"polish_next": True, "report": REPORT}, id="polish"),
-        pytest.param({"full_rewrite_next": True, "report": REPORT}, id="rewrite"),
+        pytest.param({}, "patch", id="first_draft"),
+        pytest.param({"polish_next": True, "report": REPORT}, "patch", id="polish"),
+        pytest.param({"full_rewrite_next": True, "report": REPORT}, "patch", id="rewrite"),
+        pytest.param({"report": REPORT}, "rewrite", id="global_rewrite_mode"),
     ],
 )
 def test_gate_2_is_exempt_where_scope_measurement_is_silent_but_gate_1_is_not(
-    identities, tmp_path, roster, overrides
+    identities, tmp_path, roster, overrides, mode
 ):
     """`_scope_fields` stays silent for the first draft, a rule-9 polish pass and a
     rule-13 rewrite (D-scoped-revision), so gate 2 can never fire there — but gate 1
-    (marker-less body) applies to every draft including these three."""
+    (marker-less body) applies to every draft including these three, and to a
+    `revision.mode: rewrite` deployment. None of these four generations was held to the
+    patch close, so none of their repair turns may ask for byte-for-byte restoration
+    (D-census-gated-repair inherits the licence, never widens it)."""
     cfg = Config(
         roster=roster,
         budgets=Budgets(min_ticks=2, hard_cap=4),
         runs_dir=tmp_path / "runs",
-        revision=RevisionConfig(repair=RepairConfig(enabled=True)),
+        revision=RevisionConfig(mode=mode, repair=RepairConfig(enabled=True)),
     )
     source_line = "\n\n## Sources\n\n[1] A real-looking source."
     markerless = "# Answer\n\nAn unmarked claim entirely." + source_line
@@ -1262,9 +1269,13 @@ def test_gate_2_is_exempt_where_scope_measurement_is_silent_but_gate_1_is_not(
     assert out["report"] == repaired
     assert event["repair_attempted"] == 1
     assert event["repair_reason"] == "markerless"
-    assert "out_of_scope" not in event
+    if mode == "patch":
+        assert "out_of_scope" not in event
     writer_calls = [c for c in client.calls if c.schema is None]
     assert len(writer_calls) == 2
+    assert "byte-for-byte" not in writer_calls[1].user, (
+        "a generation asked for the whole document must not be told to restore paragraphs"
+    )
 
 
 def test_repair_cap_bounds_the_number_of_extra_writer_calls(identities, tmp_path, roster):
@@ -1293,3 +1304,151 @@ def test_repair_cap_bounds_the_number_of_extra_writer_calls(identities, tmp_path
     assert len(writer_calls) == 3, "the draft plus exactly repair_cap (2) repair calls, never more"
     assert event["repair_attempted"] == 1
     assert event["repair_resolved"] == 0
+
+
+def test_gate_2_stays_silent_under_a_global_rewrite_mode(identities, tmp_path, roster):
+    """`revision.mode: rewrite` as the deployment's standing configuration is a different
+    path from a rule-13 `full_rewrite_next` tick: `_scope_fields` still measures
+    `out_of_scope` there, so only `_repair_gates`'s own `mode == "patch"` check keeps gate 2
+    from firing on every round of a deployment that asked for whole-document revisions
+    (D-census-gated-repair)."""
+    cfg = Config(
+        roster=roster,
+        budgets=Budgets(min_ticks=2, hard_cap=4),
+        runs_dir=tmp_path / "runs",
+        revision=RevisionConfig(
+            mode="rewrite", repair=RepairConfig(enabled=True, max_out_of_scope=6)
+        ),
+    )
+    previous = _multi_paragraph_report(9)
+    over_threshold = "\n\n".join(
+        f"Paragraph number {i} was rewritten wholesale for no stated reason."
+        if 2 <= i <= 8
+        else f"Paragraph number {i} says something specific to itself."
+        for i in range(1, 10)
+    )
+    client = FakeClient(identities=identities, critique_fn=clean, report_fn=lambda _n: over_threshold)
+    state = {
+        "question": "Is it so?",
+        "report": previous,
+        "author_identity": identities["writer-a"],
+        "run_date": "2026-09-20",
+        "defects": [uncited(section=0, paragraph=1).model_dump(mode="json")],
+    }
+    out, event = _direct_generate(tmp_path, cfg, client, identities, state)
+
+    assert out["report"] == over_threshold
+    writer_calls = [c for c in client.calls if c.schema is None]
+    assert len(writer_calls) == 1, "under mode: rewrite a high out_of_scope is the mode working"
+    assert "repair_attempted" not in event
+    assert event["out_of_scope"] == 7, "the measurement itself is still recorded"
+
+
+def test_the_repair_call_offers_no_tool_even_when_the_drafting_call_did(
+    identities, tmp_path, roster
+):
+    """D-census-gated-repair withholds `web_search`/`read_source` from the repair turn.
+    That is only testable with retrieval *on*: the drafting call must carry the tool and
+    the repair call, to the same writer, must not."""
+    from reasonable_answer.graph import Runtime, _generate
+    from reasonable_answer.search import QueryBudget, SearchResult
+    from reasonable_answer.store import RunStore
+
+    class _Searcher:
+        budget = QueryBudget(10)
+
+        def search(self, query, count=None):
+            return [SearchResult(title="T", url="https://example.org/x", description="D")]
+
+    cfg = Config(
+        roster=roster,
+        budgets=Budgets(min_ticks=2, hard_cap=4),
+        runs_dir=tmp_path / "runs",
+        revision=RevisionConfig(repair=RepairConfig(enabled=True)),
+    )
+    markerless = REPORT.replace(" [1]", "")
+    drafts = [markerless, REPORT]
+    client = FakeClient(identities=identities, critique_fn=clean, report_fn=lambda n: drafts[n - 1])
+    rt = Runtime(
+        config=cfg,
+        client=client,
+        identities=identities,
+        store=RunStore(tmp_path, "run-repair-tools"),
+        searcher=_Searcher(),
+    )
+    state = {
+        "question": "Is it so?",
+        "report": REPORT,
+        "author_identity": identities["writer-a"],
+        "run_date": "2026-09-20",
+        "defects": [],
+    }
+    out = _generate(state, rt)
+
+    assert out["report"] == REPORT.strip()
+    writer_calls = [c for c in client.calls if c.schema is None]
+    assert len(writer_calls) == 2
+    assert writer_calls[0].tools == ["web_search"], "retrieval is on for the drafting call"
+    assert "web_search" in writer_calls[0].system
+    assert writer_calls[1].tools == [], "the repair turn is offered no tool"
+    assert "web_search" not in writer_calls[1].system
+    assert writer_calls[1].alias == writer_calls[0].alias
+
+
+def test_an_empty_repair_completion_keeps_the_original_draft(identities, tmp_path, roster):
+    """The second failure path of `_writer_repair`: a completion that is empty rather
+    than an error. Same caller-visible outcome as a failed call — the unrepaired draft
+    ships, the event says the repair was tried and did not resolve."""
+    markerless = REPORT.replace(" [1]", "")
+    drafts = [markerless, "   \n"]
+    cfg = Config(
+        roster=roster,
+        budgets=Budgets(min_ticks=2, hard_cap=4),
+        runs_dir=tmp_path / "runs",
+        revision=RevisionConfig(repair=RepairConfig(enabled=True)),
+    )
+    client = FakeClient(identities=identities, critique_fn=clean, report_fn=lambda n: drafts[n - 1])
+    state = {
+        "question": "Is it so?",
+        "report": REPORT,
+        "author_identity": identities["writer-a"],
+        "run_date": "2026-09-20",
+        "defects": [],
+    }
+    out, event = _direct_generate(tmp_path, cfg, client, identities, state)
+
+    assert out["report"] == markerless.strip()
+    assert event["repair_attempted"] == 1
+    assert event["repair_resolved"] == 0
+    assert event["body_markers"] == 0
+
+
+def test_a_repair_that_deletes_the_sources_section_is_not_resolved(identities, tmp_path, roster):
+    """Gate 1 is `source_entries > 0`. A repair that empties `## Sources` makes the gate
+    false without restoring a marker — the delete-to-discharge shape the gate exists to
+    catch — so `repair_resolved` stays 0 even though neither gate fires afterwards."""
+    markerless = REPORT.replace(" [1]", "")
+    sourceless = markerless.split("## Sources")[0].rstrip() + "\n"
+    assert "## Sources" not in sourceless
+    drafts = [markerless, sourceless]
+    cfg = Config(
+        roster=roster,
+        budgets=Budgets(min_ticks=2, hard_cap=4),
+        runs_dir=tmp_path / "runs",
+        revision=RevisionConfig(repair=RepairConfig(enabled=True)),
+    )
+    client = FakeClient(identities=identities, critique_fn=clean, report_fn=lambda n: drafts[n - 1])
+    state = {
+        "question": "Is it so?",
+        "report": REPORT,
+        "author_identity": identities["writer-a"],
+        "run_date": "2026-09-20",
+        "defects": [],
+    }
+    out, event = _direct_generate(tmp_path, cfg, client, identities, state)
+
+    assert out["report"] == sourceless.strip(), "the repaired draft still ships — the gate never rejects"
+    assert event["repair_attempted"] == 1
+    assert event["repair_reason"] == "markerless"
+    assert event["repair_resolved"] == 0
+    assert event["source_entries"] == 0

@@ -304,3 +304,37 @@ def test_a_critic_cannot_emit_a_free_form_instruction_channel():
             rationale="y",
             instruction="z",
         )
+
+
+def test_repair_turn_prompt_carries_no_critique_prose():
+    """Principle 1 holds on the census-gated repair turn too (D-census-gated-repair): the
+    writer gets its own draft, the previous artifact, the fix tasks and two counts — never
+    a lens, a critic, or a verdict — under either licence."""
+    from reasonable_answer.schemas import Defect, StructuralRef
+    from reasonable_answer.taxonomy import Category, Severity
+
+    defect = Defect(
+        locus=StructuralRef(section=1, paragraph=1),
+        category=Category.UNCITED_CLAIM,
+        severity=Severity.MAJOR,
+        claim_span="Water boils at 100 degrees Celsius",
+        rationale="no citation attached",
+        instruction="cite a source or remove the claim",
+    )
+    for patch_licence in (True, False):
+        text = prompts.writer_repair_turn(
+            "q?",
+            CLEAN_REPORT.replace(" [1]", ""),
+            CLEAN_REPORT,
+            [defect],
+            markerless=True,
+            scope_gate=True,
+            source_entries=1,
+            body_markers=0,
+            cited_sources_dropped=1,
+            out_of_scope=7,
+            patch_licence=patch_licence,
+        )
+        for leak in ("lens", "critic", "reviewer", "logic", "evidence", "completeness"):
+            assert leak not in text.lower(), (patch_licence, leak)
+        assert ("byte-for-byte from PREVIOUS DRAFT" in text) is patch_licence

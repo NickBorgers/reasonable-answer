@@ -222,20 +222,27 @@ claim, how many came back containing every word of the old text, in order, with 
 It is a subset of `in_scope` plus `restated` — a rate to read against them, never a fourth bucket —
 and, like every other number here, it is warn-only. Nothing about who edits or who reviews moves.
 
-**Two of these measurements now buy one repair turn before any critic reads the draft
-(D-census-gated-repair).** A production run's writer returned a body with zero `[n]` markers over
-twelve listed sources; the next round's writer "resolved" the resulting findings by deleting most of
+**Two of these measurements now buy a bounded repair turn before any critic reads the draft
+(D-census-gated-repair).** A production run's writer returned a body with no `[n]` marker while its
+Sources list survived; the next round's writer "resolved" the resulting findings by deleting most of
 the report rather than restoring the citations. Two mechanical gates on numbers this section and
 D-writer-citation-continuity already compute — a marker-less body with sources (every draft, first
-included), or `out_of_scope` over a configured ceiling on a patch-mode revision only — spend up to
-`revision.repair.repair_cap` extra calls (default 1) to the *same* writer, handing back its own draft
-with the exact counts and the fix tasks it
-already saw, and ask for the whole corrected report. The repaired draft is re-measured and ships
-whether or not the gate cleared: this is a bounded repair turn, never a loop, and `revision.repair:
-enabled: false` restores the exact warn-only behaviour above. `additive_only` is unaffected — it
-stays warn-only, and gates nothing. Nothing about who edits or who reviews moves here either: the
-repair call is the same author, offered no tool, and sees nothing beyond its own draft, the previous
-artifact and the fix tasks — never a critic's identity, never fresh source text.
+included), or `out_of_scope` over a configured ceiling on a patch-mode revision only (never under
+`revision.mode: rewrite`, and never under `scope_check: off`, which measures nothing) — spend up to
+`revision.repair.repair_cap` extra calls (default 1) to the *same* writer and ask for the whole
+corrected report. The repaired draft is re-measured and ships whether or not the gate cleared: this
+is a bounded repair turn, never a loop, and `revision.repair.enabled: false` restores the exact
+warn-only behaviour above. `additive_only` is unaffected — it stays warn-only, and gates nothing.
+
+Nothing about who edits or who reviews moves here either. The repair call is the same author and is
+offered no tool. Its prompt (`prompts.writer_repair_turn`) contains exactly: the run's date line; the
+gate sentence(s) with their counts, for the gate(s) that fired; the question; the writer's own
+failing draft; the previous artifact, on a revision; and the fix tasks it already had — never a
+critic's identity, never a lens name, never fresh source text. Every fenced block is `_neutralized`
+like every other writer-facing block (D-fence-scrub-all-directions). The instruction to restore
+untouched paragraphs byte-for-byte from the previous artifact appears only under the patch licence —
+the same `mode == "patch"`, not-polish, not-rewrite condition the drafting call uses to select the
+patch close (D-scoped-revision) — so a repair never carries a licence the generation it repairs did not.
 
 ## The depersonalization step (principle 1, made concrete)
 

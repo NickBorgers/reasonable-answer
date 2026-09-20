@@ -320,7 +320,8 @@ flowchart TD
 critique. Intake validates size and normalizes.
 
 **Report shape is a fixed frame with a free middle (D-report-template).** Every writer call —
-first draft, revision, polish — carries `prompts.REPORT_SKELETON` in its system prompt:
+first draft, revision, polish, rule-13 rewrite, and the census-gated repair turn
+(D-census-gated-repair) — carries `prompts.REPORT_SKELETON` in its system prompt:
 `## Conclusion` first (a direct, cited answer that also names the strongest opposing view),
 `## Key findings`, `## The strongest counterargument` (steelmanned and engaged, never merely
 listed), then writer-chosen topical sections, and `## Sources` last. The `## Sources` heading

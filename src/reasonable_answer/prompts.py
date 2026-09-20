@@ -611,14 +611,14 @@ def writer_revision(
 
 
 #: The census-gated repair turn (D-census-gated-repair). A production run's writer
-#: dropped every `[n]` marker from a 12-source draft; the next writer "resolved" the
-#: resulting uncited-claim findings by deleting most of the report. Two mechanical gates
-#: on the numbers `graph._citation_fields`/`_scope_fields` already compute — a marker-less
-#: body with sources, or a patch-mode revision touching far more than the fix tasks named
-#: — spend up to a configured cap of extra calls to the *same* writer with the exact
-#: counts, before any critic sees the draft. The writer sees nothing new: its own draft,
-#: the previous artifact, and the fix tasks it already had — no critic identity, no
-#: fresh source text.
+#: dropped every `[n]` marker from a draft that still listed its sources; the next
+#: writer "resolved" the resulting uncited-claim findings by deleting most of the report.
+#: Two mechanical gates on the numbers `graph._citation_fields`/`_scope_fields` already
+#: compute — a marker-less body with sources, or a patch-mode revision touching far more
+#: than the fix tasks named — spend up to a configured cap of extra calls to the *same*
+#: writer with the exact counts, before any critic sees the draft. The writer sees
+#: nothing new: the question, its own draft, the previous artifact, and the fix tasks it
+#: already had — no critic identity, no fresh source text.
 def writer_repair_turn(
     question: str,
     draft: str,
@@ -631,12 +631,19 @@ def writer_repair_turn(
     body_markers: int,
     cited_sources_dropped: int,
     out_of_scope: int,
+    patch_licence: bool = True,
     current_date: str | None = None,
 ) -> str:
     """Only the sentence for the gate that actually fired is included — a run tuned to
     tolerate a high `out_of_scope` never sees that wording on a marker-only failure, and
     vice versa. `previous` is `None` on a first draft, where only the marker-less gate can
-    fire and there is no earlier artifact to restore paragraphs from."""
+    fire and there is no earlier artifact to restore paragraphs from.
+
+    `patch_licence` is whether the drafting call was held to the patch close
+    (D-scoped-revision: `revision.mode == "patch"`, not a polish pass, not a rule-13
+    rewrite). Only then does the repair ask for untouched paragraphs back byte-for-byte
+    from the previous artifact; a polish, a rewrite, or a `mode: rewrite` deployment was
+    asked for the whole document and its repair turn must not say otherwise."""
     tasks = json.dumps([_task_dump(d) for d in defects], indent=2)
 
     sentences: list[str] = []
@@ -653,9 +660,9 @@ def writer_repair_turn(
     if clauses:
         sentences.append("It " + " and ".join(clauses) + ".")
     restore = (
-        "Restore every paragraph outside the fix tasks byte-for-byte from the draft you "
-        "were given. "
-        if previous is not None
+        "Restore every paragraph outside the fix tasks byte-for-byte from PREVIOUS DRAFT "
+        "below. "
+        if previous is not None and patch_licence
         else ""
     )
     findings = " ".join(sentences)
