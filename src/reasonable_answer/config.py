@@ -765,9 +765,11 @@ class RepairConfig(BaseModel):
     Two mechanical gates, checked against the numbers `_citation_fields`/`_scope_fields`
     already compute for the `generate` event. Either firing spends up to `repair_cap`
     extra calls to the *same* writer that just drafted, handing back its own draft with
-    the concrete numbers and the fix tasks it already saw, and asking for the whole corrected report
-    back. The repaired draft is re-measured and used whether or not the gate cleared —
-    this is a bounded repair turn, never a loop that holds up the run chasing zero.
+    the concrete numbers and the fix tasks it already saw. Under the patch licence the
+    repair asks for the whole corrected report; under the ops licence it asks for
+    operations on the labelled previous draft. The repaired draft is re-measured and
+    used whether or not the gate cleared — this is a bounded repair turn, never a loop
+    that holds up the run chasing zero.
 
     `enabled: false` restores the warn-only behaviour D-writer-citation-continuity and
     D-scoped-revision shipped with: the numbers are still computed and logged, nothing
@@ -785,10 +787,10 @@ class RepairConfig(BaseModel):
     #: the moment neither gate fires — so this is a ceiling on wasted calls against a
     #: writer that keeps failing the same gate, not a retry target.
     repair_cap: int = Field(default=1, ge=1, le=5)
-    #: Gate 2's threshold (patch-mode revisions only — never the first draft, a rule-9
-    #: polish pass, or a rule-13 rewrite, the same three cases `_scope_fields` is silent
-    #: for). The shipped roster's value is an operator deployment choice based on private
-    #: observations; it is not a project-wide empirical claim (QP9).
+    #: Gate 2's threshold (patch- or ops-mode revisions only — never the first draft, a
+    #: rule-9 polish pass, or a rule-13 rewrite, the same three cases `_scope_fields` is
+    #: silent for). The shipped roster's value is an operator deployment choice based
+    #: on private observations; it is not a project-wide empirical claim (QP9).
     max_out_of_scope: int = Field(default=6, ge=1, le=100)
 
 

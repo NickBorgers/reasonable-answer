@@ -227,10 +227,12 @@ and, like every other number here, it is warn-only. Nothing about who edits or w
 Sources list survived; the next round's writer "resolved" the resulting findings by deleting most of
 the report rather than restoring the citations. Two mechanical gates on numbers this section and
 D-writer-citation-continuity already compute — a marker-less body with sources (every draft, first
-included), or `out_of_scope` over a configured ceiling on a patch-mode revision only (never under
+included), or `out_of_scope` over a configured ceiling on a patch- or ops-mode revision (never under
 `revision.mode: rewrite`, and never under `scope_check: off`, which measures nothing) — spend up to
-`revision.repair.repair_cap` extra calls (default 1) to the *same* writer and ask for the whole
-corrected report. The repaired draft is re-measured and ships whether or not the gate cleared: this
+`revision.repair.repair_cap` extra calls (default 1) to the *same* writer. Under the patch licence the
+repair asks for the whole corrected report; under the ops licence it asks for operations on the
+labelled previous draft and splices them into that draft (D-ops-revision). The repaired draft is
+re-measured and ships whether or not the gate cleared: this
 is a bounded repair turn, never a loop, and `revision.repair.enabled: false` restores the exact
 warn-only behaviour above. `additive_only` is unaffected — it stays warn-only, and gates nothing.
 

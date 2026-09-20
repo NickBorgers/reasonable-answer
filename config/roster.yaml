@@ -514,10 +514,10 @@ revision:
   #
   # Either gate spends up to `repair_cap` extra calls to the *same* writer with no tool,
   # handing back its own draft with the exact numbers, the previous artifact and the fix
-  # tasks it already saw, and asking for the whole corrected report. Only under the patch
-  # licence (`mode: patch`, not a polish pass, not a rewrite) is the writer also told to
-  # restore untouched paragraphs byte-for-byte; under `mode: ops` the repair asks for
-  # operations, like the drafting call did. The repaired draft is re-measured and
+  # tasks it already saw. Under the patch licence (`mode: patch`, not a polish pass, not a
+  # rewrite) it asks for the whole corrected report and tells the writer to restore
+  # untouched paragraphs byte-for-byte; under `mode: ops` it asks for operations on the
+  # labelled previous draft, like the drafting call did. The repaired draft is re-measured
   # ships whether or not the gate cleared — never a loop chasing a clean measurement,
   # always at most `repair_cap` extra calls. A failed repair call keeps the latest
   # successfully repaired draft (or the original when the first attempt fails); a repair
