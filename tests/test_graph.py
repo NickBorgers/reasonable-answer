@@ -1005,7 +1005,7 @@ def test_repair_config_bounds(field, value):
 
 
 def test_a_markerless_revision_triggers_one_repair_and_ships_the_repaired_draft(
-    identities, tmp_path, roster
+    identities, tmp_path, roster, caplog
 ):
     """Gate 1 (D-census-gated-repair): a revision that drops every [n] marker gets one
     extra call to the writer that dropped it, and the repaired draft is what ships."""
@@ -1025,7 +1025,8 @@ def test_a_markerless_revision_triggers_one_repair_and_ships_the_repaired_draft(
         "run_date": "2026-09-20",
         "defects": [],
     }
-    out, event = _direct_generate(tmp_path, cfg, client, identities, state)
+    with caplog.at_level("WARNING"):
+        out, event = _direct_generate(tmp_path, cfg, client, identities, state)
 
     assert out["report"] == REPORT.strip()
     writer_calls = [c for c in client.calls if c.schema is None]
@@ -1041,6 +1042,9 @@ def test_a_markerless_revision_triggers_one_repair_and_ships_the_repaired_draft(
     # Post-repair census, not the failed draft's — existing A/B readers see what shipped.
     assert event["body_markers"] == 1
     assert event["source_entries"] == 1
+    assert caplog.text.count("its body carries no [n] marker") == 1, (
+        "the post-repair census must not repeat the generation's warning"
+    )
 
 
 def test_an_out_of_scope_revision_over_threshold_triggers_repair(identities, tmp_path, roster):
@@ -1304,6 +1308,36 @@ def test_repair_cap_bounds_the_number_of_extra_writer_calls(identities, tmp_path
     assert len(writer_calls) == 3, "the draft plus exactly repair_cap (2) repair calls, never more"
     assert event["repair_attempted"] == 1
     assert event["repair_resolved"] == 0
+
+
+def test_repair_continues_after_an_unresolved_attempt_within_the_cap(
+    identities, tmp_path, roster
+):
+    """The bounded loop re-measures each attempt and may resolve on a later call."""
+    cfg = Config(
+        roster=roster,
+        budgets=Budgets(min_ticks=2, hard_cap=4),
+        runs_dir=tmp_path / "runs",
+        revision=RevisionConfig(repair=RepairConfig(enabled=True, repair_cap=2)),
+    )
+    markerless = REPORT.replace(" [1]", "")
+    drafts = [markerless, markerless, REPORT]
+    client = FakeClient(identities=identities, critique_fn=clean, report_fn=lambda n: drafts[n - 1])
+    state = {
+        "question": "Is it so?",
+        "report": REPORT,
+        "author_identity": identities["writer-a"],
+        "run_date": "2026-09-20",
+        "defects": [],
+    }
+    out, event = _direct_generate(tmp_path, cfg, client, identities, state)
+
+    assert out["report"] == REPORT.strip()
+    writer_calls = [c for c in client.calls if c.schema is None]
+    assert len(writer_calls) == 3, "the draft plus two repair attempts"
+    assert event["repair_attempted"] == 1
+    assert event["repair_reason"] == "markerless"
+    assert event["repair_resolved"] == 1
 
 
 def test_gate_2_stays_silent_under_a_global_rewrite_mode(identities, tmp_path, roster):
