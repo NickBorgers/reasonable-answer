@@ -123,8 +123,8 @@ Two narrowings keep it from becoming "quantify everything":
 The resolvability contract above guarantees the writer an escape from a demand it cannot satisfy.
 It is not a licence to keep the claim and hedge it, and both prompts now say so.
 
-**Writer side** (`prompts.WRITER_RESOLUTION_STANDARD`, carried by every non-polish revision in both
-`revision.mode`s). A fix task is resolved by changing the claim or its support, never by appending a
+**Writer side** (`prompts.WRITER_RESOLUTION_STANDARD`, carried by every non-polish revision in every
+`revision.mode`). A fix task is resolved by changing the claim or its support, never by appending a
 qualifier to a claim that is kept. Weakening a claim means restricting it to what the support
 establishes — a narrower population, a smaller magnitude, the cases actually measured, one named
 source's finding — or removing it. Attaching *this remains an extrapolation*, *this is not directly

@@ -1243,7 +1243,7 @@ def _writer_repair(
     citation_fields: dict[str, int],
     scope_fields: dict[str, int],
     run_date: str | None,
-) -> str | None:
+) -> tuple[str, dict[str, int]] | None:
     """One extra call to the writer that just produced `draft` (D-census-gated-repair).
 
     Same alias, same system prompt shape, same timeout as the generation it repairs —
@@ -1265,7 +1265,8 @@ def _writer_repair(
 
     Never raises. A repair must not abort a run that would otherwise have continued, so
     any call failure, empty completion, or — under ops — a reply with no applicable
-    operation is reported as `None` and the caller keeps the unrepaired draft.
+    operation is reported as `None` and the caller keeps the unrepaired draft. Otherwise
+    the repaired text, with the splice's counts under ops (empty for the other licences).
     """
     user = prompts.writer_repair_turn(
         question,
@@ -1304,8 +1305,8 @@ def _writer_repair(
         if spliced is None:
             log.warning("writer repair call to %s returned no applicable operations", alias)
             return None
-        return spliced.text
-    return text
+        return spliced.text, spliced.fields
+    return text, {}
 
 
 def _repair_draft(
@@ -1355,6 +1356,11 @@ def _repair_draft(
     # delete-to-discharge shape this gate exists to catch, so it never counts as resolved.
     entries_before = citation_fields["source_entries"]
     resolved = 0
+    # Under the ops licence each repair reply is a splice of its own, and the shipped
+    # text may be its product rather than the drafting splice's. Its counts are summed
+    # over the repair calls and ride the event under `repair_ops_*`, so `ops_*` keeps
+    # describing the drafting call and neither set stands in for the other.
+    repair_ops: dict[str, int] = {}
     for _ in range(repair_cfg.repair_cap):
         repaired = _writer_repair(
             rt,
@@ -1372,7 +1378,10 @@ def _repair_draft(
         )
         if repaired is None:
             break
-        text = repaired
+        text, splice_fields = repaired
+        for key, value in splice_fields.items():
+            key = ops.REPAIR_PREFIX + key
+            repair_ops[key] = repair_ops.get(key, 0) + value
         if len(text) > cfg.max_report_chars:
             text = text[: cfg.max_report_chars]
         citation_fields = _citation_fields(previous, text, polish=polish, warn=False)
@@ -1387,7 +1396,7 @@ def _repair_draft(
         text,
         citation_fields,
         scope_fields,
-        {"repair_attempted": 1, "repair_reason": reason, "repair_resolved": resolved},
+        {"repair_attempted": 1, "repair_reason": reason, "repair_resolved": resolved, **repair_ops},
     )
 
 

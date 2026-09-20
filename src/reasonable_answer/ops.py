@@ -40,8 +40,6 @@ from . import report as report_mod
 from .fetch import _SOURCES_HEADING
 from .schemas import StructuralRef
 
-OP_KINDS = ("replace", "delete", "insert-after")
-
 _HEADER = re.compile(
     r"^\s*@@\s*(replace|delete|insert[-_ ]?after)\s+\[?S(\d+)\.P(\d+)\]?"
     r"(?:\s+tasks?\s*[:=]\s*(.*?))?\s*$",
@@ -54,7 +52,8 @@ _LABEL_ECHO = re.compile(r"^\[S\d+\.P\d+\]\s*")
 _HEADING = report_mod._HEADING
 
 #: Every count the parser and the splice report, so a `generate` event under ops mode
-#: always carries the whole set and an absent key can only mean "not ops mode".
+#: always carries the whole set and an absent key can only mean "not ops mode". The
+#: census-gated repair turn's own splice reports the same set under `REPAIR_PREFIX`.
 PARSE_FIELDS = (
     "ops_fenced",
     "ops_bad_headers",
@@ -76,6 +75,11 @@ SPLICE_FIELDS = (
     "ops_label_echo",
     "ops_heading_echo",
 )
+
+
+#: Prefix under which the repair turn's splice counts ride the `generate` event, so
+#: the drafting call's counts and the repair's never share a key (D-ops-revision).
+REPAIR_PREFIX = "repair_"
 
 
 @dataclass(frozen=True)

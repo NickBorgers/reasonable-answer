@@ -131,7 +131,12 @@ change continues under the new mode from its next generation — as a `patch`/`r
 did; recorded here, not changed. Fail-closed lenses, severity floors and termination are untouched.
 
 **Event fields on `generate`, integers, present exactly when ops mode ran** (no text, no locus, no task
-id — RA-016), and `revision_mode` (`patch` | `rewrite` | `ops`) on every `generate` event:
+id — RA-016), and `revision_mode` (`patch` | `rewrite` | `ops`) on every `generate` event. The `ops_*`
+set describes the **drafting call's** reply. When the census-gated repair turn runs under the ops
+licence, each repair reply is a splice of its own and the shipped text may be its product; the same
+set, summed over the repair calls, rides the event under `repair_ops_*` beside `repair_attempted`, so
+a reader of the A/B evidence never attributes a repair's operations to the drafting call or the other
+way round. A repair reply with no applicable operation adds nothing (there was no splice):
 
 | field | meaning |
 |---|---|
@@ -146,6 +151,8 @@ id — RA-016), and `revision_mode` (`patch` | `rewrite` | `ops`) on every `gene
 | `ops_label_echo`, `ops_heading_echo` | stripped and counted, not refused |
 | `ops_without_task` | operations naming no task id |
 | `ops_unterminated`, `ops_stray_lines`, `ops_bad_headers`, `ops_fenced` | protocol tolerance, counted |
+
+| `repair_ops_<any of the above>` | the same counts for the repair turn's splice(s), when one ran |
 
 `generate_failed` gains no field; its `failure_class` (`malformed_ops`) is the whole record.
 

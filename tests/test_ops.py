@@ -429,3 +429,33 @@ def test_revise_carries_every_count_as_an_integer_and_a_partial_reply_still_ship
     assert spliced.fields["ops_applied"] == 3
     assert spliced.fields["ops_refused_locus"] == 1
     assert spliced.text == ops.splice(REPORT, ops.parse_ops(THREE_BLOCKS).ops).text
+
+
+# ------------------------------------------------- the two heading shapes ops leans on
+
+
+def test_the_sources_section_is_found_by_the_extractors_own_heading_rule():
+    """The dangling-marker guard defers exactly the section `fetch._SOURCES_HEADING`
+    names — any depth, any case, the word alone — and no other. Pinned here because a
+    change to that regex would silently move which operations the guard checks."""
+    for heading in ("## Sources", "# SOURCES", "### sources", "##   Sources  "):
+        text = REPORT.replace("## Sources", heading)
+        assert ops.splice(text, [op("delete", 4, 2)]).fields["ops_refused_dangling"] == 1, heading
+    # A heading that only starts with the word is not the Sources section: its
+    # paragraphs are body paragraphs, deleted freely and never deferred.
+    text = REPORT.replace("## Sources", "## Sources and further reading")
+    spliced = ops.splice(text, [op("delete", 4, 2)])
+    assert spliced.fields["ops_refused_dangling"] == 0
+    assert spliced.fields["ops_applied"] == 1
+
+
+def test_a_heading_is_refused_at_every_depth_and_only_when_it_is_one():
+    """The heading-echo strip and `ops_refused_heading` follow `report._HEADING`: one
+    to six `#` followed by a space. A `#` glued to a word is prose, not a heading."""
+    for depth in range(1, 7):
+        text = f"{'#' * depth} New section\n\nBody."
+        assert ops.splice(REPORT, [op("replace", 3, 1, text)]).fields["ops_refused_heading"] == 1, depth
+    spliced = ops.splice(REPORT, [op("replace", 3, 1, "#hashtag is not a heading [1].")])
+    assert spliced.fields["ops_refused_heading"] == 0
+    assert spliced.fields["ops_applied"] == 1
+    assert "#hashtag is not a heading [1]." in paragraphs(spliced.text)

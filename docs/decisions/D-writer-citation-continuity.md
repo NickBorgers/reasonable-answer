@@ -31,8 +31,8 @@ at least one body marker and every marker has an entry. `REPORT_SKELETON` item 5
 per source the body cites with an inline marker. Both ride the system prompt, so first drafts, revisions
 and polish passes all hold them (D-report-template).
 
-*The revision rule.* `WRITER_CITATION_REVISION`, carried inside `WRITER_RESOLUTION_STANDARD` so both
-revision modes hold it (D-no-hedge-discharge placed the standard there for the same reason):
+*The revision rule.* `WRITER_CITATION_REVISION`, carried inside `WRITER_RESOLUTION_STANDARD` so every
+revision mode holds it (D-no-hedge-discharge placed the standard there for the same reason):
 
 - keep every marker on a claim you keep, and remove a marker only together with its claim;
 - delete an entry only when no remaining sentence cites it;

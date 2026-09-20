@@ -1760,8 +1760,13 @@ def test_gate_2_fires_under_ops_and_the_repair_turn_returns_operations(identitie
     assert event["repair_reason"] == "out_of_scope"
     assert event["repair_resolved"] == 1
     assert event["out_of_scope"] == 0
-    # The event's ops counts describe the drafting reply; the repair is a separate call.
+    # `ops_*` describes the drafting reply; the repair splice that actually built the
+    # shipped text reports under `repair_ops_*`, so neither stands in for the other.
     assert event["ops_total"] == 7
+    assert event["ops_applied"] == 7
+    assert event["repair_ops_total"] == 7
+    assert event["repair_ops_applied"] == 7
+    assert event["repair_ops_refused_locus"] == 0
 
 
 def test_a_malformed_ops_repair_reply_keeps_the_draft(identities, tmp_path, roster):
@@ -1786,3 +1791,26 @@ def test_a_malformed_ops_repair_reply_keeps_the_draft(identities, tmp_path, rost
     assert event["repair_resolved"] == 0
     assert event["body_markers"] == 0
     assert len([c for c in client.calls if c.schema is None]) == 2
+    # Nothing was spliced by the repair, so there are no repair splice counts to report.
+    assert not any(k.startswith("repair_ops_") for k in event)
+
+
+def test_a_patch_mode_repair_carries_no_repair_ops_counts(identities, tmp_path, roster):
+    cfg = Config(
+        roster=roster,
+        budgets=Budgets(min_ticks=2, hard_cap=4),
+        runs_dir=tmp_path / "runs",
+        revision=RevisionConfig(mode="patch", repair=RepairConfig(enabled=True)),
+    )
+    drafts = [REPORT.replace(" [1]", ""), REPORT]
+    client = FakeClient(identities=identities, critique_fn=clean, report_fn=lambda n: drafts[n - 1])
+    state = {
+        "question": "Is it so?",
+        "report": REPORT,
+        "author_identity": identities["writer-a"],
+        "run_date": "2026-09-20",
+        "defects": [],
+    }
+    _, event = _direct_generate(tmp_path, cfg, client, identities, state)
+    assert event["repair_attempted"] == 1
+    assert not any(k.startswith("ops_") or k.startswith("repair_ops_") for k in event)
