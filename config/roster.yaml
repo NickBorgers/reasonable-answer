@@ -491,10 +491,12 @@ revision:
   # the writer returns operations on the labelled paragraphs of the draft and the splice
   # builds the next report, so an unnamed paragraph *is* byte-identical, a heading cannot
   # be touched, and a Sources change that would orphan a body marker is refused
-  # (D-ops-revision). Production stays on `patch` until a live A/B on this build says
-  # otherwise; the `generate` event's `revision_mode` field buckets the two, and under
-  # `ops` its `ops_applied` / `ops_refused_*` counts say which rule did the work.
-  mode: patch
+  # (D-ops-revision). The shipped roster runs `ops` (D-ops-revision-rollout); the code
+  # default is still `patch`, and `patch` here is the one-line rollback. The `generate`
+  # event's `revision_mode` field says which mode a round ran under, the `startup` event
+  # records this whole block, and under `ops` the `ops_applied` / `ops_refused_*` counts
+  # say which rule did the work.
+  mode: ops
   scope_check: warn
 
   # The census-gated repair turn (D-census-gated-repair). A production writer returned a

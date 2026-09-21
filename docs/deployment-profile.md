@@ -181,6 +181,15 @@ load-bearing rather than incidental:
   forbidden because it silently escalates. This is doctrine, and tests assert against the
   serialized request body so a new code path is caught too.
 
+## Revisions are operations in production
+
+The committed roster runs `revision.mode: ops` (D-ops-revision-rollout): a revising writer returns
+operations on the labelled paragraphs of the draft and `ops.splice` builds the next artifact, so an
+unnamed paragraph is byte-identical by construction and a Sources change that would orphan a body
+marker is refused. The code default remains `patch`, and a deployment that mounts its own roster
+gets whatever that file says — the `startup` event's `revision` block is the record of which. Setting
+`mode: patch` in the mounted roster, with a restart between runs, is the whole rollback.
+
 ## Observability
 
 There is no metrics or log-shipping stack in this repository — the application logs to stdout via
