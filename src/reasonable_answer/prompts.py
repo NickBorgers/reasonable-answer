@@ -525,15 +525,11 @@ WRITER_PATCH_CLOSE = (
 #: of a list that sits under one label. The Sources sentences answer another: a Sources
 #: list is sometimes one paragraph and sometimes one paragraph per entry, and the writer
 #: has to be told both cases are addressed by the label it can see.
-WRITER_OPS_CLOSE = (
-    "Revise by operations, not by returning the report. Change only the paragraphs a fix "
-    "task names in its locus, plus anything a task's instruction explicitly requires you "
-    "to touch elsewhere (a '## Sources' entry, for example). A paragraph you do not name "
-    "comes back exactly as it is, by construction: you cannot and must not reproduce "
-    "it.\n\n"
-    f"{WRITER_CLAIM_UNIT}\n\n"
-    "Text you did not write is not text to be fixed: operating on a passage no task names "
-    "only puts a fresh defect where there was none.\n\n"
+#: The block format itself (D-ops-revision), stated once and carried by both prompts
+#: that ask for operations: the ops close, and the census-gated repair turn under the
+#: ops licence — a fresh context that has never seen the close, so "the same format as
+#: before" would name a format the model was not shown.
+WRITER_OPS_FORMAT = (
     "OUTPUT FORMAT — OPERATIONS ONLY. Do not return the report. Return a sequence of "
     "operations on the labelled draft, each one a block in exactly this form:\n\n"
     "@@ replace S2.P3 tasks=T1,T4\n"
@@ -556,6 +552,18 @@ WRITER_OPS_CLOSE = (
     "removed; such an operation is refused. Never operate on a heading and never put a "
     "heading in new text. Output nothing outside the blocks: no preamble, no commentary, "
     "no code fence."
+)
+
+WRITER_OPS_CLOSE = (
+    "Revise by operations, not by returning the report. Change only the paragraphs a fix "
+    "task names in its locus, plus anything a task's instruction explicitly requires you "
+    "to touch elsewhere (a '## Sources' entry, for example). A paragraph you do not name "
+    "comes back exactly as it is, by construction: you cannot and must not reproduce "
+    "it.\n\n"
+    f"{WRITER_CLAIM_UNIT}\n\n"
+    "Text you did not write is not text to be fixed: operating on a passage no task names "
+    "only puts a fresh defect where there was none.\n\n"
+    f"{WRITER_OPS_FORMAT}"
 )
 
 
@@ -756,11 +764,12 @@ def writer_repair_turn(
         sentences.append("It " + " and ".join(clauses) + ".")
     if ops and previous is not None:
         restore = (
-            "Return operations on the labelled PREVIOUS DRAFT below, in the same block "
-            "format as before, serving only the fix tasks; do not return the report. "
+            "Return operations on the labelled PREVIOUS DRAFT below, in the block format "
+            "stated at the end, serving only the fix tasks; do not return the report. "
         )
         shown_previous: str | None = report_mod.render_with_loci(previous)
         output = "Keep every [n] marker on a claim you keep."
+        format_block = f"\n\n{WRITER_OPS_FORMAT}"
     else:
         restore = (
             "Restore every paragraph outside the fix tasks byte-for-byte from PREVIOUS DRAFT "
@@ -770,6 +779,7 @@ def writer_repair_turn(
         )
         shown_previous = previous
         output = "Keep every [n] marker on a claim you keep. Return the complete report."
+        format_block = ""
     findings = " ".join(sentences)
 
     previous_block = (
@@ -784,7 +794,7 @@ def writer_repair_turn(
         f"QUESTION\n{DATA_FENCE}\n{_neutralized(question)}\n{DATA_END}\n\n"
         f"YOUR DRAFT\n{DATA_FENCE}\n{_neutralized(draft)}\n{DATA_END}\n\n"
         f"{previous_block}"
-        f"FIX TASKS\n{DATA_FENCE}\n{_neutralized(tasks)}\n{DATA_END}"
+        f"FIX TASKS\n{DATA_FENCE}\n{_neutralized(tasks)}\n{DATA_END}{format_block}"
     )
 
 

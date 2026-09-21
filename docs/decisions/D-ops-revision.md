@@ -178,3 +178,41 @@ can exist), D-writer-citation-continuity (the census the dangling-marker guard r
 entry only when nothing cites it", now mechanical), D-census-gated-repair (gate 2 under ops; the repair
 turn returns operations), D-writer-failure-class (`malformed_ops`), and D-fence-scrub-all-directions
 (every fenced block in the ops prompt and its repair turn is scrubbed).
+
+---
+
+**Amended 2026-09-21 — hardening after the first review, and the revision block on `startup`.** The
+second review cycle of the implementing change found four places where the mechanism was weaker than
+the guarantees stated above, and the first production rounds under the shipped code showed why the
+repair-turn one mattered. All four are now as stated; none changes the interface, the default, or any
+invariant.
+
+1. **The repair turn under the ops licence carries the block format.** The repair call is a fresh
+   context with the plain system prompt; it had been told to answer "in the same block format as
+   before", which named a format it was never shown. The format is now one text,
+   `WRITER_OPS_FORMAT`, that ends both the ops close and the ops repair turn. Without it the ops repair
+   turn could only fail safe, and gate 2 would spend its one repair call for nothing on every firing.
+2. **The dangling-marker guard compares sets, not counts.** `excerpt.dangling_numbers` returns the
+   entry numbers the body cites that have no entry; a deferred Sources operation is refused if that set
+   gains any member. A swap that cures one orphan by creating another kept the count level and passed.
+3. **A heading line anywhere in new text is refused.** `report.blocks` reads the first line of a block,
+   so a `#` line glued under a sentence created no locus and passed, but still rendered as a heading.
+   Every line is checked.
+4. **Operations that leave no paragraph are a malformed reply.** The empty-reply guard reads the reply,
+   which under ops is operations; a reply that deleted every paragraph had `ops_applied > 0` and shipped
+   a headings-only artifact. `ops.revise` now returns `None` for a splice with no paragraph, which the
+   caller already records as `malformed_ops`.
+
+**The `startup` event records the `revision` block** — `mode`, `scope_check`, `repair_enabled`,
+`repair_cap`, `max_out_of_scope` — beside `budgets` and `identities`. Production mounts its own roster
+over the baked one, so `summary.build.commit` cannot say which mode or which repair settings a run had;
+the first runs after this decision shipped ran with no `revision:` block in the mounted roster at all,
+which the audit could only show by the *absence* of `repair_attempted` on rounds that met a gate. That
+is an inference, and the event field replaces it with a record. This is the deployment-profile
+concern docs/run-provenance.md already names, given a field.
+
+What the first patch-mode rounds with repair enabled showed, recorded without identifiers as
+motivation (QP9): gate 1 caught every marker-less draft it saw and the repair restored the markers
+each time; gate 2 fired more often and resolved rarely; and Sources deletions of most of a list while
+the body's markers stayed recurred — the exact shape the dangling-marker guard refuses under ops.
+That is the case for the roster flip, which remains a separate decision.

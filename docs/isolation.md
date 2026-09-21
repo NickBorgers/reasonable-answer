@@ -254,9 +254,10 @@ the next artifact from the previous one and the operations, and that spliced Mar
 critic reads, in the unchanged rendering, in a fresh blind context. What the patch close could only ask
 for is now a property of the splice: a paragraph no operation names is byte-identical because nothing
 touched it; a heading cannot be renumbered or dropped because no label addresses one; a Sources change
-that would leave a body marker citing nothing is refused; new text that would add a heading is
-refused; a copied label or an echoed section heading is stripped. A reply with no applicable
-operation is a failed writer attempt (`malformed_ops`) that moves to the next pool member, like an
+that would leave a body marker citing nothing is refused (the set of orphaned entry numbers may
+never gain a member); new text containing a heading line is refused; a copied label or an echoed
+section heading is stripped. A reply with no applicable operation, or whose operations leave no
+paragraph, is a failed writer attempt (`malformed_ops`) that moves to the next pool member, like an
 empty reply — there is no draft to ship or repair. Every count rides the `generate` event as an
 integer (`ops_applied`, `ops_refused_*`, …) beside `revision_mode`; no text, no locus, no task id.
 
@@ -264,8 +265,8 @@ Nothing about who edits or who reviews moves here either. The handoff carries ex
 prompt carried plus the labels the critics already read and a task ordinal per fix task; every fenced
 block is `_neutralized` (D-fence-scrub-all-directions), and no critique prose, lens name or critic
 identity is added. The census-gated repair turn under ops asks for operations on the labelled previous
-draft, never for a whole document — one output contract per mode — and its reply is spliced the same
-way. A first draft, a polish pass and a rule-13 rewrite are whole documents whatever the mode.
+draft, never for a whole document — one output contract per mode — carries the block format itself
+(its context is fresh and never saw the close), and its reply is spliced the same way. A first draft, a polish pass and a rule-13 rewrite are whole documents whatever the mode.
 
 ## The depersonalization step (principle 1, made concrete)
 
