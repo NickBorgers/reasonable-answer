@@ -77,9 +77,10 @@ contract is `splice(x, []).text == canonical(x)`, and `revision_scope` reports n
    order written; an `insert-after` beside a `delete` on the same locus is allowed.
 3. *Application.* Every accepted operation outside the `## Sources` section, plus every `insert-after`
    inside it, is applied.
-4. *The dangling-marker guard.* The citation census of that candidate gives a baseline count of body
-   markers that cite no entry. Each Sources `replace`/`delete` is then tried in the order written and
-   kept only if that count does not rise; otherwise it is refused (`ops_refused_dangling`). This is
+4. *The dangling-marker guard.* The citation census of that candidate gives the baseline set of entry
+   numbers cited by body markers but absent from Sources. Each Sources `replace`/`delete` is then tried
+   in the order written and kept only if the candidate set gains no member; otherwise it is refused
+   (`ops_refused_dangling`). This is
    "delete an entry only when nothing cites it", generalised to a Sources list that sits under one
    label (where a *replace* of the whole list is how an entry is removed), and it uses only the public
    census so `[n]`, `n.` and `n)` entries all count. Body operations run first, so a reply that removes
@@ -183,9 +184,8 @@ turn returns operations), D-writer-failure-class (`malformed_ops`), and D-fence-
 
 **Amended 2026-09-21 — hardening after the first review, and the revision block on `startup`.** The
 second review cycle of the implementing change found four places where the mechanism was weaker than
-the guarantees stated above, and the first production rounds under the shipped code showed why the
-repair-turn one mattered. All four are now as stated; none changes the interface, the default, or any
-invariant.
+the guarantees stated above. All four are now as stated; none changes the interface, the default, or
+any invariant.
 
 1. **The repair turn under the ops licence carries the block format.** The repair call is a fresh
    context with the plain system prompt; it had been told to answer "in the same block format as
@@ -206,13 +206,6 @@ invariant.
 **The `startup` event records the `revision` block** — `mode`, `scope_check`, `repair_enabled`,
 `repair_cap`, `max_out_of_scope` — beside `budgets` and `identities`. Production mounts its own roster
 over the baked one, so `summary.build.commit` cannot say which mode or which repair settings a run had;
-the first runs after this decision shipped ran with no `revision:` block in the mounted roster at all,
-which the audit could only show by the *absence* of `repair_attempted` on rounds that met a gate. That
-is an inference, and the event field replaces it with a record. This is the deployment-profile
-concern docs/run-provenance.md already names, given a field.
-
-What the first patch-mode rounds with repair enabled showed, recorded without identifiers as
-motivation (QP9): gate 1 caught every marker-less draft it saw and the repair restored the markers
-each time; gate 2 fired more often and resolved rarely; and Sources deletions of most of a list while
-the body's markers stayed recurred — the exact shape the dangling-marker guard refuses under ops.
-That is the case for the roster flip, which remains a separate decision.
+the audit would otherwise require inferring those settings from later events. The event field replaces
+that inference with a record. This is the deployment-profile concern docs/run-provenance.md already
+names, given a field. A roster flip remains a separate decision.

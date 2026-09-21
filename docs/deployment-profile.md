@@ -187,7 +187,7 @@ There is no metrics or log-shipping stack in this repository — the application
 the standard library and the container's log driver takes it from there. The real audit surface is
 on disk: per run, `events.jsonl`, `audit.json`, and `owner.txt` under the runs volume, with a
 startup event recording identities, modes, budgets, which resolve tiers were enabled, and the
-build the attempt ran on. A background sweeper enforces `retention_days`.
+revision settings and build the attempt ran with. A background sweeper enforces `retention_days`.
 
 `compose.yaml` sets **`RA_LOG_LEVEL: INFO`** (D-provider-retry). The shipped code default is WARNING, and the
 container's CMD is fixed so `--verbose` cannot be passed; at WARNING a deployment records no run
