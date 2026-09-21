@@ -118,4 +118,10 @@ of falling back to a cold agent with no context.
   relative link out of it climbs one extra level — `../isolation.md`, not `./isolation.md`.
 - **Browser impersonation and stealth proxying are doctrine, not gaps.** The outbound user agent is
   fixed and the extraction provider's proxy mode is pinned; tests assert it.
+- **To read a production run, take the `run-<12 hex>` id from a log line** and `GET
+  https://reasonable-answer.nickborgers.net/runs/<run-id>/audit.json` — public, no identity needed
+  (D-id-as-credential). The build commit is `summary.build.commit` there, and nowhere in the logs.
+  Everything else on that host — the index, `/runs-table`, `/healthz`, `/app/…` — is behind
+  Cloudflare Access and unreachable from an agent; probing it proves nothing. See
+  `docs/run-provenance.md`.
 - **Ambiguous task → ask, don't guess.** Comment on the issue rather than opening a speculative PR.

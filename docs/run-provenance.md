@@ -114,6 +114,30 @@ best `converged_unconfirmed`, never `accepted` — it may equally end `exhausted
 carries that roster limitation too, but only the events say *which* models were missing. A reduced roster that still leaves every lens
 with at least two eligible critics may still reach `accepted`.
 
+## Reading a production run from outside
+
+Everything above assumes you have a `runs/` directory to `jq` against. An agent working from the
+operator's log store — the container logs, queried from a dev machine — has no such directory, only
+run ids of the form `run-<12 hex chars>`. Those are enough: every run's audit record is a public,
+identity-free `GET`:
+
+```
+https://reasonable-answer.nickborgers.net/runs/<run-id>/audit.json
+```
+
+No sign-in, no header, no token — holding the run id is the credential
+([D-id-as-credential](./authentication.md#sharing-a-run-publicly)). `audit.json` carries
+`summary.status`, the full `events` list, and `summary.build.commit`, the canonical final-build
+attribution. The audit's `final.build` and stamped events also carry build identities; for a run
+resumed across a deploy, use the `startup` event for the attempt in question as described above.
+The logs carry the run id; they do not carry the commit — do not go looking for it there.
+
+Nothing else on that host answers an agent. The index, `/runs-table`, `/healthz`, and everything
+under `/app/` are gated by Cloudflare Access (see [authentication.md](./authentication.md)); a
+probe of any of them gets a 403, a redirect to a login, or an nginx 404, and none of that says
+anything about whether the application is up. The one working entry point from outside is the
+`audit.json` URL above, built directly from a run id.
+
 ## Keeping the stamp working
 
 The production path depends on CI passing `RA_BUILD_SHA` as a build argument
