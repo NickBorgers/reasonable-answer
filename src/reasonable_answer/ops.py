@@ -221,9 +221,12 @@ def _normalised(text: str, section_title: str, fields: dict[str, int]) -> str | 
 
     Writers were seen to copy the `[S<n>.P<m>]` label they were shown into the new text,
     and once to open the new text with the section's own heading; both are stripped and
-    counted, never refused. A heading anywhere in what remains *is* refused: the labels
-    critics read are numbered by heading, so new text that adds one would renumber every
-    paragraph after it, and a heading is exactly what no operation may touch.
+    counted, never refused. A heading *line* anywhere in what remains is refused — every
+    line is checked, not only the first line of each block, because a `#` line glued
+    under a sentence creates no new locus but still renders as a heading in the
+    published report. The labels critics read are numbered by heading, so new text that
+    adds one would renumber every paragraph after it, and a heading is exactly what no
+    operation may touch.
     """
     text = text.strip()
     stripped = _LABEL_ECHO.sub("", text, count=1)
@@ -239,11 +242,10 @@ def _normalised(text: str, section_title: str, fields: dict[str, int]) -> str | 
     if not text:
         fields["ops_refused_empty"] += 1
         return None
-    parts = report_mod.blocks(text)
-    if any(b.kind == "heading" for b in parts):
+    if any(_HEADING.match(line) for line in text.splitlines()):
         fields["ops_refused_heading"] += 1
         return None
-    return "\n\n".join(b.text for b in parts)
+    return "\n\n".join(b.text for b in report_mod.blocks(text))
 
 
 def _render(
@@ -271,11 +273,13 @@ def splice(previous: str, ops: Sequence[Op]) -> Splice:
     (the first wins), while several `insert-after` on one locus are all kept in the
     order written. Every accepted operation outside the `## Sources` section, plus every
     `insert-after` inside it, is applied. Then each Sources `replace`/`delete` is tried
-    in the order written and kept only if the body's count of markers citing no entry
-    does not rise — "delete an entry only when nothing cites it", generalised to a
-    Sources list that sits under one label, using only the public citation census so
-    `[n]`, `n.` and `n)` entries all count. A body edit that removes the last marker
-    citing an entry therefore licenses deleting that entry in the same reply.
+    in the order written and kept only if it orphans no entry number that had an entry
+    before it — the *set* of dangling numbers may shrink or stay, never gain a member,
+    so a swap that cures one orphan by creating another is refused too. This is "delete
+    an entry only when nothing cites it", generalised to a Sources list that sits under
+    one label, using only the public census helpers so `[n]`, `n.` and `n)` entries all
+    count. A body edit that removes the last marker citing an entry therefore licenses
+    deleting that entry in the same reply.
 
     The result is `report.canonical(previous)` with the operations applied: blocks
     joined by one blank line, headings on their own line, no trailing newline. Text
@@ -319,11 +323,11 @@ def splice(previous: str, ops: Sequence[Op]) -> Splice:
             fields["ops_applied"] += 1
 
     candidate = _render(bs, replaced, inserted)
-    baseline = excerpt.citation_census(candidate)["dangling_markers"]
+    baseline = excerpt.dangling_numbers(candidate)
     for i, text in deferred:
         trial = _render(bs, {**replaced, i: text}, inserted)
-        dangling = excerpt.citation_census(trial)["dangling_markers"]
-        if dangling > baseline:
+        dangling = excerpt.dangling_numbers(trial)
+        if dangling - baseline:
             fields["ops_refused_dangling"] += 1
             continue
         replaced[i] = text
@@ -335,12 +339,16 @@ def splice(previous: str, ops: Sequence[Op]) -> Splice:
 
 def revise(previous: str, reply: str) -> Splice | None:
     """Parse `reply` and splice it into `previous`. `None` when no operation could be
-    parsed or none could be applied: there is then no new draft, and the caller records
-    the attempt as failed."""
+    parsed, none could be applied, or what they leave has no paragraph at all: there is
+    then no new draft, and the caller records the attempt as failed. The last case is
+    the ops counterpart of the empty-reply guard — under ops the reply is operations,
+    so "the model answered with nothing" has to be judged on the spliced result."""
     parsed = parse_ops(reply)
     if not parsed.ops:
         return None
     spliced = splice(previous, parsed.ops)
     if spliced.fields["ops_applied"] == 0:
+        return None
+    if not any(b.kind == "paragraph" for b in report_mod.blocks(spliced.text)):
         return None
     return Splice(spliced.text, {**parsed.fields, **spliced.fields})

@@ -19,6 +19,11 @@ are `unparsed_tool_markup`, `tool_loop_no_answer`, `tool_loop_no_end`, `empty_co
 in `llm.py`, because the call *succeeded* — `empty_report` for a model that answered with
 whitespace.
 
+> Superseded in part by **D-ops-revision**: the set gains a second class raised nowhere in `llm.py`,
+> `malformed_ops` — under `revision.mode: ops` the call succeeded and the model answered, but with no
+> operation the splice could apply, or with operations that leave no paragraph. Like `empty_report` it
+> moves the attempt to the next pool member and adds no field to `generate_failed`.
+
 Two properties are deliberate. Classification reads the exception type and the SDK's status code,
 never the message text, for the same reason `_permanent` does: a provider's wording is not an
 interface. And an exhausted retry budget reports its *cause's* class rather than a class of its

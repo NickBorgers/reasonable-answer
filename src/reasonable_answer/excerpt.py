@@ -210,6 +210,16 @@ def _cited_keys(report: str) -> tuple[set[str], set[str]]:
     )
 
 
+def dangling_numbers(report: str) -> set[int]:
+    """Every entry number the body cites that no `## Sources` entry carries — the
+    *identities* behind `citation_census`'s `dangling_markers` count. The ops splice
+    compares these sets, not the counts: a Sources edit that orphans one entry while
+    curing another leaves the count unchanged and is still a broken citation
+    (D-ops-revision)."""
+    _, cited = _body_citations(report)
+    return cited - {number for number, _ in _numbered_entries(report)}
+
+
 def citation_census(report: str) -> dict[str, int]:
     """How the draft's body markers and its `## Sources` entries agree
     (D-writer-citation-continuity). Counts only — never a URL or a character of text — because these land in

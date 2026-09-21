@@ -51,7 +51,8 @@ gives the query.
 `events.jsonl` today, and adding I/O plus a failure mode to the terminal write path is not worth
 data already recoverable from the events. No separate hash of the roster or the prompts — the
 roster is tracked, so the commit covers it, and the `startup` event already records the resolved
-identities and budgets, which is what actually varies between runs on the same commit. No
+identities, budgets, and revision settings, which are the configuration that may vary between runs
+on the same commit. No
 invariant, no controller or isolation surface touched: `OrchestratorView` forbids extras and is
 built field by field, so a key in the store cannot reach it, and a test asserts the stamp never
 appears in `signals/views.jsonl`.

@@ -1240,6 +1240,11 @@ def test_a_failed_repair_call_keeps_the_original_draft(identities, tmp_path, ros
         pytest.param({"polish_next": True, "report": REPORT}, "patch", id="polish"),
         pytest.param({"full_rewrite_next": True, "report": REPORT}, "patch", id="rewrite"),
         pytest.param({"report": REPORT}, "rewrite", id="global_rewrite_mode"),
+        # The same three whole-document generations under an ops deployment: the repair
+        # turn must ask for the whole report, never for operations (D-ops-revision).
+        pytest.param({}, "ops", id="first_draft_ops"),
+        pytest.param({"polish_next": True, "report": REPORT}, "ops", id="polish_ops"),
+        pytest.param({"full_rewrite_next": True, "report": REPORT}, "ops", id="rewrite_ops"),
     ],
 )
 def test_gate_2_is_exempt_where_scope_measurement_is_silent_but_gate_1_is_not(
@@ -1281,6 +1286,9 @@ def test_gate_2_is_exempt_where_scope_measurement_is_silent_but_gate_1_is_not(
     assert "byte-for-byte" not in writer_calls[1].user, (
         "a generation asked for the whole document must not be told to restore paragraphs"
     )
+    assert "Return operations" not in writer_calls[1].user
+    assert "@@ replace" not in writer_calls[1].user
+    assert "Return the complete report" in writer_calls[1].user
 
 
 def test_repair_cap_bounds_the_number_of_extra_writer_calls(identities, tmp_path, roster):
@@ -1753,6 +1761,8 @@ def test_gate_2_fires_under_ops_and_the_repair_turn_returns_operations(identitie
     assert "REPAIR REQUIRED" in repair.user
     assert "changed 7 paragraph(s)" in repair.user
     assert "Return operations on the labelled PREVIOUS DRAFT below" in repair.user
+    # A fresh context: the block format has to travel with the repair prompt.
+    assert prompts.WRITER_OPS_FORMAT in repair.user
     assert "[S0.P2] Paragraph number 2 says something specific to itself." in repair.user
     assert "byte-for-byte" not in repair.user
     assert "Return the complete report" not in repair.user
@@ -1793,6 +1803,40 @@ def test_a_malformed_ops_repair_reply_keeps_the_draft(identities, tmp_path, rost
     assert len([c for c in client.calls if c.schema is None]) == 2
     # Nothing was spliced by the repair, so there are no repair splice counts to report.
     assert not any(k.startswith("repair_ops_") for k in event)
+
+
+def test_a_plain_patch_generation_records_its_mode(identities, tmp_path, roster):
+    cfg = Config(roster=roster, budgets=Budgets(min_ticks=2, hard_cap=4), runs_dir=tmp_path / "runs")
+    client = FakeClient(identities=identities, critique_fn=clean, report_fn=lambda _n: REPORT)
+    state = {
+        "question": "Is it so?",
+        "report": REPORT,
+        "author_identity": identities["writer-a"],
+        "run_date": "2026-09-20",
+        "defects": [],
+    }
+    _, event = _direct_generate(tmp_path, cfg, client, identities, state)
+    assert event["revision_mode"] == "patch"
+    assert not any(k.startswith("ops_") for k in event)
+
+
+def test_the_startup_event_records_the_revision_block(identities, config):
+    """Production mounts its own roster, so the commit cannot say which mode or which
+    repair settings a run had; the `startup` event does (D-ops-revision)."""
+    cfg = config.model_copy(
+        update={"revision": RevisionConfig(mode="ops", repair=RepairConfig(enabled=True, max_out_of_scope=4))}
+    )
+    final = run(cfg, question="Is it so?", seed=REPORT, client=make_client(identities))
+    startup = next(e for e in events_of(final) if e["kind"] == "startup")
+    assert startup["revision"] == {
+        "mode": "ops",
+        "scope_check": "warn",
+        "repair_enabled": True,
+        "repair_cap": 1,
+        "max_out_of_scope": 4,
+    }
+    default = run(config, question="Is it so?", seed=REPORT, client=make_client(identities))
+    assert next(e for e in events_of(default) if e["kind"] == "startup")["revision"]["mode"] == "patch"
 
 
 def test_a_patch_mode_repair_carries_no_repair_ops_counts(identities, tmp_path, roster):

@@ -77,9 +77,10 @@ contract is `splice(x, []).text == canonical(x)`, and `revision_scope` reports n
    order written; an `insert-after` beside a `delete` on the same locus is allowed.
 3. *Application.* Every accepted operation outside the `## Sources` section, plus every `insert-after`
    inside it, is applied.
-4. *The dangling-marker guard.* The citation census of that candidate gives a baseline count of body
-   markers that cite no entry. Each Sources `replace`/`delete` is then tried in the order written and
-   kept only if that count does not rise; otherwise it is refused (`ops_refused_dangling`). This is
+4. *The dangling-marker guard.* The citation census of that candidate gives the baseline set of entry
+   numbers cited by body markers but absent from Sources. Each Sources `replace`/`delete` is then tried
+   in the order written and kept only if the candidate set gains no member; otherwise it is refused
+   (`ops_refused_dangling`). This is
    "delete an entry only when nothing cites it", generalised to a Sources list that sits under one
    label (where a *replace* of the whole list is how an entry is removed), and it uses only the public
    census so `[n]`, `n.` and `n)` entries all count. Body operations run first, so a reply that removes
@@ -178,3 +179,33 @@ can exist), D-writer-citation-continuity (the census the dangling-marker guard r
 entry only when nothing cites it", now mechanical), D-census-gated-repair (gate 2 under ops; the repair
 turn returns operations), D-writer-failure-class (`malformed_ops`), and D-fence-scrub-all-directions
 (every fenced block in the ops prompt and its repair turn is scrubbed).
+
+---
+
+**Amended 2026-09-21 — hardening after the first review, and the revision block on `startup`.** The
+second review cycle of the implementing change found four places where the mechanism was weaker than
+the guarantees stated above. All four are now as stated; none changes the interface, the default, or
+any invariant.
+
+1. **The repair turn under the ops licence carries the block format.** The repair call is a fresh
+   context with the plain system prompt; it had been told to answer "in the same block format as
+   before", which named a format it was never shown. The format is now one text,
+   `WRITER_OPS_FORMAT`, that ends both the ops close and the ops repair turn. Without it the ops repair
+   turn could only fail safe, and gate 2 would spend its one repair call for nothing on every firing.
+2. **The dangling-marker guard compares sets, not counts.** `excerpt.dangling_numbers` returns the
+   entry numbers the body cites that have no entry; a deferred Sources operation is refused if that set
+   gains any member. A swap that cures one orphan by creating another kept the count level and passed.
+3. **A heading line anywhere in new text is refused.** `report.blocks` reads the first line of a block,
+   so a `#` line glued under a sentence created no locus and passed, but still rendered as a heading.
+   Every line is checked.
+4. **Operations that leave no paragraph are a malformed reply.** The empty-reply guard reads the reply,
+   which under ops is operations; a reply that deleted every paragraph had `ops_applied > 0` and shipped
+   a headings-only artifact. `ops.revise` now returns `None` for a splice with no paragraph, which the
+   caller already records as `malformed_ops`.
+
+**The `startup` event records the `revision` block** — `mode`, `scope_check`, `repair_enabled`,
+`repair_cap`, `max_out_of_scope` — beside `budgets` and `identities`. Production mounts its own roster
+over the baked one, so `summary.build.commit` cannot say which mode or which repair settings a run had;
+the audit would otherwise require inferring those settings from later events. The event field replaces
+that inference with a record. This is the deployment-profile concern docs/run-provenance.md already
+names, given a field. A roster flip remains a separate decision.

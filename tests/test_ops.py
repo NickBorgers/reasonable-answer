@@ -459,3 +459,62 @@ def test_a_heading_is_refused_at_every_depth_and_only_when_it_is_one():
     assert spliced.fields["ops_refused_heading"] == 0
     assert spliced.fields["ops_applied"] == 1
     assert "#hashtag is not a heading [1]." in paragraphs(spliced.text)
+
+
+# ------------------------------------------------- hardening after the first review
+
+
+def test_a_sources_swap_that_orphans_one_entry_while_curing_another_is_refused():
+    """The guard compares the *set* of orphaned entry numbers, not the count. Body cites
+    [1] and [9]; only [1] is listed, so [9] is already dangling. Replacing the [1] entry
+    with a [9] entry keeps the count at one and orphans [1] — refused."""
+    draft = "## Body\n\nA claim [1] and another [9].\n\n## Sources\n\n[1] One. https://example.org/one"
+    assert citation_census(draft)["dangling_markers"] == 1
+    spliced = ops.splice(draft, [op("replace", 2, 1, "[9] Nine. https://example.org/nine")])
+    assert spliced.fields["ops_refused_dangling"] == 1
+    assert spliced.fields["ops_applied"] == 0
+    # Curing the orphan without creating one is applied: the set shrinks.
+    grown = ops.splice(
+        draft, [op("replace", 2, 1, "[1] One. https://example.org/one\n\n[9] Nine. https://example.org/nine")]
+    )
+    assert grown.fields["ops_applied"] == 1
+    assert citation_census(grown.text)["dangling_markers"] == 0
+
+
+def test_a_heading_line_in_the_middle_of_a_block_is_refused():
+    """`report.blocks` only reads the first line of a block, so a heading glued under a
+    sentence creates no locus — but it still renders as a heading. Every line is checked."""
+    spliced = ops.splice(REPORT, [op("replace", 3, 1, "kept line [1]\n## Sneaky heading\nmore text")])
+    assert spliced.fields["ops_refused_heading"] == 1
+    assert spliced.fields["ops_applied"] == 0
+
+
+def test_operations_that_leave_no_paragraph_are_malformed():
+    """The empty-reply guard reads the reply, which under ops is operations; the
+    spliced result is where "the model answered with nothing" has to be judged."""
+    one = "Just one paragraph, nothing else."
+    assert ops.revise(one, "@@ delete S0.P1 tasks=T1\n@@ end") is None
+    loci = ((1, 1), (2, 1), (3, 1), (3, 2), (4, 1), (4, 2))
+    everything = "".join(f"@@ delete S{sec}.P{par} tasks=T1\n@@ end\n" for sec, par in loci)
+    assert ops.revise(REPORT, everything) is None
+    # One paragraph left is a report, however short.
+    almost = everything.replace("@@ delete S1.P1 tasks=T1\n@@ end\n", "")
+    assert ops.revise(REPORT, almost) is not None
+
+
+def test_a_second_replace_on_a_sources_locus_is_refused_and_the_first_wins():
+    spliced = ops.splice(
+        REPORT,
+        [
+            op("replace", 4, 2, "[2] First freezing source. https://example.org/freeze"),
+            op("replace", 4, 2, "[2] Second freezing source. https://example.org/freeze2"),
+        ],
+    )
+    assert spliced.fields["ops_refused_duplicate"] == 1
+    assert spliced.fields["ops_applied"] == 1
+    assert "[2] First freezing source. https://example.org/freeze" in paragraphs(spliced.text)
+
+
+def test_repeated_task_ids_are_deduplicated():
+    parsed = ops.parse_ops("@@ replace S3.P2 tasks=T1,T1,t1 T2\nx\n@@ end")
+    assert parsed.ops[0].tasks == ("T1", "T2")

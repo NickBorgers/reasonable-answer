@@ -421,6 +421,18 @@ def _build_runtime(
         read_pdfs=read_pdfs,
         resolve_tiers=sorted(_enabled_tiers(config)),
         audition_enforced=config.audition.enforce,
+        # The revision block this attempt ran under, so an audit says which mode and
+        # which repair settings applied instead of inferring them from whether
+        # `repair_attempted` ever appeared (D-ops-revision). Production mounts its own
+        # roster over the baked one, so the commit alone cannot answer this
+        # (docs/run-provenance.md).
+        revision={
+            "mode": config.revision.mode,
+            "scope_check": config.revision.scope_check,
+            "repair_enabled": config.revision.repair.enabled,
+            "repair_cap": config.revision.repair.repair_cap,
+            "max_out_of_scope": config.revision.repair.max_out_of_scope,
+        },
         # Which aliases this attempt could not probe, and so ran without
         # (D-degraded-roster). Empty on a healthy start. Recorded per attempt because it
         # is a fact about the moment, not about the run: the same run resumed an hour

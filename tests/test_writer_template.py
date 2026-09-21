@@ -382,6 +382,17 @@ def test_the_ops_repair_turn_asks_for_operations_on_the_labelled_previous_draft(
     assert "YOUR DRAFT" in text
 
 
+def test_the_ops_repair_turn_carries_the_block_format_because_its_context_is_fresh():
+    """The repair call uses the plain system prompt and never saw the ops close, so
+    "the same format as before" would name a format the model was not shown."""
+    assert prompts.WRITER_OPS_CLOSE.endswith(prompts.WRITER_OPS_FORMAT)
+    text = _repair(ops=True)
+    assert text.endswith(prompts.WRITER_OPS_FORMAT)
+    assert "in the block format stated at the end" in text
+    assert "@@" not in _repair()
+    assert prompts.WRITER_OPS_FORMAT not in _repair(patch_licence=False)
+
+
 def test_the_repair_turn_is_unchanged_when_ops_is_off():
     assert _repair() == _repair(ops=False)
     assert "Return the complete report" in _repair()

@@ -93,9 +93,10 @@ one once written, and a wrong attribution is worse than a missing one. Unstamped
 
 **The roster is not separately versioned.** `config/roster.yaml` is tracked, so the commit covers
 it — but production mounts its own copy over the baked one, so a roster edited on the host is
-invisible to the stamp. The `startup` event records the resolved model `identities`, `budgets` and
-enabled tiers alongside the build, which is what actually varies; check there before concluding two
-runs on the same commit were configured identically.
+invisible to the stamp. The `startup` event records the resolved model `identities`, `budgets`, the
+`revision` block (`mode`, `scope_check`, `repair_enabled`, `repair_cap`, `max_out_of_scope` —
+D-ops-revision) and enabled tiers alongside the build, which is what actually varies; check there
+before concluding two runs on the same commit were configured identically.
 
 **Two attempts of one run can have had different rosters.** `unreachable_aliases` on each `startup`
 event lists the aliases that attempt could not probe and therefore ran without (D-degraded-roster).
