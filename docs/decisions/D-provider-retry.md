@@ -45,7 +45,14 @@ the defect above.
    verdict that was already final.
 3. **A tool loop never returns empty text.** When the last round yields no prose, one further
    toolless round asks for the answer in words; if that is also empty the call raises
-   `ModelCallError`. A writer call is ten-plus minutes and has usually spent its whole search budget
+   `ModelCallError`.
+
+   > Superseded in part by **D-ops-revision**: that one round no longer asks for the answer "as
+   > prose". Under `revision.mode: ops` the writer's instructions say operations only, and a nudge
+   > asking for prose contradicted them; a writer that had never failed this way under patch then
+   > answered the nudge with nothing and failed as `tool_loop_no_answer`. The nudge now asks for the
+   > answer "in exactly the output format your instructions require" — still one round, still
+   > free of run material, still raising when that is empty too. A writer call is ten-plus minutes and has usually spent its whole search budget
    by then, so one cheap round beats discarding it — and the failure now enters the retry budget
    instead of masquerading as a successful empty report.
 4. **Writer attempts are a budget, not a walk over the pool.** `attempts = writer_attempts`, with
