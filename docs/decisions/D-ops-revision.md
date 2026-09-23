@@ -213,10 +213,7 @@ names, given a field. A roster flip remains a separate decision.
 **Amended 2026-09-22 — the tool-loop nudge is format-neutral.** `llm.LLMClient._ANSWER_NOW`, the one
 toolless round D-provider-retry sends when a writer's tool loop ends without prose, asked for the
 answer "as prose". Under ops the writer has just been told to return operations and nothing outside
-them; asked for prose, it returned nothing, and the call failed as `tool_loop_no_answer` on a model
-that did not fail that way under patch. The nudge now asks for the answer "in exactly the output
-format your instructions require". One round, no run material, the same raise when it is empty:
-nothing in D-provider-retry's mechanism moves except the words. The observation that found this is
-private production data and is the motivation, not the warrant (QP9); the warrant is that a nudge
-must not contradict the instructions it is nudging toward, and `tests/test_llm_tools.py` pins the
-wording.
+them, so the nudge contradicted the instructions it was nudging toward. The nudge now asks for the
+answer "in exactly the output format your instructions require". One round, no run material, the
+same raise when it is empty: nothing in D-provider-retry's mechanism moves except the words.
+`tests/test_llm_tools.py` pins the wording.
