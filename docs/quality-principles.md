@@ -46,6 +46,12 @@ review findings the way `D-<slug>` ids are.
 | QP11 | **Evidence-base freshness is checked mechanically and is never blocking.** See the marker line above and [§3](#3-refreshing-the-evidence-base). | this file | — |
 | QP12 | **Principles-as-spec drift is blocking, in both directions.** Behavior governed by QP1–QP10 changing without this file and the decision registry (a new `docs/decisions/D-<slug>.md`) moving too — or a principle here weakening with no new fetchable evidence in the diff — is the `quality` reviewer's row-12 analogue. See [§4](#4-retiring-or-weakening-a-principle). | this file + every surface above | — |
 
+**Application — same-family checkpoint update (D-claude-opus-5-5-pin).** The invariant reviewer and
+the Claude branches of the issue-author and fixer maps now pin `claude-opus-5-5`. This changes the
+named checkpoint while preserving QP3's panel composition: those surfaces remain Claude-family,
+the test reviewer remains on `claude-sonnet-5`, and the three Codex reviewer roles are unchanged.
+The existing executable checks continue to require explicit pins and the intended family split.
+
 **Application — bounded claim-check failures
 (D-claim-check-inconclusive-verdicts).** `claimcheck.check` and
 `config.ClaimCheckConfig.max_consecutive_failures` apply QP7 at the per-critic checker entry point:
