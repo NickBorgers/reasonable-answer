@@ -495,8 +495,9 @@ carried no headings is accepted with a warning; the warning rides the run's exis
   account cannot pay — raises `ProviderAccountError` immediately too, and the graph defers the run
   on it rather than failing a writer or a lens (D-credit-exhaustion-defers). A completion is never
   empty: an agentic loop that ends on a tool call gets exactly one further toolless round asking for
-  prose, and raises if that is empty too, so no caller can mistake a stalled loop for a model that
-  wrote nothing. A tool whose own budget is spent is withdrawn from subsequent rounds rather than
+  the answer in whatever output format the call's own instructions require (operations under
+  `revision.mode: ops`, prose otherwise — D-ops-revision), and raises if that is empty too, so no
+  caller can mistake a stalled loop for a model that wrote nothing. A tool whose own budget is spent is withdrawn from subsequent rounds rather than
   offered for rounds it cannot serve. Every `ModelCallError` carries a `failure_class` — a stable
   token naming *how* the call failed, read from the exception type and status code and never from
   the provider's wording — and each failed writer attempt records it on `generate_failed` beside

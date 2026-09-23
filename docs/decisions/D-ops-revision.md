@@ -209,3 +209,11 @@ over the baked one, so `summary.build.commit` cannot say which mode or which rep
 the audit would otherwise require inferring those settings from later events. The event field replaces
 that inference with a record. This is the deployment-profile concern docs/run-provenance.md already
 names, given a field. A roster flip remains a separate decision.
+
+**Amended 2026-09-22 — the tool-loop nudge is format-neutral.** `llm.LLMClient._ANSWER_NOW`, the one
+toolless round D-provider-retry sends when a writer's tool loop ends without prose, asked for the
+answer "as prose". Under ops the writer has just been told to return operations and nothing outside
+them, so the nudge contradicted the instructions it was nudging toward. The nudge now asks for the
+answer "in exactly the output format your instructions require". One round, no run material, the
+same raise when it is empty: nothing in D-provider-retry's mechanism moves except the words.
+`tests/test_llm_tools.py` pins the wording.
