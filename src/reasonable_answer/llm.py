@@ -616,10 +616,16 @@ class LLMClient:
 
     #: The one instruction sent when a model ends its tool loop without prose. Kept
     #: free of any run material — it says nothing about the question, the draft, or the
-    #: tool results already in the conversation.
+    #: tool results already in the conversation — and free of any *format*: it used to
+    #: say "as prose", which was right for every call until `revision.mode: ops` told a
+    #: writer to return operations and nothing else (D-ops-revision). Asked for prose
+    #: after being told to write none, a writer answered with nothing, and the call failed
+    #: as `tool_loop_no_answer` on a model that had never failed that way under patch.
+    #: The nudge now defers to whatever the call's own instructions require.
     _ANSWER_NOW = (
-        "You have no tools available and no further tool calls are possible. "
-        "Write your complete final answer now, as prose, using what you already have."
+        "You have no tools available and no further tool calls are possible. Write your "
+        "complete final answer now, in exactly the output format your instructions "
+        "require, using what you already have."
     )
 
     def _answer_now(

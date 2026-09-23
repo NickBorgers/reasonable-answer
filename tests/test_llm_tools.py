@@ -182,6 +182,10 @@ def test_a_tool_call_on_the_exhausted_round_is_asked_again_in_words(client):
     last = rounds[-1]["messages"][-1]
     assert last["role"] == "user"
     assert "final answer" in last["content"]
+    # Format-neutral (D-ops-revision): a writer told to return operations only must not
+    # then be asked for prose — that contradiction produced empty answers in production.
+    assert "as prose" not in last["content"]
+    assert "the output format your instructions require" in last["content"]
     # The unanswered assistant message must NOT be replayed: it holds tool calls with
     # no matching `role: tool` replies, which several providers reject outright.
     assert not any(m.get("tool_calls") for m in rounds[-1]["messages"][-2:])
