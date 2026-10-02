@@ -126,9 +126,10 @@ Three roster rules do the heavy lifting:
 
 - **No model ever reviews its own draft.** A critic of round *n* is never the writer of round
   *n* — on any lens. Self-review is removed structurally, not discouraged by prompt.
-- **Consecutive drafts have different authors.** The model fixing the defects is never the model
-  that made them — and since it receives a task list rather than someone's opinion, there is no
-  peer verdict to be sycophantic toward.
+- **Writers rotate round-robin over the whole pool.** The previous author remains eligible, so a
+  one-writer roster can still revise; critic-side author exclusion remains absolute. The writer
+  receives a task list rather than someone's opinion, so there is no peer verdict to be
+  sycophantic toward (D-writer-rotation-pool).
 - **A verdict needs two cross-family witnesses, and both are called at once by default.** Full
   acceptance means every lens was cleared by at least **two different non-author model families**
   looking at the *identical* final text. With the shipped `review.depth: 2` default, both read every

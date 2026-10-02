@@ -65,8 +65,9 @@ paragraph for this decision, and the two references above in the §5 table.
 
 **What this changes in the documents.** The `writer(Rₙ₊₁) ∈ writer_pool \ {writer(Rₙ)}` line in
 [DESIGN.md](../DESIGN.md) and [architecture.md](../architecture.md) becomes a rotation rule; the
-"no model ever patches its own last draft" clause in [isolation.md](../isolation.md) and
-`config/roster.yaml` is withdrawn; D-provider-retry and D-scoped-revision carry superseded-in-part
+"no model ever patches its own last draft" clause and writer-role diagram in
+[isolation.md](../isolation.md), and the corresponding clause in `config/roster.yaml` are withdrawn;
+D-provider-retry and D-scoped-revision carry superseded-in-part
 notes; D-writer-rereads-cited-sources records that its writer-side exclusion claim is superseded;
 and the D-alternating-refine-game registry row now distinguishes writer rotation from critic-side
 exclusion. `docs/convergence.md`'s `aborted` row loses the "empty writer pool" case.

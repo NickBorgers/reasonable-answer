@@ -24,7 +24,7 @@ qualify, because that adjacency is what lets a reader check the panel's composit
 
 | role | agent | model | why this tier |
 |---|---|---|---|
-| `invariant` | claude | `claude-opus-5` | never-abstain backstop on the six invariants and the merge gate; nothing downstream catches what it misses |
+| `invariant` | claude | `claude-opus-5-5` | never-abstain backstop on the six invariants and the merge gate; nothing downstream catches what it misses |
 | `test` | claude | `claude-sonnet-5` | bounded, checklist-shaped work against the table in `test.md` |
 | `docs` | codex | `gpt-5.6-luna` | the most mechanical role — prose against diff, decision entry present |
 | `security` | codex | `gpt-5.6-sol` | guards the egress boundary, where a miss reaches production rather than the next cycle |
@@ -41,6 +41,10 @@ is adequate for a given role, or that one costs less than another: no benchmark 
 relative capability of these checkpoints is asserted by their vendors, not established here. The
 tiering is a deliberate, revisable bet, and the thing that would falsify it is a role that starts
 missing defects it used to catch — visible as blockers appearing only after a human review.
+
+The invariant reviewer and the Claude branches of the runtime author/fixer maps were subsequently
+repointed within the same family and tier to `claude-opus-5-5`; D-claude-opus-5-5-pin records that
+checkpoint update. The task-shape rationale and the rest of the panel assignment are unchanged.
 
 **Decision — Codex becomes the default author, and the cold fixer.** `CI_AGENT_DEFAULT` defaults
 to `codex`, and the cold fixer is pinned to it. Resolving an issue end to end is the pipeline's

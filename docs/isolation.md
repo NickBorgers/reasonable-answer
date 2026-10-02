@@ -74,7 +74,7 @@ residual (a bias the rulebook does not describe passes through).
 
 ```mermaid
 flowchart TB
-    subgraph GEN["Writer (from writer pool, ≠ last writer)"]
+    subgraph GEN["Writer (next in the writer pool rotation; last writer eligible — D-writer-rotation-pool)"]
         Gin["SEES: question + latest report + DEFECT LIST (fix-tasks)<br/>+ its OWN search results, and the pages it read from them (D-writer-source-reads)<br/>+ on a revision, pages listed in the draft it revises (D-writer-rereads-cited-sources)"]
         Gno["NEVER: raw critique prose · other reports' history · who critiqued<br/>· a page another writer's search found that the draft does not cite"]
     end

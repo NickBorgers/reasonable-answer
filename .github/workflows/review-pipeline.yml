@@ -482,7 +482,7 @@ jobs:
       # The never-abstain backstop on the six invariants and the merge gate. Nothing
       # downstream catches a safety-property regression this role misses, so it is the role
       # where the tier is chosen for headroom rather than for economy.
-      model: claude-opus-5
+      model: claude-opus-5-5
       pr_number: ${{ inputs.pr_number }}
       reviewed_sha: ${{ inputs.reviewed_sha }}
       base_ref: ${{ inputs.base_ref }}

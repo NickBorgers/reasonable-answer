@@ -76,6 +76,12 @@ and never attests to its own clean record. What it gives up is a rule the eviden
 supported, which under a one-writer roster had become a reason runs died instead of a quality
 property.
 
+**Application — same-family checkpoint update (D-claude-opus-5-5-pin).** The invariant reviewer and
+the Claude branches of the issue-author and fixer maps now pin `claude-opus-5-5`. This changes the
+named checkpoint while preserving QP3's panel composition: those surfaces remain Claude-family,
+the test reviewer remains on `claude-sonnet-5`, and the three Codex reviewer roles are unchanged.
+The existing executable checks continue to require explicit pins and the intended family split.
+
 **Application — bounded claim-check failures
 (D-claim-check-inconclusive-verdicts).** `claimcheck.check` and
 `config.ClaimCheckConfig.max_consecutive_failures` apply QP7 at the per-critic checker entry point:
