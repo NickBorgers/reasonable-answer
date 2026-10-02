@@ -30,20 +30,28 @@ def test_eligibility_is_deduplicated_by_resolved_identity(roster):
     assert len(eligible) == 1
 
 
-def test_next_writer_is_never_the_current_author(roster, identities):
-    alias = roles.next_writer(roster, identities, identities["writer-a"], rotation=0)
-    assert alias == "writer-b"
-    alias = roles.next_writer(roster, identities, identities["writer-b"], rotation=0)
-    assert alias == "writer-a"
+def test_next_writer_is_round_robin_over_the_whole_pool(roster):
+    """D-writer-rotation-pool: the previous author is not excluded from writing. The
+    rotation counter alone decides, so draft k goes to writers[k % n] and no one model
+    authors every revision."""
+    assert [roles.next_writer(roster, rotation=k) for k in range(4)] == [
+        "writer-a",
+        "writer-b",
+        "writer-a",
+        "writer-b",
+    ]
 
 
-def test_next_writer_fails_closed_with_a_single_writer(identities):
+def test_a_single_writer_is_a_one_deep_rotation_not_a_fatal():
+    """The outage case: a roster degraded to one writer keeps running, and that writer
+    revises its own draft. Author exclusion is a property of *review* and still holds
+    there (`test_a_model_never_critiques_its_own_draft`)."""
     solo = Roster(
         writers=["writer-a"],
         critics={lens.value: ["logic-spec", "evidence-spec"] for lens in LENSES},
     )
-    with pytest.raises(roles.RosterExhausted):
-        roles.next_writer(solo, identities, "vendor-a/model-a", rotation=0)
+    assert roles.writer_pool(solo) == ["writer-a"]
+    assert roles.next_writer(solo, rotation=0) == roles.next_writer(solo, rotation=1) == "writer-a"
 
 
 def test_pick_critic_prefers_a_model_that_has_not_reviewed_this_artifact(roster, identities):

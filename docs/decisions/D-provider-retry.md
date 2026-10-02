@@ -70,7 +70,12 @@ the defect above.
 re-asks a model that already failed; it never re-asks the *previous author*, because
 `writer_pool` removed them before `_generate` saw the list. The invariant is enforced at the
 construction of the pool, not at the length of the walk over it, so lengthening the walk cannot
-reach an excluded model. Nothing here touches critic selection, the blind orchestrator, the severity
+reach an excluded model.
+
+> Superseded in part by **D-writer-rotation-pool**: `writer_pool` no longer removes the previous
+> author, so the walk may reach them. The finding above — a one-deep pool must still get the whole
+> `writer_attempts` budget — stands, and is now the case for a roster degraded to one writer.
+> Author exclusion for *critics* is unchanged. Nothing here touches critic selection, the blind orchestrator, the severity
 floors, or termination: retries are bounded by `call_retries` and `writer_attempts`, the extra
 toolless round is exactly one, and rule 1 still fires when every attempt fails.
 

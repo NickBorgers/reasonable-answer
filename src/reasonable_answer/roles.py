@@ -17,38 +17,25 @@ class RosterExhausted(RuntimeError):
     """No eligible model remains for a required role — fatal, fails closed."""
 
 
-def writer_pool(
-    roster: Roster,
-    identities: dict[str, str],
-    last_author_identity: str | None,
-) -> list[str]:
+def writer_pool(roster: Roster) -> list[str]:
     """Every alias eligible to write the next draft, in roster order.
 
-    Exposed alongside `next_writer` because a caller that wants to *fall back* after a
-    dud model has to know how many distinct candidates exist — rotating past the end
-    of the pool would re-ask the model that just failed."""
-    candidates = [
-        alias
-        for alias in roster.writers
-        if last_author_identity is None or identities[alias] != last_author_identity
-    ]
+    The author of the current draft is *not* excluded (D-writer-rotation-pool): author
+    exclusion is a property of review, and the writer who patches a draft never reviews
+    it. Exposed alongside `next_writer` because a caller that wants to *fall back* after
+    a dud model has to know how many distinct candidates exist."""
+    candidates = list(roster.writers)
     if not candidates:
-        raise RosterExhausted(
-            "writer pool contains no model other than the current author; "
-            "add a second distinct writer"
-        )
+        raise RosterExhausted("writer pool is empty; add a writer")
     return candidates
 
 
-def next_writer(
-    roster: Roster,
-    identities: dict[str, str],
-    last_author_identity: str | None,
-    rotation: int,
-) -> str:
-    """Round-robin over the writer pool, never the model that authored the current
-    draft. The next report is always improved by someone who did not write it."""
-    candidates = writer_pool(roster, identities, last_author_identity)
+def next_writer(roster: Roster, rotation: int) -> str:
+    """Round-robin over the whole writer pool. The counter carries across rounds, so with
+    `n` writers draft `k` goes to `writers[k % n]` and no single model authors every
+    revision; the author of the current draft is simply the pool member whose turn comes
+    round again (D-writer-rotation-pool)."""
+    candidates = writer_pool(roster)
     return candidates[rotation % len(candidates)]
 
 

@@ -87,9 +87,12 @@ Invariants that make this work:
 
 - **Every per-lens critic of `Rₙ` ≠ the writer of `Rₙ`** — no model ever critiques its own draft,
   on any lens (principle 7, for free).
-- **`writer(Rₙ₊₁) ∈ writer_pool \ {writer(Rₙ)}`** — the next report is written by a different model
-  than the last, improving a draft it did not author. There is no peer opinion to defer to, so the
-  revision step is structurally sycophancy-resistant.
+- **`writer(Rₙ₊₁) = writer_pool[(n+1) mod |writer_pool|]`** — drafts go round-robin over the whole
+  writer pool, the previous author included (D-writer-rotation-pool). Rotation spreads authorship
+  so no single model's voice owns a run, but it is not an isolation property: the writer sees only
+  the draft and an objective defect list, never a peer's opinion, so the revision step is
+  structurally sycophancy-resistant whoever holds the pen. A roster degraded to one writer keeps
+  running.
 - **The handoff is a structured defect list, not raw critique prose.** The critique is triaged
   into objective fix-tasks (`{locus, observable-category, severity, instruction}`). This keeps
   principle 1 (artifact-first) and principle 6 (fresh context) fully intact — the generator
@@ -108,7 +111,7 @@ flowchart TD
     G1 --> CRIT["critique current report<br/>3 blind lenses × review.depth critics<br/>each a distinct NON-AUTHOR model in its own fresh context"]
     CRIT --> SUM["triage → OrchestratorView<br/>(category × severity counts only)"]
     SUM --> CTRL{"controller<br/>deterministic guardrails +<br/>blind LLM orchestrator<br/>reads OrchestratorView ONLY"}
-    CTRL -->|"material issues, or round &lt; min"| GEN["generate next report<br/>generator = a non-author writer<br/>inputs: question + latest report + structured defect list"]
+    CTRL -->|"material issues, or round &lt; min"| GEN["generate next report<br/>generator = the next writer in rotation<br/>inputs: question + latest report + structured defect list"]
     GEN --> CRIT
     CTRL -->|"clean → top up per-lens clearance"| CONF["acceptance path (per-lens)<br/>each lens cleared by 2 distinct non-author models on the SAME report"]
     CONF -->|"every lens strongly-cleared"| ACC["terminal: accepted"]

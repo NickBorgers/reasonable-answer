@@ -91,12 +91,12 @@ class Budgets(BaseModel):
     # (D-repair-turn-context).
     critic_repair_retries: int = Field(default=2, ge=0, le=10)
     call_retries: int = Field(default=2, ge=0, le=10)
-    # How many times a single draft is asked for before the run dies. Attempts rotate
-    # through the writer pool and WRAP: with a two-writer roster the pool is one model
-    # deep on every revision round (author exclusion already removed the other), so
-    # bounding this by the pool size made the retry budget 1 and one flaky response
-    # killed the run. Re-asking a pool member is safe — `writer_pool` excluded the
-    # previous author before `_generate` ever saw it (D-provider-retry).
+    # How many times a single draft is asked for before the run dies. Attempts walk the
+    # writer pool from the rotation's position and WRAP. Bounding this by the pool size
+    # once made a one-deep pool a one-attempt pool, and one flaky response killed the
+    # run (D-provider-retry). The pool is the whole writer list, previous author
+    # included, so a roster degraded to a single writer still gets every attempt
+    # (D-writer-rotation-pool).
     writer_attempts: int = Field(default=3, ge=1, le=10)
     timeout_seconds: float = Field(default=300.0, gt=0, le=7200)
     # Wait between retries, exponential with jitter: attempt N sleeps
@@ -798,7 +798,7 @@ class RevisionConfig(BaseModel):
     """How a writer is asked to apply a defect list (D-scoped-revision).
 
     `rewrite` is what the system did before this existed: the whole document is
-    regenerated every round, by a different model each time (`roles.next_writer`). Six
+    regenerated every round, by the next writer in rotation (`roles.next_writer`). Six
     production runs measured what that costs — the writer applied essentially every fix
     task (`defects_applied` tracked the material count round for round) and the material
     count still did not fall, because re-rolling ~1,800 words to repair ~5 paragraphs

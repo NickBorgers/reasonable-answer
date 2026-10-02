@@ -185,12 +185,14 @@ that matters is between *who edits* and *who reviews*, and only the first is sco
 - Every critic still receives the **whole** rendered artifact, in a fresh blind context, every tick.
   Untouched prose is not unreviewed prose. #1 through #6 are untouched, and #7 — `critic(Rn) ≠
   writer(Rn)` — is untouched because nothing about who critiques changed.
-- **Writer rotation is deliberately kept.** A different model patches every round and no model ever
-  patches its own last draft, so no single model's prose accumulates unchallenged. Note that rotation
-  is not one of the seven principles and never was: as stated above, #7 "is fundamentally about *not
-  sharing a context*, not about model identity," and the decorrelation layer is the **critic roster**.
-  Rotation's own justification is availability (D-provider-retry). Keeping it is cheap insurance, not
-  a load-bearing property being preserved.
+- **Writer rotation is kept; writer author-exclusion is not.** Drafts go round-robin over the whole
+  writer pool, and the model that wrote the last draft is eligible to patch it
+  (D-writer-rotation-pool). Rotation is not one of the seven principles and never was: as stated
+  above, #7 "is fundamentally about *not sharing a context*, not about model identity," and the
+  decorrelation layer is the **critic roster**, where author exclusion is absolute. A writer that
+  revises its own draft does so in a fresh context from an objective defect list — the arrangement
+  #1 and #6 permit — and never reviews it. What rotation buys is that no single model's prose owns
+  a run; what dropping exclusion buys is that a roster degraded to one writer keeps running.
 - **Clean records still reset on every generation.** Any patched draft is a new `artifact_hash` and
   therefore a fresh clean-record set (RC-002). A locus-scoped attestation that survived a hash change
   *would* be an echo chamber — a lens cleared once on text nobody re-read — and is deliberately not

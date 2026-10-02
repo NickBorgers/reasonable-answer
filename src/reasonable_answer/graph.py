@@ -952,13 +952,9 @@ def _retrieval_kwargs(rt: Runtime, session: reading.ReadSession) -> dict[str, An
 
 def _generate(state: State, rt: Runtime) -> dict:
     cfg = rt.config
-    last_author = state.get("author_identity")
-    if last_author == "external/seed":
-        last_author = None  # a human seed excludes nobody from writing
-
     rotation = state.get("writer_rotation", 0)
     try:
-        pool = roles.writer_pool(cfg.roster, rt.identities, last_author)
+        pool = roles.writer_pool(cfg.roster)
     except roles.RosterExhausted as exc:
         return {"fatal": True, "fatal_reason": str(exc)}
 
@@ -991,14 +987,14 @@ def _generate(state: State, rt: Runtime) -> dict:
     else:
         user = prompts.writer_first_draft(state["question"], current_date=run_date)
 
-    # One flaky response must not cost the run. Attempts rotate through the eligible
-    # pool and wrap, so a model that is down, rate-limited, or answering with nothing
-    # is routed around when there is somewhere to route to — and simply given another,
-    # spaced, chance when there is not. On a revision round a two-writer roster leaves
-    # exactly one eligible model (author exclusion already removed the other), so
-    # bounding these attempts by the pool size made the whole budget 1 and one empty
-    # completion aborted the run (D-provider-retry). Re-asking a pool member never re-asks the
-    # previous author: `writer_pool` excluded them before this ran.
+    # One flaky response must not cost the run. Attempts walk the pool from the
+    # rotation's current position and wrap, so a model that is down, rate-limited, or
+    # answering with nothing is routed around when there is somewhere to route to — and
+    # simply given another, spaced, chance when there is not. The budget is
+    # `writer_attempts`, never the pool size: bounding it by the pool once made a
+    # one-writer pool a one-attempt pool (D-provider-retry). The pool is the whole
+    # writer list, author included (D-writer-rotation-pool): the previous author is a
+    # legitimate next writer, and on a roster degraded to one writer it is the only one.
     # The draft's cited URLs, readable on this revision (D-writer-rereads-cited-sources).
     # Computed once, from state, outside the retry loop: it is a function of the draft every
     # attempt already holds, so it carries nothing from one attempt to another. What must
