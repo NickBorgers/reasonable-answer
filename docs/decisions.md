@@ -98,7 +98,7 @@ decisions.
 
 | # | Decision | Rationale |
 |---|----------|-----------|
-| D-alternating-refine-game | **Alternating refine game.** A report is written by one model and critiqued only by models that did not write it; the next report is written by a different writer. *(Roster later generalized to a writer pool + per-lens critic pools by D-three-model-roster, D-per-lens-critics and D-critic-only-specialists.)* | Dissolves the corroboration-vs-specialization conflict; guarantees `critic ≠ producer`; convergence becomes temporal. |
+| D-alternating-refine-game | **Alternating refine game.** A report is written by one model and critiqued only by models that did not write it; the next report is written by the next writer in rotation. *(Roster later generalized to a writer pool + per-lens critic pools by D-three-model-roster, D-per-lens-critics and D-critic-only-specialists; writer-side author exclusion was withdrawn by D-writer-rotation-pool, while critic-side exclusion remains absolute.)* | Dissolves the corroboration-vs-specialization conflict; guarantees `critic ≠ producer`; convergence becomes temporal. |
 | D-structured-handoff | **Structured defect-list handoff**, not raw critiques. | Keeps principles #1 (artifact-first) and #6 (fresh context) fully intact while still telling the generator what to fix. |
 | D-blind-orchestrator | **Blind LLM orchestrator inside a deterministic controller.** | The user wants the AI to add judgment on the signal summary (its main value); the controller guarantees termination the LLM cannot. |
 | D-observable-categories | **Observable-category taxonomy** (no intent tags). | A critic can't infer intent from text; `uncited_claim`/`contradicted_claim`/`fabricated_citation` are checkable. |

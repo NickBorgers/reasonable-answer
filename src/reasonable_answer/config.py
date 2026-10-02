@@ -808,9 +808,9 @@ class RevisionConfig(BaseModel):
     `patch` narrows the *edit*, and nothing else. What every critic reads, who reviews,
     author exclusion, and the per-hash reset of clean records (RC-002) are all unchanged
     — so the decorrelation layer docs/isolation.md actually assigns the work to, the
-    critic roster, is untouched. Writer rotation is deliberately kept as well: a
-    different model still patches every round, so no single model's prose accumulates
-    unchallenged.
+    critic roster, is untouched. Writer rotation is deliberately kept as well: the
+    whole pool is used round-robin, with the previous author eligible, so no single
+    model authors every revision while other writers are available.
 
     The unit of a patch is the *claim* (D-claim-scoped-patch): the frame restates each
     claim in the conclusion, the key findings and the body, and a fix carried to one of

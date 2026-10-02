@@ -149,15 +149,16 @@ runs an alternating game, in rounds called **ticks**:
 
 ```mermaid
 flowchart LR
-    G["write<br/>a fresh writer revises the draft"] --> K["critique (default)<br/>3 lenses × 2 cross-family critics"]
+    G["write<br/>the next writer in rotation revises the draft"] --> K["critique (default)<br/>3 lenses × 2 cross-family critics"]
     K --> TR["triage<br/>mechanical: count, classify, floor"]
     TR --> D{"controller<br/>14 ordered rules"}
     D -->|"defects remain"| G
     D -->|"critique stream dries up"| F["finalize"]
 ```
 
-Each tick, a *different* writer receives the current draft plus a depersonalized defect list and
-produces the next draft; fresh non-author critics then review it. Two ideas make the loop sound:
+Each tick, the next writer in a round-robin rotation over the whole pool receives the current draft
+plus a depersonalized defect list and produces the next draft. The previous author remains eligible;
+fresh non-author critics then review the result. Two ideas make the loop sound:
 
 **Convergence is temporal, not a vote.** The three lenses look for different things, so they can
 never corroborate each other — and they don't have to. Agreement is inferred from the critique

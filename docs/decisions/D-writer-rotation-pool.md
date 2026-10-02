@@ -46,7 +46,9 @@ budget, spaced, exactly as D-provider-retry specified for a one-deep pool.
 [DESIGN.md](../DESIGN.md) and [architecture.md](../architecture.md) becomes a rotation rule; the
 "no model ever patches its own last draft" clause in [isolation.md](../isolation.md) and
 `config/roster.yaml` is withdrawn; D-provider-retry and D-scoped-revision carry superseded-in-part
-notes. `docs/convergence.md`'s `aborted` row loses the "empty writer pool" case.
+notes; D-writer-rereads-cited-sources records that its writer-side exclusion claim is superseded;
+and the D-alternating-refine-game registry row now distinguishes writer rotation from critic-side
+exclusion. `docs/convergence.md`'s `aborted` row loses the "empty writer pool" case.
 
 **Tests.** `test_next_writer_is_round_robin_over_the_whole_pool` and
 `test_a_single_writer_is_a_one_deep_rotation_not_a_fatal` in `tests/test_roles.py` replace the

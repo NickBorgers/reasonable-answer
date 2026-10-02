@@ -45,8 +45,9 @@ image, the one D-critic-audition exists to serve, was the one person who could n
 `corpus_hash` is the identity of the measurement and a fallback chain would let two corpora answer
 to one command.
 
-The diagram below shows a minimal roster for clarity; generator selection is round-robin among
-writers excluding the current artifact's author, preserving `critic(Rₙ) ≠ generator(Rₙ)`.
+The diagram below shows a minimal roster for clarity; generator selection is round-robin over the
+whole writer pool, including the current artifact's author. Critic selection independently preserves
+`critic(Rₙ) ≠ generator(Rₙ)`.
 
 ```mermaid
 flowchart LR
@@ -54,10 +55,10 @@ flowchart LR
         G1["generate R1<br/>writer W1"] --> K1["critique R1<br/>per-lens critics<br/>(each ≠ author R1)"]
     end
     subgraph T2["tick 2"]
-        G2["generate R2<br/>writer W2 (≠ author R1)"] --> K2["critique R2<br/>per-lens critics<br/>(each ≠ author R2)"]
+        G2["generate R2<br/>next writer in rotation"] --> K2["critique R2<br/>per-lens critics<br/>(each ≠ author R2)"]
     end
     subgraph T3["tick 3"]
-        G3["generate R3<br/>writer (≠ author R2)"] --> K3["critique R3<br/>per-lens critics<br/>(each ≠ author R3)"]
+        G3["generate R3<br/>next writer in rotation"] --> K3["critique R3<br/>per-lens critics<br/>(each ≠ author R3)"]
     end
     K1 -->|defect list| G2
     K2 -->|defect list| G3
@@ -465,11 +466,10 @@ carried no headings is accepted with a warning; the warning rides the run's exis
   reach `accepted`. `LensResult.failure_class` (also on the `critique` event) is what the count
   reads; schema violations, unstaffed slots and account refusals do not count. The limit lives
   under `review`, not `budgets`, to stay out of `_run_fingerprint`.
-- **Writer-pool depth (D-provider-retry):** author exclusion applies to writers too, so the pool the *next* draft
-  may come from is `writers \ {author(Rₙ)}`. Size the pool for **≥2 eligible writers on a revision
-  round** — i.e. at least three writers — or one flaky response is an aborted run rather than a
-  retry. This is a sizing recommendation, not a fail-closed check: a two-writer roster is legal and
-  still runs, it just has no lateral move when its one eligible writer misbehaves.
+- **Writer-pool depth (D-provider-retry, D-writer-rotation-pool):** the pool the next draft may come
+  from is the whole `writers` list; the author of Rₙ is not excluded. Size it for **≥2 writers** so
+  a failed response has a lateral move to the next pool member. A one-writer roster is legal and
+  still runs, spending the full, spaced `writer_attempts` budget on that model.
 - **Model call timing (D-model-call-timing):** `LLMClient` reports every HTTP attempt to a call
   sink, and `build_runtime` points the sink at the run's event log. Each attempt becomes a
   `model_call` event: `purpose` (`writer`, `critic:<lens>`, `claim_check`, `support_manifest`,
