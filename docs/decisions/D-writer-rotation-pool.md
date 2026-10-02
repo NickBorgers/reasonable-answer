@@ -25,6 +25,23 @@ voice: one model's framing persists across its own patches, and `loaded_language
 `minor` (D-social-bias). Rotation already mitigates that whenever more than one writer is up;
 rule 13's bounded rewrite is the backstop when it is not.
 
+**The evidence, fetched (QP12 §4).** This narrows QP4's surface, so the register row moves with
+it and two new references are cited by URL. [Kamoi et al. 2024](https://arxiv.org/abs/2406.01297),
+a critical survey of the self-correction literature, finds that "no prior work demonstrates
+successful self-correction with feedback from prompted LLMs" outside tasks exceptionally suited to
+it, while "self-correction works well in tasks that can use reliable external feedback" — the
+variable is the feedback's source, not the generator's identity.
+[Stechly, Valmeekam & Kambhampati 2024](https://arxiv.org/abs/2402.08115) run the direct experiment
+with the *same* model as generator throughout: "significant performance collapse with self-critique
+and significant performance gains with sound external verification", and "merely re-prompting with
+a sound verifier maintains most of the benefits". Their verifier is a sound external reasoner on
+formal tasks, so the result establishes that who generates is not what exclusion protects; it does
+not establish that an LLM critic is a sound verifier, which is why critic-side exclusion and the
+cross-family roster are untouched. The register's existing QP4 sources are consistent with this
+reading: Huang et al. 2024 is self-correction *without* external feedback, Panickssery et al. 2024
+is self-preference in an *evaluator*, and Chen, Su & Chiang 2026 shows correction rates rise when
+the same critique is labelled as external input — here it *is* external input.
+
 **The decision.** The writer pool is the whole `roster.writers` list, in order, and drafts go
 round-robin over it: draft `k` is written by `writers[k % n]`. The rotation counter carries across
 rounds, so no single model authors every revision while others are available — a run does not
@@ -41,6 +58,10 @@ budget, spaced, exactly as D-provider-retry specified for a one-deep pool.
   with who reviews.
 - Attempts still walk the pool from the rotation's position and wrap; the walk may now reach the
   previous author, which is the intended fallback rather than a leak.
+
+**What this changes in the register.** `docs/quality-principles.md` QP4 gains, in its surface
+column, the statement that `roles.py` applies the exclusion to review only, an application
+paragraph for this decision, and the two references above in the §5 table.
 
 **What this changes in the documents.** The `writer(Rₙ₊₁) ∈ writer_pool \ {writer(Rₙ)}` line in
 [DESIGN.md](../DESIGN.md) and [architecture.md](../architecture.md) becomes a rotation rule; the
