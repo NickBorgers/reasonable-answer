@@ -64,7 +64,7 @@ gated.
 ```
 review-entry            authorize · fork-reject · resolve SHA · prior-GO check · dedup claim
   └─ review-pipeline    gather (cycle, inherit, cap, classify)
-       ├─ invariant     Claude · claude-opus-5   ─┐
+       ├─ invariant     Claude · claude-opus-5-5 ─┐
        ├─ docs          Codex  · gpt-5.6-luna     │
        ├─ security      Codex  · gpt-5.6-sol      ├─ read-only, each emits a JSON artifact
        ├─ test          Claude · claude-sonnet-5  │
