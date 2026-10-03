@@ -67,6 +67,9 @@ they are what make patching safe:
 
 1. **Rotation stays.** `roles.next_writer` and `roles.writer_pool` are untouched — a different model
    patches every round, and no model ever patches its own last draft.
+   > Superseded in part by **D-writer-rotation-pool**: rotation still stays, but the previous
+   > author is no longer excluded from it. The argument above — that decorrelation lives in the
+   > critic roster, not in who holds the pen — is exactly why that exclusion could go.
 2. **Critics still read the whole document.** Nothing in the critique path changes. Untouched prose is
    not unreviewed prose: a rotating critic pool re-reads every paragraph on every tick.
 3. **Clean records still reset on every generation.** RC-002 is absolute. There are no locus-scoped or

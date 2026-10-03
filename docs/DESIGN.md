@@ -62,9 +62,12 @@ unconfirmed and the open-weight roster as the portable thing.
 
 The heart of the system is an alternating game: models take turns **writing** and **critiquing** a
 report, and a report is always critiqued by models that did **not** author it. The system is
-**role-structured** — a writer pool plus **per-lens critic pools** (the table below shows one tick
-per row, at the default `review.depth: 2`; **GLM** is critic-only, and W1/W2 also sit in critic
-pools and drop out of them on the tick they authored):
+**role-structured** — a writer pool plus **per-lens critic pools**. The table below is a generic
+**two-writer** illustration, one tick per row at the default `review.depth: 2`; **GLM** is
+critic-only, and W1/W2 also sit in critic pools and drop out of them on the tick they authored.
+Writers rotate round-robin over the whole pool, previous author included (D-writer-rotation-pool),
+so with two writers the schedule alternates as shown; the shipped roster has three, so there the
+writer column runs W1, W2, W3, W1, … and a writer drops out of the critic pools one tick in three:
 
 | tick | report | writer | logic critics | evidence critics | completeness critics |
 |------|--------|--------|---------------|------------------|----------------------|
@@ -77,7 +80,8 @@ models** — two by default (D-front-loaded-depth) — none of which may be the 
 report. A model can be a **critic-only specialist** — `glm-5.2`,
 the strongest model in the roster, never authors — so it reviews every tick without ever violating
 author-exclusion. Had it been a writer instead, it would have been barred from reviewing its own
-drafts and the roster would have lost its best reviewer on half of all rounds. Each lens pool holds
+drafts and the roster would have lost its best reviewer on every round it wrote — one in three
+under the shipped three-writer rotation (D-writer-rotation-pool). Each lens pool holds
 **≥2 eligible non-author model families**, and both read every draft, so every dimension gets its
 second, cross-family reviewer *before* the draft is revised rather than after a pass has already reported it
 clean (see D-per-lens-critics/D-critic-only-specialists/D-front-loaded-depth in
@@ -87,9 +91,14 @@ Invariants that make this work:
 
 - **Every per-lens critic of `Rₙ` ≠ the writer of `Rₙ`** — no model ever critiques its own draft,
   on any lens (principle 7, for free).
-- **`writer(Rₙ₊₁) ∈ writer_pool \ {writer(Rₙ)}`** — the next report is written by a different model
-  than the last, improving a draft it did not author. There is no peer opinion to defer to, so the
-  revision step is structurally sycophancy-resistant.
+- **`writer(Rₙ₊₁)` is the pool member after `writer(Rₙ)`** — drafts go round-robin over the whole
+  writer pool, the previous author included (D-writer-rotation-pool). A failed attempt moves on to
+  the next member, and the rotation then continues from the member that succeeded, so a fallback
+  skips a writer and never repeats one. Rotation spreads authorship across the pool whenever more
+  than one writer is up, but it is not an isolation property: the writer sees only
+  the draft and an objective defect list, never a peer's opinion, so the revision step is
+  structurally sycophancy-resistant whoever holds the pen. A roster degraded to one writer keeps
+  running.
 - **The handoff is a structured defect list, not raw critique prose.** The critique is triaged
   into objective fix-tasks (`{locus, observable-category, severity, instruction}`). This keeps
   principle 1 (artifact-first) and principle 6 (fresh context) fully intact — the generator
@@ -108,7 +117,7 @@ flowchart TD
     G1 --> CRIT["critique current report<br/>3 blind lenses × review.depth critics<br/>each a distinct NON-AUTHOR model in its own fresh context"]
     CRIT --> SUM["triage → OrchestratorView<br/>(category × severity counts only)"]
     SUM --> CTRL{"controller<br/>deterministic guardrails +<br/>blind LLM orchestrator<br/>reads OrchestratorView ONLY"}
-    CTRL -->|"material issues, or round &lt; min"| GEN["generate next report<br/>generator = a non-author writer<br/>inputs: question + latest report + structured defect list"]
+    CTRL -->|"material issues, or round &lt; min"| GEN["generate next report<br/>generator = the next writer in rotation<br/>inputs: question + latest report + structured defect list"]
     GEN --> CRIT
     CTRL -->|"clean → top up per-lens clearance"| CONF["acceptance path (per-lens)<br/>each lens cleared by 2 distinct non-author models on the SAME report"]
     CONF -->|"every lens strongly-cleared"| ACC["terminal: accepted"]

@@ -98,6 +98,10 @@ never the draft's author — and it does not carry the previous writer's reasoni
 only third-party pages the draft names. docs/isolation.md records it on the writer's SEES line and in
 the allowlist bullet.
 
+**Superseded in part by D-writer-rotation-pool.** Writer rotation now includes the previous author,
+so the reviser may be the draft's author. Critic-side author exclusion remains unchanged: the model
+that authored a report cannot critique that report.
+
 **Deployment profile drift, corrected in passing.** docs/deployment-profile.md listed
 `search.enabled` and `search.verify_sources` for production and omitted `read_sources: true` and
 `support_manifest: true`, both of which production runs (run-116cc0ea4cac's startup event). Because this
