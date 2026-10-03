@@ -25,13 +25,14 @@ proxy:
 
 roster:
   # Author exclusion does NOT apply to writers (D-writer-rotation-pool): drafts go
-  # round-robin over this whole list, so with three writers draft k is written by
-  # writers[k % 3], and a roster degraded to one writer still runs — that one model
+  # round-robin over this whole list — each draft to the member after the last draft's
+  # author, a failed attempt moving on and the rotation continuing from whoever
+  # succeeded — and a roster degraded to one writer still runs: that one model
   # revises its own draft, in a fresh context, from the critics' defect list. Three
   # writers is still the target: a dud response is routed to the next member rather
   # than retried in place (D-provider-retry), and one voice never owns a whole run.
   writers:
-    - mistral-large-3      # 675B/A41B Apache 2.0, ~340GB @4bit. Authors R1, R4, R7, …
+    - mistral-large-3      # 675B/A41B Apache 2.0, ~340GB @4bit. Authors R1; every third draft after, failures aside.
     - deepseek-v4-flash    # 284B/A13B MIT, ~145GB @4bit.
     - nemotron-3-ultra     # 550B/A55B open, ~275GB @4bit. Writer-only: it shrinks no
                            # critic pool, and its Western corpus decorrelates a pool

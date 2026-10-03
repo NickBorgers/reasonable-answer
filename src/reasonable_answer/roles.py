@@ -31,10 +31,12 @@ def writer_pool(roster: Roster) -> list[str]:
 
 
 def next_writer(roster: Roster, rotation: int) -> str:
-    """Round-robin over the whole writer pool. The counter carries across rounds, so with
-    `n` writers draft `k` goes to `writers[k % n]` and no single model authors every
-    revision; the author of the current draft is simply the pool member whose turn comes
-    round again (D-writer-rotation-pool)."""
+    """Round-robin over the whole writer pool. `rotation` is the position the caller
+    carries across rounds; `_generate` advances it past whichever member actually
+    succeeded, so the next draft goes to the member after the last draft's author and a
+    failed attempt skips a writer rather than repeating one. The author of the current
+    draft is simply the pool member whose turn comes round again
+    (D-writer-rotation-pool)."""
     candidates = writer_pool(roster)
     return candidates[rotation % len(candidates)]
 

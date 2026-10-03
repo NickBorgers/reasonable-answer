@@ -87,9 +87,11 @@ Invariants that make this work:
 
 - **Every per-lens critic of `Rₙ` ≠ the writer of `Rₙ`** — no model ever critiques its own draft,
   on any lens (principle 7, for free).
-- **`writer(Rₙ₊₁) = writer_pool[(n+1) mod |writer_pool|]`** — drafts go round-robin over the whole
-  writer pool, the previous author included (D-writer-rotation-pool). Rotation spreads authorship
-  so no single model's voice owns a run, but it is not an isolation property: the writer sees only
+- **`writer(Rₙ₊₁)` is the pool member after `writer(Rₙ)`** — drafts go round-robin over the whole
+  writer pool, the previous author included (D-writer-rotation-pool). A failed attempt moves on to
+  the next member, and the rotation then continues from the member that succeeded, so a fallback
+  skips a writer and never repeats one. Rotation spreads authorship across the pool whenever more
+  than one writer is up, but it is not an isolation property: the writer sees only
   the draft and an objective defect list, never a peer's opinion, so the revision step is
   structurally sycophancy-resistant whoever holds the pen. A roster degraded to one writer keeps
   running.

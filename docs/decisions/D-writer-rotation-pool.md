@@ -49,9 +49,14 @@ Panickssery et al. 2024 is self-preference in an *evaluator*, and Chen, Su & Chi
 where a claim sits in a context rather than who generated it, so it is not claimed here.
 
 **The decision.** The writer pool is the whole `roster.writers` list, in order, and drafts go
-round-robin over it: draft `k` is written by `writers[k % n]`. The rotation counter carries across
-rounds, so no single model authors every revision while others are available — a run does not
-collapse onto `writers[0]`. The previous author is not excluded. A roster degraded to one writer
+round-robin over it: the next draft goes to the member after the one that wrote the last draft,
+wrapping, so on an uninterrupted run draft `k` is `writers[k % n]`. The one exception is stated
+exactly: a failed attempt moves to the next member (D-provider-retry), and the rotation then
+continues from the member that *succeeded* — `_generate` adds the attempt offset to the counter
+before the usual increment — so a fallback skips a writer and never repeats one. The previous
+author is not excluded. While more than one writer is up, no model authors two consecutive drafts
+except through that fallback; on a one-writer roster the same model authors every draft, and that
+is the point. A roster degraded to one writer
 (D-degraded-roster) is a one-deep rotation, and that writer gets the whole `writer_attempts`
 budget, spaced, exactly as D-provider-retry specified for a one-deep pool.
 

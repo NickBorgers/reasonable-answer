@@ -11,7 +11,15 @@ from fakes import FakeClient
 from pydantic import ValidationError
 
 from reasonable_answer import prompts
-from reasonable_answer.config import Budgets, Config, ConfigError, RepairConfig, RevisionConfig, Roster
+from reasonable_answer.config import (
+    Budgets,
+    Config,
+    ConfigError,
+    ProxyConfig,
+    RepairConfig,
+    RevisionConfig,
+    Roster,
+)
 from reasonable_answer.graph import _lens_results, run
 from reasonable_answer.llm import ModelCallError
 from reasonable_answer.schemas import CritiqueOutput, RawIssue, StructuralRef
@@ -451,6 +459,58 @@ def test_an_out_of_scope_category_fails_the_lens_not_the_issue(identities, confi
     client = make_client(identities, critique_fn=critique_fn)
     final = run(config, question="Is it so?", seed=REPORT, client=client)
     assert final["terminal_status"] == "aborted"
+
+
+THREE_WRITER_IDENTITIES = {
+    "writer-a": "vendor-a/model-a",
+    "writer-b": "vendor-b/model-b",
+    "writer-c": "vendor-f/model-c",
+    "logic-spec": "vendor-c/logic",
+    "evidence-spec": "vendor-d/evidence",
+    "completeness-spec": "vendor-e/completeness",
+}
+
+
+def _three_writer_config(tmp_path) -> Config:
+    """The shape production runs: three writers, for the retry-bookkeeping test below.
+    `test_drafts_are_written_round_robin_over_the_whole_pool` covers the plain modulo
+    walk on three writers (D-writer-rotation-pool)."""
+    return Config(
+        proxy=ProxyConfig(),
+        roster=Roster(
+            writers=["writer-a", "writer-b", "writer-c"],
+            critics={
+                "logic": ["logic-spec", "writer-a", "writer-b"],
+                "evidence": ["evidence-spec", "writer-a", "writer-b"],
+                "completeness": ["completeness-spec", "writer-a", "writer-b"],
+            },
+        ),
+        budgets=Budgets(min_ticks=2, hard_cap=8, polish_cap=1, retry_backoff_seconds=0.0),
+        runs_dir=tmp_path / "runs",
+    )
+
+
+def test_a_failed_attempt_moves_on_and_the_rotation_follows_the_writer_that_succeeded(tmp_path):
+    """The retry exception to the modulo walk, stated exactly (D-writer-rotation-pool): a
+    failed attempt moves to the next pool member, and the next draft goes to the member
+    *after the one that succeeded*. So a fallback skips a writer; it never repeats one."""
+    client = FlakyWriterClient(
+        identities=THREE_WRITER_IDENTITIES,
+        critique_fn=always_material,
+        report_fn=lambda n: f"{REPORT}\nRevision {n}.\n",
+    )
+    # Generation 2's first attempt (writer-b's turn) comes back empty; the walk moves
+    # to writer-c, which succeeds.
+    client.empty_generations = {2}
+    final = run(_three_writer_config(tmp_path), question="Is it so?", seed=REPORT, client=client)
+    assert not final["fatal"]
+
+    attempts = [c.alias for c in client.calls if c.schema is None]
+    # a | b(empty) c | a | b ...: the failed b is skipped, c authors draft 2, and draft 3
+    # goes to the member after c, which is a — not back to c, and not to b.
+    assert attempts[:5] == ["writer-a", "writer-b", "writer-c", "writer-a", "writer-b"], attempts
+    authors = [e["author"] for e in events_of(final) if e["kind"] == "generate"]
+    assert authors[:3] == ["vendor-a/model-a", "vendor-f/model-c", "vendor-a/model-a"], authors
 
 
 def test_drafts_are_written_round_robin_over_the_whole_pool(identities, config):

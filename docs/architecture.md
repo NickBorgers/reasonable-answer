@@ -72,8 +72,9 @@ report under review. Writers rotate round-robin over the whole pool, previous au
 
 Invariants (enforced in code, covered by tests):
 - `critic(Rₙ) ≠ generator(Rₙ)` — production ≠ review (holds for confirmation critiques too).
-- `generator(Rₙ₊₁) = writer_pool[(n+1) mod |writer_pool|]` — a writer, by rotation, never a critic-only
-  specialist; the author of `Rₙ` is eligible (D-writer-rotation-pool).
+- `generator(Rₙ₊₁)` is the writer-pool member after `generator(Rₙ)`, wrapping — a writer, by
+  rotation, never a critic-only specialist; the author of `Rₙ` is eligible. A failed attempt moves
+  to the next member and the rotation continues from the one that succeeded (D-writer-rotation-pool).
 - Models distinct at the **resolved** provider/model/version level, not just the alias (RA-017);
   prefer distinct providers/families per lens and **warn** when a lens's two critic models share a family (weak independence).
 
