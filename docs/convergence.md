@@ -864,7 +864,7 @@ and keep their gates (RI-001, RH-001).
 | `converged_unconfirmed` | every lens at least weakly-cleared, but ≥1 lens is `roster_limited` (only one eligible non-author model) — the record names the under-reviewed dimension |
 | `exhausted_unresolved` | cap/stagnation reached with only non-blocking issues, or clean-but-unconfirmed at cap; returned **with annotations** |
 | `needs_human_review` | cap/stagnation/cycle reached with **blocking** issues present |
-| `aborted` | either a fatal writer failure (every writer attempt failed), or a failed-lens path that reaches rule 3 after rule 2 cannot recover it (including zero eligible non-author critics or exhausted malformed/incomplete-review repairs); a provider unreachable at *startup* degrades the roster or defers the attempt instead — D-degraded-roster; a provider *account* that refuses to pay mid-run (HTTP 402) defers the run instead of reaching rule 1 or 3 — D-credit-exhaustion-defers |
+| `aborted` | either a fatal writer failure (the writer pool is empty or every writer attempt failed), or a failed-lens path that reaches rule 3 after rule 2 cannot recover it (including zero eligible non-author critics or exhausted malformed/incomplete-review repairs); a provider unreachable at *startup* degrades the roster or defers the attempt instead — D-degraded-roster; a provider *account* that refuses to pay mid-run (HTTP 402) defers the run instead of reaching rule 1 or 3 — D-credit-exhaustion-defers |
 
 A known-unacceptable artifact is **never** labeled `accepted` or `converged_unconfirmed`.
 
