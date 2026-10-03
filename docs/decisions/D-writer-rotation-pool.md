@@ -32,9 +32,10 @@ it and two references are added by URL. The register's existing QP4 sources are 
 et al. 2024); none measures a generator revising from a defect list that other models produced.
 [Tyen et al. 2024](https://arxiv.org/abs/2311.08516) measure exactly that split. They show "that
 poor self-correction performance stems from LLMs' inability to find logical mistakes, rather than
-their ability to correct a known mistake": the same models that made the errors, given the mistake
-location from outside, correct them, and that "boosts downstream task performance across our 5
-reasoning tasks, indicating that LLMs' correction abilities are robust". That is the division of
+their ability to correct a known mistake": in their backtracking experiment the same model that
+made the errors, given the mistake location from outside, corrects them, and that "boosts downstream
+task performance across our 5 reasoning tasks, indicating that LLMs' correction abilities are
+robust". That is the division of
 labour this pipeline enforces — critics the author never includes *find and locate*; the writer,
 author or not, *corrects* from a `{locus, category, severity}` task list — and it says the step
 exclusion was guarding is the one a model does well on its own output. Its limit is stated: the

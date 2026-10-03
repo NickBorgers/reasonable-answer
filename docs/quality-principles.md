@@ -58,9 +58,10 @@ that critics the author never includes produced in fresh contexts (QP5).
 
 * **Tyen et al. 2024** is the evidence added for this change, and it measures that split directly.
   Poor self-correction "stems from LLMs' inability to find logical mistakes, rather than their
-  ability to correct a known mistake"; the same models that made the errors, fed the mistake
-  location from outside, correct them, which "boosts downstream task performance across our 5
-  reasoning tasks, indicating that LLMs' correction abilities are robust". Finding and locating is
+  ability to correct a known mistake"; in the backtracking experiment the same model that made
+  the errors (PaLM 2 Unicorn correcting its own traces), fed the mistake location from outside,
+  corrects them, which "boosts downstream task performance across our 5 reasoning tasks,
+  indicating that LLMs' correction abilities are robust". Finding and locating is
   the step QP4 keeps with excluded critics; correcting a located mistake is the step the writer
   does, and the paper's result is that a model does that step well on its own output. Limit: the
   tasks are reasoning benchmarks with ground-truth mistake locations, not prose reports located by
@@ -332,7 +333,7 @@ on without fetching something new.
 | [Huang et al. 2024, "Large Language Models Cannot Self-Correct Reasoning Yet" (ICLR)](https://arxiv.org/abs/2310.01798) | Intrinsic self-correction without external feedback degrades reasoning performance. | QP4, QP7 |
 | [Chen, Su & Chiang 2026, "The Self-Correction Illusion"](https://arxiv.org/abs/2606.05976) | Relabeling a model's own reasoning as external input raises explicit correction rates by 23–93 percentage points across seven model families. | QP4 |
 | [Panickssery, Bowman & Feng 2024, "LLM Evaluators Recognize and Favor Their Own Generations" (NeurIPS)](https://arxiv.org/abs/2404.13076) | Self-recognition capability linearly predicts self-preference in LLM judges; the bias is causal. | QP4 |
-| [Tyen et al. 2024, "LLMs cannot find reasoning errors, but can correct them given the error location" (ACL Findings)](https://arxiv.org/abs/2311.08516) | Poor self-correction stems from the inability to *find* mistakes, not to correct a known one: the same models that made the errors, given the mistake location from outside, correct them, boosting performance across five reasoning tasks. Relied on for the find/correct split; the tasks are reasoning benchmarks with ground-truth locations, not prose under an LLM critic. | QP4 |
+| [Tyen et al. 2024, "LLMs cannot find reasoning errors, but can correct them given the error location" (ACL Findings)](https://arxiv.org/abs/2311.08516) | Poor self-correction stems from the inability to *find* mistakes, not to correct a known one: in the backtracking experiment the same model that made the errors, given the mistake location from outside, corrects them, boosting performance across five reasoning tasks. Relied on for the find/correct split; the tasks are reasoning benchmarks with ground-truth locations, not prose under an LLM critic. | QP4 |
 | [Kamoi et al. 2024, "When Can LLMs Actually Correct Their Own Mistakes? A Critical Survey of Self-Correction of LLMs" (TACL 12)](https://arxiv.org/abs/2406.01297) | Critical survey: self-correction works well where reliable external feedback is available, and is undemonstrated with feedback from prompted LLMs outside tasks exceptionally suited to it. Relied on as a bound on this pipeline's LLM-critic feedback, whoever the reviser is. | QP4 |
 | [Sharma et al. 2023, "Towards Understanding Sycophancy in Language Models" (ICLR 2024)](https://arxiv.org/abs/2310.13548) | Sycophancy is consistent across RLHF assistants and is triggered by stances visible in context. | QP5 |
 | [Song 2026, "Cross-Context Review"](https://arxiv.org/abs/2603.12123) | Reviewing in a separate session with no access to the production conversation beats same-session self-review; repetition within a session does not. | QP5 |
