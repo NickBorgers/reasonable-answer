@@ -84,6 +84,9 @@ attempt after an empty completion goes to the next pool member — the previous 
 would spread that but the roster's fit-first logic-pool ordering reasons about which rounds
 `writers[0]` authors, so it is its own decision. No comparison of self-revision against rotated
 revision has been run; each `audit.json` carries author per `generate` and material count per
-`triage`, and under the shipped three-writer roster self-revision occurs on the normal modulo-three
-return and may also occur after retry fallback changes the walk, so the arms are distinguishable
+`triage`. Two cases must not be conflated in that measurement: a model *authoring again* (every
+third draft under the shipped roster, revising another model's draft) and a model *revising its own
+immediately preceding draft*, which the withdrawn rule forbade and which occurs only on a one-writer
+roster or when the retry walk wraps back to the last author after every other writer failed. Both
+are readable from consecutive `generate` events' `author` fields, so the arms are distinguishable
 from the events alone.
