@@ -47,33 +47,47 @@ review findings the way `D-<slug>` ids are.
 | QP12 | **Principles-as-spec drift is blocking, in both directions.** Behavior governed by QP1–QP10 changing without this file and the decision registry (a new `docs/decisions/D-<slug>.md`) moving too — or a principle here weakening with no new fetchable evidence in the diff — is the `quality` reviewer's row-12 analogue. See [§4](#4-retiring-or-weakening-a-principle). | this file + every surface above | — |
 
 **Application — a writer may revise its own draft; it still never reviews it
-(D-writer-rotation-pool).** This is a deliberate narrowing of QP4's *surface*, recorded under
-[§4](#4-retiring-or-weakening-a-principle): writer-side author exclusion is withdrawn, critic-side
-exclusion is not. The register's own evidence draws the line in the same place, and the two new
-references were added for this change:
+(D-writer-rotation-pool).** This is a narrowing of QP4's *surface*, recorded under
+[§4](#4-retiring-or-weakening-a-principle), and the claim is kept deliberately small. QP4's
+measurements stand untouched: a model evaluating its own output favours it (Panickssery et al.
+2024), and a model correcting its own output with no outside signal degrades it (Huang et al.
+2024). What is withdrawn is a rule the register listed on `roles.py`'s surface but never measured —
+that the writer of draft *n* may not write draft *n+1* — and the question §4 asks is whether the
+evidence supports withdrawing it. What the fetched sources establish, and all that is claimed:
 
-* QP4's negative results are about a model judging or correcting *its own* output with no
-  outside signal. Huang et al. 2024 is intrinsic self-correction **without external feedback**;
-  Panickssery et al. 2024 is self-preference in an **evaluator**; Chen, Su & Chiang 2026 shows the
-  same model corrects far more when the critique arrives labelled as external input. None of them
-  measures a generator revising from a defect list that *other* models produced.
-* **Kamoi et al. 2024** is the survey-level statement of the boundary: across the literature,
-  "no prior work demonstrates successful self-correction with feedback from prompted LLMs" except
-  in tasks exceptionally suited to it, while "self-correction works well in tasks that can use
-  reliable external feedback". Who generates is not the variable; where the feedback comes from is.
-* **Stechly, Valmeekam & Kambhampati 2024** is the direct experiment: the *same* model
-  (GPT-4) as generator shows "significant performance collapse with self-critique and significant
-  performance gains with sound external verification", and "merely re-prompting with a sound
-  verifier maintains most of the benefits". Its limit is stated rather than hidden: the verifier
-  there is a sound external reasoner on formal tasks, not an LLM critic on prose, so it establishes
-  that the generator's identity is not what the exclusion protects — not that an LLM critic is a
-  sound verifier.
+* **The variable the literature finds decisive is the source of the feedback, not the identity of
+  the generator.** Kamoi et al. 2024's positive condition is "reliable external feedback"; its
+  negative one is feedback "from prompted LLMs" and self-evaluation. Stechly, Valmeekam &
+  Kambhampati 2024 is the one direct same-generator experiment: with GPT-4 generating throughout,
+  "significant performance collapse with self-critique and significant performance gains with sound
+  external verification", and "merely re-prompting with a sound verifier maintains most of the
+  benefits". The generator that produced the wrong answer is the generator that fixes it; what
+  changed between collapse and gain is who verified. No source in this register finds an effect of
+  the generator's identity with the feedback held fixed, and that absence — not any positive
+  result about self-revision — is the ground for withdrawing a rule about the generator's identity.
+* **Chen, Su & Chiang 2026 does not bear on this.** It moves a byte-identical claim between
+  chat-template roles; it says where a claim sits in a context matters, not who generated the
+  draft. Its 23–93 point result is not inherited and is not claimed, exactly as the
+  D-repair-turn-context note below already says.
+
+What the fetched sources do **not** establish, stated so the retreat cannot outrun them:
+
+* **That an LLM critic's defect list is "reliable external feedback" in Kamoi et al.'s sense.**
+  It is not shown to be, and Kamoi et al. report no demonstrated success from prompted-LLM feedback
+  outside tasks suited to it. That finding is a limit on *this loop's feedback*, and the feedback
+  is the same defect list whether the reviser wrote the draft or not — so it is not an argument for
+  the withdrawn rule, and this decision neither creates nor removes it. The loop's efficacy is a
+  measured property (audition fitness gates on every critic, production convergence rates), not a
+  literature claim, and that is unchanged.
+* **That a writer revising its own draft does as well as a different writer would.** No source
+  measures that comparison. That is why rotation is kept wherever a second writer is available and
+  the previous author is merely *eligible*, not preferred.
 
 What the pipeline keeps is therefore exactly what the evidence bears on: the feedback a writer
 revises from is produced by models that never wrote the draft, in fresh contexts, as bounded
 structural data (QP5); the writer never adjudicates its own dispute (D-dispute-evidence-prior-draft)
-and never attests to its own clean record. What it gives up is a rule the evidence never
-supported, which under a one-writer roster had become a reason runs died instead of a quality
+and never attests to its own clean record. What it gives up is a generator-identity rule no source
+supports, which under a one-writer roster had become the reason runs died rather than a quality
 property.
 
 **Application — same-family checkpoint update (D-claude-opus-5-5-pin).** The invariant reviewer and
@@ -326,8 +340,8 @@ on without fetching something new.
 | [Huang et al. 2024, "Large Language Models Cannot Self-Correct Reasoning Yet" (ICLR)](https://arxiv.org/abs/2310.01798) | Intrinsic self-correction without external feedback degrades reasoning performance. | QP4, QP7 |
 | [Chen, Su & Chiang 2026, "The Self-Correction Illusion"](https://arxiv.org/abs/2606.05976) | Relabeling a model's own reasoning as external input raises explicit correction rates by 23–93 percentage points across seven model families. | QP4 |
 | [Panickssery, Bowman & Feng 2024, "LLM Evaluators Recognize and Favor Their Own Generations" (NeurIPS)](https://arxiv.org/abs/2404.13076) | Self-recognition capability linearly predicts self-preference in LLM judges; the bias is causal. | QP4 |
-| [Kamoi et al. 2024, "When Can LLMs Actually Correct Their Own Mistakes? A Critical Survey of Self-Correction of LLMs" (TACL 12)](https://arxiv.org/abs/2406.01297) | Critical survey: no prior work demonstrates successful self-correction with feedback from prompted LLMs outside tasks exceptionally suited to it; self-correction works well where reliable external feedback is available. The source of feedback, not the identity of the generator, is the condition. | QP4 |
-| [Stechly, Valmeekam & Kambhampati 2024, "On the Self-Verification Limitations of Large Language Models on Reasoning and Planning Tasks"](https://arxiv.org/abs/2402.08115) | With GPT-4 as the generator throughout, iterative prompting shows significant performance collapse under self-critique and significant gains under sound external verification; merely re-prompting the same generator with a sound verifier keeps most of the benefit. Formal domains (Game of 24, graph colouring, STRIPS planning) with a sound verifier, not an LLM critic on prose. | QP4 |
+| [Kamoi et al. 2024, "When Can LLMs Actually Correct Their Own Mistakes? A Critical Survey of Self-Correction of LLMs" (TACL 12)](https://arxiv.org/abs/2406.01297) | Critical survey: no prior work demonstrates successful self-correction with feedback from prompted LLMs outside tasks exceptionally suited to it; self-correction works well where reliable external feedback is available. Relied on for where it locates the condition — the feedback's source — and for its negative result, which bounds this pipeline's LLM-critic feedback whoever the reviser is; not relied on as support for self-revision. | QP4 |
+| [Stechly, Valmeekam & Kambhampati 2024, "On the Self-Verification Limitations of Large Language Models on Reasoning and Planning Tasks"](https://arxiv.org/abs/2402.08115) | With GPT-4 as the generator throughout, iterative prompting shows significant performance collapse under self-critique and significant gains under sound external verification; merely re-prompting the same generator with a sound verifier keeps most of the benefit. Relied on only for the absence of a generator-identity effect under fixed external feedback. Formal domains (Game of 24, graph colouring, STRIPS planning) with a sound verifier, not an LLM critic on prose; says nothing about whether an LLM critic is a sound verifier. | QP4 |
 | [Sharma et al. 2023, "Towards Understanding Sycophancy in Language Models" (ICLR 2024)](https://arxiv.org/abs/2310.13548) | Sycophancy is consistent across RLHF assistants and is triggered by stances visible in context. | QP5 |
 | [Song 2026, "Cross-Context Review"](https://arxiv.org/abs/2603.12123) | Reviewing in a separate session with no access to the production conversation beats same-session self-review; repetition within a session does not. | QP5 |
 | [Smit et al. 2024, "Should we be going MAD?" (ICML)](https://arxiv.org/abs/2311.17371) | Multi-agent debate does not reliably outperform simpler ensembling and is highly hyperparameter-sensitive. | QP6 |

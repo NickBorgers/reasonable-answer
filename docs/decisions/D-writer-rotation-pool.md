@@ -26,21 +26,27 @@ voice: one model's framing persists across its own patches, and `loaded_language
 rule 13's bounded rewrite is the backstop when it is not.
 
 **The evidence, fetched (QP12 §4).** This narrows QP4's surface, so the register row moves with
-it and two new references are cited by URL. [Kamoi et al. 2024](https://arxiv.org/abs/2406.01297),
-a critical survey of the self-correction literature, finds that "no prior work demonstrates
-successful self-correction with feedback from prompted LLMs" outside tasks exceptionally suited to
-it, while "self-correction works well in tasks that can use reliable external feedback" — the
-variable is the feedback's source, not the generator's identity.
-[Stechly, Valmeekam & Kambhampati 2024](https://arxiv.org/abs/2402.08115) run the direct experiment
-with the *same* model as generator throughout: "significant performance collapse with self-critique
-and significant performance gains with sound external verification", and "merely re-prompting with
-a sound verifier maintains most of the benefits". Their verifier is a sound external reasoner on
-formal tasks, so the result establishes that who generates is not what exclusion protects; it does
-not establish that an LLM critic is a sound verifier, which is why critic-side exclusion and the
-cross-family roster are untouched. The register's existing QP4 sources are consistent with this
-reading: Huang et al. 2024 is self-correction *without* external feedback, Panickssery et al. 2024
-is self-preference in an *evaluator*, and Chen, Su & Chiang 2026 shows correction rates rise when
-the same critique is labelled as external input — here it *is* external input.
+it and two new references are cited by URL. The claim they are asked to carry is small: that no
+source finds an effect of the *generator's* identity once the feedback is external, so a rule about
+the generator's identity has no evidence behind it. [Kamoi et al. 2024](https://arxiv.org/abs/2406.01297),
+a critical survey, locates the condition for successful self-correction in the feedback's source —
+"self-correction works well in tasks that can use reliable external feedback" — and reports that
+"no prior work demonstrates successful self-correction with feedback from prompted LLMs" outside
+tasks suited to it. [Stechly, Valmeekam & Kambhampati 2024](https://arxiv.org/abs/2402.08115) keep
+the *same* generator throughout and find "significant performance collapse with self-critique and
+significant performance gains with sound external verification". Who generated the draft was not
+the variable that moved the result in either source.
+
+Two limits are stated so the retreat does not outrun them. Kamoi et al.'s negative result about
+prompted-LLM feedback is a bound on *this pipeline's* critic feedback, and that feedback is the same
+defect list whether or not the reviser wrote the draft — so it does not argue for the withdrawn
+rule, and it is neither created nor removed here; the loop's efficacy stays a measured property
+(critic audition gates, production convergence), not a literature claim. And no source measures
+self-revision against revision by a different writer, which is why rotation stays wherever a second
+writer is up and the previous author is eligible, not preferred. The register's existing QP4
+sources are untouched as claims: Huang et al. 2024 is self-correction *without* external feedback,
+Panickssery et al. 2024 is self-preference in an *evaluator*, and Chen, Su & Chiang 2026 is about
+where a claim sits in a context rather than who generated it, so it is not claimed here.
 
 **The decision.** The writer pool is the whole `roster.writers` list, in order, and drafts go
 round-robin over it: draft `k` is written by `writers[k % n]`. The rotation counter carries across
