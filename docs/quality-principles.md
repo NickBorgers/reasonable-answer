@@ -77,8 +77,10 @@ that critics the author never includes produced in fresh contexts (QP5).
 
 Neither source compares a model revising its own draft against a different model revising it from
 the same list, so the previous author is *eligible*, not preferred: rotation stays wherever a second
-writer is up, and self-revision occurs there only through the retry fallback. What the pipeline
-keeps is everything the evidence bears on — external, locus-anchored, bounded structural feedback
+writer is up. With the shipped three-writer roster, self-revision is the normal modulo-three return
+when the previous author's turn comes round; retry fallback can also change the walk so that a
+previous author is asked again after intervening failures. What the pipeline keeps is everything
+the evidence bears on — external, locus-anchored, bounded structural feedback
 from models that never wrote the draft; no self-adjudication (D-dispute-evidence-prior-draft); no
 self-attested clean record. What it gives up is a rule that, on a one-writer roster, had become the
 reason runs died.
