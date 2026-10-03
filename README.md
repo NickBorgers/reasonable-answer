@@ -303,7 +303,8 @@ roster:
 Every entry is **open-weight** and small enough to load on the target local box (see
 [docs/DESIGN.md](./docs/DESIGN.md) for the footprint table). `glm-5.2` is deliberately
 *critic-only*: as a writer it would be barred from reviewing its own drafts, which would cost the
-roster its best reviewer on half of all rounds.
+roster its best reviewer on every round it wrote — one round in three with the shipped three-writer
+rotation (D-writer-rotation-pool).
 
 The `orchestrator` decides only whether a cosmetic polish pass is worth running. It sees bounded
 counts and returns one boolean, so it runs on the cheapest local model in the roster; if it fails,

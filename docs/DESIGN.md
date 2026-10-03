@@ -62,9 +62,12 @@ unconfirmed and the open-weight roster as the portable thing.
 
 The heart of the system is an alternating game: models take turns **writing** and **critiquing** a
 report, and a report is always critiqued by models that did **not** author it. The system is
-**role-structured** — a writer pool plus **per-lens critic pools** (the table below shows one tick
-per row, at the default `review.depth: 2`; **GLM** is critic-only, and W1/W2 also sit in critic
-pools and drop out of them on the tick they authored):
+**role-structured** — a writer pool plus **per-lens critic pools**. The table below is a generic
+**two-writer** illustration, one tick per row at the default `review.depth: 2`; **GLM** is
+critic-only, and W1/W2 also sit in critic pools and drop out of them on the tick they authored.
+Writers rotate round-robin over the whole pool, previous author included (D-writer-rotation-pool),
+so with two writers the schedule alternates as shown; the shipped roster has three, so there the
+writer column runs W1, W2, W3, W1, … and a writer drops out of the critic pools one tick in three:
 
 | tick | report | writer | logic critics | evidence critics | completeness critics |
 |------|--------|--------|---------------|------------------|----------------------|

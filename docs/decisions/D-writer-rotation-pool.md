@@ -25,28 +25,41 @@ voice: one model's framing persists across its own patches, and `loaded_language
 `minor` (D-social-bias). Rotation already mitigates that whenever more than one writer is up;
 rule 13's bounded rewrite is the backstop when it is not.
 
-**The evidence, fetched (QP12 §4).** This narrows QP4's surface, so the register row moves with
-it and two new references are cited by URL. The claim they are asked to carry is small: that no
-source finds an effect of the *generator's* identity once the feedback is external, so a rule about
-the generator's identity has no evidence behind it. [Kamoi et al. 2024](https://arxiv.org/abs/2406.01297),
-a critical survey, locates the condition for successful self-correction in the feedback's source —
-"self-correction works well in tasks that can use reliable external feedback" — and reports that
-"no prior work demonstrates successful self-correction with feedback from prompted LLMs" outside
-tasks suited to it. [Stechly, Valmeekam & Kambhampati 2024](https://arxiv.org/abs/2402.08115) keep
-the *same* generator throughout and find "significant performance collapse with self-critique and
-significant performance gains with sound external verification". Who generated the draft was not
-the variable that moved the result in either source.
+**The evidence, fetched (QP12 §4) — and what it does not settle.** This narrows QP4's surface,
+so the register row moves with it and two references were fetched and added by URL:
+[Kamoi et al. 2024](https://arxiv.org/abs/2406.01297), a critical survey that classifies
+self-correction by feedback source — "self-correction works well in tasks that can use reliable
+external feedback", and "no prior work demonstrates successful self-correction with feedback from
+prompted LLMs" outside tasks suited to it — and
+[Stechly, Valmeekam & Kambhampati 2024](https://arxiv.org/abs/2402.08115), who hold GPT-4 as the
+generator throughout and vary only the verifier: "significant performance collapse with
+self-critique and significant performance gains with sound external verification". Neither varies
+the generator's identity, and neither compares a model revising its own draft against a different
+model revising it from the same feedback. The register's existing QP4 sources do not either: Huang
+et al. 2024 is self-correction *without* external feedback, Panickssery et al. 2024 is
+self-preference in an *evaluator*, and Chen, Su & Chiang 2026 is about where a claim sits in a
+context. **So the evidence base neither supports nor refutes the withdrawn rule**, and the absence
+of a reported generator-identity effect is not claimed as evidence of none. The warrant for this
+decision is operational — the exclusion was killing every run on a one-writer roster — plus the
+record that nothing in the register ever supported the rule. That is weaker than §4's standard,
+and the register's application paragraph says so in those words rather than presenting an
+availability decision as a literature result.
 
-Two limits are stated so the retreat does not outrun them. Kamoi et al.'s negative result about
-prompted-LLM feedback is a bound on *this pipeline's* critic feedback, and that feedback is the same
-defect list whether or not the reviser wrote the draft — so it does not argue for the withdrawn
-rule, and it is neither created nor removed here; the loop's efficacy stays a measured property
-(critic audition gates, production convergence), not a literature claim. And no source measures
-self-revision against revision by a different writer, which is why rotation stays wherever a second
-writer is up and the previous author is eligible, not preferred. The register's existing QP4
-sources are untouched as claims: Huang et al. 2024 is self-correction *without* external feedback,
-Panickssery et al. 2024 is self-preference in an *evaluator*, and Chen, Su & Chiang 2026 is about
-where a claim sits in a context rather than who generated it, so it is not claimed here.
+What the fetched sources do bound is kept: Kamoi et al.'s negative result about prompted-LLM
+feedback limits *this pipeline's* critic feedback whoever the reviser is, so it does not argue for
+the withdrawn rule and is neither created nor removed here; the loop's efficacy stays a measured
+property (critic audition gates, production convergence), not a literature claim.
+
+**The measurement that would settle it.** Each production run's `audit.json` carries, per
+`generate` event, the author and, per `triage` event, the material count on that artifact, so the
+change in material count across each revision can be grouped by author today. Over the local audit
+set at the time of this decision the writers already differ by that measure (deepseek retired about
+2.4 material defects per revision, mistral about 0.8, with a quarter to a third of revisions making
+the count worse) — a difference in *writers*, not evidence about *self*-revision. The comparison
+this decision leaves open is self-revision against rotated revision on the same question set with
+the same critics; under the shipped roster self-revision occurs only through the retry fallback,
+so the arms are distinguishable from the `generate` events alone. Until it is run, the register
+records the rule as withdrawn without evidence either way.
 
 **The decision.** The writer pool is the whole `roster.writers` list, in order, and drafts go
 round-robin over it: the next draft goes to the member after the one that wrote the last draft,
