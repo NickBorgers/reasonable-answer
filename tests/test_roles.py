@@ -42,6 +42,23 @@ def test_next_writer_is_round_robin_over_the_whole_pool(roster):
     ]
 
 
+def test_next_writer_wraps_over_a_three_writer_pool():
+    """The production roster shape distinguishes whole-pool modulo rotation from the
+    former two-candidate sequence after previous-author exclusion."""
+    roster = Roster(
+        writers=["writer-a", "writer-b", "writer-c"],
+        critics={lens.value: ["logic-spec", "evidence-spec"] for lens in LENSES},
+    )
+    assert [roles.next_writer(roster, rotation=k) for k in range(6)] == [
+        "writer-a",
+        "writer-b",
+        "writer-c",
+        "writer-a",
+        "writer-b",
+        "writer-c",
+    ]
+
+
 def test_a_single_writer_is_a_one_deep_rotation_not_a_fatal():
     """The outage case: a roster degraded to one writer keeps running, and that writer
     revises its own draft. Author exclusion is a property of *review* and still holds

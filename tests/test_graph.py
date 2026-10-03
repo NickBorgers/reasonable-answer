@@ -11,7 +11,7 @@ from fakes import FakeClient
 from pydantic import ValidationError
 
 from reasonable_answer import prompts
-from reasonable_answer.config import Budgets, Config, ConfigError, RepairConfig, RevisionConfig
+from reasonable_answer.config import Budgets, Config, ConfigError, RepairConfig, RevisionConfig, Roster
 from reasonable_answer.graph import _lens_results, run
 from reasonable_answer.llm import ModelCallError
 from reasonable_answer.schemas import CritiqueOutput, RawIssue, StructuralRef
@@ -454,8 +454,13 @@ def test_an_out_of_scope_category_fails_the_lens_not_the_issue(identities, confi
 
 
 def test_drafts_are_written_round_robin_over_the_whole_pool(identities, config):
-    """D-writer-rotation-pool: draft k goes to writers[k % n]. With two writers that is
-    still strict alternation; the property pinned is the rotation, not exclusion."""
+    """D-writer-rotation-pool: draft k goes to writers[k % n], including modulo-3 wrap."""
+    identities = {**identities, "writer-c": "vendor-f/model-c"}
+    roster = Roster(
+        writers=["writer-a", "writer-b", "writer-c"],
+        critics=config.roster.critics,
+    )
+    config = config.model_copy(update={"roster": roster})
     client = FakeClient(
         identities=identities,
         critique_fn=always_material,
@@ -772,6 +777,9 @@ def test_the_only_eligible_writer_is_asked_again_rather_than_the_run_aborted(
     generated = [e for e in events if e["kind"] == "generate"]
     assert generated[1]["author"] != failures[0]["author"]
     assert generated[1]["author"] == generated[0]["author"]
+    # The persisted rotation advances past the successful fallback, so the following
+    # draft resumes at the next pool member rather than repeating that fallback.
+    assert generated[2]["author"] == failures[0]["author"]
 
     # And it waited first, rather than re-asking a model mid-wobble inside a second.
     assert client.writer_backoffs == [1]
