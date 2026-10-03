@@ -1,6 +1,7 @@
 # Role-structured roster (docs/architecture.md).
 #
-# writers       — models that author reports (round-robin, never the previous author)
+# writers       — models that author reports (round-robin over the whole list; the
+#                 previous author is NOT excluded — D-writer-rotation-pool)
 # critics       — per-lens pools; a model may be critic-only (never a writer), which is
 #                 the clean way to satisfy author-exclusion. Each lens wants >=2 eligible
 #                 NON-AUTHOR models for a strong `accepted`.
@@ -23,12 +24,15 @@ proxy:
   api_key_fallback: fake-key
 
 roster:
-  # Three, not two, because author exclusion applies to writers as well: on every
-  # revision round the previous author is removed, so a two-writer pool leaves exactly
-  # ONE eligible model and a single flaky response ends the run. Three leaves two
-  # (D-provider-retry).
+  # Author exclusion does NOT apply to writers (D-writer-rotation-pool): drafts go
+  # round-robin over this whole list — each draft to the member after the last draft's
+  # author, a failed attempt moving on and the rotation continuing from whoever
+  # succeeded — and a roster degraded to one writer still runs: that one model
+  # revises its own draft, in a fresh context, from the critics' defect list. Three
+  # writers is still the target: a dud response is routed to the next member rather
+  # than retried in place (D-provider-retry), and one voice never owns a whole run.
   writers:
-    - mistral-large-3      # 675B/A41B Apache 2.0, ~340GB @4bit. Authors R1 and every odd round.
+    - mistral-large-3      # 675B/A41B Apache 2.0, ~340GB @4bit. Authors R1; every third draft after, failures aside.
     - deepseek-v4-flash    # 284B/A13B MIT, ~145GB @4bit.
     - nemotron-3-ultra     # 550B/A55B open, ~275GB @4bit. Writer-only: it shrinks no
                            # critic pool, and its Western corpus decorrelates a pool
@@ -477,7 +481,7 @@ review:
 # arms are comparable from configuration rather than from a checkout.
 #
 # What it does NOT change, and this is the point: critics still read the whole document
-# every tick, writers still rotate so no model ever patches its own last draft, and a
+# every tick, writers still rotate round-robin (D-writer-rotation-pool), and a
 # new draft is still a new hash and therefore a fresh clean-record set (RC-002). The
 # decorrelation layer is the critic roster (docs/isolation.md), not the rewrite.
 #
@@ -553,11 +557,11 @@ budgets:
   # the 12 `critique_attempts` re-asking a fresh model the identical question.
   critic_repair_retries: 2
   call_retries: 2
-  # Attempts at one draft before the run gives up. They rotate through the eligible
-  # writer pool and wrap, so a model that is down or answering with nothing is routed
-  # around when there is somewhere to route to, and given another spaced chance when
-  # there is not. Wrapping never re-asks the previous author — exclusion removed them
-  # before the rotation started (D-provider-retry).
+  # Attempts at one draft before the run gives up. They walk the writer pool from the
+  # rotation's position and wrap, so a model that is down or answering with nothing is
+  # routed around when there is somewhere to route to, and given another spaced chance
+  # when there is not (D-provider-retry). The walk may reach the previous author: the
+  # pool is the whole writer list (D-writer-rotation-pool).
   writer_attempts: 3
   timeout_seconds: 300
   # Wait before each retry: min(base * 2^(n-1), max) seconds, times jitter in

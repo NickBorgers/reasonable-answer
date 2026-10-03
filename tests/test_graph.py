@@ -11,7 +11,15 @@ from fakes import FakeClient
 from pydantic import ValidationError
 
 from reasonable_answer import prompts
-from reasonable_answer.config import Budgets, Config, ConfigError, RepairConfig, RevisionConfig
+from reasonable_answer.config import (
+    Budgets,
+    Config,
+    ConfigError,
+    ProxyConfig,
+    RepairConfig,
+    RevisionConfig,
+    Roster,
+)
 from reasonable_answer.graph import _lens_results, run
 from reasonable_answer.llm import ModelCallError
 from reasonable_answer.schemas import CritiqueOutput, RawIssue, StructuralRef
@@ -453,15 +461,119 @@ def test_an_out_of_scope_category_fails_the_lens_not_the_issue(identities, confi
     assert final["terminal_status"] == "aborted"
 
 
-def test_the_generator_is_never_the_author_of_the_draft_it_revises(identities, config):
-    client = make_client(identities, critique_fn=always_material)
+THREE_WRITER_IDENTITIES = {
+    "writer-a": "vendor-a/model-a",
+    "writer-b": "vendor-b/model-b",
+    "writer-c": "vendor-f/model-c",
+    "logic-spec": "vendor-c/logic",
+    "evidence-spec": "vendor-d/evidence",
+    "completeness-spec": "vendor-e/completeness",
+}
+
+
+def _three_writer_config(tmp_path) -> Config:
+    """The shape production runs: three writers, for the retry-bookkeeping test below.
+    `test_drafts_are_written_round_robin_over_the_whole_pool` covers the plain modulo
+    walk on three writers (D-writer-rotation-pool)."""
+    return Config(
+        proxy=ProxyConfig(),
+        roster=Roster(
+            writers=["writer-a", "writer-b", "writer-c"],
+            critics={
+                "logic": ["logic-spec", "writer-a", "writer-b"],
+                "evidence": ["evidence-spec", "writer-a", "writer-b"],
+                "completeness": ["completeness-spec", "writer-a", "writer-b"],
+            },
+        ),
+        budgets=Budgets(min_ticks=2, hard_cap=8, polish_cap=1, retry_backoff_seconds=0.0),
+        runs_dir=tmp_path / "runs",
+    )
+
+
+def test_a_failed_attempt_moves_on_and_the_rotation_follows_the_writer_that_succeeded(tmp_path):
+    """The retry exception to the modulo walk, stated exactly (D-writer-rotation-pool): a
+    failed attempt moves to the next pool member, and the next draft goes to the member
+    *after the one that succeeded*. So a fallback skips a writer; it never repeats one."""
+    client = FlakyWriterClient(
+        identities=THREE_WRITER_IDENTITIES,
+        critique_fn=always_material,
+        report_fn=lambda n: f"{REPORT}\nRevision {n}.\n",
+    )
+    # Generation 2's first attempt (writer-b's turn) comes back empty; the walk moves
+    # to writer-c, which succeeds.
+    client.empty_generations = {2}
+    final = run(_three_writer_config(tmp_path), question="Is it so?", seed=REPORT, client=client)
+    assert not final["fatal"]
+
+    attempts = [c.alias for c in client.calls if c.schema is None]
+    # a | b(empty) c | a | b ...: the failed b is skipped, c authors draft 2, and draft 3
+    # goes to the member after c, which is a — not back to c, and not to b.
+    assert attempts[:5] == ["writer-a", "writer-b", "writer-c", "writer-a", "writer-b"], attempts
+    authors = [e["author"] for e in events_of(final) if e["kind"] == "generate"]
+    assert authors[:3] == ["vendor-a/model-a", "vendor-f/model-c", "vendor-a/model-a"], authors
+
+
+def test_a_one_writer_roster_revises_its_own_draft_and_survives_a_failed_attempt(tmp_path):
+    """The motivating outage (D-writer-rotation-pool): every provider but one is down, so
+    the roster is one writer deep. Under the withdrawn exclusion rule round two had zero
+    eligible writers and the run died as RosterExhausted. Now the same model revises its
+    own draft, and when one of its attempts comes back empty the retry goes to the same
+    resolved identity after a wait (D-provider-retry) rather than to nobody."""
+    client = FlakyWriterClient(
+        identities=THREE_WRITER_IDENTITIES,
+        critique_fn=always_material,
+        report_fn=lambda n: f"{REPORT}\nRevision {n}.\n",
+    )
+    client.empty_generations = {2}
+    config = Config(
+        proxy=ProxyConfig(),
+        roster=Roster(
+            writers=["writer-a"],
+            critics={
+                "logic": ["logic-spec", "writer-b"],
+                "evidence": ["evidence-spec", "writer-b"],
+                "completeness": ["completeness-spec", "writer-b"],
+            },
+        ),
+        budgets=Budgets(min_ticks=2, hard_cap=5, polish_cap=1, retry_backoff_seconds=0.0),
+        runs_dir=tmp_path / "runs",
+    )
+
+    final = run(config, question="Is it so?", seed=REPORT, client=client)
+
+    assert not final["fatal"], final.get("fatal_reason")
+    authors = [e["author"] for e in events_of(final) if e["kind"] == "generate"]
+    assert len(authors) >= 3 and set(authors) == {"vendor-a/model-a"}, authors
+    failures = [e for e in events_of(final) if e["kind"] == "generate_failed"]
+    assert [f["author"] for f in failures] == ["vendor-a/model-a"]
+    assert client.writer_backoffs == [1], "the retry waited, then re-asked the only writer"
+    # Author exclusion on the review side is what still holds: the one writer never
+    # critiques its own drafts, so every critique came from the specialists or writer-b.
+    critics = {e["critic"] for e in events_of(final) if e["kind"] == "critique"}
+    assert critics and "vendor-a/model-a" not in critics, critics
+
+
+def test_drafts_are_written_round_robin_over_the_whole_pool(identities, config):
+    """D-writer-rotation-pool: draft k goes to writers[k % n], including modulo-3 wrap."""
+    identities = {**identities, "writer-c": "vendor-f/model-c"}
+    roster = Roster(
+        writers=["writer-a", "writer-b", "writer-c"],
+        critics=config.roster.critics,
+    )
+    config = config.model_copy(update={"roster": roster})
+    client = FakeClient(
+        identities=identities,
+        critique_fn=always_material,
+        # A distinct draft each round, or rule 12 freezes the run on a repeated artifact
+        # after the first generation and there is no rotation to observe.
+        report_fn=lambda n: f"{REPORT}\nRevision {n}.\n",
+    )
     run(config, question="Is it so?", seed=REPORT, client=client)
 
     writers = [c.alias for c in client.calls if c.schema is None]
-    assert writers  # sanity
-    # strict=False is deliberate: this pairs each writer with its successor, so the two
-    # sequences differ in length by one by construction.
-    assert all(a != b for a, b in zip(writers, writers[1:], strict=False)), writers
+    assert len(writers) >= 3  # sanity: enough rounds to wrap
+    pool = config.roster.writers
+    assert writers == [pool[k % len(pool)] for k in range(len(writers))], writers
 
 
 def test_every_critique_call_excludes_the_author(identities, config):
@@ -735,10 +847,11 @@ def test_the_only_eligible_writer_is_asked_again_rather_than_the_run_aborted(
 ):
     """D-provider-retry, and the shape of the three runs that aborted on 2026-07-29.
 
-    Author exclusion applies to writers, so from round two a two-writer roster leaves
-    exactly ONE eligible model. `attempts` used to be `min(len(pool), writer_attempts)`,
-    which made the retry budget 1 — every abort logged `writer attempt 1/1` — so a
-    single empty completion ended the run with its defects still open.
+    `attempts` used to be `min(len(pool), writer_attempts)`, and on a one-deep pool that
+    made the retry budget 1 — every abort logged `writer attempt 1/1` — so a single empty
+    completion ended the run with its defects still open. The pool is now the whole
+    writer list (D-writer-rotation-pool), so the second attempt here goes to the *other*
+    writer; the budget, not the pool size, is still what bounds the walk.
     """
     client = FlakyWriterClient(
         identities=identities,
@@ -747,8 +860,6 @@ def test_the_only_eligible_writer_is_asked_again_rather_than_the_run_aborted(
         # artifact before the writer fallback is ever reached.
         report_fn=lambda n: f"{REPORT}\nRevision {n}.\n",
     )
-    # The second generation is the first on a one-deep pool: generation one ran with
-    # both writers eligible (a human seed excludes nobody).
     client.empty_generations = {2}
 
     final = run(config, question="Is it so?", seed=REPORT, client=client)
@@ -760,11 +871,15 @@ def test_the_only_eligible_writer_is_asked_again_rather_than_the_run_aborted(
     assert len(failures) == 1
     assert "empty report" in failures[0]["reason"]
 
-    # The sharp end: the draft that followed the failure was written by the SAME model,
-    # because it was the only eligible one. Before D-provider-retry there was no second attempt to
-    # make, and this was `terminal=aborted`.
+    # The sharp end: a second attempt was made at all. Before D-provider-retry there was
+    # none, and this was `terminal=aborted`. The walk moved on to the next pool member —
+    # the previous author, which D-writer-rotation-pool no longer excludes.
     generated = [e for e in events if e["kind"] == "generate"]
-    assert generated[1]["author"] == failures[0]["author"]
+    assert generated[1]["author"] != failures[0]["author"]
+    assert generated[1]["author"] == generated[0]["author"]
+    # The persisted rotation advances past the successful fallback, so the following
+    # draft resumes at the next pool member rather than repeating that fallback.
+    assert generated[2]["author"] == failures[0]["author"]
 
     # And it waited first, rather than re-asking a model mid-wobble inside a second.
     assert client.writer_backoffs == [1]
@@ -1631,8 +1746,8 @@ def test_a_malformed_ops_reply_is_its_own_failure_class_and_the_next_writer_auth
     replies = ["I revised the report as you asked.", OPS_REPLY]
     client = FakeClient(identities=identities, critique_fn=clean, report_fn=lambda n: replies[n - 1])
     cfg = _ops_cfg(roster, tmp_path)
-    # A seeded previous draft excludes no writer, so both pool members are eligible and
-    # the retry is observably a different one.
+    # Both pool members are always eligible (D-writer-rotation-pool), so the retry is
+    # observably a different one.
     state = _ops_state(identities, author_identity="external/seed")
     out, event = _direct_generate(tmp_path, cfg, client, identities, state)
 

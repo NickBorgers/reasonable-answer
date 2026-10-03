@@ -40,12 +40,13 @@ valve behaviour in `tests/test_graph.py` — make the changed behaviour checkabl
 the same way D-source-verification pins its empirical claim rather than resting it on private run
 audit material.
 
-**The mechanism.** `prompts.writer_revision` ended *"Return the complete revised report in Markdown —
-the whole document, not a diff,"* and `roles.next_writer` hands each revision to a **different** model.
-So every round, a model that did not write the text regenerated ~1,800 words in order to repair ~5
-paragraphs, and every passage the critics had just cleared was re-rendered by a model with different
-priors. Fixing five paragraphs by re-rolling forty is a losing trade, and the numbers above are what
-losing it looks like.
+**The mechanism at the time of this decision.** `prompts.writer_revision` ended *"Return the complete
+revised report in Markdown — the whole document, not a diff,"* and `roles.next_writer` handed each
+revision to a **different** model. So every round, a model that did not write the text regenerated
+~1,800 words in order to repair ~5 paragraphs, and every passage the critics had just cleared was
+re-rendered by a model with different priors. Fixing five paragraphs by re-rolling forty is a losing
+trade, and the numbers above are what losing it looks like. D-writer-rotation-pool later retained
+round-robin rotation while making the previous author eligible.
 
 **Decision, part one: scope the edit.** `revision.mode: patch` (the default) tells the writer to change
 only the paragraphs a fix task names in its locus, plus whatever a task's instruction explicitly
@@ -65,8 +66,11 @@ layer … each dimension blessed by ≥2 distinct non-author models." Decorrelat
 `config/roster.yaml` is availability (D-provider-retry). Three properties therefore hold unchanged, and
 they are what make patching safe:
 
-1. **Rotation stays.** `roles.next_writer` and `roles.writer_pool` are untouched — a different model
-   patches every round, and no model ever patches its own last draft.
+1. **Rotation stayed.** At the time of this decision, `roles.next_writer` and `roles.writer_pool`
+   were untouched: a different model patched every round, and no model patched its own last draft.
+   **D-writer-rotation-pool superseded that exclusion:** rotation still stays, but it now uses the
+   whole writer pool and the previous author is eligible. The argument above — that decorrelation
+   lives in the critic roster, not in who holds the pen — is exactly why that exclusion could go.
 2. **Critics still read the whole document.** Nothing in the critique path changes. Untouched prose is
    not unreviewed prose: a rotating critic pool re-reads every paragraph on every tick.
 3. **Clean records still reset on every generation.** RC-002 is absolute. There are no locus-scoped or

@@ -8,7 +8,8 @@ The roster is **role-structured**, not a flat swap:
 - **Per-lens critic pools** — each lens (logic / evidence / completeness) has its own set of
   eligible models, headed by the one best matched to that lens. Models may be **critic-only**
   (never author), which cleanly satisfies the author-exclusion rule and is how the roster's
-  strongest model (`glm-5.2`) gets to review *every* draft instead of half of them.
+  strongest model (`glm-5.2`) gets to review *every* draft instead of sitting out each one it
+  wrote (one draft in three under the shipped three-writer rotation, D-writer-rotation-pool).
 - **Orchestrator** — the blind referee's model, configured separately (default `writers[0]`).
 
 The one hard invariant: **a report is never critiqued — on any lens — by the model that authored
@@ -45,8 +46,9 @@ image, the one D-critic-audition exists to serve, was the one person who could n
 `corpus_hash` is the identity of the measurement and a fallback chain would let two corpora answer
 to one command.
 
-The diagram below shows a minimal roster for clarity; generator selection is round-robin among
-writers excluding the current artifact's author, preserving `critic(Rₙ) ≠ generator(Rₙ)`.
+The diagram below shows a minimal roster for clarity; generator selection is round-robin over the
+whole writer pool, including the current artifact's author. Critic selection independently preserves
+`critic(Rₙ) ≠ generator(Rₙ)`.
 
 ```mermaid
 flowchart LR
@@ -54,10 +56,10 @@ flowchart LR
         G1["generate R1<br/>writer W1"] --> K1["critique R1<br/>per-lens critics<br/>(each ≠ author R1)"]
     end
     subgraph T2["tick 2"]
-        G2["generate R2<br/>writer W2 (≠ author R1)"] --> K2["critique R2<br/>per-lens critics<br/>(each ≠ author R2)"]
+        G2["generate R2<br/>next writer in rotation"] --> K2["critique R2<br/>per-lens critics<br/>(each ≠ author R2)"]
     end
     subgraph T3["tick 3"]
-        G3["generate R3<br/>writer (≠ author R2)"] --> K3["critique R3<br/>per-lens critics<br/>(each ≠ author R3)"]
+        G3["generate R3<br/>next writer in rotation"] --> K3["critique R3<br/>per-lens critics<br/>(each ≠ author R3)"]
     end
     K1 -->|defect list| G2
     K2 -->|defect list| G3
@@ -66,11 +68,14 @@ flowchart LR
 Each `critique` box is three lenses (logic / evidence / completeness), and each lens is read by
 `review.depth` critic models — **two** by default (D-front-loaded-depth). Every one of them is a
 fresh blind context, distinct at the resolved provider/model level, and excluded if it authored the
-report under review. Writers rotate; a model may be a critic-only specialist (never a writer).
+report under review. Writers rotate round-robin over the whole pool, previous author included
+(D-writer-rotation-pool); a model may be a critic-only specialist (never a writer).
 
 Invariants (enforced in code, covered by tests):
 - `critic(Rₙ) ≠ generator(Rₙ)` — production ≠ review (holds for confirmation critiques too).
-- `generator(Rₙ₊₁) ∈ writer_pool \ {author(Rₙ)}` — a writer, never the author, never a critic-only specialist.
+- `generator(Rₙ₊₁)` is the writer-pool member after `generator(Rₙ)`, wrapping — a writer, by
+  rotation, never a critic-only specialist; the author of `Rₙ` is eligible. A failed attempt moves
+  to the next member and the rotation continues from the one that succeeded (D-writer-rotation-pool).
 - Models distinct at the **resolved** provider/model/version level, not just the alias (RA-017);
   prefer distinct providers/families per lens and **warn** when a lens's two critic models share a family (weak independence).
 
@@ -79,7 +84,7 @@ Invariants (enforced in code, covered by tests):
 | Node | Reads | Produces | Model | Trust model |
 |------|-------|----------|-------|-------------|
 | **intake** | question + **markdown** seed | normalized `question` / `seed`; routing | none | deterministic |
-| **generate** | question + latest report + **defect list**; with retrieval on, its own `web_search` results and — with `search.read_sources` — the pages it read from them (D-writer-source-reads), and on a revision with `verify_sources` on, the pages the draft's `## Sources` lists (D-writer-rereads-cited-sources) | next report (with citations) — under `revision.mode: patch` only the paragraphs a fix task named — and the passages that restate the same claim (D-claim-scoped-patch) — are edited, the rest returned byte-identical (D-scoped-revision); plus, with `search.support_manifest`, an **audit-side** support manifest; every draft's `generate` event carries a citation census (D-writer-citation-continuity) and, on a patch or ops revision, a scope measurement (D-scoped-revision) — when repair is enabled, a marker-less body or an over-threshold `out_of_scope` spends up to `revision.repair.repair_cap` extra calls (default 1) to the same writer with no tool before the draft ships (D-census-gated-repair); under `revision.mode: ops` the writer sees the labelled draft and returns operations on its paragraphs, `ops.splice` builds the next report, and the event carries the applied/refused counts; an ops-licensed repair likewise returns operations rather than a whole report (D-ops-revision) | non-author (alternating); the repair call, when spent, is the same author again | LLM (untrusted output) |
+| **generate** | question + latest report + **defect list**; with retrieval on, its own `web_search` results and — with `search.read_sources` — the pages it read from them (D-writer-source-reads), and on a revision with `verify_sources` on, the pages the draft's `## Sources` lists (D-writer-rereads-cited-sources) | next report (with citations) — under `revision.mode: patch` only the paragraphs a fix task named — and the passages that restate the same claim (D-claim-scoped-patch) — are edited, the rest returned byte-identical (D-scoped-revision); plus, with `search.support_manifest`, an **audit-side** support manifest; every draft's `generate` event carries a citation census (D-writer-citation-continuity) and, on a patch or ops revision, a scope measurement (D-scoped-revision) — when repair is enabled, a marker-less body or an over-threshold `out_of_scope` spends up to `revision.repair.repair_cap` extra calls (default 1) to the same writer with no tool before the draft ships (D-census-gated-repair); under `revision.mode: ops` the writer sees the labelled draft and returns operations on its paragraphs, `ops.splice` builds the next report, and the event carries the applied/refused counts; an ops-licensed repair likewise returns operations rather than a whole report (D-ops-revision) | the next writer in rotation, which may be the current author (D-writer-rotation-pool); the repair call, when spent, is the same author again | LLM (untrusted output) |
 | **adjudicate** *(D-writer-disputes, opt-in)* | pending disputes + finding + one paragraph | `AdjudicationRecord[]` | mechanical fetch-check, else an arbiter ≠ disputer ≠ raiser | mechanical, or LLM inside a closed 2-field schema |
 | **critique** | report + question + **one lens** + taxonomy; the evidence lens also gets the cited pages as claim-anchored excerpts (D-claim-anchored-excerpts) | `Issue[]` per critic | `review.depth` non-author models per lens, drawn as one slate (`roles.critic_slate`) | LLM (untrusted output) |
 | ↳ **claim check** *(D-claim-level-verification, opt-in)* | one citing sentence + its paragraph + one fetched page, per pair | a closed `ClaimVerdict` per pair, minted into `misrepresented_source` on the evidence critic's `LensResult` (`claimcheck`) | the evidence critic's own model, one fresh context per pair, memoised per resolved identity and complete prompt | LLM inside a closed 4-way schema; `supported` and `contradicted` must quote the shown page verbatim or the pair is unchecked; `absent` and `unreadable` carry no page quote, settle nothing unless the page was shown whole and uncut, and never retire the critic's own finding; a pass stops after `claim_check.max_consecutive_failures` unchecked calls in a row (D-claim-check-inconclusive-verdicts) |
@@ -463,11 +468,10 @@ carried no headings is accepted with a warning; the warning rides the run's exis
   reach `accepted`. `LensResult.failure_class` (also on the `critique` event) is what the count
   reads; schema violations, unstaffed slots and account refusals do not count. The limit lives
   under `review`, not `budgets`, to stay out of `_run_fingerprint`.
-- **Writer-pool depth (D-provider-retry):** author exclusion applies to writers too, so the pool the *next* draft
-  may come from is `writers \ {author(Rₙ)}`. Size the pool for **≥2 eligible writers on a revision
-  round** — i.e. at least three writers — or one flaky response is an aborted run rather than a
-  retry. This is a sizing recommendation, not a fail-closed check: a two-writer roster is legal and
-  still runs, it just has no lateral move when its one eligible writer misbehaves.
+- **Writer-pool depth (D-provider-retry, D-writer-rotation-pool):** the pool the next draft may come
+  from is the whole `writers` list; the author of Rₙ is not excluded. Size it for **≥2 writers** so
+  a failed response has a lateral move to the next pool member. A one-writer roster is legal and
+  still runs, spending the full, spaced `writer_attempts` budget on that model.
 - **Model call timing (D-model-call-timing):** `LLMClient` reports every HTTP attempt to a call
   sink, and `build_runtime` points the sink at the run's event log. Each attempt becomes a
   `model_call` event: `purpose` (`writer`, `critic:<lens>`, `claim_check`, `support_manifest`,
@@ -558,7 +562,7 @@ sequenceDiagram
     participant O as Orchestrator (blind LLM)
     participant K as Per-lens critics (review.depth each, all ≠ author)
     participant T as Triage (mechanical)
-    participant G as Generator (non-author)
+    participant G as Generator (next in writer rotation, may be the current author — D-writer-rotation-pool)
     participant S as Report store
 
     C->>K: critique Rₙ (question + lens ×3, ×review.depth critics per lens) — identical interface for normal & confirm critiques
