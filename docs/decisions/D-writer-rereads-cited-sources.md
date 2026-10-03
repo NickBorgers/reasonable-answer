@@ -92,15 +92,15 @@ and `cited_reads` (read attempts on a seeded URL), so a budget spent on re-reads
 * *Manifest spans and URLs in `events.jsonl` would outlive a content purge.* The new fields are
   integers; the URL a writer re-read is never logged (RA-016).
 
-**Isolation, stated plainly.** This widens the writer's context: a reviser may now see the text of
-pages a *different* writer chose to cite. It does not widen author exclusion — the reviser is still
-never the draft's author — and it does not carry the previous writer's reasoning, searches or reads,
-only third-party pages the draft names. docs/isolation.md records it on the writer's SEES line and in
-the allowlist bullet.
+**Isolation, stated plainly.** This widened the writer's context: a reviser could now see the text of
+pages a *different* writer chose to cite. At the time of this decision, writer-side author exclusion
+still meant the reviser was never the draft's author; the change did not carry the previous writer's
+reasoning, searches or reads, only third-party pages the draft named. docs/isolation.md records it on
+the writer's SEES line and in the allowlist bullet.
 
-**Superseded in part by D-writer-rotation-pool.** Writer rotation now includes the previous author,
-so the reviser may be the draft's author. Critic-side author exclusion remains unchanged: the model
-that authored a report cannot critique that report.
+**Superseded in part by D-writer-rotation-pool.** Writer rotation now uses the whole writer pool, so
+the reviser may be the draft's author. Critic-side author exclusion remains unchanged: the model that
+authored a report cannot critique that report.
 
 **Deployment profile drift, corrected in passing.** docs/deployment-profile.md listed
 `search.enabled` and `search.verify_sources` for production and omitted `read_sources: true` and
