@@ -1,13 +1,12 @@
 ## D-writer-rotation-pool — writers rotate; the previous author is not excluded
 
-**The finding.** In late September 2026 the production instance was effectively down for a week.
-OpenRouter refused the account intermittently (D-credit-exhaustion-defers), the NIM-hosted writer
-ended tool loops without an answer, and the one writer paid for directly was the only one reliably
-up. `roles.writer_pool` removed the previous author on every revision round, so a roster that was
-one writer deep in practice had **zero** eligible writers from round two, and every run died as
-`RosterExhausted` — "writer pool contains no model other than the current author". The provider
-situation is not fixable from this repository for a month or more, so the question was which
-property the exclusion was protecting.
+**The finding.** Operator observations outside this repository prompted a re-examination of writer
+availability. Under QP9 they are the **motivation and not the warrant** for this decision; no outage
+duration, provider outcome or run rate is claimed here. The repository-verifiable mechanism is
+narrower: `roles.writer_pool` removed the previous author on every revision round, so a roster with
+one writer has zero eligible writers from round two and raises `RosterExhausted` — "writer pool
+contains no model other than the current author". The question was which property that exclusion
+was protecting.
 
 [isolation.md](../isolation.md) already answered it: principle #7 "is fundamentally about *not
 sharing a context*, not about model identity", writer rotation "is not one of the seven principles
