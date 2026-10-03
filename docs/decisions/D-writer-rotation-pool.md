@@ -1,12 +1,24 @@
 ## D-writer-rotation-pool — writers rotate; the previous author is not excluded
 
-**The finding.** Operator observations outside this repository prompted a re-examination of writer
-availability. Under QP9 they are the **motivation and not the warrant** for this decision; no outage
-duration, provider outcome or run rate is claimed here. The repository-verifiable mechanism is
-narrower: `roles.writer_pool` removed the previous author on every revision round, so a roster with
-one writer has zero eligible writers from round two and raises `RosterExhausted` — "writer pool
-contains no model other than the current author". The question was which property that exclusion
-was protecting.
+**The finding.** `roles.writer_pool` removed the previous author on every revision round, so a
+roster with one reachable writer had zero eligible writers from round two and the run died as
+`RosterExhausted` — "writer pool contains no model other than the current author". That is not a
+hypothetical: it is the recorded terminal state of production runs
+[`run-48dc92fd3a4f`](https://reasonable-answer.nickborgers.net/runs/run-48dc92fd3a4f/audit.json)
+and
+[`run-e356ab3260bb`](https://reasonable-answer.nickborgers.net/runs/run-e356ab3260bb/audit.json)
+(2026-09-18, build `b2eb19f`, readable by run id under D-id-as-credential). In both, the `startup`
+event's `warnings` record a degraded roster — `mistral-large-3` and `nemotron-3-ultra` could not be
+probed, and the run proceeded without them (D-degraded-roster) — the one `generate` event names
+`deepseek-v4-flash` as the author of the first draft, and `finalize` is `aborted` with the message
+above: the only writer that was up was barred from writing the second draft because it had
+written the first. The same day's
+[`run-021a9032ce99`](https://reasonable-answer.nickborgers.net/runs/run-021a9032ce99/audit.json)
+shows the other shape the fallback was built for: three `generate_failed` events on that same sole
+writer, then `aborted` — "every eligible writer failed". Operator observations beyond those runs —
+how long the providers stayed unreachable, how many runs were lost — are motivation and not
+warrant here; no outage duration or run rate is claimed. The question the recorded aborts posed was
+which property the exclusion was protecting.
 
 [isolation.md](../isolation.md) already answered it: principle #7 "is fundamentally about *not
 sharing a context*, not about model identity", writer rotation "is not one of the seven principles
