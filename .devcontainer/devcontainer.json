@@ -13,9 +13,10 @@
   "workspaceMount": "source=${localWorkspaceFolder},target=${localWorkspaceFolder},type=bind,consistency=cached",
   "workspaceFolder": "${localWorkspaceFolder}",
   "mounts": [
-    // ~/.claude carries the memory index, skills, hooks, settings and credentials.
-    // Harmless when absent: the bind just yields an empty directory.
-    "source=${localEnv:HOME}/.claude,target=/home/vscode/.claude,type=bind,consistency=cached",
+    // Deliberately NOT mounting the host ~/.claude. A read-write mount lets the container's
+    // Claude (plugin installs, settings writes, OAuth token refresh) mutate host config and
+    // rotate the shared login, which logs out the host and every other session. Credentials
+    // are supplied per-file by the `dcs`/`dcr` helpers (~/code/util/profile) instead.
     // `gh` keeps its credentials in hosts.yml; without it the CLI is installed but signed out.
     "source=${localEnv:HOME}/.config/gh,target=/home/vscode/.config/gh,type=bind,consistency=cached"
   ],
