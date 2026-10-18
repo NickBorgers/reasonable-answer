@@ -400,7 +400,7 @@ open only a URL a `web_search` result **in that same writer call** returned or, 
 `search.verify_sources` also on, a URL the draft's own `## Sources` lists
 (`search.read_cited_sources`, default on; D-writer-rereads-cited-sources) — there is no
 arbitrary-URL reader, and a refused URL never reaches the network or costs budget. Calls are counted
-but unbounded by default; optional `search.read_budget` adds a whole-run call cap. Two character
+but unbounded by default; optional `search.read_budget` adds a whole-run call cap. With `read_sources` and `verify_sources` both on, writers must read a page before citing it: each cited entry no writer has read in full text becomes a major mechanical `uncited_claim` finding, and `generate` events expose `cited_unread` (D-read-before-citing). Two character
 bounds always apply: `search.read_char_budget` characters of page text in total (default 200,000),
 and `search.read_max_chars` per page (default 6,000). Raising
 `read_max_chars` above `fetch_body_max_chars` widens what the *writer* sees and nothing else — the

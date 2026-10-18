@@ -239,18 +239,39 @@ WRITER_REREAD_ADDENDUM = (
 )
 
 
-def writer_system(search_enabled: bool, read_enabled: bool = False, reread: bool = False) -> str:
+#: Appended last when reading-before-citing is in force (D-read-before-citing). The rule a
+#: mechanical finding enforces: a citation is a claim that you read the page.
+WRITER_READ_FIRST_ADDENDUM = (
+    "\n\nCite only pages you have read.\n"
+    "- Before drafting, search for and `read_source` every page you intend to cite. A "
+    "source you have not read in full text this run may not appear in '## Sources'.\n"
+    "- On a revision, read a cited page before you keep a claim that rests on it, unless "
+    "an earlier writer's read of it already stands; where the page cannot be read, "
+    "re-source the claim to one you can, weaken it, or remove it.\n"
+    "- Reading changes nothing about numbering: never renumber existing entries."
+)
+
+
+def writer_system(
+    search_enabled: bool,
+    read_enabled: bool = False,
+    reread: bool = False,
+    read_first: bool = False,
+) -> str:
     """`read_enabled` presumes `search_enabled`: reading is limited to search results,
     so the tool is unofferable without them (enforced at config load, `SearchConfig`).
 
     `reread` says this call's `read_source` allowlist was seeded with the URLs the draft
     under revision cites (D-writer-rereads-cited-sources); it presumes both of the others.
+    `read_first` adds the cite-only-what-you-read rule (D-read-before-citing).
     """
     addendum = WRITER_SEARCH_ADDENDUM if search_enabled else ""
     if search_enabled and read_enabled:
         addendum += WRITER_READ_ADDENDUM
         if reread:
             addendum += WRITER_REREAD_ADDENDUM
+        if read_first:
+            addendum += WRITER_READ_FIRST_ADDENDUM
     return WRITER_SYSTEM + addendum
 
 

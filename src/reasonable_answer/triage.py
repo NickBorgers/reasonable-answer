@@ -796,6 +796,137 @@ def mechanical_bibliography_issues(
     return issues
 
 
+#: `SourceOutcome` values that are not a fact about a page: the allowlist refused the
+#: address, or the run's read budget was spent. Neither belongs in the read log
+#: (D-read-before-citing), which records only what a fetch established.
+READ_LOG_SKIP = frozenset({"not_retrieved", "budget_exhausted"})
+_FULL_TEXT = "full_text"
+
+
+def unread_cited_entries(
+    report_text: str,
+    structure: Structure,
+    read_log: dict[str, str] | None,
+    *,
+    limit: int = DEFAULT_ENTRY_LIMIT,
+) -> list[tuple[_Entry, str | None]]:
+    """The addressable bibliography entries the body cites that no writer has read in
+    full text this run, each with the closed-vocabulary outcome of the failed read (None
+    when no read was ever attempted).
+
+    `read_log` is url -> `SourceOutcome` value over the whole run (D-read-before-citing).
+    URLs are compared after `fetch._clean_url` on both sides. An entry with no address
+    cannot be passed to `read_source` and is never listed.
+    """
+    sources_section = _sources_section(structure)
+    if sources_section is None or not fetch.sources_section(report_text).strip():
+        return []
+    cited = _citations(structure, sources_section)
+    log = {fetch._clean_url(url): outcome for url, outcome in (read_log or {}).items()}
+    out: list[tuple[_Entry, str | None]] = []
+    for entry in _entries(report_text, limit):
+        if entry.url is None or entry.number not in cited:
+            continue
+        outcome = log.get(fetch._clean_url(entry.url))
+        if outcome == _FULL_TEXT:
+            continue
+        out.append((entry, outcome))
+    return out
+
+
+def mechanical_unread_issues(
+    report_text: str,
+    structure: Structure,
+    read_log: dict[str, str] | None,
+    *,
+    limit: int = DEFAULT_ENTRY_LIMIT,
+) -> list[RawIssue]:
+    """`uncited_claim` findings for cited entries nobody has read (D-read-before-citing).
+
+    Every unread entry is covered. Each is anchored on the first citing sentence not
+    already taken by an earlier entry's finding; `_issue_key` collapses two findings on
+    one sentence into one, so when every sentence citing an entry is already taken (for
+    example `... confirmed [1][2].`) the entry is folded into that sentence's finding,
+    which then names every label and carries each entry's fixed instruction. Fields hold
+    only labels, truncated addresses, closed-vocabulary outcomes and fixed wording; never
+    page text.
+
+    A read that was attempted and failed (`not_found`, `paywalled`, ...) is cached for the
+    run, so reading it again returns the same refusal: its instruction says to re-source,
+    which keeps the finding dischargeable.
+    """
+    sources_section = _sources_section(structure)
+    if sources_section is None:
+        return []
+    cited = _citations(structure, sources_section)
+    #: (section, paragraph, span) -> the unread entries folded into that sentence's finding
+    groups: dict[tuple[int, int, str], list[tuple[_Entry, str | None]]] = {}
+    for entry, outcome in unread_cited_entries(report_text, structure, read_log, limit=limit):
+        first = None
+        picked = None
+        for paragraph in cited[entry.number]:
+            for sentence in excerpt._SENTENCE_END.split(paragraph.text):
+                sentence = sentence.strip()
+                if not sentence:
+                    continue
+                if not any(entry.number in excerpt._cited(m) for m in excerpt._MARKER.findall(sentence)):
+                    continue
+                key = (paragraph.section, paragraph.paragraph, sentence[:MAX_SPAN])
+                first = first or key
+                if key not in groups:
+                    picked = key
+                    break
+            if picked:
+                break
+        key = picked or first
+        if key is None:
+            continue
+        groups.setdefault(key, []).append((entry, outcome))
+
+    issues: list[RawIssue] = []
+    for (section, paragraph_no, span), members in groups.items():
+        rationales: list[str] = []
+        instructions: list[str] = []
+        for entry, outcome in members:
+            label = _citation_label(entry.number)
+            address = (entry.url or "")[:120]
+            if outcome is None:
+                rationales.append(
+                    f"This sentence cites {label} ({address}), a page no writer has read in full "
+                    "text during this run: the claim rests on a search snippet or on memory."
+                )
+                instructions.append(
+                    f"Read {label} with read_source and keep the claim only if the page text "
+                    "supports it. If it does not, or the page cannot be read, re-source the "
+                    "claim to a page you have read, weaken it to what you did read, or remove "
+                    "it. Do not renumber entries."
+                )
+            else:
+                rationales.append(
+                    f"This sentence cites {label} ({address}), a page that was tried and could "
+                    f"not be read in full text (outcome: {outcome}): the claim rests on a page "
+                    "no writer has seen."
+                )
+                instructions.append(
+                    f"Do not try to read {label} again; the same refusal comes back. Re-source "
+                    "the claim to a page you have read in full text, weaken it to what you did "
+                    "read, or remove it, then drop the entry if nothing cites it. Do not "
+                    "renumber entries."
+                )
+        issues.append(
+            _minted(
+                category=Category.UNCITED_CLAIM,
+                severity=Severity.MAJOR,
+                locus=StructuralRef(section=section, paragraph=paragraph_no),
+                claim_span=span,
+                citation_id=", ".join(_citation_label(e.number) for e, _ in members),
+                rationale=" ".join(rationales),
+                instruction=" ".join(instructions),
+            )
+        )
+    return issues
+
+
 def clamp(issues: list[RawIssue]) -> list[RawIssue]:
     """Apply mechanical severity floors — critics may escalate, never downgrade."""
     out: list[RawIssue] = []

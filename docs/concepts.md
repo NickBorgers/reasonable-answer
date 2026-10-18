@@ -233,7 +233,10 @@ it — each one, again, a guard against a known LLM failure mode:
   returned in the same call — or, when revising with verification on, that the draft they revise
   cites (D-writer-rereads-cited-sources) — so a claim can rest on text they read — with an optional per-run call
   cap (`search.read_budget`) and mandatory character bounds (`search.read_char_budget`,
-  `search.read_max_chars`). Calls are unbounded by default; characters are not.
+  `search.read_max_chars`). Calls are unbounded by default; characters are not. With
+  `search.read_sources` and `search.verify_sources` both on, writers must read a page before citing
+  it: each cited entry no writer has read in full text becomes a major mechanical `uncited_claim`
+  finding, and `generate` events expose `cited_unread` (D-read-before-citing).
   Page bodies are third-party text, so they arrive fenced as untrusted data like every other input.
 - **Recording where the support actually is.** `search.support_manifest` then asks the writer, in a
   separate pass, to name `citation id -> URL -> locator -> verbatim span -> claim` for each cited
