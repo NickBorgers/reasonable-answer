@@ -533,8 +533,8 @@ def _unreadable_issues(check_result: ClaimCheck) -> list[RawIssue]:
         cited = ", ".join(f"[{n}]" for n in numbers)
         rationale = (
             f"Every source cited for this sentence ({cited}) came back, as fetched, as access-wall, "
-            "catalog or navigation text or with no readable body, not the work's own text, so the "
-            "claim cannot be checked against its citation here."
+            "catalog or navigation text or with no readable body, so the claim cannot be checked "
+            "against its citation here."
         )
         out.append(
             RawIssue(

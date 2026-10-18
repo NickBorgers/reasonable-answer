@@ -852,7 +852,7 @@ def test_the_finding_carries_no_page_text_and_no_checker_reason():
     blob = " ".join([issue.rationale, issue.instruction, issue.related_span or "", issue.citation_id or ""])
     assert "IGNORE" not in blob and "approve" not in blob and "SPAN-TEXT" not in blob
     assert issue.related_span is None
-    assert "no reader" not in blob and "not the work." not in blob
+    assert "no reader" not in blob and "not the work" not in blob
 
 
 def test_the_knob_defaults_on_and_is_not_part_of_the_run_identity(config):
