@@ -33,7 +33,9 @@ toward the writer, never against it; toward the finding, never away from it.
    `contradicted`, or `absent` from a page shown whole: the verdicts that are readings of the
    page. `reconcile` drops a critic's `misrepresented_source` finding only for a settled pair.
    `unreadable` and `absent`-in-part mint nothing and retire nothing; the critic's judgement on
-   those sentences stands exactly as it did before the checker existed. `checked` keeps its meaning
+   those sentences stands exactly as it did before the checker existed. (Superseded in part by
+   D-unreadable-citation-finding: a sentence whose every citation is `unreadable` now mints an
+   `uncited_claim`; `unreadable` still retires nothing.) `checked` keeps its meaning
    for the counts, so the `claim_check` event is unchanged in shape apart from the new `aborted`.
 2. **A cut body is never whole.** `FetchedSource.truncated` — additive, default `False`, so every
    constructor that predates it means what it meant — is set when the wire read hit `max_bytes`,

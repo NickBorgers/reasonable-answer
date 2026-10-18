@@ -18,7 +18,9 @@ not-found becomes ``fabricated_citation`` (D-notfound-fabrication):
 * ``contradicted`` is ``misrepresented_source``, always;
 * ``absent`` is ``misrepresented_source`` only when the page was shown **whole** — on a
   page shown in part, absence from the excerpts is not absence from the page;
-* ``supported`` and ``unreadable`` mint nothing, and are counted.
+* ``supported`` and ``unreadable`` mint nothing per pair, and are counted — except that a
+  sentence whose **every** citation is ``unreadable`` mints one ``uncited_claim``: no
+  citation a reader can check (D-unreadable-citation-finding, ``claim_check.unreadable_finding``).
 
 Everything fails **toward the writer, never against it**: a checker call that fails,
 answers outside the schema, or quotes a span that is not in the page leaves the pair
@@ -30,7 +32,7 @@ checker did not *settle*, and dropped for the ones it did — a settled verdict 
 authoritative for that category, so a claim is never counted twice under two spans.
 Settled means ``supported``, ``contradicted``, or ``absent`` from a page shown whole:
 ``unreadable`` and ``absent`` from a page shown in part are not readings of the page,
-so they neither mint a finding nor retire one a critic made
+so they neither mint a per-pair finding nor retire one a critic made
 (D-claim-check-inconclusive-verdicts). A page cut before its end — at the fetch byte
 cap, at a PDF's page cap — is never "shown whole", however short what survived.
 
@@ -119,6 +121,9 @@ class ClaimCheck:
     verdicts: list[PairVerdict] = field(default_factory=list)
     #: Pairs past `max_pairs`, never attempted.
     over_cap: int = 0
+    #: (section, paragraph, sentence) of every sentence that has a pair past `max_pairs`.
+    #: Such a sentence has a citation nobody read, so it is never "all unreadable".
+    cut_sentences: frozenset[tuple[int, int, str]] = frozenset()
 
     def counts(self) -> dict[str, int]:
         out = {
@@ -285,8 +290,10 @@ def check(
     is not a call and neither breaks nor resets the streak; a verdict resets it.
     """
     by_url = {s.url: s for s in sources}
-    kept, dropped = pairs(report_text, limit=max_pairs)
-    result = ClaimCheck(over_cap=dropped)
+    everything, _ = pairs(report_text)
+    kept = everything[:max_pairs]
+    cut = frozenset((p.locus.section, p.locus.paragraph, p.sentence) for p in everything[max_pairs:])
+    result = ClaimCheck(over_cap=len(everything) - len(kept), cut_sentences=cut)
     failures = 0
     aborted = False
     for pair in kept:
@@ -419,8 +426,10 @@ def _check_pair(
 # ------------------------------------------------------------------ findings
 
 
-def issues_from(check_result: ClaimCheck) -> list[RawIssue]:
-    """The ``misrepresented_source`` findings the verdicts settle.
+def issues_from(check_result: ClaimCheck, *, unreadable_finding: bool = False) -> list[RawIssue]:
+    """The ``misrepresented_source`` findings the verdicts settle, and — with
+    `unreadable_finding` — an ``uncited_claim`` for each sentence whose every cited page
+    was unreadable (D-unreadable-citation-finding).
 
     Mechanically minted like `triage.mechanical_citation_issues`, so this bypasses
     `validate_issue`: the `claim_span` is a prefix of the checked sentence, which is
@@ -457,7 +466,51 @@ def issues_from(check_result: ClaimCheck) -> list[RawIssue]:
                 citation_id=str(v.pair.number),
             )
         )
+    if unreadable_finding:
+        issues.extend(_unreadable_issues(check_result))
     return issues
+
+
+def _unreadable_issues(check_result: ClaimCheck) -> list[RawIssue]:
+    """One ``uncited_claim`` per sentence none of whose citations the checker could read.
+
+    A sentence qualifies only when it has at least one pair, every pair came back from a
+    completed checker call as `unreadable`, and no pair of it was left unchecked, cut by
+    `max_pairs`, or settled as anything else. One readable page that supports the sentence
+    is enough to leave it alone. The text is pipeline-authored from the entry numbers
+    alone: never page text and never the checker's `reason` (docs/isolation.md).
+    """
+    by_sentence: dict[tuple[int, int, str], list[PairVerdict]] = {}
+    for v in check_result.verdicts:
+        key = (v.pair.locus.section, v.pair.locus.paragraph, v.pair.sentence)
+        by_sentence.setdefault(key, []).append(v)
+    out: list[RawIssue] = []
+    for key, group in by_sentence.items():
+        if key in check_result.cut_sentences or any(v.verdict != "unreadable" for v in group):
+            continue
+        numbers = sorted({v.pair.number for v in group})
+        cited = ", ".join(f"[{n}]" for n in numbers)
+        rationale = (
+            f"Every source cited for this sentence ({cited}) was fetched, but what came back was "
+            "not the work itself (a landing, catalog, navigation or paywall page), so no reader "
+            "can check the claim against its citation."
+        )
+        out.append(
+            RawIssue(
+                category=Category.UNCITED_CLAIM,
+                severity=Severity.MAJOR,
+                locus=group[0].pair.locus,
+                claim_span=_clip(group[0].pair.sentence, MAX_SPAN),
+                rationale=_clip(rationale, MAX_RATIONALE),
+                instruction=(
+                    f"Cite a readable copy of the same work for {cited} (an open-access version, "
+                    "or the full text rather than a catalog, abstract or paywall page), cite a "
+                    "different source that states it, or narrow or remove the claim."
+                ),
+                citation_id=str(numbers[0]),
+            )
+        )
+    return out
 
 
 def reconcile(critic_issues: list[RawIssue], check_result: ClaimCheck) -> list[RawIssue]:

@@ -2026,7 +2026,10 @@ def _critique_one(
     # the finding is simply re-derived on the next attempt, so nothing is lost.
     if checked is not None and not result.failed:
         result = result.model_copy(
-            update={"issues": claimcheck.reconcile(result.issues, checked) + claimcheck.issues_from(checked)}
+            update={
+                "issues": claimcheck.reconcile(result.issues, checked)
+                + claimcheck.issues_from(checked, unreadable_finding=cc.unreadable_finding)
+            }
         )
 
     #
