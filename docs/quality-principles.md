@@ -284,6 +284,10 @@ the fetched body of the cited URL; parametric recollection and empty-string cont
 nothing. D-writer-rereads-cited-sources lets a reviser open the pages the draft it revises cites; under
 QP5 those bodies take the same fence, and the seed is the draft's own untrusted text rather than another
 context's retrieval, so no critic output and no other writer's searches or reads cross over.
+D-read-before-citing keeps all three: its mechanical `uncited_claim` (QP1) is minted at its `major`
+floor from a URL-to-outcome read log, not from a model's score; the finding text carries only an entry
+label, address, outcome name and fixed instruction, so no page text or model prose crosses contexts (QP5);
+and a citation counts as read only when a fetch returned full text, never on a writer's say-so (QP10).
 
 ## 3. Refreshing the evidence base
 

@@ -93,6 +93,11 @@ class State(TypedDict, total=False):
     author_alias: str
     author_identity: str
     writer_rotation: int
+    #: url -> `SourceOutcome` value of every page a writer's `read_source` resolved this
+    #: run (D-read-before-citing). Whole-run, never reset on generation, and URLs plus a
+    #: closed vocabulary only — no page text. Read by the evidence lens's mechanical
+    #: block and by the `generate` event; no prompt, view or controller input.
+    read_log: dict[str, str]
 
     round: int
     hash_history: list[str]
@@ -1024,7 +1029,10 @@ def _generate(state: State, rt: Runtime) -> dict:
                 reply = rt.client.complete(
                     alias,
                     system=prompts.writer_system(
-                        rt.search_enabled, rt.read_sources, reread=bool(cited_seed)
+                        rt.search_enabled,
+                        rt.read_sources,
+                        reread=bool(cited_seed),
+                        read_first=_read_first(rt),
                     ),
                     user=user,
                     max_tokens=32000,
@@ -1114,6 +1122,15 @@ def _generate(state: State, rt: Runtime) -> dict:
         run_date=run_date,
     )
 
+    read_log = _merge_read_log(state.get("read_log"), session)
+    unread_fields: dict[str, int] = {}
+    if _read_first(rt):
+        unread_fields["cited_unread"] = len(
+            triage.unread_cited_entries(
+                text, report_mod.parse(text), read_log, limit=cfg.search.max_source_urls
+            )
+        )
+
     h = report_mod.artifact_hash(text)
     history = [*state.get("hash_history", []), h]
     # A tick is one *draft*, counted here rather than at triage: a writer that
@@ -1141,6 +1158,9 @@ def _generate(state: State, rt: Runtime) -> dict:
         # And the deeper version of the same question: did it read any of them?
         # Counts only — a URL is content and events.jsonl outlives a content purge.
         **_read_fields(session),
+        # Present only when reading-before-citing is in force (D-read-before-citing): how
+        # many addressable entries the body cites that no writer has read in full text.
+        **unread_fields,
         # Every generation, polish and rewrite included: a whole-document regeneration is
         # where markers get lost (D-writer-citation-continuity).
         **scope_fields,
@@ -1162,6 +1182,7 @@ def _generate(state: State, rt: Runtime) -> dict:
         "author_alias": alias,
         "author_identity": identity,
         "writer_rotation": rotation + 1,
+        "read_log": read_log,
         "hash_history": history,
         "round": round_no,
         # Every generation resets every per-artifact accumulator — unconditionally,
@@ -1429,6 +1450,30 @@ def _cited_seed(rt: Runtime, previous: str | None) -> list[str]:
     if not rt.config.search.read_cited_sources:
         return []
     return _verified_urls(rt.config, previous)
+
+
+def _read_first(rt: Runtime) -> bool:
+    """Whether "a writer may cite only what it has read" is in force (D-read-before-citing):
+    exactly when writers can read *and* the run verifies, the gating every reading feature
+    already uses. With either off nothing here changes a byte."""
+    return rt.read_sources and rt.verify_sources
+
+
+def _merge_read_log(prior: dict[str, str] | None, session: reading.ReadSession) -> dict[str, str]:
+    """Fold this draft's reads into the run's read log (D-read-before-citing).
+
+    A full-text read is never downgraded by a later failure; a refusal the allowlist or
+    the budget produced says nothing about the page and is not recorded.
+    """
+    log = dict(prior or {})
+    for url, source in session.reads.items():
+        outcome = source.outcome.value
+        if outcome in triage.READ_LOG_SKIP or not url:
+            continue
+        if log.get(url) == fetch.SourceOutcome.FULL_TEXT.value:
+            continue
+        log[url] = outcome
+    return log
 
 
 def _read_fields(session: reading.ReadSession) -> dict[str, Any]:
@@ -1842,6 +1887,7 @@ def _critique_one(
     attempt: int,
     run_date: str | None = None,
     coverage_sink: dict[str, dict] | None = None,
+    read_log: dict[str, str] | None = None,
 ) -> LensResult:
     """One lens, one critic, one fresh context. Failure is recorded as a *failed lens*,
     never as 'no issues found' — a failed review can never manufacture a clean record.
@@ -2046,9 +2092,24 @@ def _critique_one(
         mechanical += triage.mechanical_bibliography_issues(
             report_text, structure, sources, limit=rt.config.search.max_source_urls
         )
+        # A citation no writer has read (D-read-before-citing). Skipped once the read budget
+        # is spent: reading could no longer discharge it, and a finding only deletion can
+        # clear is the shrink-to-pass this rule must not teach.
+        if _read_first(rt) and not _read_budget_spent(rt):
+            mechanical += triage.mechanical_unread_issues(
+                report_text,
+                structure,
+                read_log,
+                limit=rt.config.search.max_source_urls,
+            )
         if mechanical:
             result = result.model_copy(update={"issues": [*mechanical, *result.issues]})
     return result
+
+
+def _read_budget_spent(rt: Runtime) -> bool:
+    budget = getattr(rt.reader, "budget", None)
+    return bool(budget is not None and budget.exhausted)
 
 
 def _lens_results(state: State) -> dict[str, list[dict]]:
@@ -2331,6 +2392,7 @@ def _critique(state: State, rt: Runtime) -> dict:
                 slot.attempt,
                 run_date=run_date,
                 coverage_sink=coverage_by_artifact,
+                read_log=state.get("read_log"),
             )
         return result.model_copy(update={"confirm_state": True}) if confirming else result
 
