@@ -43,6 +43,7 @@ from collections.abc import Callable, Iterable
 from dataclasses import replace
 
 from . import prompts
+from .evidence import Card, CardOutcome, CardTally
 from .fetch import FetchedSource, SourceOutcome, _clean_url
 
 log = logging.getLogger(__name__)
@@ -144,12 +145,20 @@ class ReadSession:
     every attempt in the retry loop already holds, so seeding it carries nothing from one
     attempt to the next. It is kept apart from `_offered` so `offered_count` still means
     "what search returned".
+
+    With evidence cards on (D-writer-evidence-card) the session also remembers which
+    reads were answered with a card, so a repeat read in the same call renders the same
+    card, and tallies the reader's activity for the `generate` event. A read recorded
+    from a card holds the card's passages as its `text` — what this writer saw — so
+    `support.check` and the manifest pass work from exactly that.
     """
 
     def __init__(self, cited: Iterable[str] = ()) -> None:
         self._offered: set[str] = set()
         self._cited: frozenset[str] = frozenset(url for url in cited if url)
         self._read: dict[str, FetchedSource] = {}
+        self._cards: dict[str, Card] = {}
+        self._tally = CardTally()
         self._lock = threading.Lock()
 
     def record_results(self, results: Iterable) -> None:
@@ -194,6 +203,25 @@ class ReadSession:
         with self._lock:
             return self._read.get(url)
 
+    def record_card(self, url: str, card: Card) -> None:
+        with self._lock:
+            self._cards.setdefault(url, card)
+
+    def card(self, url: str) -> Card | None:
+        """The card this call's read of `url` was answered with, or None — a raw read,
+        a fallback, a refusal, or no read at all."""
+        with self._lock:
+            return self._cards.get(url)
+
+    def record_card_outcome(self, outcome: CardOutcome) -> None:
+        with self._lock:
+            self._tally.add(outcome)
+
+    @property
+    def card_tally(self) -> CardTally:
+        with self._lock:
+            return replace(self._tally, fallbacks=dict(self._tally.fallbacks))
+
     @property
     def reads(self) -> dict[str, FetchedSource]:
         """Every `read_source` outcome this call produced, keyed by URL."""
@@ -229,8 +257,20 @@ class SourceReader:
     def budget(self) -> ReadBudget:
         return self._budget
 
-    def read(self, url: str, session: ReadSession) -> FetchedSource:
+    def read(
+        self,
+        url: str,
+        session: ReadSession,
+        *,
+        card: Callable[[FetchedSource], CardOutcome] | None = None,
+    ) -> FetchedSource:
         """Resolve one URL for the writer, or say precisely why it was not resolved.
+
+        `card`, when given, builds an evidence card from a full-text body
+        (D-writer-evidence-card). A card that is built is charged to the character
+        budget at its own length and recorded on the session; anything else — no card
+        function, a body that is not full text, a reader fallback — takes today's path
+        and hands back the page's opening, clipped as before.
 
         Never raises. A read that fails is a fact the writer must be told — a writer
         that believes it read a page and saw nothing is worse than one told the page
@@ -281,9 +321,51 @@ class SourceReader:
             session.record_read(result)
             return result
 
-        result = self._clipped(self._fetcher.fetch(url))
+        fetched = self._fetcher.fetch(url)
+        if card is not None and fetched.outcome is SourceOutcome.FULL_TEXT and fetched.text:
+            carded = self._carded(fetched, card, session)
+            if carded is not None:
+                session.record_read(carded)
+                return carded
+        result = self._clipped(fetched)
         session.record_read(result)
         return result
+
+    def _carded(
+        self,
+        source: FetchedSource,
+        card: Callable[[FetchedSource], CardOutcome],
+        session: ReadSession,
+    ) -> FetchedSource | None:
+        """The read as a card, or None to fall back to the raw opening.
+
+        The character budget pays for the passages shown, not for the body the reader
+        read: `read_char_budget` bounds what enters a *writer's* context. A partial
+        grant keeps the leading passages that fit; a grant that fits none of them is a
+        spent budget, exactly as a raw read into an empty budget is.
+
+        The outcome stays the fetch's (`full_text`): the card changes what the writer is
+        shown, never what the run knows about the page, so the read log and
+        D-read-before-citing see a card-backed read as the full-text read it is.
+        """
+        outcome = card(source)
+        session.record_card_outcome(outcome)
+        if outcome.card is None:
+            return None
+        grant = self._budget.take_chars(outcome.card.chars)
+        shown = outcome.card.within(grant)
+        if shown is None:
+            return FetchedSource(
+                url=source.url,
+                title=source.title,
+                status=source.status,
+                error="the source-reading character budget for this run is spent",
+                outcome=SourceOutcome.BUDGET_EXHAUSTED,
+            )
+        session.record_card(source.url, shown)
+        # `truncated`: a card is a selection, so absence from it is never absence from
+        # the page, wherever this record is read.
+        return replace(source, text=shown.text, truncated=True)
 
     def _clipped(self, source: FetchedSource) -> FetchedSource:
         """Apply the per-read cap and draw down the run's character budget.
@@ -352,30 +434,42 @@ _CITED_URL_DESCRIPTION = (
 )
 
 
-def read_source_tool(cited: bool) -> dict:
+#: The optional argument evidence cards add (D-writer-evidence-card). It steers which
+#: passages are selected and is never echoed back to the writer.
+_PURPOSE_PROPERTY = {
+    "type": "string",
+    "description": "Optional. In a few words, what you need from this page — the claim, "
+    "figure, population or period — so the passages returned are chosen for it.",
+}
+
+
+def read_source_tool(cited: bool, cards: bool = False) -> dict:
     """The tool definition for one writer call. `cited` says its session was seeded with
-    the draft's cited URLs; without that, today's `READ_SOURCE_TOOL`, unchanged."""
-    if not cited:
+    the draft's cited URLs; `cards` that reads answer with evidence cards, which adds the
+    optional `purpose` argument. With neither, today's `READ_SOURCE_TOOL`, unchanged."""
+    if not cited and not cards:
         return READ_SOURCE_TOOL
     function = READ_SOURCE_TOOL["function"]
     parameters = function["parameters"]
+    properties = dict(parameters["properties"])
+    if cited:
+        properties["url"] = {**properties["url"], "description": _CITED_URL_DESCRIPTION}
+    if cards:
+        properties["purpose"] = _PURPOSE_PROPERTY
     return {
         "type": "function",
         "function": {
             **function,
-            "description": _CITED_DESCRIPTION,
-            "parameters": {
-                **parameters,
-                "properties": {
-                    "url": {**parameters["properties"]["url"], "description": _CITED_URL_DESCRIPTION}
-                },
-            },
+            "description": _CITED_DESCRIPTION if cited else function["description"],
+            "parameters": {**parameters, "properties": properties},
         },
     }
 
 
 def make_tool_handler(
-    reader: SourceReader, session: ReadSession
+    reader: SourceReader,
+    session: ReadSession,
+    cards: Callable[[FetchedSource, str], CardOutcome] | None = None,
 ) -> Callable[[str, str], str]:
     """Bind a reader and one call's session into the `(name, raw_arguments) -> text`
     callback :meth:`LLMClient.complete` drives.
@@ -383,19 +477,31 @@ def make_tool_handler(
     Every path returns text. A malformed argument, a refused URL and a dead site are
     all things the writer has to know in order to weaken the claim instead of asserting
     it, and none of them is worth aborting a half-written report over.
+
+    `cards(source, purpose)` builds an evidence card (D-writer-evidence-card). A read the
+    session recorded with a card renders as one; every other read renders through
+    `prompts.source_read_block` exactly as before, so a fallback is never shown as a card.
     """
 
     def handle(name: str, raw_arguments: str) -> str:
         if name != "read_source":
             return prompts.read_error_block(f"unknown tool {name!r}")
         try:
-            url = str((json.loads(raw_arguments or "{}") or {}).get("url", "")).strip()
+            arguments = json.loads(raw_arguments or "{}") or {}
+            url = str(arguments.get("url", "")).strip()
+            purpose = str(arguments.get("purpose", "") or "").strip()
         except (json.JSONDecodeError, AttributeError, TypeError):
             return prompts.read_error_block("arguments were not valid JSON")
         if not url:
             return prompts.read_error_block("no url supplied")
 
-        result = reader.read(url, session)
+        card_fn = None
+        if cards is not None:
+
+            def card_fn(source: FetchedSource) -> CardOutcome:
+                return cards(source, purpose)
+
+        result = reader.read(url, session, card=card_fn)
         # The URL itself is never logged (RA-016): a writer composes it from search
         # results chosen while looking at the question and the draft, and events.jsonl
         # outlives a content purge. The outcome is a closed vocabulary and the lengths
@@ -409,6 +515,9 @@ def make_tool_handler(
             reader.budget.used_chars,
             reader.budget.max_chars,
         )
+        card = session.card(result.url) if result.ok else None
+        if card is not None:
+            return prompts.evidence_card_block(result, card)
         return prompts.source_read_block(result)
 
     return handle

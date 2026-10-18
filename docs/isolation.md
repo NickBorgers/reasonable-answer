@@ -75,8 +75,12 @@ residual (a bias the rulebook does not describe passes through).
 ```mermaid
 flowchart TB
     subgraph GEN["Writer (next in the writer pool rotation; last writer eligible — D-writer-rotation-pool)"]
-        Gin["SEES: question + latest report + DEFECT LIST (fix-tasks)<br/>+ its OWN search results, and the pages it read from them (D-writer-source-reads)<br/>+ on a revision, pages listed in the draft it revises (D-writer-rereads-cited-sources)"]
+        Gin["SEES: question + latest report + DEFECT LIST (fix-tasks)<br/>+ its OWN search results, and the pages it read from them (D-writer-source-reads) — as evidence cards when on (D-writer-evidence-card)<br/>+ on a revision, pages listed in the draft it revises (D-writer-rereads-cited-sources)"]
         Gno["NEVER: raw critique prose · other reports' history · who critiqued<br/>· a page another writer's search found that the draft does not cite"]
+    end
+    subgraph RDR["Evidence reader (D-writer-evidence-card, opt-in) — the drafting writer's own model, one fresh context per page chunk"]
+        Rin["SEES: the question + the writer's stated purpose (fenced) + ONE part of ONE page this writer call asked to read"]
+        Rno["NEVER: the draft · fix tasks · any other page · critic output · who wrote or reviews anything<br/>RETURNS: page passages located verbatim in the body + closed-vocabulary labels — no free text"]
     end
     subgraph CRIT["Per-lens critics — 3 lenses × review.depth models, each its own fresh context"]
         Cin["SEES: report + question + its ONE lens + taxonomy"]
@@ -105,8 +109,8 @@ flowchart TB
     %% and the see/never distinction rides on the border colour instead.
     classDef see stroke:#3a3,stroke-width:2px;
     classDef no stroke:#c33,stroke-width:2px;
-    class Gin,Cin,Kin,Oin,CTin see;
-    class Gno,Cno,Kno,Ono,CTno no;
+    class Gin,Rin,Cin,Kin,Oin,CTin see;
+    class Gno,Rno,Cno,Kno,Ono,CTno no;
 ```
 
 ## How the seven principles are preserved
@@ -351,6 +355,22 @@ downstream. Four things bound it, and only the first is new:
   prompt.
 - **Bounded.** Reads per run, characters per run, characters per page — see D-writer-source-reads.
   A long context is a correctness property here, not a cost optimisation (#6).
+- **An evidence card carries page text and labels, never a model's words
+  (D-writer-evidence-card).** With `evidence_reader.enabled` (and reading and verification both on),
+  `read_source` runs one fresh reader context per chunk of the page's retained body, under the
+  drafting writer's own alias. That context sees the question, the writer's `purpose` argument
+  (fenced as model output) and one chunk of one page the allowlist already admitted — no draft, no
+  fix task, no other page. Its schema has two closed enums and a `quote` string, and `evidence`
+  keeps a quote only when it finds it in the body (exactly, or differing only in whitespace and
+  case, in which case the page's own characters are kept); an unfound or over-long quote is
+  dropped, never repaired or clipped. So what reaches the writer is a subset of the page — the
+  same class of text, fenced by `prompts.evidence_card_block` the way `source_read_block` fences a
+  raw read — plus labels from a fixed list, and nothing the reader composed. The reader reviews
+  nothing, so author exclusion (#7), which governs who may *judge* an artifact, does not bind it;
+  running it under the writer's own model is what keeps a second model's judgement out of what the
+  writer sees. Every failure falls back to the raw opening, rendered exactly as before and counted
+  as a fallback; a fallback is never shown as a card. Cards are cached per resolved identity, so
+  one writer model is never handed another's selection.
 
 The support manifest the same writer may then author (`search.support_manifest`) is **audit-side
 only**: it is checked mechanically by `support.check`, written to `support/`, and never enters

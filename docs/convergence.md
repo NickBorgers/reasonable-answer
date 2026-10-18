@@ -278,6 +278,10 @@ well-formed/resolvable in format.
   where `verify_sources` is also on, the writer may also open the pages the draft it revises lists
   (`search.read_cited_sources`, default on; D-writer-rereads-cited-sources), so a fix task about a
   cited claim can be worked against the page rather than the draft's paraphrase of it.
+  With `evidence_reader.enabled` as well (D-writer-evidence-card), a read answers with an evidence
+  card — passages of the page's whole retained body, each located verbatim in it — instead of the
+  page's first `read_max_chars` characters. That changes what the writer sees, not the label, any
+  finding, or anything the controller reads.
 
 **Retrieval alone does not make the report fact-checked.** It constrains where citations come from;
 it does not establish that a cited page *supports the specific claim attached to it* — the
@@ -370,7 +374,8 @@ page shown in part is truncated, and a claim missing from the excerpts is not ev
 lacks it — `misrepresented_source` is raised only where an excerpt addresses the same point and
 states something materially different. `dispute.adjudicate_mechanical` searches the retained body,
 not the excerpts; `support.check` is a separate mechanism entirely, working from `session.reads`
-(capped at `read_max_chars`) rather than this cap.
+(capped at `read_max_chars`, or an evidence card's passages — D-writer-evidence-card) rather than
+this cap.
 
 #### Direction and scope (D-source-fidelity-direction-and-scope)
 

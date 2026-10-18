@@ -27,6 +27,7 @@ from langgraph.graph import END, START, StateGraph
 from . import audition as audition_mod
 from . import (
     claimcheck,
+    evidence,
     excerpt,
     fetch,
     ops,
@@ -215,10 +216,18 @@ class Runtime:
     #: checker call is a function of. Never a clean record: clearance is still minted
     #: from the completed review of the current artifact (RC-002).
     claim_cache: claimcheck.VerdictCache = field(default_factory=claimcheck.VerdictCache)
+    #: The per-source evidence reader behind `read_source` (D-writer-evidence-card), or
+    #: None — then a read hands the writer the page's opening exactly as before. Effective
+    #: only where writers read *and* the run verifies (`cards_enabled`).
+    evidence_reader: Any | None = None
 
     @property
     def search_enabled(self) -> bool:
         return self.searcher is not None
+
+    @property
+    def cards_enabled(self) -> bool:
+        return self.evidence_reader is not None and self.read_sources and self.verify_sources
 
     @property
     def claim_check_enabled(self) -> bool:
@@ -403,6 +412,7 @@ def _build_runtime(
         else None
     )
     reader = _build_reader(config, source_fetcher)
+    evidence_reader = _build_evidence_reader(config, client, reader, fetcher)
 
     run_id = run_id or f"run-{uuid.uuid4().hex[:12]}"
     store = RunStore(config.runs_dir, run_id)
@@ -423,6 +433,8 @@ def _build_runtime(
         read_sources=reader is not None,
         read_budget=config.search.read_budget if reader else 0,
         support_manifest=reader is not None and config.search.support_manifest,
+        # Whether `read_source` answers with evidence cards (D-writer-evidence-card).
+        evidence_cards=evidence_reader is not None,
         read_pdfs=read_pdfs,
         resolve_tiers=sorted(_enabled_tiers(config)),
         audition_enforced=config.audition.enforce,
@@ -452,7 +464,8 @@ def _build_runtime(
         log.warning("roster: %s", warning)
     return Runtime(config=config, client=client, identities=identities, store=store,
                    warnings=warnings, searcher=searcher, fetcher=fetcher,
-                   dispute_fetcher=dispute_fetcher, reader=reader)
+                   dispute_fetcher=dispute_fetcher, reader=reader,
+                   evidence_reader=evidence_reader)
 
 
 def _degrade_roster(
@@ -553,6 +566,23 @@ def _build_reader(config: Config, fetcher) -> reading.SourceReader | None:
         ),
         max_chars=config.search.read_max_chars,
     )
+
+
+def _build_evidence_reader(config: Config, client, reader, fetcher) -> evidence.EvidenceReader | None:
+    """The per-source evidence reader (D-writer-evidence-card), or None.
+
+    On only where it is switched on *and* writers read *and* the run verifies — the
+    gating every reading feature uses (D-read-before-citing). With any of the three off
+    `read_source` is byte-identical to a build without this.
+    """
+    if not config.evidence_reader.enabled or reader is None or fetcher is None:
+        return None
+    log.info(
+        "evidence cards enabled: %d-character chunks, %d reader calls for this run",
+        config.evidence_reader.chunk_chars,
+        config.evidence_reader.max_calls,
+    )
+    return evidence.EvidenceReader(client, config.evidence_reader)
 
 
 def _pdf_reading_enabled(config: Config) -> bool:
@@ -906,8 +936,19 @@ def _scope_fields(
     return scope.as_event_fields()
 
 
-def _retrieval_kwargs(rt: Runtime, session: reading.ReadSession) -> dict[str, Any]:
+def _retrieval_kwargs(
+    rt: Runtime,
+    session: reading.ReadSession,
+    *,
+    alias: str | None = None,
+    question: str = "",
+    run_date: str | None = None,
+) -> dict[str, Any]:
     """The tool half of a writer call: `web_search`, and `read_source` when it is on.
+
+    `alias` and `question` bind the evidence reader to this call (D-writer-evidence-card):
+    the reader runs under the drafting writer's own alias and reads for the run's question.
+    Without cards enabled they are unused.
 
     Returns `{}` when retrieval is off, so a search-less build hands `complete` exactly
     the argument list it always did.
@@ -928,8 +969,18 @@ def _retrieval_kwargs(rt: Runtime, session: reading.ReadSession) -> dict[str, An
     tools = [search.SEARCH_TOOL]
     reader = rt.reader
     if reader is not None:
-        handlers["read_source"] = reading.make_tool_handler(reader, session)
-        tools.append(reading.read_source_tool(session.cited_count > 0))
+        cards = None
+        if alias is not None and rt.cards_enabled:
+            identity = rt.identities[alias]
+
+            def cards(source, purpose: str):
+                return rt.evidence_reader.card(
+                    alias, identity, source, question=question, purpose=purpose,
+                    current_date=run_date,
+                )
+
+        handlers["read_source"] = reading.make_tool_handler(reader, session, cards)
+        tools.append(reading.read_source_tool(session.cited_count > 0, cards is not None))
 
     def route(name: str, raw_arguments: str) -> str:
         handler = handlers.get(name)
@@ -1023,7 +1074,9 @@ def _generate(state: State, rt: Runtime) -> dict:
         # cross-context affordance the per-call allowlist exists to refuse
         # (D-writer-source-reads, principle #6).
         session = reading.ReadSession(cited=cited_seed)
-        search_kwargs = _retrieval_kwargs(rt, session)
+        search_kwargs = _retrieval_kwargs(
+            rt, session, alias=alias, question=state["question"], run_date=run_date
+        )
         try:
             with call_purpose("writer"):
                 reply = rt.client.complete(
@@ -1033,6 +1086,7 @@ def _generate(state: State, rt: Runtime) -> dict:
                         rt.read_sources,
                         reread=bool(cited_seed),
                         read_first=_read_first(rt),
+                        cards=rt.cards_enabled,
                     ),
                     user=user,
                     max_tokens=32000,
@@ -1161,6 +1215,10 @@ def _generate(state: State, rt: Runtime) -> dict:
         # Present only when reading-before-citing is in force (D-read-before-citing): how
         # many addressable entries the body cites that no writer has read in full text.
         **unread_fields,
+        # Present only when evidence cards are on (D-writer-evidence-card): cards built,
+        # passages kept and dropped, fallbacks by closed reason, cache hits, reader calls
+        # and seconds. Counts only (RA-016).
+        **(session.card_tally.as_event() if rt.cards_enabled else {}),
         # Every generation, polish and rewrite included: a whole-document regeneration is
         # where markers get lost (D-writer-citation-continuity).
         **scope_fields,

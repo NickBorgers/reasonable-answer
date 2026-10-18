@@ -540,6 +540,7 @@ src/reasonable_answer/
                  arXiv, CORE), and the paid rendering-provider tier
   search.py      writer retrieval: web_search, source reads, support manifest
   reading.py     the read_source writer tool and its per-call URL allowlist
+  evidence.py    the per-source evidence reader behind read_source: verbatim passages, no prose
   support.py     the support manifest: mechanical claim/source verification, no model
   ingest.py      seed conversion (PDF / docx / HTML / URL → markdown) at the edge
   textconv.py    shared PDF/docx/HTML → markdown conversion used by both ingest and fetch

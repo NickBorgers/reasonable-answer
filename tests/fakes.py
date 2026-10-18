@@ -15,6 +15,7 @@ from typing import Any
 from pydantic import ValidationError
 
 from reasonable_answer.config import Budgets, ConfigError
+from reasonable_answer.evidence import ReaderOutput
 from reasonable_answer.llm import (
     CallRecord,
     Completion,
@@ -134,6 +135,10 @@ class FakeClient:
     repair_fn: Any | None = None
     #: callable(alias, user) -> SupportManifest; None means "an empty manifest"
     support_fn: Any | None = None
+    #: callable(alias, user) -> ReaderOutput (D-writer-evidence-card); None means a reader
+    #: call is a test error — cards are off by default, so a run that reaches one without
+    #: scripting it has enabled something it did not mean to.
+    card_fn: Any | None = None
     #: The tool calls this "model" makes when a handler is supplied, as
     #: `(name, raw_arguments)` pairs. The default is the one `web_search` every
     #: pre-D-writer-source-reads test was written against; a test that wants to drive
@@ -262,6 +267,10 @@ class FakeClient:
                 )
             if schema is CritiqueOutput:
                 return self.critique_fn(alias, user)
+            if schema is ReaderOutput:
+                if self.card_fn is None:
+                    raise AssertionError("unexpected evidence reader call")
+                return self.card_fn(alias, attempt_user)
             if schema is WriterDisputes:
                 if self.dispute_fn is None:
                     return WriterDisputes(disputes=[])

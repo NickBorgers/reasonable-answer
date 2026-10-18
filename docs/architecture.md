@@ -85,6 +85,7 @@ Invariants (enforced in code, covered by tests):
 |------|-------|----------|-------|-------------|
 | **intake** | question + **markdown** seed | normalized `question` / `seed`; routing | none | deterministic |
 | **generate** | question + latest report + **defect list**; with retrieval on, its own `web_search` results and — with `search.read_sources` — the pages it read from them (D-writer-source-reads), and on a revision with `verify_sources` on, the pages the draft's `## Sources` lists (D-writer-rereads-cited-sources) | next report (with citations) — under `revision.mode: patch` only the paragraphs a fix task named — and the passages that restate the same claim (D-claim-scoped-patch) — are edited, the rest returned byte-identical (D-scoped-revision); plus, with `search.support_manifest`, an **audit-side** support manifest; every draft's `generate` event carries a citation census (D-writer-citation-continuity) and, on a patch or ops revision, a scope measurement (D-scoped-revision) — with reading and verification on, the system prompt also requires reading a page before citing it and the event carries `cited_unread` (D-read-before-citing); when repair is enabled, a marker-less body or an over-threshold `out_of_scope` spends up to `revision.repair.repair_cap` extra calls (default 1) to the same writer with no tool before the draft ships (D-census-gated-repair); under `revision.mode: ops` the writer sees the labelled draft and returns operations on its paragraphs, `ops.splice` builds the next report, and the event carries the applied/refused counts; an ops-licensed repair likewise returns operations rather than a whole report (D-ops-revision) | the next writer in rotation, which may be the current author (D-writer-rotation-pool); the repair call, when spent, is the same author again | LLM (untrusted output) |
+| ↳ **evidence reader** *(D-writer-evidence-card, opt-in)* | the question + the writer's `purpose` + one chunk of one page the writer's `read_source` admitted | an evidence card — verbatim page passages located in the body + closed `page_kind`/`kind` labels — returned to the writer in place of the page's opening (`evidence`) | the drafting writer's own model, one fresh context per chunk, memoised per resolved identity, page, question and purpose | LLM inside a closed schema whose only free string is a quote; an unfound or over-long quote is dropped; any failure falls back to the raw opening, counted, never shown as a card |
 | **adjudicate** *(D-writer-disputes, opt-in)* | pending disputes + finding + one paragraph | `AdjudicationRecord[]` | mechanical fetch-check, else an arbiter ≠ disputer ≠ raiser | mechanical, or LLM inside a closed 2-field schema |
 | **critique** | report + question + **one lens** + taxonomy; the evidence lens also gets the cited pages as claim-anchored excerpts (D-claim-anchored-excerpts) | `Issue[]` per critic | `review.depth` non-author models per lens, drawn as one slate (`roles.critic_slate`) | LLM (untrusted output) |
 | ↳ **claim check** *(D-claim-level-verification, opt-in)* | one citing sentence + its paragraph + one fetched page, per pair | a closed `ClaimVerdict` per pair, minted into `misrepresented_source` on the evidence critic's `LensResult` (`claimcheck`) | the evidence critic's own model, one fresh context per pair, memoised per resolved identity and complete prompt | LLM inside a closed 4-way schema; `supported` and `contradicted` must quote the shown page verbatim or the pair is unchecked; `absent` and `unreadable` settle nothing and never retire the critic's own finding; a sentence whose every citation is an anchored non-body mints one `uncited_claim`: an `unreadable` verdict is anchored only by a quoted span found verbatim in the shown page, while selected non-body fetch outcomes are anchored mechanically, and an unanchored `unreadable` mints nothing (D-unreadable-citation-finding, D-anchored-unreadable); a pass stops after `claim_check.max_consecutive_failures` unchecked calls in a row (D-claim-check-inconclusive-verdicts) |
@@ -378,6 +379,9 @@ flowchart LR
     SES --> R["read_source<br/>only a URL in the session"]
     R --> F["fetch.SourceFetcher → fetch.http_get<br/>(the one egress point; cache shared with verification)"]
     F --> P["prompts.source_read_block<br/>fenced untrusted page text"]
+    F -. "evidence_reader on" .-> E["evidence.EvidenceReader<br/>one fresh call per body chunk → verbatim passages located in the body"]
+    E --> EC["prompts.evidence_card_block<br/>fenced passages + closed labels"]
+    EC --> W
     P --> W
     W --> D["draft"]
     D --> M["support manifest pass (structured, separate call)"]
@@ -397,6 +401,21 @@ composition lives so `search` and `reading` need not import each other. The opti
 `read_budget` call cap is unbounded by default; `read_char_budget` remains a mandatory whole-run
 character bound and `read_max_chars` a per-page bound. Bytes off the wire are bounded already by
 `fetch_max_bytes`.
+
+**Evidence cards (D-writer-evidence-card, opt-in).** With `evidence_reader.enabled` and both
+`read_sources` and `verify_sources` on, `graph._retrieval_kwargs` binds an `evidence.EvidenceReader`
+(one per runtime) to the writer call's alias and the run's question, and `read_source` gains an
+optional `purpose` argument. A full-text read then goes through `SourceReader._carded`: the reader
+reads the whole retained body (`fetch_body_max_chars`) in chunks of `evidence_reader.chunk_chars`
+overlapping by `chunk_overlap_chars`, one structured `ReaderOutput` call each (`model_call` purpose
+`evidence_reader`); each proposed quote is located in its chunk, offsets map back to the body,
+overlap repeats merge first-wins, and at most `max_passages` / `card_max_chars` of passages survive,
+shown in page order. `read_char_budget` is charged the card's characters, not the body's; reader
+calls have their own whole-run ceiling (`max_calls`, all-or-nothing per page) and a breaker
+(`max_consecutive_failures`). The `ReadSession` records a carded read with the passages as its
+`text` and its fetch outcome unchanged (`full_text`), so `support.check`, the manifest pass and the
+D-read-before-citing log all see exactly what the writer saw. No card — off, a failure, a spent
+budget, no verified passage, a body that is not full text — is today's path, byte for byte.
 
 `search.support_manifest` then adds a separate structured pass asking the same writer for
 `citation_id -> url -> locator -> support_span -> claim`, one entry per claim resting on a page it
