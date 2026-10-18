@@ -323,8 +323,8 @@ unreadable content type — so "a body this cannot read" narrows to formats no c
 
 **Bibliography integrity is settled mechanically (D-bibliography-integrity).** Every critic finding
 anchors to a verbatim `claim_span` in a body paragraph, so a defect whose whole subject is the
-reference list cannot be expressed in the critic schema and no lens owns it. Three such defects are
-decidable by string comparison against the report's own text — no fetched body is read and no URL is
+reference list cannot be expressed in the critic schema and no lens owns it. Three such defects (plus,
+with reading and verification both on, the unread-citation row below) are decidable by string comparison against the report's own text — no fetched body is read and no URL is
 judged by its shape, so nothing here reaches past what the report itself says (QP10) — and
 `triage.mechanical_bibliography_issues` mints them from `graph._critique_one` under the same gate as
 the not-found finding above — the evidence lens, on a **completed** review, and with verification
@@ -336,6 +336,11 @@ on or off, because none of them needs a fetch:
 | an entry the body never cites | `unclear_structure` | minor | the paragraph listing it |
 | two entries under one URL | `unclear_structure` | minor | the paragraph listing the duplicate |
 | a Sources list with a real reference (a URL or an explicit number) and no marker anywhere in the body (D-uncited-bibliography) | `uncited_claim` | major | first sentence of the first quotable body paragraph |
+| with `search.read_sources` **and** `search.verify_sources` on: a cited entry with a URL that no writer has read in full text this run (D-read-before-citing) | `uncited_claim` | major | first citing sentence of the entry |
+
+The last row is minted from the run's read log, not from the report alone, and only while the read
+budget has room. An entry whose read already failed gets an instruction to re-source rather than re-read,
+so the finding is always dischargeable (read, re-source, weaken or remove).
 
 No category is added to the taxonomy table, and each finding is minted **at** its category's floor,
 so the clamp is a no-op and RC-005's direction is untouched. These are pipeline-authored facts, not
