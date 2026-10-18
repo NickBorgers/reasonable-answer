@@ -406,12 +406,10 @@ runs:
       shell: bash
       env:
         WORKSPACE_FOLDER: ${{ inputs.workspace_folder }}
+        CI_AGENT_IMAGE: ${{ inputs.image }}
       run: |
         set -euo pipefail
-        WORKSPACE_HOST="${GITHUB_WORKSPACE}/${WORKSPACE_FOLDER}"
-        if [ -d "$WORKSPACE_HOST" ]; then
-          sudo chown -R "$(id -u):$(id -g)" "$WORKSPACE_HOST"
-        fi
+        ./scripts/reclaim-ownership.sh "$CI_AGENT_IMAGE" "${GITHUB_WORKSPACE}/${WORKSPACE_FOLDER}"
 
     - name: Redact secrets from the agent transcript
       # `--output-format=stream-json --verbose` streams full tool results and CLI error
