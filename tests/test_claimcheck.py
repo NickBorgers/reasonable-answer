@@ -21,7 +21,13 @@ from reasonable_answer.config import ClaimCheckConfig, Config, ConfigError, Sear
 from reasonable_answer.fetch import FetchedSource
 from reasonable_answer.graph import Runtime, _critique_one, _run_fingerprint
 from reasonable_answer.llm import ModelCallError, ProviderAccountError
-from reasonable_answer.schemas import ClaimVerdict, CritiqueOutput, RawIssue, StructuralRef
+from reasonable_answer.schemas import (
+    MAX_INSTRUCTION,
+    ClaimVerdict,
+    CritiqueOutput,
+    RawIssue,
+    StructuralRef,
+)
 from reasonable_answer.store import RunStore
 from reasonable_answer.taxonomy import Category, Lens, Severity
 
@@ -752,6 +758,26 @@ def test_a_sentence_whose_every_citation_is_unreadable_mints_one_uncited_claim()
     triage.validate_issue(Lens.EVIDENCE, issue, report_mod.parse(REPORT), True)
     # Off (the function's default, and the knob's rollback): the old behaviour.
     assert claimcheck.issues_from(check) == []
+
+
+def test_many_unreadable_citations_keep_the_instruction_within_its_schema_bound():
+    kept, _ = claimcheck.pairs(REPORT)
+    template = kept[0]
+    pairs = [
+        claimcheck.ClaimPair(
+            locus=template.locus,
+            sentence=template.sentence,
+            paragraph=template.paragraph,
+            number=number,
+            url=f"https://example.test/source-{number}",
+        )
+        for number in range(1, 51)
+    ]
+    check = claimcheck.ClaimCheck(verdicts=[_verdict(pair, "unreadable") for pair in pairs])
+
+    [issue] = _unreadable_issues(check)
+
+    assert len(issue.instruction) <= MAX_INSTRUCTION
 
 
 def test_one_readable_marker_leaves_the_sentence_alone():

@@ -62,7 +62,7 @@ from .llm import (
     ProviderAccountError,
     per_call_timeout,
 )
-from .schemas import MAX_RATIONALE, MAX_SPAN, ClaimVerdict, RawIssue, StructuralRef
+from .schemas import MAX_INSTRUCTION, MAX_RATIONALE, MAX_SPAN, ClaimVerdict, RawIssue, StructuralRef
 from .taxonomy import Category, Severity
 from .triage import _normalize
 
@@ -502,10 +502,11 @@ def _unreadable_issues(check_result: ClaimCheck) -> list[RawIssue]:
                 locus=group[0].pair.locus,
                 claim_span=_clip(group[0].pair.sentence, MAX_SPAN),
                 rationale=_clip(rationale, MAX_RATIONALE),
-                instruction=(
+                instruction=_clip(
                     f"Cite a readable copy of the same work for {cited} (an open-access version, "
                     "or the full text rather than a catalog, abstract or paywall page), cite a "
-                    "different source that states it, or narrow or remove the claim."
+                    "different source that states it, or narrow or remove the claim.",
+                    MAX_INSTRUCTION,
                 ),
                 citation_id=str(numbers[0]),
             )
