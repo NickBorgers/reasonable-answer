@@ -32,10 +32,11 @@ toward the writer, never against it; toward the finding, never away from it.
 1. **Only a settled verdict is authoritative.** `PairVerdict.settled` is `supported`,
    `contradicted`, or `absent` from a page shown whole: the verdicts that are readings of the
    page. `reconcile` drops a critic's `misrepresented_source` finding only for a settled pair.
-   `unreadable` and `absent`-in-part mint nothing and retire nothing; the critic's judgement on
-   those sentences stands exactly as it did before the checker existed. (Superseded in part by
-   D-unreadable-citation-finding: a sentence whose every citation is `unreadable` now mints an
-   `uncited_claim`; `unreadable` still retires nothing.) `checked` keeps its meaning
+   `unreadable` and `absent`-in-part retire nothing; the critic's judgement on those sentences
+   stands exactly as it did before the checker existed. ~~`unreadable` and `absent`-in-part mint
+   nothing~~ — **superseded in part by D-unreadable-citation-finding:** `absent`-in-part still mints
+   nothing, and an `unreadable` pair still mints nothing on its own, but a sentence whose every
+   citation is `unreadable` now mints one `uncited_claim`. `checked` keeps its meaning
    for the counts, so the `claim_check` event is unchanged in shape apart from the new `aborted`.
 2. **A cut body is never whole.** `FetchedSource.truncated` — additive, default `False`, so every
    constructor that predates it means what it meant — is set when the wire read hit `max_bytes`,

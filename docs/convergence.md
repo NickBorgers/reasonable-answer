@@ -450,8 +450,8 @@ whole-document `misrepresented_source` judgement is kept for exactly the pairs t
 **settle** and dropped for the ones it did (`claimcheck.reconcile`: same paragraph, the critic's span
 inside the checked sentence), so one claim is never counted twice under two spans. A pair is settled
 by `supported`, `contradicted`, or `absent` from a page shown whole — the verdicts that read the page.
-`unreadable` and `absent` from a page shown in part settle nothing: they mint no finding, so they may
-retire none, and the critic's judgement on that sentence stands as it did before the checker existed
+`unreadable` and `absent` from a page shown in part settle nothing: they mint no per-pair finding
+(an all-`unreadable` sentence is the exception, below), so they may retire none, and the critic's judgement on that sentence stands as it did before the checker existed
 (D-claim-check-inconclusive-verdicts).
 
 **A sentence resting only on unreadable pages is an `uncited_claim` (D-unreadable-citation-finding,

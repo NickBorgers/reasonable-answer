@@ -46,7 +46,9 @@ in its own context.
    as `related_span`; `absent` mints the same **only when the page was shown whole**, because on a
    page shown in part absence from the excerpts is not absence from the page — the rule the critic
    was asked to keep in its head, now enforced by a boolean the excerpter reports; `supported`,
-   `unreadable` and every unchecked pair mint nothing. The findings ride the critic's `LensResult`,
+   `unreadable` and every unchecked pair mint nothing per pair (~~mint nothing~~ superseded in part by
+   D-unreadable-citation-finding: a sentence whose every citation is `unreadable` mints one
+   `uncited_claim`; unchecked pairs still mint nothing). The findings ride the critic's `LensResult`,
    so they clamp, deduplicate, count, withhold the clean record and reach the writer as tasks exactly
    as a critic's own would.
 4. **A checked pair's verdict is authoritative for its category.** The critic still reads the whole
