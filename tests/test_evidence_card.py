@@ -134,6 +134,15 @@ def test_a_too_long_quote_is_dropped_not_clipped():
     assert session.card_tally.passages_dropped == 1
 
 
+def test_a_too_short_quote_is_dropped():
+    cfg = EvidenceReaderConfig(enabled=True, passage_min_chars=50)
+    short_quote = BODY[:48].strip()
+    handler, session, *_ = _wire(_quoting(short_quote, FIGURE), cfg=cfg)
+    _read(handler)
+    assert [p.text for p in session.card(URL).passages] == [FIGURE]
+    assert session.card_tally.passages_dropped == 1
+
+
 def test_passages_are_shown_in_page_order_whatever_the_reader_order():
     early = BODY[:48].strip()
     handler, session, *_ = _wire(_quoting(FIGURE, early))
@@ -314,6 +323,19 @@ def test_a_partial_character_grant_keeps_the_passages_that_fit():
     handler, session, reader, *_ = _wire(_quoting(early, FIGURE), max_chars=len(early) + 10)
     _read(handler)
     assert [p.text for p in session.card(URL).passages] == [early]
+
+
+def test_a_character_grant_too_small_for_any_passage_is_budget_exhausted():
+    handler, session, *_ = _wire(_quoting(FIGURE), max_chars=len(FIGURE) - 1)
+    spent = FetchedSource(
+        url=URL,
+        title="A paper",
+        status=200,
+        error="the source-reading character budget for this run is spent",
+        outcome=SourceOutcome.BUDGET_EXHAUSTED,
+    )
+    assert _read(handler) == prompts.source_read_block(spent)
+    assert session.card(URL) is None
 
 
 def test_the_reader_call_budget_is_a_hard_bound():
