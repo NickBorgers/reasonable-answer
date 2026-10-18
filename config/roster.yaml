@@ -223,7 +223,7 @@ search:
   #
   # With read_sources AND verify_sources on, a writer may also cite only a page some
   # writer has read in full text: the writer prompt says so, and each cited entry not
-  # yet read becomes a mechanical finding (D-read-before-citing). No knob of its own.
+  # yet read becomes a mechanical finding while the read budget remains (D-read-before-citing). No knob of its own.
   #
   # And the audit half: after each draft, ask its writer where each cited claim's
   # support actually sits — citation id, URL, locator, verbatim span, claim — and check

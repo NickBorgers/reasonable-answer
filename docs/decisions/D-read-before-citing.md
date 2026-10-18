@@ -25,8 +25,8 @@ byte, finding or event field changes.
    (D-writer-source-reads) are untouched: the log never widens what any writer may read, and no
    writer is shown another's page text.
 3. **A mechanical finding.** `triage.mechanical_unread_issues`, minted in `graph._critique_one` beside
-   the D-bibliography-integrity findings (evidence lens, completed review only): one finding per
-   `## Sources` entry that has an address, is cited by a body marker, and whose URL the log does not
+   the D-bibliography-integrity findings (evidence lens, completed review only): one finding per sentence (covering every
+   entry it cites) for each `## Sources` entry that has an address, is cited by a body marker, and whose URL the log does not
    hold at `full_text`. Entries are bounded by the same `search.max_source_urls` ceiling.
    - **Category `uncited_claim`, severity `major`** (its floor, so the clamp is a no-op). No new
      category (taxonomy is unchanged): the reader is told a claim rests on a source and cannot rely on
@@ -40,8 +40,11 @@ byte, finding or event field changes.
      monotone), so that finding says not to read it again and to re-source. Once the run's read budget
      is spent, reading cannot discharge anything and no finding is minted, so the rule can never
      demand the undoable. Entries with no address cannot be read and get none.
-   - **Anchoring.** The first citing sentence of the entry, skipping a sentence already taken by an
-     earlier unread finding (the `_issue_key` dedupe would otherwise collapse them).
+   - **Anchoring.** Every unread entry is covered. Each is anchored on its first citing sentence not
+     already taken by an earlier entry's finding (the `_issue_key` dedupe would otherwise collapse
+     them). When every sentence citing an entry is taken (`... confirmed [1][2].`), the entry is
+     folded into that sentence's one finding, which names every label in `citation_id` and carries
+     each entry's fixed instruction.
    - **A not-found page** still carries its own blocking `fabricated_citation` from verification
      (D-notfound-fabrication); the unread finding on top of it adds only the re-source instruction.
 4. **Measurement.** The `generate` event carries `cited_unread`, an integer: the addressable cited

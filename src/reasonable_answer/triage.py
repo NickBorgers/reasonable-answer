@@ -841,26 +841,28 @@ def mechanical_unread_issues(
     *,
     limit: int = DEFAULT_ENTRY_LIMIT,
 ) -> list[RawIssue]:
-    """One `uncited_claim` per cited entry nobody has read (D-read-before-citing).
+    """`uncited_claim` findings for cited entries nobody has read (D-read-before-citing).
 
-    The report cites a page the writers never opened, so the claim rests on a snippet or
-    on memory. Anchored on the first citing sentence not already used by an earlier
-    finding of this kind (`_issue_key` would collapse two findings on one sentence into
-    one). Fields carry only the entry label, a truncated address, the closed-vocabulary
-    outcome and a fixed instruction; never page text.
+    Every unread entry is covered. Each is anchored on the first citing sentence not
+    already taken by an earlier entry's finding; `_issue_key` collapses two findings on
+    one sentence into one, so when every sentence citing an entry is already taken (for
+    example `... confirmed [1][2].`) the entry is folded into that sentence's finding,
+    which then names every label and carries each entry's fixed instruction. Fields hold
+    only labels, truncated addresses, closed-vocabulary outcomes and fixed wording; never
+    page text.
 
     A read that was attempted and failed (`not_found`, `paywalled`, ...) is cached for the
-    run, so reading it again returns the same refusal: that finding tells the writer to
-    re-source instead, which keeps the finding dischargeable.
+    run, so reading it again returns the same refusal: its instruction says to re-source,
+    which keeps the finding dischargeable.
     """
     sources_section = _sources_section(structure)
     if sources_section is None:
         return []
     cited = _citations(structure, sources_section)
-    issues: list[RawIssue] = []
-    used: set[tuple[int, int, str]] = set()
+    #: (section, paragraph, span) -> the unread entries folded into that sentence's finding
+    groups: dict[tuple[int, int, str], list[tuple[_Entry, str | None]]] = {}
     for entry, outcome in unread_cited_entries(report_text, structure, read_log, limit=limit):
-        label = _citation_label(entry.number)
+        first = None
         picked = None
         for paragraph in cited[entry.number]:
             for sentence in excerpt._SENTENCE_END.split(paragraph.text):
@@ -869,50 +871,57 @@ def mechanical_unread_issues(
                     continue
                 if not any(entry.number in excerpt._cited(m) for m in excerpt._MARKER.findall(sentence)):
                     continue
-                span = sentence[:MAX_SPAN]
-                if (paragraph.section, paragraph.paragraph, span) in used:
-                    continue
-                picked = (paragraph, span)
-                break
+                key = (paragraph.section, paragraph.paragraph, sentence[:MAX_SPAN])
+                first = first or key
+                if key not in groups:
+                    picked = key
+                    break
             if picked:
                 break
-        if picked is None:
+        key = picked or first
+        if key is None:
             continue
-        paragraph, span = picked
-        used.add((paragraph.section, paragraph.paragraph, span))
-        address = (entry.url or "")[:120]
-        if outcome is None:
-            rationale = (
-                f"This sentence cites {label} ({address}), a page no writer has read in full "
-                "text during this run: the claim rests on a search snippet or on memory."
-            )
-            instruction = (
-                f"Read {label} with read_source and keep the claim only if the page text "
-                "supports it. If it does not, or the page cannot be read, re-source the "
-                "claim to a page you have read, weaken it to what you did read, or remove "
-                "it. Do not renumber entries."
-            )
-        else:
-            rationale = (
-                f"This sentence cites {label} ({address}), a page that was tried and could "
-                f"not be read in full text (outcome: {outcome}): the claim rests on a page "
-                "no writer has seen."
-            )
-            instruction = (
-                f"Do not try to read {label} again; the same refusal comes back. Re-source "
-                "the claim to a page you have read in full text, weaken it to what you did "
-                "read, or remove it, then drop the entry if nothing cites it. Do not "
-                "renumber entries."
-            )
+        groups.setdefault(key, []).append((entry, outcome))
+
+    issues: list[RawIssue] = []
+    for (section, paragraph_no, span), members in groups.items():
+        rationales: list[str] = []
+        instructions: list[str] = []
+        for entry, outcome in members:
+            label = _citation_label(entry.number)
+            address = (entry.url or "")[:120]
+            if outcome is None:
+                rationales.append(
+                    f"This sentence cites {label} ({address}), a page no writer has read in full "
+                    "text during this run: the claim rests on a search snippet or on memory."
+                )
+                instructions.append(
+                    f"Read {label} with read_source and keep the claim only if the page text "
+                    "supports it. If it does not, or the page cannot be read, re-source the "
+                    "claim to a page you have read, weaken it to what you did read, or remove "
+                    "it. Do not renumber entries."
+                )
+            else:
+                rationales.append(
+                    f"This sentence cites {label} ({address}), a page that was tried and could "
+                    f"not be read in full text (outcome: {outcome}): the claim rests on a page "
+                    "no writer has seen."
+                )
+                instructions.append(
+                    f"Do not try to read {label} again; the same refusal comes back. Re-source "
+                    "the claim to a page you have read in full text, weaken it to what you did "
+                    "read, or remove it, then drop the entry if nothing cites it. Do not "
+                    "renumber entries."
+                )
         issues.append(
             _minted(
                 category=Category.UNCITED_CLAIM,
                 severity=Severity.MAJOR,
-                locus=StructuralRef(section=paragraph.section, paragraph=paragraph.paragraph),
+                locus=StructuralRef(section=section, paragraph=paragraph_no),
                 claim_span=span,
-                citation_id=label,
-                rationale=rationale,
-                instruction=instruction,
+                citation_id=", ".join(_citation_label(e.number) for e, _ in members),
+                rationale=" ".join(rationales),
+                instruction=" ".join(instructions),
             )
         )
     return issues

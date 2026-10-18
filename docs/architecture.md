@@ -119,8 +119,8 @@ emit `Issue[]` against a closed schema. On a completed evidence review, determin
 checks may add mechanically authored findings, including `unclear_structure`, to the evidence
 result (D-bibliography-integrity); the category still describes the defect even though no critic
 minted it. A bibliography the body never cites is one `uncited_claim`, not one finding per entry
-(D-uncited-bibliography). With reading and verification both on, a cited entry no writer has read in full
-text this run is one `uncited_claim` too, minted from the run's read log (D-read-before-citing).
+(D-uncited-bibliography). With reading and verification both on, and while the read budget remains, a cited entry no writer has read in full
+text this run is covered by an `uncited_claim` too, minted from the run's read log (D-read-before-citing).
 `stylistic` (cosmetic preference, ignored for convergence) is not listed above per lens
 because it attaches to all three — any lens may raise it.
 

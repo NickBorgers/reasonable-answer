@@ -199,3 +199,38 @@ def test_a_spent_read_budget_mints_nothing(tmp_path, identities, config):
     rt.reader.budget.take_chars(10_000)
     assert rt.reader.budget.exhausted
     assert _critique(rt, draft, {}).issues == []
+
+
+CO_LOCATED = (
+    "## Findings\n\nThe effect was confirmed and strengthened [1][2].\n\n"
+    f"## Sources\n\n[1] Paper A. {URL_A}\n\n[2] Paper B. {URL_B}\n"
+)
+
+
+def test_two_unread_entries_sharing_their_only_sentence_are_both_covered():
+    [issue] = issues_for({}, CO_LOCATED)
+    assert issue.citation_id == "[1], [2]"
+    assert URL_A in issue.rationale and URL_B in issue.rationale
+    assert issue.instruction.count("read_source") == 2
+    validate_issue(Lens.EVIDENCE, issue, report_mod.parse(CO_LOCATED))
+    # Reading one leaves the other covered.
+    [left] = issues_for({URL_A: "full_text"}, CO_LOCATED)
+    assert left.citation_id == "[2]"
+
+
+def test_an_entry_moves_to_its_next_sentence_when_the_first_is_taken():
+    report = (
+        "## Findings\n\nThe effect was large [1][2]. It also held later [2].\n\n"
+        f"## Sources\n\n[1] Paper A. {URL_A}\n\n[2] Paper B. {URL_B}\n"
+    )
+    # [1] takes the first sentence; [2] finds it taken and moves to the second.
+    first, second = issues_for({}, report)
+    assert first.citation_id == "[1]"
+    assert second.citation_id == "[2]"
+    assert "held later" in second.claim_span
+
+
+def test_a_mixed_group_keeps_each_entrys_own_instruction():
+    [issue] = issues_for({URL_B: "paywalled"}, CO_LOCATED)
+    assert "Do not try to read [2] again" in issue.instruction
+    assert "Read [1] with read_source" in issue.instruction
