@@ -451,19 +451,28 @@ whole-document `misrepresented_source` judgement is kept for exactly the pairs t
 inside the checked sentence), so one claim is never counted twice under two spans. A pair is settled
 by `supported`, `contradicted`, or `absent` from a page shown whole — the verdicts that read the page.
 `unreadable` and `absent` from a page shown in part settle nothing: they mint no per-pair finding
-(an all-`unreadable` sentence is the exception, below), so they may retire none, and the critic's judgement on that sentence stands as it did before the checker existed
+(a sentence of anchored non-body pages is the exception, below), so they may retire none, and the critic's judgement on that sentence stands as it did before the checker existed
 (D-claim-check-inconclusive-verdicts).
 
-**A sentence resting only on unreadable pages is an `uncited_claim` (D-unreadable-citation-finding,
-`claim_check.unreadable_finding`, default on; supersedes the "`unreadable` mints nothing" row of
-D-claim-check-inconclusive-verdicts).** `unreadable` says the checker was shown a landing, catalog,
-navigation or paywall page, not the work; a claim whose every cited page is like that has no citation a
-reader can check. When every pair of a sentence came back `unreadable` from completed checker calls —
-none `supported`, none `unchecked`, `aborted` or cut by `max_pairs` — the pass mints one `uncited_claim`
-at the sentence's locus, at that category's `major` floor. One readable supporting page leaves the
-sentence alone. The finding is pipeline-authored from the entry numbers alone — never page text, never
-the checker's reason — and tells the writer to cite a readable copy of the same work, cite a source that
-states it, or narrow or remove the claim. It is per critic slot, like every finding: another slot's
+**A sentence resting only on anchored non-body pages is an `uncited_claim` (D-unreadable-citation-finding,
+`claim_check.unreadable_finding`, default on; narrowed by D-anchored-unreadable, which supersedes the
+"`unreadable` mints nothing" row of D-claim-check-inconclusive-verdicts).** The finding is about the
+observable form of the fetched response, never about what the work says, and it rests on something the
+pipeline can check rather than on the model's say-so. A pair is *anchored* when either (a) the checker
+answered `unreadable` and quoted, as `support_span`, a verbatim line of the page text it was shown that
+evidences it is not the work's own text (a login or purchase wall, catalog or navigation boilerplate),
+found in that text by the same normalised match `supported` and `contradicted` spans face; or (b) the
+fetch outcome is mechanically not a body (`paywalled`, `blocked`, `metadata_only`, `unreadable`), which
+the pipeline itself observed — such a pair never reaches the checker and is counted `unchecked`. An
+`unreadable` with no span, or a span the page does not contain, stays a valid verdict but is unanchored
+and mints nothing. When every pair of a sentence is anchored — none `supported`, `contradicted` or
+`absent`, none unanchored, none otherwise `unchecked`, `aborted` or cut by `max_pairs` — the pass mints
+one `uncited_claim` at the sentence's locus, at that category's `major` floor. One readable supporting
+page leaves the sentence alone. The finding is pipeline-authored from the entry numbers alone — never
+page text, never the span, never the checker's reason — and states only what was observed (the cited
+pages, as fetched, show access-wall, catalog or navigation text or no readable body); it tells the
+writer to cite a readable copy of the same work, cite a source that states it, or narrow or remove the
+claim. `claim_check` events count `unreadable` and `unreadable_anchored`. It is per critic slot, like every finding: another slot's
 `supported` does not veto it, because the slots are independent views (QP2) and a dispute can answer it.
 It is dischargeable by re-sourcing or narrowing, so it adds no unterminable state; on a topic whose good
 sources are paywalled the writer's exit is to narrow the claim, and a run that cannot is bounded by the

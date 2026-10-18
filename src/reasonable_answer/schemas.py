@@ -102,7 +102,10 @@ class ClaimVerdict(BaseModel):
     `support_span` from the page text the checker was shown, and `claimcheck` rejects
     the verdict otherwise: a verdict nobody can point at in the page is not a check.
     `absent` says nothing shown addresses the claim; `unreadable` says the text shown
-    is not the document's body (navigation, a cookie notice, a table of contents).
+    is not the document's body (navigation, a cookie notice, a table of contents); its
+    `support_span`, a verbatim line of the page text shown that evidences this, is
+    optional but is what anchors the verdict (D-anchored-unreadable). An `unreadable`
+    whose span is missing or not in the page stays valid and unanchored.
     """
 
     model_config = ConfigDict(extra="forbid")
