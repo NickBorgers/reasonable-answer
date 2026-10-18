@@ -757,6 +757,11 @@ class ClaimCheckConfig(BaseModel):
     #: pairs mint nothing and the critic's own review still runs; nothing here changes
     #: what a verdict means. Not under `budgets`, which `_run_fingerprint` hashes.
     max_consecutive_failures: int = Field(default=3, ge=1, le=100)
+    #: A sentence whose every cited page the checker answered `unreadable` for mints one
+    #: `uncited_claim` finding (D-unreadable-citation-finding). `false` restores the
+    #: earlier behaviour, where `unreadable` mints nothing. `unchecked` never mints either
+    #: way. Not under `budgets`, so `_run_fingerprint` is unchanged.
+    unreadable_finding: bool = True
 
 
 class RepairConfig(BaseModel):
