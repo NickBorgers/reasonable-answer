@@ -411,10 +411,11 @@ jobs:
         if: always() && steps.existing.outputs.skip != 'true'
         env:
           SESSION_DIR: ${{ steps.session.outputs.dir }}
+          CI_AGENT_IMAGE: ${{ vars.CI_IMAGE || 'ghcr.io/nickborgers/reasonable-answer-ci:latest' }}
         run: |
           set -euo pipefail
           if [ -n "$SESSION_DIR" ] && [ -d "$SESSION_DIR" ]; then
-            sudo chown -R "$(id -u):$(id -g)" "$SESSION_DIR"
+            ./scripts/reclaim-ownership.sh "$CI_AGENT_IMAGE" "$SESSION_DIR"
             chmod -R u+rwX "$SESSION_DIR"
             echo "Reclaimed $(find "$SESSION_DIR" -type f | wc -l) session file(s)."
           else
