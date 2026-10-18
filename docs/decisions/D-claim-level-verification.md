@@ -47,10 +47,12 @@ in its own context.
    page shown in part absence from the excerpts is not absence from the page — the rule the critic
    was asked to keep in its head, now enforced by a boolean the excerpter reports; `supported`,
    `unreadable` and every unchecked pair mint nothing per pair (~~mint nothing~~ superseded in part by
-   D-unreadable-citation-finding: a sentence whose every citation is `unreadable` mints one
-   `uncited_claim`; unchecked pairs still mint nothing). The findings ride the critic's `LensResult`,
-   so they clamp, deduplicate, count, withhold the clean record and reach the writer as tasks exactly
-   as a critic's own would.
+   D-unreadable-citation-finding and narrowed by D-anchored-unreadable: a sentence whose every citation
+   is an anchored non-body mints one `uncited_claim`; a model-returned `unreadable` is anchored only
+   when its `support_span` is found verbatim in the shown page, selected non-body fetch outcomes are
+   anchored mechanically, and unanchored or other unchecked pairs still mint nothing). The findings
+   ride the critic's `LensResult`, so they clamp, deduplicate, count, withhold the clean record and
+   reach the writer as tasks exactly as a critic's own would.
 4. **A checked pair's verdict is authoritative for its category.** The critic still reads the whole
    report with the excerpts, and still raises everything the evidence lens raises. Its own
    `misrepresented_source` findings are kept for the pairs the checker did not settle — no page, an

@@ -19,8 +19,11 @@ not-found becomes ``fabricated_citation`` (D-notfound-fabrication):
 * ``absent`` is ``misrepresented_source`` only when the page was shown **whole** — on a
   page shown in part, absence from the excerpts is not absence from the page;
 * ``supported`` and ``unreadable`` mint nothing per pair, and are counted — except that a
-  sentence whose **every** citation is ``unreadable`` mints one ``uncited_claim``: no
-  citation a reader can check (D-unreadable-citation-finding, ``claim_check.unreadable_finding``).
+  sentence whose **every** citation is an *anchored* non-body mints one ``uncited_claim``
+  (D-unreadable-citation-finding, ``claim_check.unreadable_finding``): an ``unreadable``
+  verdict anchored by a verbatim span of the page shown, or a pair whose fetch outcome is
+  mechanically not a body. An unanchored ``unreadable`` is the checker's say-so and mints
+  nothing (D-anchored-unreadable).
 
 Everything fails **toward the writer, never against it**: a checker call that fails,
 answers outside the schema, or quotes a span that is not in the page leaves the pair
@@ -54,7 +57,7 @@ from typing import Any
 
 from . import excerpt, prompts
 from . import report as report_mod
-from .fetch import _SOURCES_HEADING, FetchedSource
+from .fetch import _SOURCES_HEADING, FetchedSource, SourceOutcome
 from .llm import (
     LLMClient,
     MalformedOutputError,
@@ -65,6 +68,19 @@ from .llm import (
 from .schemas import MAX_INSTRUCTION, MAX_RATIONALE, MAX_SPAN, ClaimVerdict, RawIssue, StructuralRef
 from .taxonomy import Category, Severity
 from .triage import _normalize
+
+#: Fetch outcomes that are mechanically not a document body, observed by the pipeline
+#: rather than claimed by a model. These never reach the checker (`FetchedSource.ok` is
+#: false), so the pair is anchored without a call. `ERROR`, `EMPTY`, `NOT_FOUND` and the
+#: budget outcomes say nothing about what the page is and stay out (D-anchored-unreadable).
+_NON_BODY = frozenset(
+    {
+        SourceOutcome.PAYWALLED,
+        SourceOutcome.BLOCKED,
+        SourceOutcome.METADATA_ONLY,
+        SourceOutcome.UNREADABLE,
+    }
+)
 
 log = logging.getLogger(__name__)
 
@@ -96,6 +112,12 @@ class PairVerdict:
     cached: bool = False
     #: Why an `unchecked` pair was not checked: a closed label, never page text.
     unchecked_reason: str | None = None
+    #: The pair is evidence the cited response is not the work's own text, mechanically:
+    #: an `unreadable` verdict whose `support_span` was found verbatim in the page shown,
+    #: or a pair whose fetch outcome is not a document body (`_NON_BODY`).
+    #: An `unreadable` verdict without this is the checker's say-so and mints nothing
+    #: (D-anchored-unreadable).
+    anchored: bool = False
 
     @property
     def checked(self) -> bool:
@@ -134,6 +156,7 @@ class ClaimCheck:
             "absent": 0,
             "absent_partial": 0,
             "unreadable": 0,
+            "unreadable_anchored": 0,
             "unchecked": self.over_cap,
             "aborted": 0,
             "cached": 0,
@@ -147,6 +170,8 @@ class ClaimCheck:
                     out["aborted"] += 1
                 continue
             out["checked"] += 1
+            if v.verdict == "unreadable" and v.anchored:
+                out["unreadable_anchored"] += 1
             if v.verdict == "absent" and not v.complete:
                 out["absent_partial"] += 1
             else:
@@ -167,6 +192,7 @@ class ClaimCheck:
                     "support_span": v.support_span,
                     "reason": v.reason,
                     "complete": v.complete,
+                    "anchored": v.anchored,
                     "cached": v.cached,
                     "unchecked_reason": v.unchecked_reason,
                 }
@@ -187,7 +213,7 @@ class VerdictCache:
     def key(identity: str, system: str, user: str) -> tuple[str, str, str, str]:
         system_hash = hashlib.sha256(system.encode("utf-8")).hexdigest()
         user_hash = hashlib.sha256(user.encode("utf-8")).hexdigest()
-        return (identity, system_hash, user_hash, "v2")
+        return (identity, system_hash, user_hash, "v3")
 
     def get(self, key: tuple[str, str, str, str]) -> PairVerdict | None:
         with self._lock:
@@ -299,7 +325,14 @@ def check(
     for pair in kept:
         source = by_url.get(pair.url)
         if source is None or not source.ok or not source.text:
-            verdict = PairVerdict(pair, "unchecked", unchecked_reason="page_not_read")
+            # The fetch outcome is the pipeline's own observation, so a non-body outcome
+            # anchors the pair without a checker call (D-anchored-unreadable).
+            verdict = PairVerdict(
+                pair,
+                "unchecked",
+                unchecked_reason="page_not_read",
+                anchored=source is not None and source.outcome in _NON_BODY,
+            )
         elif aborted:
             verdict = PairVerdict(pair, "unchecked", unchecked_reason="aborted")
         else:
@@ -375,6 +408,7 @@ def _check_pair(
                 hit.reason,
                 complete=hit.complete,
                 cached=True,
+                anchored=hit.anchored,
             )
 
     shown_normalized = _normalize(shown)
@@ -411,12 +445,17 @@ def _check_pair(
         log.info("claim check by %s unanchored at %s: %s", alias, pair.locus, type(exc).__name__)
         return PairVerdict(pair, "unchecked", unchecked_reason="schema_violation")
 
+    # An `unreadable` span is evidence only if the page shown contains it verbatim; a
+    # span that is not there leaves a valid verdict that is merely unanchored.
+    span = _normalize(output.support_span or "")
+    anchored = output.verdict == "unreadable" and bool(span) and span in shown_normalized
     verdict = PairVerdict(
         pair,
         output.verdict,
-        output.support_span if output.verdict in ("supported", "contradicted") else None,
+        output.support_span if output.verdict in ("supported", "contradicted") or anchored else None,
         output.reason,
         complete=excerpted.complete,
+        anchored=anchored,
     )
     if cache is not None:
         cache.put(key, verdict)
@@ -472,13 +511,15 @@ def issues_from(check_result: ClaimCheck, *, unreadable_finding: bool = False) -
 
 
 def _unreadable_issues(check_result: ClaimCheck) -> list[RawIssue]:
-    """One ``uncited_claim`` per sentence none of whose citations the checker could read.
+    """One ``uncited_claim`` per sentence every citation of which is anchored non-body.
 
-    A sentence qualifies only when it has at least one pair, every pair came back from a
-    completed checker call as `unreadable`, and no pair of it was left unchecked, cut by
-    `max_pairs`, or settled as anything else. One readable page that supports the sentence
-    is enough to leave it alone. The text is pipeline-authored from the entry numbers
-    alone: never page text and never the checker's `reason` (docs/isolation.md).
+    A sentence qualifies only when it has at least one pair and every pair is anchored
+    (D-anchored-unreadable): an `unreadable` verdict whose quoted span was found in the
+    page shown, or a pair whose fetch outcome was observed not to be a document body. A
+    pair left unchecked for any other reason, cut by `max_pairs`, settled as anything else,
+    or `unreadable` on the checker's say-so alone, leaves the sentence alone. The text is
+    pipeline-authored from the entry numbers alone: never page text, the span, or the
+    checker's `reason` (docs/isolation.md), and it states only what was observed.
     """
     by_sentence: dict[tuple[int, int, str], list[PairVerdict]] = {}
     for v in check_result.verdicts:
@@ -486,14 +527,14 @@ def _unreadable_issues(check_result: ClaimCheck) -> list[RawIssue]:
         by_sentence.setdefault(key, []).append(v)
     out: list[RawIssue] = []
     for key, group in by_sentence.items():
-        if key in check_result.cut_sentences or any(v.verdict != "unreadable" for v in group):
+        if key in check_result.cut_sentences or not all(_anchored_non_body(v) for v in group):
             continue
         numbers = sorted({v.pair.number for v in group})
         cited = ", ".join(f"[{n}]" for n in numbers)
         rationale = (
-            f"Every source cited for this sentence ({cited}) was fetched, but what came back was "
-            "not the work itself (a landing, catalog, navigation or paywall page), so no reader "
-            "can check the claim against its citation."
+            f"Every source cited for this sentence ({cited}) came back, as fetched, as access-wall, "
+            "catalog or navigation text or with no readable body, so the claim cannot be checked "
+            "against its citation here."
         )
         out.append(
             RawIssue(
@@ -512,6 +553,12 @@ def _unreadable_issues(check_result: ClaimCheck) -> list[RawIssue]:
             )
         )
     return out
+
+
+def _anchored_non_body(v: PairVerdict) -> bool:
+    if v.verdict == "unreadable":
+        return v.anchored
+    return v.verdict == "unchecked" and v.unchecked_reason == "page_not_read" and v.anchored
 
 
 def reconcile(critic_issues: list[RawIssue], check_result: ClaimCheck) -> list[RawIssue]:

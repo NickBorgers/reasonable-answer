@@ -373,10 +373,12 @@ claim_check:
   # skipped as `aborted` (D-claim-check-inconclusive-verdicts). A dead proxy is met
   # with this many timeouts, not max_pairs of them; skipped pairs mint nothing.
   max_consecutive_failures: 3
-  # A sentence whose every cited page the checker found `unreadable` (a landing, catalog or
-  # paywall page, not the work) becomes one `uncited_claim` finding at the major floor, telling
-  # the writer to cite a readable copy or narrow the claim (D-unreadable-citation-finding).
-  # `unchecked` pairs never count. false = rollback: `unreadable` mints nothing, as before.
+  # A sentence whose every cited page is an anchored non-body (the checker answered `unreadable`
+  # and quoted a wall/catalog line found in the page, or the fetch outcome was paywalled,
+  # blocked, metadata-only or an unreadable type) becomes one `uncited_claim` finding at the
+  # major floor, telling the writer to cite a readable copy or narrow the claim
+  # (D-unreadable-citation-finding, D-anchored-unreadable). An `unreadable` without a found span
+  # and any `unchecked` pair never count. false = rollback: `unreadable` mints nothing.
   unreadable_finding: true
 
 # Critic auditioning (docs/architecture.md). Measures whether each rostered critic can

@@ -50,3 +50,7 @@ completed verdict from every pair. *Severity floors:* minted at the category flo
 
 **Deliberately not done.** The run label still counts a landing page as a "body read"; that badge is
 separate. No cross-slot agreement. No change to the checker prompt or the `unreadable` definition.
+
+**Superseded in part by D-anchored-unreadable.** Rule 1 (every pair an `unreadable` verdict) and the
+text in rule 5 now apply only to *anchored* pairs, and the rationale no longer asserts that no reader
+can check the claim. The category, severity, per-slot scope, knob and `reconcile` rules stand.
