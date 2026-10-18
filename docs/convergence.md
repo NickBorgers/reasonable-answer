@@ -435,7 +435,8 @@ mechanically, like the not-found above:
 |---|---|---|
 | `contradicted` | `misrepresented_source` (major) | `misrepresented_source` (major) |
 | `absent` | `misrepresented_source` (major) | nothing; counted as `absent_partial` |
-| `supported`, `unreadable` | nothing | nothing |
+| `supported` | nothing | nothing |
+| `unreadable` | nothing per pair; see the sentence rule below | nothing per pair; see the sentence rule below |
 | unchecked (call failed, span not in page, no page, past `max_pairs`, `aborted` after `max_consecutive_failures` unchecked calls in a row) | nothing | nothing |
 
 A page whose body was cut before its end — at `search.fetch_max_bytes` on the wire, at
@@ -449,9 +450,25 @@ whole-document `misrepresented_source` judgement is kept for exactly the pairs t
 **settle** and dropped for the ones it did (`claimcheck.reconcile`: same paragraph, the critic's span
 inside the checked sentence), so one claim is never counted twice under two spans. A pair is settled
 by `supported`, `contradicted`, or `absent` from a page shown whole — the verdicts that read the page.
-`unreadable` and `absent` from a page shown in part settle nothing: they mint no finding, so they may
-retire none, and the critic's judgement on that sentence stands as it did before the checker existed
-(D-claim-check-inconclusive-verdicts). The findings ride
+`unreadable` and `absent` from a page shown in part settle nothing: they mint no per-pair finding
+(an all-`unreadable` sentence is the exception, below), so they may retire none, and the critic's judgement on that sentence stands as it did before the checker existed
+(D-claim-check-inconclusive-verdicts).
+
+**A sentence resting only on unreadable pages is an `uncited_claim` (D-unreadable-citation-finding,
+`claim_check.unreadable_finding`, default on; supersedes the "`unreadable` mints nothing" row of
+D-claim-check-inconclusive-verdicts).** `unreadable` says the checker was shown a landing, catalog,
+navigation or paywall page, not the work; a claim whose every cited page is like that has no citation a
+reader can check. When every pair of a sentence came back `unreadable` from completed checker calls —
+none `supported`, none `unchecked`, `aborted` or cut by `max_pairs` — the pass mints one `uncited_claim`
+at the sentence's locus, at that category's `major` floor. One readable supporting page leaves the
+sentence alone. The finding is pipeline-authored from the entry numbers alone — never page text, never
+the checker's reason — and tells the writer to cite a readable copy of the same work, cite a source that
+states it, or narrow or remove the claim. It is per critic slot, like every finding: another slot's
+`supported` does not veto it, because the slots are independent views (QP2) and a dispute can answer it.
+It is dischargeable by re-sourcing or narrowing, so it adds no unterminable state; on a topic whose good
+sources are paywalled the writer's exit is to narrow the claim, and a run that cannot is bounded by the
+same `hard_cap`/rule 6 as any `major`. `reconcile` is unchanged: `unreadable` still retires no finding of
+a critic's own. The findings ride
 the critic's `LensResult` — so they clamp, deduplicate, count toward `material`, withhold the clean
 record, and reach the writer as tasks exactly as a critic's own would — and a 402 during checking
 fails the lens with the account class so the run defers (D-credit-exhaustion-defers). Verdicts are
