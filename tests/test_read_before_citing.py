@@ -10,7 +10,7 @@ from fakes import FakeClient
 from reasonable_answer import prompts, reading, search
 from reasonable_answer import report as report_mod
 from reasonable_answer.fetch import FetchedSource, SourceOutcome
-from reasonable_answer.graph import Runtime, _critique_one, _generate
+from reasonable_answer.graph import Runtime, _critique_one, _generate, _merge_read_log
 from reasonable_answer.schemas import CritiqueOutput
 from reasonable_answer.store import RunStore
 from reasonable_answer.taxonomy import Category, Lens, Severity
@@ -160,6 +160,15 @@ def test_a_later_failure_never_downgrades_a_full_text_read(tmp_path, identities,
     rt, _ = _runtime(tmp_path, identities, config, read=True, verify=True, outcome=SourceOutcome.BLOCKED)
     out = _generate({"question": "q?", "round": 1, "report": "x", "read_log": {URL_A: "full_text"}}, rt)
     assert out["read_log"] == {URL_A: "full_text"}
+
+
+@pytest.mark.parametrize(
+    "outcome", [SourceOutcome.NOT_RETRIEVED, SourceOutcome.BUDGET_EXHAUSTED]
+)
+def test_a_refusal_or_spent_budget_is_not_recorded_in_the_read_log(outcome):
+    session = reading.ReadSession()
+    session.record_read(FetchedSource(url=URL_A, error="not a fact about the page", outcome=outcome))
+    assert _merge_read_log({}, session) == {}
 
 
 @pytest.mark.parametrize("read,verify", [(True, False), (False, True), (False, False)])
