@@ -334,6 +334,13 @@ downstream. Four things bound it, and only the first is new:
   earlier one merely found, giving up a fresh-context property (#6) to buy nothing. The cited seed
   does not reopen that: it is a function of the draft the reviser already holds, carries no other
   writer's searches or reads, and never enters trusted prompt text as a URL list.
+- **A writer may cite only what some writer read (D-read-before-citing).** With both reading and
+  verification on, the run keeps a `read_log` (URL to `SourceOutcome` value) of every page a
+  writer's `read_source` resolved, and the evidence lens mints one `uncited_claim` per cited entry
+  the log does not hold at `full_text`. The finding carries an entry label, the entry's address, a
+  closed-vocabulary outcome and a fixed instruction — no page text and no model's words. The log
+  never widens any writer's allowlist, enters no prompt, and has no path into `OrchestratorView`
+  or the controller.
 - **The output channel is unchanged.** A writer emits free-text markdown with or without the tool,
   so reading adds evidence, not a new way to emit anything — the same argument that bounds the
   evidence critic below. What the writer may be *persuaded* to write is the residual, and it is the
