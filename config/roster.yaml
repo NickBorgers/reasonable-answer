@@ -381,6 +381,33 @@ claim_check:
   # and any `unchecked` pair never count. false = rollback: `unreadable` mints nothing.
   unreadable_finding: true
 
+# The per-source evidence reader behind read_source (D-writer-evidence-card). A read used to
+# hand the writer the page's first read_max_chars (6,000) characters, while the run kept up
+# to fetch_body_max_chars of it — the writer, who decides what to claim, had the narrowest
+# view in the pipeline. With this on, one fresh call under the writer's own model reads the
+# whole retained page (chunked) and returns an evidence card: the passages relevant to the
+# question and the writer's stated purpose, each located verbatim in the page, plus closed
+# labels. No model-written prose reaches the writer; a quote not found in the page is
+# dropped; any failure falls back to the raw opening, counted as a fallback.
+#
+# The code default is off. This roster opts in, which is inert here because reading and
+# verification are off above: it takes effect only where search.read_sources AND
+# search.verify_sources are both on. Cost: one call per chunk per (page, question, purpose,
+# writer model), memoised for the run. Rollback: enabled: false.
+evidence_reader:
+  enabled: true
+  # Retained body shown to one reader call; a longer body is read in overlapping chunks.
+  chunk_chars: 40000
+  chunk_overlap_chars: 800
+  # Per-card bounds. read_char_budget is charged the card's characters, not the body's.
+  max_passages: 8
+  passage_max_chars: 1500
+  card_max_chars: 5000
+  # Anti-pathological whole-run ceiling on reader calls, and the breaker for a dead proxy.
+  max_calls: 300
+  max_consecutive_failures: 3
+  timeout_seconds: 180
+
 # Critic auditioning (docs/architecture.md). Measures whether each rostered critic can
 # actually find a planted defect and stay quiet on a sound report — the question neither
 # `validate_roster_health` nor `ra doctor`'s probes ask.

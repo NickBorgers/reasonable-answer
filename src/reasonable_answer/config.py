@@ -256,7 +256,9 @@ class SearchConfig(BaseModel):
     read_max_chars: int = Field(default=6_000, ge=500, le=100_000)
     #: Whole-run cap on page text handed to writers. The per-read cap cannot see the
     #: total, and a long context is a correctness problem here, not a cost one
-    #: (principle #6, docs/isolation.md).
+    #: (principle #6, docs/isolation.md). It counts what enters a writer's context: a
+    #: raw read's characters, or — with evidence cards on — the card's passages, never
+    #: the body the reader read to choose them (D-writer-evidence-card).
     read_char_budget: int = Field(default=200_000, ge=1_000, le=5_000_000)
     #: On a revision, let `read_source` also open the URLs the draft being revised lists in
     #: its `## Sources` (D-writer-rereads-cited-sources), so a reviser can check the page a
@@ -1059,6 +1061,77 @@ class RefineConfig(BaseModel):
         return self.alias or roster.orchestrator_alias
 
 
+class EvidenceReaderConfig(BaseModel):
+    """The per-source evidence reader behind `read_source` (D-writer-evidence-card).
+
+    Off by default: with `enabled: false` — or with either `search.read_sources` or
+    `search.verify_sources` off, the gating every reading feature uses — `read_source`
+    hands the writer the page's first `search.read_max_chars` characters exactly as
+    before, and no prompt byte, tool definition or event field changes.
+
+    With it on, a writer's `read_source` runs one fresh, isolated call over the page's
+    whole retained body (up to `search.fetch_body_max_chars`, chunked) under the writer's
+    own alias, and hands back an **evidence card**: verbatim passages of the page, each
+    mechanically checked to occur in the body, plus closed-vocabulary labels. No
+    model-authored free text reaches the writer. Any failure falls back to the raw
+    opening, recorded as a fallback and never shown as a card.
+
+    No load-time rule, in the manner of `search.read_cited_sources`: the switch is inert
+    until reading and verification are both on, and a config that reads without
+    verifying must keep loading. Not under `budgets`, which `_run_fingerprint` hashes.
+    """
+
+    model_config = ConfigDict(extra="forbid")
+
+    enabled: bool = False
+    #: Characters of retained body one reader call is shown. A body longer than this is
+    #: split into consecutive chunks that overlap by `chunk_overlap_chars`, one call each,
+    #: so a passage straddling a boundary is whole in one of them. A context-size bound on
+    #: principle #6 grounds (docs/isolation.md), not a spend one.
+    chunk_chars: int = Field(default=40_000, ge=4_000, le=400_000)
+    chunk_overlap_chars: int = Field(default=800, ge=0, le=20_000)
+    #: Passages one card carries, across all chunks, after verification and merging.
+    max_passages: int = Field(default=8, ge=1, le=40)
+    #: Longest passage kept. A longer quote is dropped, never clipped: a verbatim prefix
+    #: can lose the qualification at the end of the sentence it was cut from.
+    passage_max_chars: int = Field(default=1_500, ge=100, le=10_000)
+    #: Shortest passage kept: a two-word "quote" is trivially verbatim and evidences
+    #: nothing.
+    passage_min_chars: int = Field(default=20, ge=1, le=1_000)
+    #: Characters of passages one card may show the writer — what `read_char_budget`
+    #: is then charged for the read, in place of the raw opening's length.
+    card_max_chars: int = Field(default=5_000, ge=500, le=100_000)
+    #: Whole-run ceiling on reader calls (one per chunk). Anti-pathological: a writer
+    #: loop re-reading pages under ever-new purposes must not become unbounded calls.
+    #: Past it, every read falls back to the raw opening.
+    max_calls: int = Field(default=300, ge=1, le=10_000)
+    #: Consecutive reader calls that may fail before the reader is switched off for the
+    #: rest of the run, so a dead proxy costs a few timeouts rather than one per read.
+    max_consecutive_failures: int = Field(default=3, ge=1, le=100)
+    max_tokens: int = Field(default=6_000, ge=500, le=32_000)
+    #: Per-attempt timeout for one reader call; `None` keeps `budgets.timeout_seconds`.
+    timeout_seconds: float | None = Field(default=None, gt=0, le=3_600)
+
+    @model_validator(mode="after")
+    def _coherent(self) -> EvidenceReaderConfig:
+        if self.chunk_overlap_chars * 2 >= self.chunk_chars:
+            raise ValueError(
+                "fail closed: evidence_reader.chunk_overlap_chars must be under half of "
+                "evidence_reader.chunk_chars, or consecutive chunks would mostly repeat"
+            )
+        if self.passage_max_chars > self.card_max_chars:
+            raise ValueError(
+                "fail closed: evidence_reader.passage_max_chars must not exceed "
+                "evidence_reader.card_max_chars, or a kept passage could never be shown"
+            )
+        if self.passage_min_chars > self.passage_max_chars:
+            raise ValueError(
+                "fail closed: evidence_reader.passage_min_chars must not exceed "
+                "evidence_reader.passage_max_chars"
+            )
+        return self
+
+
 class CallTimeouts(BaseModel):
     """Per-role overrides of `budgets.timeout_seconds` for one call attempt
     (D-role-call-timeouts).
@@ -1102,6 +1175,7 @@ class Config(BaseModel):
     refine: RefineConfig = Field(default_factory=RefineConfig)
     push: PushConfig = Field(default_factory=PushConfig)
     call_timeouts: CallTimeouts = Field(default_factory=CallTimeouts)
+    evidence_reader: EvidenceReaderConfig = Field(default_factory=EvidenceReaderConfig)
     runs_dir: Path = Path("runs")
     retention_days: int = 14
     #: How often the web server's background sweep content-purges runs past

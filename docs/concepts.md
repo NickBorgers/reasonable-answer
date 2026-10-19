@@ -236,7 +236,10 @@ it — each one, again, a guard against a known LLM failure mode:
   `search.read_max_chars`). Calls are unbounded by default; characters are not. With
   `search.read_sources` and `search.verify_sources` both on, writers must read a page before citing
   it: each cited entry no writer has read in full text becomes a major mechanical `uncited_claim`
-  finding, and `generate` events expose `cited_unread` (D-read-before-citing).
+  finding, and `generate` events expose `cited_unread` (D-read-before-citing). With
+  `evidence_reader.enabled` as well, a read returns an evidence card — the passages of the whole
+  retained page relevant to the question, each located verbatim in it, plus closed labels — in
+  place of the page's opening (D-writer-evidence-card).
   Page bodies are third-party text, so they arrive fenced as untrusted data like every other input.
 - **Recording where the support actually is.** `search.support_manifest` then asks the writer, in a
   separate pass, to name `citation id -> URL -> locator -> verbatim span -> claim` for each cited
