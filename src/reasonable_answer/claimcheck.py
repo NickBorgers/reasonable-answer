@@ -39,6 +39,14 @@ so they neither mint a per-pair finding nor retire one a critic made
 (D-claim-check-inconclusive-verdicts). A page cut before its end — at the fetch byte
 cap, at a PDF's page cap — is never "shown whole", however short what survived.
 
+A page longer than ``page_max_chars`` is no longer only shown in part
+(D-whole-page-claim-check): with ``claim_check.whole_page`` it is checked chunk by chunk to
+its end, each chunk in its own fresh context with the same closed verdict and span rule,
+most relevant chunk first, stopping at the first verified ``supported`` or ``contradicted``.
+``absent`` from **every** chunk of a body that was not itself cut is ``absent`` from the page —
+settled, and minting like a page shown whole. Any chunk not checked to a verdict, any cap
+hit, and any cut body leave the pair ``absent_partial`` and mint nothing.
+
 Verdicts are cached for the run per (critic identity, page, sentence): the call is a
 pure function of those three, and re-running it on an unchanged sentence against an
 unchanged page buys sampling noise and nothing else. The cache is keyed on the critic's
@@ -118,6 +126,12 @@ class PairVerdict:
     #: An `unreadable` verdict without this is the checker's say-so and mints nothing
     #: (D-anchored-unreadable).
     anchored: bool = False
+    #: The pair was checked chunk by chunk (D-whole-page-claim-check); `chunk_calls` is the
+    #: checker calls actually made for it (memo hits are free) and `cap_hit` that a per-pair
+    #: or per-pass cap left chunks unexamined.
+    chunked: bool = False
+    chunk_calls: int = 0
+    cap_hit: bool = False
 
     @property
     def checked(self) -> bool:
@@ -146,6 +160,9 @@ class ClaimCheck:
     #: (section, paragraph, sentence) of every sentence that has a pair past `max_pairs`.
     #: Such a sentence has a citation nobody read, so it is never "all unreadable".
     cut_sentences: frozenset[tuple[int, int, str]] = frozenset()
+    #: Chunked checking was on for this pass; only then do `counts` and the record carry the
+    #: chunk fields, so with the knob off the event is what it was before.
+    whole_page: bool = False
 
     def counts(self) -> dict[str, int]:
         out = {
@@ -176,6 +193,12 @@ class ClaimCheck:
                 out["absent_partial"] += 1
             else:
                 out[v.verdict] += 1
+        if self.whole_page:
+            out["absent_whole_page"] = sum(
+                1 for v in self.verdicts if v.chunked and v.verdict == "absent" and v.complete
+            )
+            out["chunk_calls"] = sum(v.chunk_calls for v in self.verdicts)
+            out["chunk_cap_hit"] = sum(1 for v in self.verdicts if v.cap_hit)
         return out
 
     def as_record(self) -> dict[str, Any]:
@@ -195,10 +218,39 @@ class ClaimCheck:
                     "anchored": v.anchored,
                     "cached": v.cached,
                     "unchecked_reason": v.unchecked_reason,
+                    **(
+                        {"chunked": v.chunked, "chunk_calls": v.chunk_calls, "cap_hit": v.cap_hit}
+                        if self.whole_page
+                        else {}
+                    ),
                 }
                 for v in self.verdicts
             ],
         }
+
+
+@dataclass(frozen=True)
+class Chunking:
+    """Whole-page checking policy (D-whole-page-claim-check); `None` to `check` means off."""
+
+    overlap: int
+    max_chunks_per_pair: int
+    max_chunk_calls: int
+
+    @classmethod
+    def from_config(cls, cfg: Any) -> Chunking | None:
+        if not cfg.whole_page:
+            return None
+        return cls(cfg.chunk_overlap_chars, cfg.max_chunks_per_pair, cfg.max_chunk_calls)
+
+
+@dataclass
+class _Pass:
+    """Mutable state of one `check` pass: the failure streak and the chunk-call count."""
+
+    failures: int = 0
+    aborted: bool = False
+    chunk_calls: int = 0
 
 
 class VerdictCache:
@@ -213,7 +265,7 @@ class VerdictCache:
     def key(identity: str, system: str, user: str) -> tuple[str, str, str, str]:
         system_hash = hashlib.sha256(system.encode("utf-8")).hexdigest()
         user_hash = hashlib.sha256(user.encode("utf-8")).hexdigest()
-        return (identity, system_hash, user_hash, "v3")
+        return (identity, system_hash, user_hash, "v4")
 
     def get(self, key: tuple[str, str, str, str]) -> PairVerdict | None:
         with self._lock:
@@ -300,6 +352,7 @@ def check(
     on_pair: Callable[[PairVerdict], None] | None = None,
     max_consecutive_failures: int | None = None,
     timeout: float | None = None,
+    chunking: Chunking | None = None,
 ) -> ClaimCheck:
     """Check every claim/page pair of `report_text` under one critic slot.
 
@@ -314,14 +367,19 @@ def check(
     `aborted` without a call. A dead proxy is then met with a few timeouts inside the
     critic's slot, not `max_pairs` of them each with its own retry budget. A memo hit
     is not a call and neither breaks nor resets the streak; a verdict resets it.
+
+    `chunking` (D-whole-page-claim-check) turns on chunk-by-chunk checking of a body longer
+    than `page_max_chars`; `None` is byte-identical to the earlier behaviour. Chunk calls
+    feed the same failure streak.
     """
     by_url = {s.url: s for s in sources}
     everything, _ = pairs(report_text)
     kept = everything[:max_pairs]
     cut = frozenset((p.locus.section, p.locus.paragraph, p.sentence) for p in everything[max_pairs:])
-    result = ClaimCheck(over_cap=len(everything) - len(kept), cut_sentences=cut)
-    failures = 0
-    aborted = False
+    result = ClaimCheck(
+        over_cap=len(everything) - len(kept), cut_sentences=cut, whole_page=chunking is not None
+    )
+    state = _Pass()
     for pair in kept:
         source = by_url.get(pair.url)
         if source is None or not source.ok or not source.text:
@@ -333,8 +391,25 @@ def check(
                 unchecked_reason="page_not_read",
                 anchored=source is not None and source.outcome in _NON_BODY,
             )
-        elif aborted:
+        elif state.aborted:
             verdict = PairVerdict(pair, "unchecked", unchecked_reason="aborted")
+        elif chunking is not None and len(source.text) > page_max_chars:
+            verdict = _check_chunked(
+                client,
+                alias,
+                identity,
+                pair,
+                source,
+                page_max_chars=page_max_chars,
+                max_tokens=max_tokens,
+                repair_retries=repair_retries,
+                cache=cache,
+                current_date=current_date,
+                timeout=timeout,
+                chunking=chunking,
+                state=state,
+                max_consecutive_failures=max_consecutive_failures,
+            )
         else:
             verdict = _check_pair(
                 client,
@@ -352,17 +427,9 @@ def check(
             if verdict.cached:
                 pass
             elif verdict.checked:
-                failures = 0
+                state.failures = 0
             else:
-                failures += 1
-                if max_consecutive_failures is not None and failures >= max_consecutive_failures:
-                    aborted = True
-                    log.warning(
-                        "claim check by %s: %d consecutive calls ended unchecked; "
-                        "skipping the remaining pairs of this pass",
-                        alias,
-                        failures,
-                    )
+                _note_failure(state, alias, max_consecutive_failures)
         result.verdicts.append(verdict)
         if on_pair is not None:
             on_pair(verdict)
@@ -397,19 +464,58 @@ def _check_pair(
         shown,
         current_date=current_date,
     )
+    asked = _ask(
+        client,
+        alias,
+        identity,
+        pair,
+        user,
+        shown,
+        complete=excerpted.complete,
+        max_tokens=max_tokens,
+        repair_retries=repair_retries,
+        cache=cache,
+        timeout=timeout,
+    )
+    assert asked is not None  # `allow_call` defaults to true
+    return asked[0]
+
+
+def _ask(
+    client: LLMClient,
+    alias: str,
+    identity: str,
+    pair: ClaimPair,
+    user: str,
+    shown: str,
+    *,
+    complete: bool,
+    max_tokens: int,
+    repair_retries: int,
+    cache: VerdictCache | None,
+    timeout: float | None,
+    allow_call: bool = True,
+) -> tuple[PairVerdict, bool] | None:
+    """One checker call over `shown` (or its memoised verdict). Returns the verdict and
+    whether a call was made, or `None` when the memo misses and `allow_call` is false."""
     key = VerdictCache.key(identity, prompts.CLAIM_CHECK_SYSTEM, user)
     if cache is not None:
         hit = cache.get(key)
         if hit is not None:
-            return PairVerdict(
-                pair,
-                hit.verdict,
-                hit.support_span,
-                hit.reason,
-                complete=hit.complete,
-                cached=True,
-                anchored=hit.anchored,
+            return (
+                PairVerdict(
+                    pair,
+                    hit.verdict,
+                    hit.support_span,
+                    hit.reason,
+                    complete=hit.complete,
+                    cached=True,
+                    anchored=hit.anchored,
+                ),
+                False,
             )
+    if not allow_call:
+        return None
 
     shown_normalized = _normalize(shown)
 
@@ -438,12 +544,12 @@ def _check_pair(
         raise
     except ModelCallError as exc:
         log.warning("claim check by %s failed at %s: %s", alias, pair.locus, str(exc)[:200])
-        return PairVerdict(pair, "unchecked", unchecked_reason=exc.failure_class)
+        return PairVerdict(pair, "unchecked", unchecked_reason=exc.failure_class), True
     except (MalformedOutputError, ValueError) as exc:
         # Outside the schema, or a span the page does not contain, past the repair
         # budget. Content-free in the log: the pair's locus, never its text.
         log.info("claim check by %s unanchored at %s: %s", alias, pair.locus, type(exc).__name__)
-        return PairVerdict(pair, "unchecked", unchecked_reason="schema_violation")
+        return PairVerdict(pair, "unchecked", unchecked_reason="schema_violation"), True
 
     # An `unreadable` span is evidence only if the page shown contains it verbatim; a
     # span that is not there leaves a valid verdict that is merely unanchored.
@@ -454,12 +560,162 @@ def _check_pair(
         output.verdict,
         output.support_span if output.verdict in ("supported", "contradicted") or anchored else None,
         output.reason,
-        complete=excerpted.complete,
+        complete=complete,
         anchored=anchored,
     )
     if cache is not None:
         cache.put(key, verdict)
-    return verdict
+    return verdict, True
+
+
+def _note_failure(state: _Pass, alias: str, limit: int | None) -> None:
+    state.failures += 1
+    if limit is not None and state.failures >= limit:
+        state.aborted = True
+        log.warning(
+            "claim check by %s: %d consecutive calls ended unchecked; "
+            "skipping the remaining pairs of this pass",
+            alias,
+            state.failures,
+        )
+
+
+def _chunk_page_text(
+    text: str, start: int, end: int, index: int, count: int, truncated: bool
+) -> str:
+    """A chunk as the checker is shown it: a header that says it is one section of a longer
+    page — so absence from it is read as `absent`, never `contradicted` — then the text."""
+    cut = (
+        " The fetch stopped at its cap before the end of the page, so the page continues "
+        "past the last character retained."
+        if truncated
+        else ""
+    )
+    return (
+        f"Page text: section {index} of {count} of a longer page — characters {start:,}–{end:,} "
+        f"of {len(text):,} retained. The other sections are checked separately, so text outside "
+        f"this section may say anything.{cut}\n"
+        f"(characters {start:,}–{end:,})\n{text[start:end]}"
+    )
+
+
+def _check_chunked(
+    client: LLMClient,
+    alias: str,
+    identity: str,
+    pair: ClaimPair,
+    source: FetchedSource,
+    *,
+    page_max_chars: int,
+    max_tokens: int,
+    repair_retries: int,
+    cache: VerdictCache | None,
+    current_date: str | None,
+    timeout: float | None,
+    chunking: Chunking,
+    state: _Pass,
+    max_consecutive_failures: int | None,
+) -> PairVerdict:
+    """Check `pair` against the whole retained body of a page longer than `page_max_chars`
+    (D-whole-page-claim-check): chunks most relevant first, each in a fresh context; the
+    first verified `supported` or `contradicted` is the pair's verdict; `absent` is
+    settled (`complete`) only when every chunk of an uncut body was checked to `absent`."""
+    text = source.text
+    bounds = excerpt.chunk_bounds(text, size=page_max_chars, overlap=chunking.overlap)
+    order = excerpt.rank_chunks(text, bounds, [pair.sentence])
+    count = len(bounds)
+    cap_hit = len(order) > chunking.max_chunks_per_pair
+    results: list[PairVerdict] = []
+    first_failure: str | None = None
+    calls = 0
+    for position in order[: chunking.max_chunks_per_pair]:
+        if state.aborted:
+            break
+        start, end = bounds[position]
+        shown = _chunk_page_text(text, start, end, position + 1, count, source.truncated)
+        user = prompts.claim_check_user(
+            pair.sentence, pair.paragraph, pair.number, pair.url, shown, current_date=current_date
+        )
+        asked = _ask(
+            client,
+            alias,
+            identity,
+            pair,
+            user,
+            shown,
+            complete=False,
+            max_tokens=max_tokens,
+            repair_retries=repair_retries,
+            cache=cache,
+            timeout=timeout,
+            allow_call=state.chunk_calls < chunking.max_chunk_calls,
+        )
+        if asked is None:
+            cap_hit = True
+            break
+        verdict, called = asked
+        if called:
+            state.chunk_calls += 1
+            calls += 1
+            if verdict.checked:
+                state.failures = 0
+            else:
+                _note_failure(state, alias, max_consecutive_failures)
+        if not verdict.checked:
+            first_failure = first_failure or verdict.unchecked_reason
+            continue
+        results.append(verdict)
+        if verdict.verdict in ("supported", "contradicted"):
+            # Early stop: a verdict that read the page settles the pair. A contradiction in
+            # a less relevant chunk is not looked for after a support (D-whole-page-claim-check).
+            return PairVerdict(
+                pair,
+                verdict.verdict,
+                verdict.support_span,
+                verdict.reason,
+                cached=calls == 0,
+                chunked=True,
+                chunk_calls=calls,
+                cap_hit=cap_hit,
+            )
+
+    def out(kind: str, **kw: Any) -> PairVerdict:
+        return PairVerdict(
+            pair,
+            kind,
+            cached=calls == 0,
+            chunked=True,
+            chunk_calls=calls,
+            cap_hit=cap_hit,
+            **kw,
+        )
+
+    kinds = {v.verdict for v in results}
+    if len(results) == count and kinds == {"unreadable"}:
+        # Every chunk was no document text: anchored only when every chunk quoted its line.
+        anchored = all(v.anchored for v in results)
+        return out(
+            "unreadable",
+            support_span=next((v.support_span for v in results if v.anchored), None) if anchored else None,
+            reason=results[0].reason,
+            anchored=anchored,
+        )
+    if "absent" in kinds:
+        # Settled only when every chunk answered `absent`: an unreadable chunk, an unchecked
+        # one, a capped one or a cut body each leave this a reading of part of the page.
+        whole = len(results) == count and kinds == {"absent"} and not source.truncated and not cap_hit
+        return out("absent", reason=results[0].reason, complete=whole)
+    if "unreadable" in kinds:
+        return out("unreadable", reason=results[0].reason)
+    reason = first_failure or ("aborted" if state.aborted else "chunk_cap")
+    return PairVerdict(
+        pair,
+        "unchecked",
+        unchecked_reason=reason,
+        chunked=True,
+        chunk_calls=calls,
+        cap_hit=cap_hit,
+    )
 
 
 # ------------------------------------------------------------------ findings
@@ -610,6 +866,7 @@ def _clip(text: str, limit: int) -> str:
 
 __all__ = [
     "CACHE_MAX_ENTRIES",
+    "Chunking",
     "ClaimCheck",
     "ClaimPair",
     "PairVerdict",
