@@ -124,6 +124,9 @@ minted it. A bibliography the body never cites is one `uncited_claim`, not one f
 text this run is covered by an `uncited_claim` too, minted from the run's read log (D-read-before-citing).
 When a revision drops a cited source while retaining its claim, the evidence result likewise gains
 one `uncited_claim` unless the claim cites a newly added page read in full (D-no-shrink-discharge).
+With verification on, a sentence citing an entry that has no fetchable address is covered by an
+`uncited_claim` as well, so deleting a URL while keeping the entry is not an escape from fetching
+(D-no-address-citation-finding).
 `stylistic` (cosmetic preference, ignored for convergence) is not listed above per lens
 because it attaches to all three — any lens may raise it.
 

@@ -355,6 +355,16 @@ source, narrow, or remove), adds no rule and no controller input, and the draft-
 means it cannot recur once the claim is gone. `review.shrink_finding` and `review.shrink_min_overlap`
 configure it; a `shrink_check` event records `shrink_findings`.
 
+One more pipeline-minted row, gated on `search.verify_sources` alone (D-no-address-citation-finding): a
+body sentence that cites a bibliography entry with no fetchable address (no `https://` URL; a bare
+`doi:` identifier counts as none) mints one `uncited_claim`/`major`, entries sharing a sentence folded
+into one finding. It is a fact about the current draft, needs no previous draft or read budget, and is
+dischargeable without a tool (give the entry a readable URL, re-source, or remove the claim). It is
+disjoint from the unread row by construction, which lists addressable entries only. Because it is a
+`major`, `review.selection: fewest_defects` counts it against a URL-stripped draft; `latest_unblocked`
+ranks on blocking alone and does not. `review.no_address_finding` configures it; a `no_address_check`
+event records `no_address_entries` and `no_address_findings`.
+
 No category is added to the taxonomy table, and each finding is minted **at** its category's floor,
 so the clamp is a no-op and RC-005's direction is untouched. These are pipeline-authored facts, not
 critic judgements: like the not-found finding they bypass `validate_issue`, whose subject is

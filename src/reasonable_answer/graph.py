@@ -1579,6 +1579,12 @@ def _read_first(rt: Runtime) -> bool:
     return rt.read_sources and rt.verify_sources
 
 
+def _no_address_finding(rt: Runtime) -> bool:
+    """Whether a citation of an address-less entry is a finding (D-no-address-citation-finding):
+    source verification on, plus its rollback knob."""
+    return rt.verify_sources and rt.config.review.no_address_finding
+
+
 def _must_read(rt: Runtime) -> bool:
     """Whether a writer is held to reading before it drafts (D-writer-must-read): the
     read-before-citing posture plus its rollback knob."""
@@ -2246,6 +2252,12 @@ def _critique_one(
                 read_log,
                 limit=rt.config.search.max_source_urls,
             )
+        # A citation of an entry with no fetchable address (D-no-address-citation-finding).
+        # Needs no read budget: giving the entry an address or withdrawing the claim clears it.
+        if _no_address_finding(rt):
+            mechanical += triage.mechanical_no_address_issues(
+                report_text, structure, limit=rt.config.search.max_source_urls
+            )
         # A revision that dropped a cited source and kept the claim (D-no-shrink-discharge).
         # Not gated on the read budget: withdrawing the claim always discharges it.
         if _read_first(rt) and previous_report and rt.config.review.shrink_finding:
@@ -2544,6 +2556,25 @@ def _critique(state: State, rt: Runtime) -> dict:
                     )
                 ),
             )
+
+    # Once per draft: how many address-less citation findings the evidence lens mints against
+    # it. Integers only (RA-016). Recorded on a draft's first critique pass, like shrink_check.
+    if seen.get("hash") != artifact_hash and _no_address_finding(rt):
+        _structure = report_mod.parse(report_text)
+        rt.store.event(
+            "no_address_check",
+            artifact_hash=artifact_hash,
+            no_address_entries=len(
+                triage.unaddressed_cited_entries(
+                    report_text, _structure, limit=rt.config.search.max_source_urls
+                )
+            ),
+            no_address_findings=len(
+                triage.mechanical_no_address_issues(
+                    report_text, _structure, limit=rt.config.search.max_source_urls
+                )
+            ),
+        )
 
     def work(slot: _CritiqueSlot) -> LensResult:
         if slot.unstaffed_reason is not None:

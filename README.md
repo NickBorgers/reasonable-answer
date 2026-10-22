@@ -417,6 +417,9 @@ cites a newly added page that a writer read in full. Narrowing or removing the c
 the finding (D-no-shrink-discharge). `review.shrink_finding` (default true) is the rollback switch,
 `review.shrink_min_overlap` (default 0.6) controls the claim-overlap match, and `shrink_check` events
 record dropped/added sources, removed entries, and the number of findings.
+With verification on, a sentence citing a bibliography entry that has no fetchable address also mints
+a major `uncited_claim` (D-no-address-citation-finding); `review.no_address_finding` (default true) is
+the rollback switch and `no_address_check` events count entries and findings.
 The evidence critic sees at most `fetch_max_chars` characters selected
 from that body as claim-anchored excerpts. Reading
 egresses through the same fetch boundary `verify_sources` uses, so the same network-layer caveat

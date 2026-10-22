@@ -515,6 +515,11 @@ review:
   # (D-no-shrink-discharge). false is the rollback switch; overlap is the minimum
   # word-set similarity used to recognize the claim in the next draft.
   shrink_finding: true
+  # With source verification on, a sentence citing a bibliography entry that has no fetchable
+  # address (no https:// URL) mints an uncited_claim, so stripping URLs from entries is not a
+  # way past fetching and claim checking (D-no-address-citation-finding). Print-only sources
+  # are included by design. false is the rollback switch.
+  no_address_finding: true
   shrink_min_overlap: 0.6
   # Which draft a non-accepted terminal ships (D-latest-unblocked-selection). The code
   # default is `fewest_defects`, the rule this system always had: minimal

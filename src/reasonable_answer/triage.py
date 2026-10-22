@@ -928,6 +928,91 @@ def mechanical_unread_issues(
     return issues
 
 
+def unaddressed_cited_entries(
+    report_text: str, structure: Structure, *, limit: int = DEFAULT_ENTRY_LIMIT
+) -> list[_Entry]:
+    """The bibliography entries the body cites that carry no fetchable address
+    (`fetch.entry_url` is None, so a bare `doi:` identifier counts as none).
+
+    The complement of `unread_cited_entries`, which lists only addressable entries: the two
+    never share an entry, so one sentence cannot get two findings for one entry from them
+    (D-no-address-citation-finding).
+    """
+    sources_section = _sources_section(structure)
+    if sources_section is None or not fetch.sources_section(report_text).strip():
+        return []
+    cited = _citations(structure, sources_section)
+    return [e for e in _entries(report_text, limit) if e.url is None and e.number in cited]
+
+
+def mechanical_no_address_issues(
+    report_text: str,
+    structure: Structure,
+    *,
+    limit: int = DEFAULT_ENTRY_LIMIT,
+) -> list[RawIssue]:
+    """`uncited_claim` findings for sentences citing an entry that has no fetchable address
+    (D-no-address-citation-finding).
+
+    Nothing can fetch, read or claim-check such an entry, so deleting a URL while keeping the
+    entry and its markers would otherwise leave every claim it supports unexamined. Each
+    entry is anchored on the first citing sentence not already taken by an earlier entry;
+    entries sharing a sentence fold into one finding, as in `mechanical_unread_issues`.
+    Fields hold only labels and fixed wording; never page text.
+    """
+    sources_section = _sources_section(structure)
+    if sources_section is None:
+        return []
+    cited = _citations(structure, sources_section)
+    groups: dict[tuple[int, int, str], list[_Entry]] = {}
+    for entry in unaddressed_cited_entries(report_text, structure, limit=limit):
+        first = None
+        picked = None
+        for paragraph in cited[entry.number]:
+            for sentence in excerpt._SENTENCE_END.split(paragraph.text):
+                sentence = sentence.strip()
+                if not sentence:
+                    continue
+                if not any(entry.number in excerpt._cited(m) for m in excerpt._MARKER.findall(sentence)):
+                    continue
+                key = (paragraph.section, paragraph.paragraph, sentence[:MAX_SPAN])
+                first = first or key
+                if key not in groups:
+                    picked = key
+                    break
+            if picked:
+                break
+        key = picked or first
+        if key is not None:
+            groups.setdefault(key, []).append(entry)
+
+    issues: list[RawIssue] = []
+    for (section, paragraph_no, span), members in groups.items():
+        labels = ", ".join(_citation_label(e.number) for e in members)
+        issues.append(
+            _minted(
+                category=Category.UNCITED_CLAIM,
+                severity=Severity.MAJOR,
+                locus=StructuralRef(section=section, paragraph=paragraph_no),
+                claim_span=span,
+                citation_id=labels,
+                rationale=(
+                    f"This sentence cites {labels}, a bibliography entry with no fetchable "
+                    "address: no page can be fetched, read or checked against the claim, so "
+                    "the claim is not backed by evidence a reader can verify."
+                ),
+                instruction=(
+                    f"Give {labels} a readable address in its entry (a full https:// URL: a "
+                    "doi.org link, the publisher's page or an archive copy) that you have read "
+                    "with read_source, or re-source the claim to a page you have read, or "
+                    "remove the claim. Deleting the address does not resolve it. Do not "
+                    "renumber entries."
+                ),
+            )
+        )
+    return issues
+
+
 def clamp(issues: list[RawIssue]) -> list[RawIssue]:
     """Apply mechanical severity floors — critics may escalate, never downgrade."""
     out: list[RawIssue] = []
