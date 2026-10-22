@@ -1,4 +1,4 @@
-## D-read-before-citing — a writer may cite only a page some writer has read in full text, and the pipeline checks it mechanically
+## D-read-before-citing — unread citations receive a mechanical finding
 
 **The finding.** `read_source` has been offered to writers since D-writer-source-reads, and a
 reviser may reopen the draft's own citations since D-writer-rereads-cited-sources, but both are
@@ -63,4 +63,10 @@ The event carries counts.
 still read a page and misread it; that is claim-level verification's question (D-claim-level-verification),
 not this rule's. Running without a read tool is unaffected.
 
-**Rollback.** Turn off `search.read_sources` or `search.verify_sources`; no separate knob is added.
+**Enforcement and rollback.** D-writer-must-read adds a separate, default-on
+`search.require_writer_reads` gate: a writer that drafts without a full-text read is retried, then
+the pool is rotated, within the existing attempt budget. If that walk cannot obtain a read draft,
+the held unread draft still ships with `unread_accepted: 1`; this decision's mechanical finding
+continues to cover its unread citations. Turning off `search.require_writer_reads` disables that
+retry gate but not this finding. Turn off `search.read_sources` or `search.verify_sources` to disable
+both behaviors.

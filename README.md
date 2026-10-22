@@ -405,7 +405,13 @@ bounds always apply: `search.read_char_budget` characters of page text in total 
 and `search.read_max_chars` per page (default 6,000). Raising
 `read_max_chars` above `fetch_body_max_chars` widens what the *writer* sees and nothing else — the
 verification path and mechanical dispute adjudication stay clipped to the retained body cap,
-`fetch_body_max_chars`. The evidence critic sees at most `fetch_max_chars` characters selected
+`fetch_body_max_chars`. With reading and verification enabled, the default-on
+`search.require_writer_reads` gate retries a writer that cites an unread page, then rotates through
+the writer pool within the existing attempt budget (D-writer-must-read). `generate` records
+`unread_retry`; if no read draft is obtained, the held draft ships rather than killing the run and
+records `unread_accepted: 1`, while the mechanical finding still covers its unread citations.
+Setting `search.require_writer_reads: false` disables this retry gate, but not the finding. The
+evidence critic sees at most `fetch_max_chars` characters selected
 from that body as claim-anchored excerpts. Reading
 egresses through the same fetch boundary `verify_sources` uses, so the same network-layer caveat
 applies, which is why the shipped roster leaves it off.

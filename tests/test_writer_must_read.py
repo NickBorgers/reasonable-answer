@@ -5,10 +5,12 @@ from __future__ import annotations
 import json
 
 import pytest
-from test_read_before_citing import URL_A, _runtime
+from test_graph import OPS_PREVIOUS, OPS_REPLY, uncited
+from test_read_before_citing import REPORT, URL_A, _runtime
 
 from reasonable_answer import graph as graph_mod
 from reasonable_answer import prompts
+from reasonable_answer.config import RevisionConfig
 from reasonable_answer.graph import _generate
 
 READ = [("web_search", '{"query": "q"}'), ("read_source", f'{{"url": "{URL_A}"}}')]
@@ -101,6 +103,42 @@ def test_a_draft_citing_only_already_read_entries_needs_no_new_read(tmp_path, id
 def test_a_page_whose_read_already_failed_does_not_trigger_the_retry(tmp_path, identities, config):
     rt, _ = _run(tmp_path, identities, config, [[]], round=1, report="x", read_log={URL_A: "paywalled"})
     assert len(_writer_calls(rt)) == 1
+
+
+def test_ops_mode_checks_the_spliced_draft_and_accepts_a_reading_retry(tmp_path, identities, config):
+    config = config.model_copy(update={"revision": RevisionConfig(mode="ops")})
+    rt, _ = _runtime(tmp_path, identities, config, read=True, verify=True)
+    rt.client.report_fn = lambda _n: OPS_REPLY
+    _script(rt, [[], READ])
+    out = _generate(
+        {
+            "question": "q?",
+            "round": 1,
+            "report": OPS_PREVIOUS,
+            "defects": [uncited(section=2, paragraph=2).model_dump(mode="json")],
+        },
+        rt,
+    )
+
+    assert len(_writer_calls(rt)) == 2
+    assert out["report"] != OPS_REPLY
+    assert "zero degrees Celsius" in out["report"]
+    gen = _events(rt, "generate")[-1]
+    assert gen["unread_retry"] == 1 and gen["unread_accepted"] == 0
+
+
+def test_one_full_text_read_bypasses_the_gate_while_other_citations_remain_unread(
+    tmp_path, identities, config
+):
+    rt, _ = _runtime(tmp_path, identities, config, read=True, verify=True)
+    rt.client.report_fn = lambda _n: REPORT
+    _script(rt, [READ])
+    _generate({"question": "q?", "round": 0}, rt)
+
+    assert len(_writer_calls(rt)) == 1
+    gen = _events(rt, "generate")[-1]
+    assert gen["unread_retry"] == 0 and gen["unread_accepted"] == 0
+    assert gen["cited_unread"] == 1
 
 
 def test_the_knob_off_is_byte_identical(tmp_path, identities, config):

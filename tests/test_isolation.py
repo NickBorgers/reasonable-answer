@@ -338,6 +338,8 @@ def test_a_page_a_writer_read_reaches_no_other_role(tmp_path, identities, config
     assert "read_outcomes" not in OrchestratorView.model_fields
     assert "read_log" not in OrchestratorView.model_fields
     assert "cited_unread" not in OrchestratorView.model_fields
+    assert "unread_retry" not in OrchestratorView.model_fields
+    assert "unread_accepted" not in OrchestratorView.model_fields
 
 
 def test_a_critic_cannot_emit_a_free_form_instruction_channel():
