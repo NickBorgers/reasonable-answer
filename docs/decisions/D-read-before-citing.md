@@ -13,7 +13,8 @@ read this" when no model did.
 (`search.verify_sources`) — the gating every reading feature already uses; with either off, no prompt
 byte, finding or event field changes.
 
-1. **Writer rule.** `prompts.WRITER_READ_FIRST_ADDENDUM`, appended to the writer system prompt in
+1. **Writer rule** (enforced since D-writer-must-read, which supersedes in place the earlier prompt-only
+   status). `prompts.WRITER_READ_FIRST_ADDENDUM`, appended to the writer system prompt in
    that case: search for and `read_source` every page before citing it; cite only pages read in full
    text; on a revision read a cited page before keeping a claim that rests on it. It restates, and
    does not loosen, D-writer-citation-continuity (never renumber).
