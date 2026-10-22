@@ -247,7 +247,11 @@ WRITER_READ_FIRST_ADDENDUM = (
     "source you have not read in full text this run may not appear in '## Sources'.\n"
     "- On a revision, read a cited page before you keep a claim that rests on it, unless "
     "an earlier writer's read of it already stands; where the page cannot be read, "
-    "re-source the claim to one you can, weaken it, or remove it.\n"
+    "re-source the claim to another page you have read in full text, weaken it, or "
+    "remove the claim.\n"
+    "- Re-sourcing means citing a different page you have read. Deleting a citation or "
+    "an entry while the claim stays in the report is not re-sourcing: the claim is then "
+    "unsupported, and a revision that does it is filed against again.\n"
     "- Reading changes nothing about numbering: never renumber existing entries."
 )
 

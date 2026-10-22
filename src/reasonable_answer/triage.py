@@ -24,6 +24,7 @@ from pydantic import ValidationError
 
 from . import excerpt, fetch
 from .report import Structure
+from .report import parse as _parse_report
 from .schemas import (
     MAX_CITATION_ID,
     MAX_INSTRUCTION,
@@ -1166,3 +1167,149 @@ def signal_signature(per_category: dict[str, SeverityCounts]) -> tuple:
     return tuple(
         sorted((cat, c.blocking, c.major) for cat, c in per_category.items() if c.blocking or c.major)
     )
+
+
+# ------------------------------------------------------------- removal is not a discharge
+
+_TOKEN = re.compile(r"\w+")
+
+
+def _claim_tokens(sentence: str) -> frozenset[str]:
+    """The words of a sentence with its citation markers taken off, case-folded: what the
+    sentence *claims*, independent of what it cites."""
+    return frozenset(_TOKEN.findall(excerpt._MARKER.sub(" ", sentence).casefold()))
+
+
+#: A claim of fewer words than this is too short for word overlap to say it survived.
+_SHRINK_MIN_TOKENS = 4
+
+
+def mechanical_shrink_issues(
+    previous: str,
+    report_text: str,
+    structure: Structure,
+    read_log: dict[str, str] | None,
+    *,
+    min_overlap: float = 0.6,
+    limit: int = DEFAULT_ENTRY_LIMIT,
+) -> list[RawIssue]:
+    """`uncited_claim` findings for a revision that dropped a cited source and kept the claim
+    (D-no-shrink-discharge).
+
+    A source is *dropped* exactly as the `generate` event counts it
+    (`excerpt.citation_changes`): the previous body cited it and this body does not. For
+    each sentence of the previous body that cited a dropped source, the new body is
+    searched for the same claim (word overlap of the sentence with its markers taken off,
+    at least `min_overlap`). A claim that survives is *discharged* only when it now cites
+    a source that is new to the cited set **and** that some writer has read in full text.
+    A claim that survives with no marker, or re-pointed at sources the previous draft
+    already cited, or at a new source nobody read, mints one finding at its new sentence.
+    A claim that was withdrawn or narrowed below `min_overlap` mints nothing, and neither
+    does a first draft (the caller passes no `previous`).
+
+    Fields hold only the previous draft's entry numbers, truncated addresses and fixed
+    wording; never page text, and no claim text beyond the new sentence's own quotable
+    span (docs/isolation.md).
+    """
+    if not previous:
+        return []
+    sources_section = _sources_section(structure)
+    if sources_section is None:
+        return []
+    _, before_cited = excerpt._cited_keys(previous)
+    _, after_cited = excerpt._cited_keys(report_text)
+    dropped = before_cited - after_cited
+    if not dropped:
+        return []
+
+    prev_structure = _parse_report(previous)
+    prev_section = _sources_section(prev_structure)
+    prev_entries = _entries(previous, limit)
+    dropped_by_number = {
+        e.number: e for e in prev_entries if excerpt._source_key(e.text) in dropped
+    }
+    if not dropped_by_number:
+        return []
+
+    # The previous draft's claims that rested on a dropped entry, with which entries.
+    claims: list[tuple[frozenset[str], set[int]]] = []
+    for paragraph in prev_structure.paragraphs:
+        if paragraph.section == prev_section:
+            continue
+        for sentence in excerpt._SENTENCE_END.split(paragraph.text):
+            numbers: set[int] = set()
+            for marker in excerpt._MARKER.findall(sentence):
+                numbers |= excerpt._cited(marker)
+            lost = numbers & dropped_by_number.keys()
+            tokens = _claim_tokens(sentence)
+            if lost and len(tokens) >= _SHRINK_MIN_TOKENS:
+                claims.append((tokens, lost))
+    if not claims:
+        return []
+
+    log = {fetch._clean_url(url): outcome for url, outcome in (read_log or {}).items()}
+    new_entries = {e.number: e for e in _entries(report_text, None)}
+    issues: list[RawIssue] = []
+    seen_spans: set[tuple[int, int, str]] = set()
+    for paragraph in structure.paragraphs:
+        if paragraph.section == sources_section:
+            continue
+        for sentence in excerpt._SENTENCE_END.split(paragraph.text):
+            sentence = sentence.strip()
+            tokens = _claim_tokens(sentence)
+            if len(tokens) < _SHRINK_MIN_TOKENS:
+                continue
+            lost: set[int] = set()
+            for old_tokens, old_lost in claims:
+                if len(tokens & old_tokens) / len(tokens | old_tokens) >= min_overlap:
+                    lost |= old_lost
+            if not lost:
+                continue
+            cited: set[int] = set()
+            for marker in excerpt._MARKER.findall(sentence):
+                cited |= excerpt._cited(marker)
+            replaced = False
+            for number in cited:
+                entry = new_entries.get(number)
+                if entry is None or entry.url is None:
+                    continue
+                if excerpt._source_key(entry.text) in before_cited:
+                    continue  # already cited last draft: a re-point, not a new source
+                if log.get(fetch._clean_url(entry.url)) == _FULL_TEXT:
+                    replaced = True
+            span = sentence[:MAX_SPAN]
+            key = (paragraph.section, paragraph.paragraph, span)
+            if replaced or key in seen_spans:
+                continue
+            seen_spans.add(key)
+            names = "; ".join(
+                f"{_citation_label(n)} ({(dropped_by_number[n].url or 'no address')[:120]})"
+                for n in sorted(lost)
+            )
+            issues.append(
+                _minted(
+                    category=Category.UNCITED_CLAIM,
+                    severity=Severity.MAJOR,
+                    locus=StructuralRef(section=paragraph.section, paragraph=paragraph.paragraph),
+                    claim_span=span,
+                    rationale=(
+                        f"The previous draft supported this claim with its entry {names}, which "
+                        "this revision no longer cites. The claim still stands here "
+                        + (
+                            "with no source behind it."
+                            if not cited
+                            else "on sources the previous draft already cited or that no writer "
+                            "has read in full text."
+                        )
+                        + " Dropping a citation does not answer a finding about the claim."
+                    ),
+                    instruction=(
+                        "Support this claim with a source you have read in full text with "
+                        "read_source that you did not cite for it before, or narrow the claim to "
+                        "what a source you have read states, or remove the claim. Deleting or "
+                        "moving the citation is not a resolution: the claim is judged as it "
+                        "stands. Do not renumber entries."
+                    ),
+                )
+            )
+    return issues
