@@ -411,7 +411,13 @@ the writer pool within the existing attempt budget (D-writer-must-read). `genera
 `unread_retry`; if no read draft is obtained, the held draft ships rather than killing the run and
 records `unread_accepted: 1`, while the mechanical finding still covers its unread citations.
 Setting `search.require_writer_reads: false` disables this retry gate, but not the finding. The
-evidence critic sees at most `fetch_max_chars` characters selected
+same read-and-verify gate also compares consecutive drafts: if a revision drops a cited source but
+keeps the claim it supported, the evidence lens mints a major `uncited_claim` unless the claim now
+cites a newly added page that a writer read in full. Narrowing or removing the claim also discharges
+the finding (D-no-shrink-discharge). `review.shrink_finding` (default true) is the rollback switch,
+`review.shrink_min_overlap` (default 0.6) controls the claim-overlap match, and `shrink_check` events
+record dropped/added sources, removed entries, and the number of findings.
+The evidence critic sees at most `fetch_max_chars` characters selected
 from that body as claim-anchored excerpts. Reading
 egresses through the same fetch boundary `verify_sources` uses, so the same network-layer caveat
 applies, which is why the shipped roster leaves it off.

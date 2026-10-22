@@ -99,6 +99,11 @@ class State(TypedDict, total=False):
     #: closed vocabulary only — no page text. Read by the evidence lens's mechanical
     #: block and by the `generate` event; no prompt, view or controller input.
     read_log: dict[str, str]
+    #: The draft the critique node last saw, and the draft it replaced (D-no-shrink-discharge).
+    #: Set only by `_critique`; read only by the evidence lens's shrink finding, never by a
+    #: prompt, view or the controller.
+    draft_seen: dict[str, str]
+    draft_previous: str | None
 
     round: int
     hash_history: list[str]
@@ -2025,6 +2030,7 @@ def _critique_one(
     run_date: str | None = None,
     coverage_sink: dict[str, dict] | None = None,
     read_log: dict[str, str] | None = None,
+    previous_report: str | None = None,
 ) -> LensResult:
     """One lens, one critic, one fresh context. Failure is recorded as a *failed lens*,
     never as 'no issues found' — a failed review can never manufacture a clean record.
@@ -2238,6 +2244,17 @@ def _critique_one(
                 report_text,
                 structure,
                 read_log,
+                limit=rt.config.search.max_source_urls,
+            )
+        # A revision that dropped a cited source and kept the claim (D-no-shrink-discharge).
+        # Not gated on the read budget: withdrawing the claim always discharges it.
+        if _read_first(rt) and previous_report and rt.config.review.shrink_finding:
+            mechanical += triage.mechanical_shrink_issues(
+                previous_report,
+                report_text,
+                structure,
+                read_log,
+                min_overlap=rt.config.review.shrink_min_overlap,
                 limit=rt.config.search.max_source_urls,
             )
         if mechanical:
@@ -2501,6 +2518,32 @@ def _critique(state: State, rt: Runtime) -> dict:
     # so an earlier round's coverage has to survive the rounds after it
     # (D-observed-source-coverage).
     coverage_by_artifact: dict[str, dict] = dict(state.get("source_coverage", {}))
+    # The draft this one replaced, for the shrink finding (D-no-shrink-discharge). Tracked
+    # here, per artifact hash, so a re-critique of the same draft keeps its baseline.
+    seen = state.get("draft_seen") or {}
+    if seen.get("hash") == artifact_hash:
+        previous_report = state.get("draft_previous")
+    else:
+        previous_report = seen.get("text")
+        # Once per draft, on its first critique pass: how many shrink findings the evidence
+        # lens will mint against it. Integers only (RA-016). It is its own event rather
+        # than a field of `generate`, which is written before any critique exists.
+        if _read_first(rt) and previous_report and rt.config.review.shrink_finding:
+            rt.store.event(
+                "shrink_check",
+                artifact_hash=artifact_hash,
+                **excerpt.citation_changes(previous_report, report_text),
+                shrink_findings=len(
+                    triage.mechanical_shrink_issues(
+                        previous_report,
+                        report_text,
+                        report_mod.parse(report_text),
+                        state.get("read_log"),
+                        min_overlap=rt.config.review.shrink_min_overlap,
+                        limit=rt.config.search.max_source_urls,
+                    )
+                ),
+            )
 
     def work(slot: _CritiqueSlot) -> LensResult:
         if slot.unstaffed_reason is not None:
@@ -2531,6 +2574,7 @@ def _critique(state: State, rt: Runtime) -> dict:
                 run_date=run_date,
                 coverage_sink=coverage_by_artifact,
                 read_log=state.get("read_log"),
+                previous_report=previous_report,
             )
         return result.model_copy(update={"confirm_state": True}) if confirming else result
 
@@ -2571,6 +2615,8 @@ def _critique(state: State, rt: Runtime) -> dict:
         "used_critics": {k: sorted(v) for k, v in used.items()},
         "critique_rounds": rounds,
         "source_coverage": coverage_by_artifact,
+        "draft_seen": {"hash": artifact_hash, "text": report_text},
+        "draft_previous": previous_report,
         "critic_strikes": strikes,
         "sidelined_critics": sidelined,
     }

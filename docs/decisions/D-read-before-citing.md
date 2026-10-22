@@ -17,7 +17,10 @@ byte, finding or event field changes.
    status). `prompts.WRITER_READ_FIRST_ADDENDUM`, appended to the writer system prompt in
    that case: search for and `read_source` every page before citing it; cite only pages read in full
    text; on a revision read a cited page before keeping a claim that rests on it. It restates, and
-   does not loosen, D-writer-citation-continuity (never renumber).
+   does not loosen, D-writer-citation-continuity (never renumber). Superseded in part by
+   D-no-shrink-discharge: "re-source" means cite a different page the writer has read in full text;
+   deleting the citation while the claim stays is not re-sourcing, and a revision that does it is
+   filed against.
 2. **A run-wide read log.** `State.read_log` maps URL to the `SourceOutcome` value of every page a
    writer's `read_source` resolved (`graph._merge_read_log`). It is built from the successful
    attempt's `ReadSession`, reuses the data `_read_fields` already derives, and refetches nothing. A

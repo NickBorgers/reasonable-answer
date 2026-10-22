@@ -930,6 +930,17 @@ class ReviewConfig(BaseModel):
     #: opts into search. Here and not under `budgets` for the reason `critic_strike_limit`
     #: gives: `_run_fingerprint` hashes `budgets`.
     selection: Literal["latest_unblocked", "fewest_defects"] = "fewest_defects"
+    #: A revision that drops a cited source while the claim it supported stays in the report
+    #: mints one `uncited_claim` finding (D-no-shrink-discharge), so deleting a citation is
+    #: not a free way to discharge a finding. Effective only while reading-before-citing is
+    #: in force. `false` restores the earlier behaviour. Here and not under `budgets`:
+    #: `_run_fingerprint` hashes `budgets`.
+    shrink_finding: bool = True
+    #: How much of a previous claim's wording (Jaccard overlap of its words, markers
+    #: removed) a new sentence must keep for the claim to count as still standing. A
+    #: matching heuristic, not a measured value: lower catches more reworded claims and
+    #: more unrelated sentences; higher lets a lightly reworded claim pass as withdrawn.
+    shrink_min_overlap: float = Field(default=0.6, gt=0.0, le=1.0)
 
     @model_validator(mode="after")
     def _check(self) -> ReviewConfig:

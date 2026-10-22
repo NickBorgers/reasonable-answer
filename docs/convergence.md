@@ -346,6 +346,15 @@ The last row is minted from the run's read log, not from the report alone, and o
 budget has room. An entry whose read already failed gets an instruction to re-source rather than re-read,
 so the finding is always dischargeable (read, re-source, weaken or remove).
 
+A further pipeline-minted row, under the same gating (D-no-shrink-discharge): a revision that drops a cited
+source (`cited_sources_dropped`, as the `generate` event counts it) while the sentence that cited it
+stays in the report mints one `uncited_claim`/`major` at the surviving sentence, unless that sentence
+now cites a source that is new to the cited set and was read in full text. Withdrawing or narrowing
+the claim mints nothing; a first draft mints nothing. It is dischargeable without a tool (cite a read
+source, narrow, or remove), adds no rule and no controller input, and the draft-to-draft comparison
+means it cannot recur once the claim is gone. `review.shrink_finding` and `review.shrink_min_overlap`
+configure it; a `shrink_check` event records `shrink_findings`.
+
 No category is added to the taxonomy table, and each finding is minted **at** its category's floor,
 so the clamp is a no-op and RC-005's direction is untouched. These are pipeline-authored facts, not
 critic judgements: like the not-found finding they bypass `validate_issue`, whose subject is

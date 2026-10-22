@@ -242,6 +242,12 @@ it — each one, again, a guard against a known LLM failure mode:
   Events expose `unread_retry`; if no read draft is obtained, the held unread draft ships with
   `unread_accepted: 1` and the mechanical finding remains (D-writer-must-read). Turning the gate off
   disables the retries, not that finding. With
+  reading and verification enabled, a revision also cannot discharge a finding merely by dropping
+  its citation: when the supported claim remains, the evidence lens mints a major `uncited_claim`
+  unless it now cites a newly added page that a writer read in full. Narrowing or removing the claim
+  also discharges it (D-no-shrink-discharge). `review.shrink_finding` (default true) rolls this check
+  back, `review.shrink_min_overlap` (default 0.6) sets the claim-overlap threshold, and `shrink_check`
+  events record the citation changes and resulting finding count. With
   `evidence_reader.enabled` as well, a read returns an evidence card — the passages of the whole
   retained page relevant to the question, each located verbatim in it, plus closed labels — in
   place of the page's opening (D-writer-evidence-card).

@@ -337,6 +337,8 @@ def test_a_page_a_writer_read_reaches_no_other_role(tmp_path, identities, config
     assert "sources_read" not in OrchestratorView.model_fields
     assert "read_outcomes" not in OrchestratorView.model_fields
     assert "read_log" not in OrchestratorView.model_fields
+    assert "draft_seen" not in OrchestratorView.model_fields
+    assert "draft_previous" not in OrchestratorView.model_fields
     assert "cited_unread" not in OrchestratorView.model_fields
     assert "unread_retry" not in OrchestratorView.model_fields
     assert "unread_accepted" not in OrchestratorView.model_fields
