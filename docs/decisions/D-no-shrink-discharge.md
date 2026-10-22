@@ -2,12 +2,11 @@
 
 **The finding.** D-read-before-citing, D-unreadable-citation-finding and D-anchored-unreadable make a
 claim that rests on an unread or unreadable page a major finding. Their instructions offer four
-ways out: read the page, re-source the claim, weaken it, or remove it. A writer under pressure takes
-the cheapest edit that stops the finding matching, which is to delete the citation (and the
-bibliography entry) while leaving the claim standing, often re-pointed at a long page already
-cited. The finding is gone and the claim is now less supported than before. Repeated each round,
-the cited set shrinks to a handful of sources carrying the whole report. Nothing in the pipeline
-looked at what *happened to* a claim whose source was removed, so removal was a free discharge.
+ways out: read the page, re-source the claim, weaken it, or remove it. Before this decision, deleting
+the citation and its bibliography entry while leaving the claim standing stopped the
+citation-specific finding from matching. Nothing in the pipeline checked what *happened to* a claim
+whose source was removed, so removal was a mechanically available discharge even though the claim
+no longer carried that support.
 
 **The decision.** Effective only when the run reads and verifies (`search.read_sources` and
 `search.verify_sources`, the gating of D-read-before-citing) and `review.shrink_finding` is true
