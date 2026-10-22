@@ -243,6 +243,16 @@ def test_an_out_of_range_critic_strike_limit_fails_closed(limit):
         ReviewConfig(critic_strike_limit=limit)
 
 
+@pytest.mark.parametrize("overlap", [0.0, -0.1, 1.1])
+def test_an_out_of_range_shrink_min_overlap_fails_closed(overlap):
+    with pytest.raises(ValidationError):
+        ReviewConfig(shrink_min_overlap=overlap)
+
+
+def test_shrink_min_overlap_accepts_the_upper_boundary():
+    assert ReviewConfig(shrink_min_overlap=1.0).shrink_min_overlap == 1.0
+
+
 def test_selection_defaults_to_the_rule_the_system_always_had():
     """The code default is `fewest_defects`; `latest_unblocked` is opt-in
     (D-latest-unblocked-selection) because its warrant is operator observation, not a

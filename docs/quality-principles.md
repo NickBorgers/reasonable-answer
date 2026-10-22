@@ -288,6 +288,11 @@ D-read-before-citing keeps all three: its mechanical `uncited_claim` (QP1) is mi
 floor from a URL-to-outcome read log, not from a model's score; the finding text carries only an entry
 label, address, outcome name and fixed instruction, so no page text or model prose crosses contexts (QP5);
 and a citation counts as read only when a fetch returned full text, never on a writer's say-so (QP10).
+D-no-shrink-discharge applies the same three principles across consecutive drafts: its mechanical
+`uncited_claim` is minted at the category's `major` floor (QP1); the writer receives only bounded
+entry labels and addresses, the new sentence's own span, and fixed instruction rather than prior-draft
+or page prose (QP5); and only a newly cited page with an observed full-text read can discharge a
+surviving claim by re-sourcing it (QP10).
 D-writer-must-read applies the same boundary before accepting a draft. Its unread predicate and
 retry/accept routing use only the deterministic read outcome and run read log (QP1); the retry adds
 only a fixed nudge to a fresh writer call and carries neither the rejected draft nor another model's

@@ -501,6 +501,12 @@ review:
   # (D-failing-critic-sidelined). 2026-09-04..09, glm-5.3 failed 46 of 66 critique calls
   # and was drawn again on every draft, each failure three 300s timeouts. 0 disables.
   critic_strike_limit: 2
+  # With writer reading and verification on, dropping a citation while retaining its
+  # claim mints an uncited_claim unless it is re-sourced to a newly read page
+  # (D-no-shrink-discharge). false is the rollback switch; overlap is the minimum
+  # word-set similarity used to recognize the claim in the next draft.
+  shrink_finding: true
+  shrink_min_overlap: 0.6
   # Which draft a non-accepted terminal ships (D-latest-unblocked-selection). The code
   # default is `fewest_defects`, the rule this system always had: minimal
   # 100·blocking + 10·major + 1·minor, ties to the latest round. THIS deployment opts
