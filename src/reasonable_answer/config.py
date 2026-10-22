@@ -270,6 +270,14 @@ class SearchConfig(BaseModel):
     #: which `graph._run_fingerprint` hashes.
     read_cited_sources: bool = True
 
+    #: Hold a writer to reading before it drafts (D-writer-must-read): a draft that opened no
+    #: page in full text yet cites a page nobody has read is retried once, then routed to
+    #: the next writer, and shipped with a warning only when nothing better came back.
+    #: Effective only where `read_sources` and `verify_sources` are both on. A rollback
+    #: switch, hence default on and no load-time rule; kept out of `Budgets`, which
+    #: `graph._run_fingerprint` hashes.
+    require_writer_reads: bool = True
+
     #: Ask the writer, in a separate structured pass, where each cited claim's support
     #: actually sits: citation id -> URL -> locator -> verbatim span -> claim. Checked
     #: mechanically against the bodies that were read, and written to the run's audit

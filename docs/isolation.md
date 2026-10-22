@@ -345,6 +345,10 @@ downstream. Four things bound it, and only the first is new:
   closed-vocabulary outcome and a fixed instruction — no page text and no model's words. The log
   never widens any writer's allowlist, enters no prompt, and has no path into `OrchestratorView`
   or the controller.
+- **The rule is enforced at the call (D-writer-must-read).** A draft that opened no page in full text yet
+  cites an entry the log does not hold at all is set aside once, its writer re-asked with a fixed nudge that
+  names no run material, then the next writer; the nudge and the held draft add no other model's words to any
+  context, and a read session is still scoped to one writer call.
 - **The output channel is unchanged.** A writer emits free-text markdown with or without the tool,
   so reading adds evidence, not a new way to emit anything — the same argument that bounds the
   evidence critic below. What the writer may be *persuaded* to write is the residual, and it is the
