@@ -936,6 +936,12 @@ class ReviewConfig(BaseModel):
     #: in force. `false` restores the earlier behaviour. Here and not under `budgets`:
     #: `_run_fingerprint` hashes `budgets`.
     shrink_finding: bool = True
+    #: A sentence citing a bibliography entry that carries no fetchable address mints one
+    #: `uncited_claim` finding (D-no-address-citation-finding), so deleting an entry's URL is
+    #: not a way to escape fetching and claim checking. Effective only while source
+    #: verification is on. `false` restores the earlier behaviour. Here and not under
+    #: `budgets`: `_run_fingerprint` hashes `budgets`.
+    no_address_finding: bool = True
     #: How much of a previous claim's wording (Jaccard overlap of its words, markers
     #: removed) a new sentence must keep for the claim to count as still standing. A
     #: matching heuristic, not a measured value: lower catches more reworded claims and

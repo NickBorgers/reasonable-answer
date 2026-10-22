@@ -247,7 +247,10 @@ it — each one, again, a guard against a known LLM failure mode:
   unless it now cites a newly added page that a writer read in full. Narrowing or removing the claim
   also discharges it (D-no-shrink-discharge). `review.shrink_finding` (default true) rolls this check
   back, `review.shrink_min_overlap` (default 0.6) sets the claim-overlap threshold, and `shrink_check`
-  events record the citation changes and resulting finding count. With
+  events record the citation changes and resulting finding count. With verification on, a sentence
+  citing an entry that has no fetchable address likewise mints a major `uncited_claim`, so stripping
+  URLs from entries evades nothing; print-only sources are included (D-no-address-citation-finding,
+  `review.no_address_finding`, `no_address_check` events). With
   `evidence_reader.enabled` as well, a read returns an evidence card — the passages of the whole
   retained page relevant to the question, each located verbatim in it, plus closed labels — in
   place of the page's opening (D-writer-evidence-card).
