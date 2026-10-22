@@ -26,10 +26,11 @@ along: the source is kept and its address removed.
    in force, with or without writer reading, so the finding does not require `read_sources`. With
    verification off nothing is fetched or checked for anyone, and no finding is minted. It is not
    suppressed when the read budget is spent: the exits need no read.
-4. **Dischargeable.** The instruction offers: give the entry a full `https://` URL (a doi.org link, the
-   publisher's page, an archive copy) that the writer has read, re-source the claim to a page read, or
-   remove the claim. It says deleting the address is no resolution. A restored URL is then subject to
-   the unread finding, so an entry cannot gain an address and skip reading.
+4. **Dischargeable.** The exits are: give the entry a full `http://` or `https://` URL (a doi.org
+   link, the publisher's page, an archive copy) that the writer has read, re-source the claim to a
+   page read, or remove the claim. The instruction says deleting the address is no resolution. A
+   restored URL is then subject to the unread finding, so an entry cannot gain an address and skip
+   reading.
 5. **Measurement.** A `no_address_check` event, once per draft on its first critique pass while the rule
    is in force, carries `no_address_entries` and `no_address_findings`, both integers (RA-016).
 6. **Selection.** `review.selection: fewest_defects` ranks on `100*blocking + 10*major + minor` over the
@@ -56,9 +57,10 @@ because any allowlist (an ISBN, "pp.") would be the next thing to strip.
 - D-writer-must-read: unchanged; it governs whether a writer read at all, and this finding is derived
   from the draft's text.
 
-**Isolation (docs/isolation.md).** Fields are entry labels and fixed wording; no page text and no
-model-authored text. Nothing reaches the controller view or a critic prompt; the finding is consumed as
-any minted finding is, through the revision task list.
+**Isolation (docs/isolation.md).** Fields are bounded entry labels, fixed rationale and instruction,
+and `claim_span`, a bounded verbatim sentence from the current report. No fetched page text or critic
+prose enters the finding. Nothing reaches the controller view or a critic prompt; the finding is
+consumed as any minted finding is, through the revision task list.
 
 **Residuals.** (1) An address-less entry the body never cites is a bibliography orphan
 (D-bibliography-integrity), not this finding. (2) An address that is a URL but dead or wrong belongs to

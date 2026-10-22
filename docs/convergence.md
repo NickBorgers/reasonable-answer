@@ -356,7 +356,8 @@ means it cannot recur once the claim is gone. `review.shrink_finding` and `revie
 configure it; a `shrink_check` event records `shrink_findings`.
 
 One more pipeline-minted row, gated on `search.verify_sources` alone (D-no-address-citation-finding): a
-body sentence that cites a bibliography entry with no fetchable address (no `https://` URL; a bare
+body sentence that cites a bibliography entry with no fetchable address (no `http://` or `https://`
+URL; a bare
 `doi:` identifier counts as none) mints one `uncited_claim`/`major`, entries sharing a sentence folded
 into one finding. It is a fact about the current draft, needs no previous draft or read budget, and is
 dischargeable without a tool (give the entry a readable URL, re-source, or remove the claim). It is

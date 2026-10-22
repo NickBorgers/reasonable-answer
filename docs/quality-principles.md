@@ -302,6 +302,11 @@ D-no-shrink-discharge applies the same three principles across consecutive draft
 entry labels and addresses, the new sentence's own span, and fixed instruction rather than prior-draft
 or page prose (QP5); and only a newly cited page with an observed full-text read can discharge a
 surviving claim by re-sourcing it (QP10).
+D-no-address-citation-finding applies them to citations that provide no fetchable address: its
+mechanical `uncited_claim` is minted at the category's `major` floor and enters the deterministic
+`fewest_defects` tally (QP1); the writer receives bounded entry labels, the current report sentence's
+bounded span, and fixed rationale and instruction, never fetched page text or critic prose (QP5); and
+an entry with no `http://` or `https://` URL establishes no fetched evidence for its claim (QP10).
 D-writer-must-read applies the same boundary before accepting a draft. Its unread predicate and
 retry/accept routing use only the deterministic read outcome and run read log (QP1); the retry adds
 only a fixed nudge to a fresh writer call and carries neither the rejected draft nor another model's
