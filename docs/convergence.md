@@ -513,8 +513,10 @@ prompt — for a chunk, including that chunk's text; never across runs, D-whole-
 date cannot reuse a stale verdict. Each family still forms its own
 view, and it is never a clean record. Counts go to a `claim_check` event; the sentences, spans and
 reasons go to the run's critiques directory. No controller rule, no `ControllerInput` or
-`OrchestratorView` field, and no budget changes; calls per pass are bounded by citation markers ×
-depth and the anti-pathological `claim_check.max_pairs`, and a pass whose calls fail
+`OrchestratorView` field, and no budget changes; pairs per pass are bounded by citation markers and
+the anti-pathological `claim_check.max_pairs`. With whole-page checking on, calls are separately
+bounded by `claim_check.max_chunks_per_pair` for each pair and `claim_check.max_chunk_calls` per
+critic per artifact. A pass whose calls fail
 `claim_check.max_consecutive_failures` times in a row records the rest `aborted` without a call, so
 a proxy that has stopped answering costs a few timeouts inside the critic's slot rather than one per
 pair (D-claim-check-inconclusive-verdicts).

@@ -90,8 +90,10 @@ Opt-in, off by default, `claim_check.enabled: false`, on the D-retrieval-opt-in 
 the evidence lens is byte-identical to a build without it (no call, no event, no prompt change), and
 enabling it without `search.verify_sources` fails closed at load, because there are no pages to
 check. Counts go to a `claim_check` audit event per critic per artifact — pairs, checked, supported,
-contradicted, absent, absent_partial, unreadable, unchecked, cached — and the sentences, spans and
-reasons go to the run's purgeable critiques directory, never the event trail (RA-016).
+contradicted, absent, absent_partial, unreadable, unchecked, cached — and, when
+`claim_check.whole_page` is on, `absent_whole_page`, `chunk_calls` and `chunk_cap_hit`. The
+sentences, spans and reasons go to the run's purgeable critiques directory, never the event trail
+(RA-016).
 
 **Invariants.** Author exclusion: the checker runs under the critic's slot with the critic's alias,
 so `assert_author_exclusion` has already run for it, and no new party is introduced. Cross-model
@@ -103,10 +105,11 @@ is at the floor and clamps like any other. Blind orchestrator: nothing new reach
 report sentence are fenced and marker-scrubbed in the checker's context as they are in the
 critic's; the `related_span` the writer sees is a bounded page quote inside a structured task, the
 same class of thing a critic's rationale already carries. Termination: no new rule, field or budget;
-calls per pass are bounded by citation markers × `review.depth` and the anti-pathological
-`claim_check.max_pairs`, and budgets count passes, never calls. Dispute adjudication: a dispute
-against a minted finding has the checker's page span to argue against, and the mechanical path
-already checks quotes against the retained body.
+pairs per pass are bounded by citation markers and the anti-pathological `claim_check.max_pairs`.
+With D-whole-page-claim-check on, calls are separately bounded by `max_chunks_per_pair` and by
+`max_chunk_calls` per critic per artifact; budgets count passes, never calls. Dispute adjudication:
+a dispute against a minted finding has the checker's page span to argue against, and the mechanical
+path already checks quotes against the retained body.
 
 **What this does not fix, stated plainly.** `uncited_claim` and per-sentence citation demands stay a
 critic judgement. A page that truly is a menu is `unreadable`, which is the honest answer, and the
@@ -114,14 +117,14 @@ writer still has to cite a better page — `search.read_sources` is the lever fo
 in the runs measured. The logic lens's alternating-critic variance (one critic filing four to ten
 issues per pass where its alternates file zero to two on the same drafts) is a roster question and
 is not touched. Cost is real: on a fresh draft the checker makes one call per citing sentence per
-evidence critic, serially within the critic's slot under the existing `max_concurrency`; the memo
-makes later rounds cheap, and the `cached` count on the event is how to see whether it is doing so.
+evidence critic when whole-page checking is off, and may make one call per examined chunk when it
+is on, serially within the critic's slot under the existing `max_concurrency`; the memo makes later
+rounds cheap, and the `cached` and `chunk_calls` counts show whether it is doing so.
 
 **Deliberately not done.** No change to `LENS_CATEGORIES`: the critic may still raise
 `misrepresented_source`, because the checker does not reach every citation and a lens that could not
-raise the category for an unchecked page would be weaker than before. No chunk-and-aggregate for
-pages past `page_max_chars`: the excerpter already puts the sentence's own passages in front of the
-checker, and `absent` on such a page is deliberately not a finding. No parallelism inside a slot:
+raise the category for an unchecked page would be weaker than before. ~~No chunk-and-aggregate for
+pages past `page_max_chars`~~ — superseded by D-whole-page-claim-check. No parallelism inside a slot:
 `max_concurrency` bounds proxy load and the checker respects it. No audition question for the
 checker yet: `ra audition` measures critics on the critique prompt, and a claim-checker fixture set is
 its own piece of work. No live A/B in this PR: the measurement is the evidence lens's clearance rate

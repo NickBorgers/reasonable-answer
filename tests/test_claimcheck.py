@@ -1102,6 +1102,41 @@ def test_the_per_pair_and_per_pass_caps_leave_absence_partial(identities):
     assert per_pass.counts()["chunk_cap_hit"] == 1
 
 
+def test_the_per_pass_chunk_cap_is_shared_across_pairs(identities):
+    second_url = "https://example.test/fleet"
+    report = f"""## Findings
+
+The system reaches a 60% efficiency [1]. A fleet has eleven ships [2].
+
+## Sources
+
+[1] {_URL}
+[2] {second_url}"""
+    sources = [
+        FetchedSource(url=_URL, text=_long_body(chunks=4), status=200),
+        FetchedSource(url=second_url, text=_long_body(chunks=4), status=200),
+    ]
+    result = claimcheck.check(
+        _client(identities, _absent),
+        "evidence-spec",
+        identities["evidence-spec"],
+        report,
+        sources,
+        page_max_chars=_SIZE,
+        max_pairs=200,
+        max_tokens=800,
+        repair_retries=0,
+        chunking=_chunking(max_chunk_calls=2),
+    )
+
+    first, second = result.verdicts
+    assert first.verdict == "absent" and not first.complete and first.cap_hit
+    assert second.verdict == "unchecked" and second.unchecked_reason == "chunk_cap"
+    assert second.chunk_calls == 0 and second.cap_hit
+    assert result.counts()["chunk_calls"] == 2
+    assert result.counts()["chunk_cap_hit"] == 2
+
+
 def test_an_unreadable_chunk_never_settles_absence(identities):
     n = {"i": 0}
 
