@@ -464,6 +464,23 @@ however short what survived (`FetchedSource.truncated` → `Excerpted.complete` 
 checker and the critic are both told the page continues past the last character retained
 (D-claim-check-inconclusive-verdicts).
 
+**A long page is checked to its end (D-whole-page-claim-check, `claim_check.whole_page`, default on;
+`false` restores the above exactly).** A body longer than `page_max_chars` is split into chunks of at
+most that many characters, each sharing `claim_check.chunk_overlap_chars` (default 800) with the
+previous so a passage up to that long straddling a boundary is whole in one chunk. The sentence is
+checked against the chunks most relevant first (`excerpt.rank_chunks`), each chunk in its own fresh
+context with the same four verdicts and the same verbatim-span rule. The first verified `supported`
+or `contradicted` is the pair's verdict (no scan for a contradiction after a support: cost against
+the common case, stated in the decision). `absent` from **every** chunk of a body that was not itself
+cut is `absent` with `complete`: settled, minting like a page shown whole, and so retiring the
+critic's own finding on that sentence through `reconcile`. Anything less leaves `absent_partial`, which
+mints and retires nothing: a chunk that failed, was skipped by the circuit breaker, or was not reached
+because `max_chunks_per_pair` (default 6) or `max_chunk_calls` (default 150 per critic per artifact)
+was hit; any `unreadable` chunk among `absent` ones; and a cut body (`FetchedSource.truncated`) however
+many chunks were checked. All `unreadable` is `unreadable`, anchored only if every chunk is. Chunk
+calls feed `max_consecutive_failures`. The `claim_check` event adds `absent_whole_page`, `chunk_calls`
+and `chunk_cap_hit` when the knob is on. Severity floors are unchanged.
+
 Every failure lands toward the writer: an unchecked pair mints nothing, and the critic's own
 whole-document `misrepresented_source` judgement is kept for exactly the pairs the checker did not
 **settle** and dropped for the ones it did (`claimcheck.reconcile`: same paragraph, the critic's span
@@ -501,12 +518,14 @@ the critic's `LensResult` — so they clamp, deduplicate, count toward `material
 record, and reach the writer as tasks exactly as a critic's own would — and a 402 during checking
 fails the lens with the account class so the run defers (D-credit-exhaustion-defers). Verdicts are
 memoised for the runtime per (critic resolved identity, complete system prompt, complete user
-prompt): the memo covers every input the checker sees, so a changed paragraph, source metadata or
+prompt — for a chunk, including that chunk's text; never across runs, D-whole-page-claim-check): the memo covers every input the checker sees, so a changed paragraph, source metadata or
 date cannot reuse a stale verdict. Each family still forms its own
 view, and it is never a clean record. Counts go to a `claim_check` event; the sentences, spans and
 reasons go to the run's critiques directory. No controller rule, no `ControllerInput` or
-`OrchestratorView` field, and no budget changes; calls per pass are bounded by citation markers ×
-depth and the anti-pathological `claim_check.max_pairs`, and a pass whose calls fail
+`OrchestratorView` field, and no budget changes; pairs per pass are bounded by citation markers and
+the anti-pathological `claim_check.max_pairs`. With whole-page checking on, calls are separately
+bounded by `claim_check.max_chunks_per_pair` for each pair and `claim_check.max_chunk_calls` per
+critic per artifact. A pass whose calls fail
 `claim_check.max_consecutive_failures` times in a row records the rest `aborted` without a call, so
 a proxy that has stopped answering costs a few timeouts inside the critic's slot rather than one per
 pair (D-claim-check-inconclusive-verdicts).

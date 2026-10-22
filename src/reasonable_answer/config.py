@@ -773,6 +773,21 @@ class ClaimCheckConfig(BaseModel):
     #: earlier behaviour, where `unreadable` mints nothing. `unchecked` never mints either
     #: way. Not under `budgets`, so `_run_fingerprint` is unchanged.
     unreadable_finding: bool = True
+    #: A page longer than `page_max_chars` is checked chunk by chunk to its end, so a
+    #: claim can be refuted by the whole retained body and `absent` from every chunk of an
+    #: uncut body settles as absent from the page (D-whole-page-claim-check). `false` is
+    #: the rollback: a long page is shown in part as before and absence from it mints
+    #: nothing. Not under `budgets`, so `_run_fingerprint` is unchanged.
+    whole_page: bool = True
+    #: Characters shared by consecutive chunks, so a passage up to this long that straddles
+    #: a boundary lies whole in one chunk.
+    chunk_overlap_chars: int = Field(default=800, ge=0, le=1_000)
+    #: Anti-pathological ceilings. Chunks examined per pair (most relevant first), and
+    #: checker calls spent on chunks per critic per artifact (memo hits are free). A pair
+    #: that hits either stays `absent_partial` and mints nothing. The default per-pair cap
+    #: covers the shipped `search.fetch_body_max_chars` (120,000) at the default chunk size.
+    max_chunks_per_pair: int = Field(default=6, ge=1, le=50)
+    max_chunk_calls: int = Field(default=150, ge=1, le=5_000)
 
 
 class RepairConfig(BaseModel):

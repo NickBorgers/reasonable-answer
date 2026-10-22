@@ -337,6 +337,53 @@ def select(
     return Excerpted(total, tuple(_merged(body, taken)), truncated)
 
 
+def _rws(body: str, lo: int, hi: int) -> int:
+    """Index of the last space or newline in body[lo:hi], or -1."""
+    return max(body.rfind(" ", lo, hi), body.rfind("\n", lo, hi))
+
+
+def chunk_bounds(body: str, *, size: int, overlap: int) -> list[tuple[int, int]]:
+    """Cover all of `body` with consecutive ranges of at most `size` characters, each
+    sharing exactly its first `overlap` characters with the end of the one before
+    (D-whole-page-claim-check). A passage no longer than `overlap` that straddles a
+    boundary therefore lies whole inside one range. Edges snap to whitespace (the end
+    backward, the start backward as well), which only lengthens the overlap, never
+    shortens it. A body that fits is one range. Deterministic."""
+    total = len(body)
+    if total <= size:
+        return [(0, total)]
+    overlap = max(0, min(overlap, size // 2))
+    out: list[tuple[int, int]] = []
+    start = 0
+    while True:
+        end = min(total, start + size)
+        if end < total:
+            cut = _rws(body, max(start + 1, end - 200), end)
+            end = cut if cut > start else end
+        out.append((start, end))
+        if end >= total:
+            return out
+        nxt = end - overlap
+        if overlap:
+            back = _rws(body, max(start + 1, nxt - 40), nxt)
+            nxt = back + 1 if back > start else nxt
+        start = max(nxt, start + 1)
+
+
+def rank_chunks(body: str, bounds: Sequence[tuple[int, int]], anchors: Sequence[str]) -> list[int]:
+    """Indices of `bounds`, most relevant to `anchors` first (the same distinctive-token
+    weights `select` scores windows with, summed over the whole range), earlier first on
+    ties so the order is deterministic. With no anchor tokens, document order."""
+    token_sets = [_tokens(a) for a in anchors]
+    merged: dict[str, int] = {}
+    for tokens in token_sets:
+        for token, weight in tokens.items():
+            merged[token] = max(merged.get(token, 0), weight)
+    lowered = body.lower()
+    scores = [sum(w for t, w in merged.items() if t in lowered[a:b]) for a, b in bounds]
+    return sorted(range(len(bounds)), key=lambda i: (-scores[i], i))
+
+
 def _score_windows(
     body: str, anchors: Sequence[str], *, window: int, start_at: int
 ) -> list[tuple[int, int, int]]:

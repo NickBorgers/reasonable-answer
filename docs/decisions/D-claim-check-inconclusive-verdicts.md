@@ -37,7 +37,9 @@ toward the writer, never against it; toward the finding, never away from it.
    nothing~~ — **superseded in part by D-unreadable-citation-finding:** `absent`-in-part still mints
    nothing, and an `unreadable` pair still mints nothing on its own, but a sentence whose every
    citation is `unreadable` now mints one `uncited_claim`. `checked` keeps its meaning
-   for the counts, so the `claim_check` event is unchanged in shape apart from the new `aborted`.
+   for the counts. With whole-page checking off, the `claim_check` event is unchanged in shape
+   apart from the new `aborted`; D-whole-page-claim-check adds `absent_whole_page`, `chunk_calls`
+   and `chunk_cap_hit` when `claim_check.whole_page` is on.
 2. **A cut body is never whole.** `FetchedSource.truncated` — additive, default `False`, so every
    constructor that predates it means what it meant — is set when the wire read hit `max_bytes`,
    when a PDF lost pages to `max_pages` (`textconv.pdf_to_markdown_bounded` reports it), when the
@@ -69,6 +71,8 @@ table.
 **Deliberately not done.** No parallelism inside a critic's slot; D-claim-level-verification's
 reason stands. No retry of an aborted pass within the same critique; the next round re-derives,
 and the memo means only the pairs that were never answered are re-asked. No chunk-and-aggregate
-for pages past `page_max_chars`. The production profile's `claim_check.enabled: true` describes the
+for pages past `page_max_chars` (~~not done~~ — **superseded by D-whole-page-claim-check**, which checks
+such a page chunk by chunk, treats a page checked to its end as shown whole, and keeps rule 2: a cut
+body is never whole however many chunks were checked). The production profile's `claim_check.enabled: true` describes the
 posture this decision makes safe, and takes effect when the deployed configuration is changed to
 match it.
