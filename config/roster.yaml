@@ -380,6 +380,15 @@ claim_check:
   # (D-unreadable-citation-finding, D-anchored-unreadable). An `unreadable` without a found span
   # and any `unchecked` pair never count. false = rollback: `unreadable` mints nothing.
   unreadable_finding: true
+  # A page longer than page_max_chars is checked chunk by chunk to its end, so it can be
+  # refuted as well as confirmed; `absent` from every chunk of an uncut body is a settled
+  # absence (D-whole-page-claim-check). false = rollback: a long page is shown in part and
+  # absence from it mints nothing. Chunks share the overlap; caps are anti-pathological and a
+  # pair that hits one stays partial and mints nothing.
+  whole_page: true
+  chunk_overlap_chars: 800
+  max_chunks_per_pair: 6
+  max_chunk_calls: 150
 
 # The per-source evidence reader behind read_source (D-writer-evidence-card). A read used to
 # hand the writer the page's first read_max_chars (6,000) characters, while the run kept up

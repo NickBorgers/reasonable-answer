@@ -2070,6 +2070,7 @@ def _critique_one(
                     current_date=run_date,
                     max_consecutive_failures=cc.max_consecutive_failures,
                     timeout=rt.config.call_timeouts.critic_seconds,
+                    chunking=claimcheck.Chunking.from_config(cc),
                 )
         except ProviderAccountError as exc:
             # The same shape `critique_once` returns for the critic's own 402, so

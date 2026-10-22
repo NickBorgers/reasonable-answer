@@ -970,3 +970,223 @@ def test_the_cache_preserves_anchoring_and_is_keyed_on_the_new_prompt(identities
     assert not any(v.cached for v in first.verdicts) and all(v.cached for v in again.verdicts)
     assert all(v.anchored for v in again.verdicts)
     assert "character-for-character, as `support_span`" in prompts.CLAIM_CHECK_SYSTEM.split("`unreadable`")[1]
+
+
+# ------------------------------------------------------------------ whole page (D-whole-page-claim-check)
+
+_URL = "https://example.test/emals"
+_ONE = "## Findings\n\nThe system reaches a 60% efficiency [1].\n\n## Sources\n\n[1] https://example.test/emals"
+_SIZE = 2_000
+
+
+def _long_body(needle: str | None = None, at: int = 2, chunks: int = 4) -> str:
+    """Filler of about `chunks` chunks; `needle` sits in the `at`-th (1-based)."""
+    filler = "Unrelated filler sentence about shipping schedules. "
+    per = _SIZE // len(filler)
+    parts = [filler * per for _ in range(chunks)]
+    if needle:
+        parts[at - 1] += needle + " "
+    return "".join(parts)
+
+
+def _chunking(**kw):
+    base = dict(overlap=200, max_chunks_per_pair=6, max_chunk_calls=100)
+    return claimcheck.Chunking(**{**base, **kw})
+
+
+def _run(identities, claim_fn, body, *, chunking="default", cache=None, truncated=False, **kw):
+    src = FetchedSource(url=_URL, text=body, status=200, truncated=truncated)
+    args = dict(page_max_chars=_SIZE, max_pairs=200, max_tokens=800, repair_retries=0)
+    return claimcheck.check(
+        _client(identities, claim_fn),
+        "evidence-spec",
+        identities["evidence-spec"],
+        _ONE,
+        [src],
+        chunking=_chunking() if chunking == "default" else chunking,
+        cache=cache,
+        **{**args, **kw},
+    )
+
+
+def _absent(alias, user):
+    return ClaimVerdict(verdict="absent", reason="nothing")
+
+
+def test_chunk_bounds_cover_the_body_and_overlap():
+    from reasonable_answer import excerpt
+
+    body = _long_body(chunks=5)
+    bounds = excerpt.chunk_bounds(body, size=_SIZE, overlap=200)
+    assert bounds[0][0] == 0 and bounds[-1][1] == len(body)
+    for (a, b), (c, _d) in zip(bounds, bounds[1:], strict=False):
+        assert b - a <= _SIZE and b - c >= 200 and c > a
+    assert excerpt.chunk_bounds("short", size=_SIZE, overlap=200) == [(0, 5)]
+
+
+def test_a_claim_supported_only_in_a_later_chunk_is_supported(identities):
+    body = _long_body("The projected efficiency is about 60% end to end.", at=3)
+    seen = []
+
+    def fn(alias, user):
+        seen.append(user)
+        if "about 60% end to end" in user:
+            return ClaimVerdict(verdict="supported", support_span="about 60% end to end", reason="ok")
+        return ClaimVerdict(verdict="absent", reason="no")
+
+    result = _run(identities, fn, body)
+    v = result.verdicts[0]
+    assert v.verdict == "supported" and v.settled and v.chunked
+    # Most relevant chunk first: the chunk holding the figure is asked before the filler.
+    assert len(seen) == 1 and result.counts()["chunk_calls"] == 1
+
+
+def test_a_contradiction_in_any_chunk_mints_a_finding(identities):
+    body = _long_body("The efficiency is only about 40%.", at=4)
+
+    def fn(alias, user):
+        if "only about 40%" in user:
+            return ClaimVerdict(verdict="contradicted", support_span="only about 40%", reason="40")
+        return ClaimVerdict(verdict="absent", reason="no")
+
+    result = _run(identities, fn, body)
+    assert result.verdicts[0].verdict == "contradicted"
+    assert [i.category for i in claimcheck.issues_from(result)] == [Category.MISREPRESENTED_SOURCE]
+
+
+def test_absent_from_every_chunk_of_an_uncut_body_is_a_settled_absence(identities):
+    result = _run(identities, _absent, _long_body(chunks=4))
+    v = result.verdicts[0]
+    assert v.verdict == "absent" and v.complete and v.settled
+    counts = result.counts()
+    assert counts["absent"] == 1 and counts["absent_whole_page"] == 1 and counts["absent_partial"] == 0
+    assert counts["chunk_calls"] >= 2 and counts["chunk_cap_hit"] == 0
+    (issue,) = claimcheck.issues_from(result)
+    assert issue.category is Category.MISREPRESENTED_SOURCE and issue.severity is Severity.MAJOR
+    assert "filler" not in issue.rationale and "filler" not in issue.claim_span
+    # A settled whole-page absence retires the critic's own judgement for that pair.
+    critic = [_critic_issue(1, 1, "reaches a 60% efficiency", citation_id="1")]
+    assert claimcheck.reconcile(critic, result) == []
+
+
+def test_one_failed_chunk_leaves_the_pair_absent_partial(identities):
+    n = {"i": 0}
+
+    def fn(alias, user):
+        n["i"] += 1
+        if n["i"] == 2:
+            raise ModelCallError("down", failure_class="timeout")
+        return ClaimVerdict(verdict="absent", reason="no")
+
+    result = _run(identities, fn, _long_body(chunks=4))
+    v = result.verdicts[0]
+    assert v.verdict == "absent" and not v.complete and not v.settled
+    assert result.counts()["absent_partial"] == 1
+    assert claimcheck.issues_from(result) == []
+
+
+def test_a_cut_body_is_never_complete_however_many_chunks_are_checked(identities):
+    result = _run(identities, _absent, _long_body(chunks=4), truncated=True)
+    v = result.verdicts[0]
+    assert v.verdict == "absent" and not v.complete
+    assert result.counts()["absent_whole_page"] == 0 and claimcheck.issues_from(result) == []
+
+
+def test_the_per_pair_and_per_pass_caps_leave_absence_partial(identities):
+    body = _long_body(chunks=4)
+    per_pair = _run(identities, _absent, body, chunking=_chunking(max_chunks_per_pair=2))
+    assert per_pair.verdicts[0].verdict == "absent" and not per_pair.verdicts[0].complete
+    assert per_pair.counts()["chunk_calls"] == 2 and per_pair.counts()["chunk_cap_hit"] == 1
+    per_pass = _run(identities, _absent, body, chunking=_chunking(max_chunk_calls=2))
+    assert not per_pass.verdicts[0].complete and per_pass.counts()["chunk_calls"] == 2
+    assert per_pass.counts()["chunk_cap_hit"] == 1
+
+
+def test_an_unreadable_chunk_never_settles_absence(identities):
+    n = {"i": 0}
+
+    def fn(alias, user):
+        n["i"] += 1
+        if n["i"] == 1:
+            return ClaimVerdict(verdict="unreadable", support_span="Unrelated filler", reason="nav")
+        return ClaimVerdict(verdict="absent", reason="no")
+
+    v = _run(identities, fn, _long_body(chunks=3)).verdicts[0]
+    assert v.verdict == "absent" and not v.complete
+    every = _run(
+        identities,
+        lambda a, u: ClaimVerdict(verdict="unreadable", support_span="Unrelated filler", reason="nav"),
+        _long_body(chunks=3),
+    )
+    assert every.verdicts[0].verdict == "unreadable" and every.verdicts[0].anchored
+
+
+def test_chunk_verdicts_are_memoised_across_rounds(identities):
+    cache = claimcheck.VerdictCache()
+    calls = []
+
+    def fn(alias, user):
+        calls.append(1)
+        return ClaimVerdict(verdict="absent", reason="no")
+
+    body = _long_body(chunks=3)
+    first = _run(identities, fn, body, cache=cache)
+    made = len(calls)
+    second = _run(identities, fn, body, cache=cache)
+    assert len(calls) == made and second.verdicts[0].cached and second.verdicts[0].complete
+    assert second.counts()["chunk_calls"] == 0 and first.counts()["chunk_calls"] == made
+    # A changed page misses.
+    _run(identities, fn, body + "A new closing sentence. ", cache=cache)
+    assert len(calls) > made
+
+
+def test_a_failed_chunk_is_never_memoised(identities):
+    cache = claimcheck.VerdictCache()
+
+    def boom(alias, user):
+        raise ModelCallError("down", failure_class="timeout")
+
+    _run(identities, boom, _long_body(chunks=3), cache=cache)
+    assert not cache._entries
+
+
+def test_chunk_failures_feed_the_circuit_breaker(identities):
+    calls = []
+
+    def boom(alias, user):
+        calls.append(1)
+        raise ModelCallError("down", failure_class="timeout")
+
+    result = _run(identities, boom, _long_body(chunks=5), max_consecutive_failures=2)
+    assert len(calls) == 2
+    assert result.verdicts[0].verdict == "unchecked"
+
+
+def test_knob_off_is_the_earlier_behaviour(identities):
+    off = _run(identities, _absent, _long_body(chunks=4), chunking=None)
+    assert off.verdicts[0].verdict == "absent" and not off.verdicts[0].complete
+    assert not off.verdicts[0].chunked and "chunk_calls" not in off.counts()
+    assert "chunked" not in off.as_record()["verdicts"][0]
+
+
+def test_chunks_are_asked_most_relevant_first(identities):
+    body = _long_body("The projected efficiency is about 60% end to end.", at=4)
+    order = []
+
+    def fn(alias, user):
+        order.append("about 60% end to end" in user)
+        return ClaimVerdict(verdict="absent", reason="no")
+
+    _run(identities, fn, body)
+    assert order[0] is True
+
+
+def test_whole_page_config_defaults_and_is_outside_the_run_identity(config):
+    cfg = ClaimCheckConfig()
+    assert cfg.whole_page and claimcheck.Chunking.from_config(cfg).overlap == cfg.chunk_overlap_chars
+    assert claimcheck.Chunking.from_config(ClaimCheckConfig(whole_page=False)) is None
+    knobs = {"whole_page": False, "max_chunk_calls": 3}
+    changed = config.model_copy(update={"claim_check": config.claim_check.model_copy(update=knobs)})
+    assert _run_fingerprint(config, "q", None) == _run_fingerprint(changed, "q", None)
+    with pytest.raises(ValidationError):
+        ClaimCheckConfig(max_chunk_calls=0)

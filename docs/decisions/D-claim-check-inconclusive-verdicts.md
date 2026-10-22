@@ -69,6 +69,8 @@ table.
 **Deliberately not done.** No parallelism inside a critic's slot; D-claim-level-verification's
 reason stands. No retry of an aborted pass within the same critique; the next round re-derives,
 and the memo means only the pairs that were never answered are re-asked. No chunk-and-aggregate
-for pages past `page_max_chars`. The production profile's `claim_check.enabled: true` describes the
+for pages past `page_max_chars` (~~not done~~ — **superseded by D-whole-page-claim-check**, which checks
+such a page chunk by chunk, treats a page checked to its end as shown whole, and keeps rule 2: a cut
+body is never whole however many chunks were checked). The production profile's `claim_check.enabled: true` describes the
 posture this decision makes safe, and takes effect when the deployed configuration is changed to
 match it.

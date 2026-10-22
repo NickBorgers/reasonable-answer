@@ -40,7 +40,10 @@ in its own context.
    schema is closed (`ClaimVerdict`): `supported`, `contradicted`, `absent`, `unreadable`, a
    `support_span`, a bounded `reason`. A `supported` or `contradicted` verdict whose span is not
    verbatim in the text shown is rejected on the repair loop and, past the budget, leaves the pair
-   *unchecked*. A verdict nobody can point at in the page is not a check.
+   *unchecked*. A verdict nobody can point at in the page is not a check. *Amended by
+   D-whole-page-claim-check:* a page longer than `page_max_chars` is checked chunk by chunk to its
+   end, each chunk in its own such context, so "a page shown in part" no longer means "never read
+   in full"; a page checked chunk by chunk to its end, uncut, counts as shown whole.
 3. **Verdicts become findings mechanically**, in the shape D-notfound-fabrication established for
    the 404: `contradicted` mints `misrepresented_source` at its major floor, with the page's own span
    as `related_span`; `absent` mints the same **only when the page was shown whole**, because on a
