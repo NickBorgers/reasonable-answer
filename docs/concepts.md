@@ -236,7 +236,12 @@ it — each one, again, a guard against a known LLM failure mode:
   `search.read_max_chars`). Calls are unbounded by default; characters are not. With
   `search.read_sources` and `search.verify_sources` both on, writers must read a page before citing
   it: each cited entry no writer has read in full text becomes a major mechanical `uncited_claim`
-  finding, and `generate` events expose `cited_unread` (D-read-before-citing). With
+  finding, and `generate` events expose `cited_unread` (D-read-before-citing). The default-on
+  `search.require_writer_reads` gate, effective only while both switches are on, retries a writer
+  that cites an unread page and then rotates through the pool within the existing attempt budget.
+  Events expose `unread_retry`; if no read draft is obtained, the held unread draft ships with
+  `unread_accepted: 1` and the mechanical finding remains (D-writer-must-read). Turning the gate off
+  disables the retries, not that finding. With
   `evidence_reader.enabled` as well, a read returns an evidence card — the passages of the whole
   retained page relevant to the question, each located verbatim in it, plus closed labels — in
   place of the page's opening (D-writer-evidence-card).

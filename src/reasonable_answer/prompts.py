@@ -256,6 +256,17 @@ WRITER_READ_FIRST_ADDENDUM = (
 )
 
 
+#: Appended to the writer's user message on the one retry of a writer whose draft cited pages
+#: it had not read (D-writer-must-read). Fixed text: it carries no run material and no
+#: format, so it holds under patch, rewrite and ops revision alike.
+WRITER_UNREAD_NUDGE = (
+    "\n\nYour previous attempt at this task cited pages you had not read, and was set aside. "
+    "Before you write, call `web_search` and `read_source` and read each page you mean to "
+    "cite. Cite only pages you read in full text; drop any claim you cannot source that "
+    "way. Then give your answer in exactly the output format your instructions require."
+)
+
+
 #: Appended after the read addenda when `read_source` answers with an evidence card
 #: (D-writer-evidence-card): what a card is, and the `purpose` argument that steers it.
 WRITER_CARD_ADDENDUM = (

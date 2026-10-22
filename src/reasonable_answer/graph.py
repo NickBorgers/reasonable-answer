@@ -1068,10 +1068,23 @@ def _generate(state: State, rt: Runtime) -> dict:
     spliced: ops.Splice | None = None
     last_failure = ""
     account_refused = False
+    # Write-before-read gate (D-writer-must-read). `pos` is the pool offset in force: it
+    # advances after a failed attempt (as `offset` always did) but holds still for the one
+    # nudged retry of the same writer. `held` is the latest draft that came back unread; it
+    # is accepted, with a recorded warning, when the walk ends without a better one.
+    gate = _must_read(rt)
+    pos = 0
+    nudged: set[str] = set()
+    tried: set[str] = set()
+    held: tuple[str, Any, ops.Splice | None, reading.ReadSession, int] | None = None
+    unread_retry = 0
+    nudge = False
     for offset in range(attempts):
         if offset > 0:
             rt.client.backoff_between_writer_attempts(offset)
-        alias = pool[(rotation + offset) % len(pool)]
+        alias = pool[(rotation + pos) % len(pool)]
+        tried.add(alias)
+        stay = False
         # A fresh session per `complete()` call, inside the loop rather than outside it,
         # because each attempt is a *different model* from the pool. Hoisting this would
         # let a retry read a page the failed attempt's search found, and would let the
@@ -1093,7 +1106,7 @@ def _generate(state: State, rt: Runtime) -> dict:
                         read_first=_read_first(rt),
                         cards=rt.cards_enabled,
                     ),
-                    user=user,
+                    user=user + prompts.WRITER_UNREAD_NUDGE if nudge else user,
                     max_tokens=32000,
                     # A draft on a slow host can generate for many minutes; cutting it at the
                     # shared default discards the work and bills it anyway (D-role-call-timeouts).
@@ -1119,9 +1132,36 @@ def _generate(state: State, rt: Runtime) -> dict:
                 # (D-ops-revision).
                 last_failure = f"generator {alias} returned no applicable operations"
                 failure_class = "malformed_ops"
+            elif gate and _unread_draft(
+                cfg, state, spliced.text if spliced is not None else reply.text.strip(), session
+            ):
+                # The call answered, but wrote from memory: it read no page in full text and
+                # cites a page nobody has read (D-writer-must-read). Not acceptable yet. One
+                # retry of this same writer with a fixed nudge; if that also comes back
+                # unread, the next unseen writer in the pool; if there is none, or the
+                # attempt budget is spent, the held draft ships with a warning.
+                held = (alias, reply, spliced, session, pos)
+                last_failure = f"generator {alias} drafted without reading the pages it cites"
+                failure_class = "unread_draft"
+                if alias not in nudged and offset + 1 < attempts:
+                    nudged.add(alias)
+                    nudge = True
+                    stay = True
+                    unread_retry += 1
+                else:
+                    nudge = False
+                    if tried.issuperset(pool):
+                        rt.store.event(
+                            "generate_failed",
+                            author=rt.identities[alias],
+                            reason=last_failure,
+                            failure_class=failure_class,
+                        )
+                        log.warning("writer attempt %d/%d: %s", offset + 1, attempts, last_failure)
+                        break
             else:
                 completion = reply
-                rotation += offset
+                rotation += pos
                 break
         # Recorded per attempt: a run that silently changed authors mid-draft is
         # unauditable, and the roster's weak models are only visible from here.
@@ -1136,6 +1176,18 @@ def _generate(state: State, rt: Runtime) -> dict:
             failure_class=failure_class,
         )
         log.warning("writer attempt %d/%d: %s", offset + 1, attempts, last_failure)
+        if not stay:
+            pos += 1
+            nudge = False
+
+    unread_accepted = 0
+    if completion is None and held is not None:
+        # Never leave a run without a draft over this gate (D-writer-rotation-pool): ship the
+        # unread one, say so in the event, and let the mechanical read finding discharge it.
+        alias, completion, spliced, session, held_pos = held
+        rotation += held_pos
+        unread_accepted = 1
+        log.warning("accepting an unread draft from %s: no writer read the pages it cites", alias)
 
     if completion is None:
         if account_refused:
@@ -1183,6 +1235,11 @@ def _generate(state: State, rt: Runtime) -> dict:
 
     read_log = _merge_read_log(state.get("read_log"), session)
     unread_fields: dict[str, int] = {}
+    if gate:
+        # Present only when the gate is in force (D-writer-must-read): nudged retries of the
+        # same writer, and whether an unread draft shipped because nothing better came back.
+        unread_fields["unread_retry"] = unread_retry
+        unread_fields["unread_accepted"] = unread_accepted
     if _read_first(rt):
         unread_fields["cited_unread"] = len(
             triage.unread_cited_entries(
@@ -1520,6 +1577,28 @@ def _read_first(rt: Runtime) -> bool:
     exactly when writers can read *and* the run verifies, the gating every reading feature
     already uses. With either off nothing here changes a byte."""
     return rt.read_sources and rt.verify_sources
+
+
+def _must_read(rt: Runtime) -> bool:
+    """Whether a writer is held to reading before it drafts (D-writer-must-read): the
+    read-before-citing posture plus its rollback knob."""
+    return _read_first(rt) and rt.config.search.require_writer_reads
+
+
+def _unread_draft(cfg: Any, state: State, text: str, session: reading.ReadSession) -> bool:
+    """A draft written without reading: this call opened no page in full text, and the
+    draft cites an addressable entry that is not in the run's read log at all
+    (D-writer-must-read). A revision that only keeps entries an earlier writer read, or
+    that already failed a read, is not caught: the mechanical finding owns those."""
+    if any(s.outcome is fetch.SourceOutcome.FULL_TEXT for s in session.reads.values()):
+        return False
+    log = _merge_read_log(state.get("read_log"), session)
+    return any(
+        outcome is None
+        for _, outcome in triage.unread_cited_entries(
+            text, report_mod.parse(text), log, limit=cfg.search.max_source_urls
+        )
+    )
 
 
 def _merge_read_log(prior: dict[str, str] | None, session: reading.ReadSession) -> dict[str, str]:
