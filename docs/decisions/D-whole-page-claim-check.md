@@ -39,8 +39,8 @@ chunk.
    relevant chunk and qualifies or contradicts it in a less relevant one yields `supported`, and the
    `supported` settles the pair and retires the critic's own `misrepresented_source` finding for it
    (`reconcile`, unchanged). This is the same limit a page shown whole to one context has — a single
-   reader may miss a qualification — and is accepted for cost; it is the direction D-claim-level-
-   verification already takes, toward the writer. Another critic slot's independent checker still
+   reader may miss a qualification — and is accepted for cost; it is the direction D-claim-level-verification
+   already takes, toward the writer. Another critic slot's independent checker still
    forms its own view (QP2).
 3. **Whole-page absence.** If every chunk of the body returns a completed `absent`, the pair is
    `absent` with `complete=True`: settled, minting `misrepresented_source` at its existing major
