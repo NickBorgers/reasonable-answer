@@ -46,6 +46,11 @@ review findings the way `D-<slug>` ids are.
 | QP11 | **Evidence-base freshness is checked mechanically and is never blocking.** See the marker line above and [§3](#3-refreshing-the-evidence-base). | this file | — |
 | QP12 | **Principles-as-spec drift is blocking, in both directions.** Behavior governed by QP1–QP10 changing without this file and the decision registry (a new `docs/decisions/D-<slug>.md`) moving too — or a principle here weakening with no new fetchable evidence in the diff — is the `quality` reviewer's row-12 analogue. See [§4](#4-retiring-or-weakening-a-principle). | this file + every surface above | — |
 
+**Application — per-identity evidence-reader breaker
+(D-per-identity-reader-breaker).** On QP10's `evidence.EvidenceReader` surface, the
+consecutive-failure breaker is scoped per resolved reader identity, while `max_calls` remains a
+run-wide ceiling shared by all identities.
+
 **Application — a writer may revise its own draft; it still never reviews it
 (D-writer-rotation-pool).** A narrowing of QP4's *surface*, recorded under
 [§4](#4-retiring-or-weakening-a-principle): writer-side author exclusion is withdrawn, critic-side
