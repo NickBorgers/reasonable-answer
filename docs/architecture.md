@@ -417,7 +417,8 @@ overlapping by `chunk_overlap_chars`, one structured `ReaderOutput` call each (`
 overlap repeats merge first-wins, and at most `max_passages` / `card_max_chars` of passages survive,
 shown in page order. `read_char_budget` is charged the card's characters, not the body's; reader
 calls have their own whole-run ceiling (`max_calls`, all-or-nothing per page) and a breaker
-(`max_consecutive_failures`). The `ReadSession` records a carded read with the passages as its
+(`max_consecutive_failures`, kept per reader model identity so one provider's failures never
+switch off another writer's cards; D-per-identity-reader-breaker). The `ReadSession` records a carded read with the passages as its
 `text` and its fetch outcome unchanged (`full_text`), so `support.check`, the manifest pass and the
 D-read-before-citing log all see exactly what the writer saw. No card — off, a failure, a spent
 budget, no verified passage, a body that is not full text — is today's path, byte for byte.

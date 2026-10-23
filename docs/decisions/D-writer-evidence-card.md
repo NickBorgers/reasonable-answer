@@ -57,7 +57,7 @@ path: every retained body is read, and no two pages ever share the reader's cont
 3. **Failure posture: toward the writer seeing something, and never disguised.** A failed or
    timed-out call (`reader_failed`), a schema violation past one repair, a spent reader-call budget
    (`reader_budget_spent`), a breaker that has tripped (`reader_unavailable`, after
-   `max_consecutive_failures` failures in a row, so a dead proxy costs a few timeouts rather than
+   `max_consecutive_failures` failures in a row on one model identity, per D-per-identity-reader-breaker, so a dead proxy costs a few timeouts rather than
    one per read) and a pass with no verified passage (`no_verified_passage`) all fall back to the
    raw opening, rendered by `source_read_block` **byte-identically** to a build without this, and
    counted under that closed reason. A card is rendered only for a read the session recorded with

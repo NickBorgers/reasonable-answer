@@ -239,8 +239,8 @@ def _locate(quote: str, text: str) -> tuple[int, int] | None:
 
 
 class EvidenceReader:
-    """Run-lifetime reader: the client, the knobs, the cache, the call budget and the
-    breaker. One per runtime, shared by every writer call of the run."""
+    """Run-lifetime reader: the client, the knobs, the cache, the run-wide call budget and the
+    per-identity breaker. One per runtime, shared by every writer call of the run."""
 
     def __init__(self, client, config, *, repair_retries: int = 1) -> None:
         self._client = client
@@ -249,8 +249,10 @@ class EvidenceReader:
         self._cache: dict[tuple[str, ...], CardOutcome] = {}
         self._lock = threading.Lock()
         self._calls = 0
-        self._failures = 0
-        self._disabled = False
+        #: Breaker state per reader identity (the resolved provider/model), never run-wide:
+        #: one provider's bad patch is no evidence about another writer's model.
+        self._failures: dict[str, int] = {}
+        self._disabled: set[str] = set()
 
     @property
     def calls(self) -> int:
@@ -281,7 +283,7 @@ class EvidenceReader:
 
         pieces = chunks(body, cfg.chunk_chars, cfg.chunk_overlap_chars)
         with self._lock:
-            if self._disabled:
+            if identity in self._disabled:
                 return CardOutcome(None, "reader_unavailable")
             # All or nothing: a card that read half the page would present the passages
             # of that half as the page's relevant material.
@@ -328,7 +330,7 @@ class EvidenceReader:
                     len(pieces),
                     getattr(exc, "failure_class", type(exc).__name__),
                 )
-                self._failed()
+                self._failed(alias, identity)
                 return CardOutcome(
                     None,
                     "reader_failed",
@@ -344,7 +346,7 @@ class EvidenceReader:
                     found.append(passage)
         seconds = time.monotonic() - started
         with self._lock:
-            self._failures = 0
+            self._failures[identity] = 0
 
         # An overlap repeat is neither kept nor a verification failure, so not counted.
         merged, _ = _merged(found)
@@ -388,15 +390,17 @@ class EvidenceReader:
             used += len(passage.text)
         return kept, len(passages) - len(kept)
 
-    def _failed(self) -> None:
+    def _failed(self, alias: str, identity: str) -> None:
         with self._lock:
-            self._failures += 1
-            if self._failures >= self._config.max_consecutive_failures and not self._disabled:
-                self._disabled = True
+            count = self._failures.get(identity, 0) + 1
+            self._failures[identity] = count
+            if count >= self._config.max_consecutive_failures and identity not in self._disabled:
+                self._disabled.add(identity)
                 log.warning(
-                    "evidence reader: %d consecutive failures; raw page openings for the "
-                    "rest of this run",
-                    self._failures,
+                    "evidence reader: %d consecutive failures on %s; raw page openings for "
+                    "that model for the rest of this run",
+                    count,
+                    alias,
                 )
 
 
