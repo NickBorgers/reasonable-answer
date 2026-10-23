@@ -418,7 +418,8 @@ evidence_reader:
   max_passages: 8
   passage_max_chars: 1500
   card_max_chars: 5000
-  # Anti-pathological whole-run ceiling on reader calls, and the breaker for a dead proxy.
+  # Anti-pathological whole-run ceiling on reader calls, and the breaker for a dead proxy
+  # (per model identity; the ceiling stays run-wide).
   max_calls: 300
   max_consecutive_failures: 3
   timeout_seconds: 180

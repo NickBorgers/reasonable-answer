@@ -242,6 +242,63 @@ def test_consecutive_failures_switch_the_reader_off_for_the_run():
     assert out.fallback == "reader_unavailable"
 
 
+def _split_client(bad_alias):
+    calls = {}
+
+    def fn(alias, user):
+        calls[alias] = calls.get(alias, 0) + 1
+        if alias == bad_alias[0]:
+            raise ModelCallError("429", failure_class="http_429")
+        return _quoting(FIGURE)(alias, user)
+
+    return calls, _client(fn)
+
+
+def _read_as(er, alias, identity, n):
+    return er.card(alias, identity, _page(text=BODY + str(n)), question="q")
+
+
+def test_one_identitys_breaker_leaves_another_identitys_cards_working():
+    bad = ["writer-a"]
+    calls, client = _split_client(bad)
+    er = EvidenceReader(client, EvidenceReaderConfig(enabled=True, max_consecutive_failures=2))
+    for n in range(4):
+        out = _read_as(er, "writer-a", "vendor-a/model-a", n)
+    assert out.fallback == "reader_unavailable"
+    assert calls["writer-a"] == 2
+    for n in range(10, 13):
+        assert _read_as(er, "writer-b", "vendor-b/model-b", n).card is not None
+    # A stays disabled for the run, even after its provider recovers.
+    bad[:] = ["none"]
+    assert _read_as(er, "writer-a", "vendor-a/model-a", 99).fallback == "reader_unavailable"
+
+
+def test_a_success_resets_only_its_own_identitys_failure_count():
+    bad = ["writer-a"]
+    _, client = _split_client(bad)
+    er = EvidenceReader(client, EvidenceReaderConfig(enabled=True, max_consecutive_failures=2))
+    assert _read_as(er, "writer-a", "vendor-a/model-a", 0).fallback == "reader_failed"
+    assert _read_as(er, "writer-b", "vendor-b/model-b", 1).card is not None  # not A's reset
+    assert _read_as(er, "writer-a", "vendor-a/model-a", 2).fallback == "reader_failed"
+    assert _read_as(er, "writer-a", "vendor-a/model-a", 3).fallback == "reader_unavailable"
+    # And B's own success does reset B's count.
+    bad[:] = ["writer-b"]
+    assert _read_as(er, "writer-b", "vendor-b/model-b", 4).fallback == "reader_failed"
+    bad[:] = ["none"]
+    assert _read_as(er, "writer-b", "vendor-b/model-b", 5).card is not None
+    bad[:] = ["writer-b"]
+    assert _read_as(er, "writer-b", "vendor-b/model-b", 6).fallback == "reader_failed"
+
+
+def test_the_call_cap_stays_run_wide_across_identities():
+    _, client = _split_client(["none"])
+    er = EvidenceReader(client, EvidenceReaderConfig(enabled=True, max_calls=2))
+    assert _read_as(er, "writer-a", "vendor-a/model-a", 0).card is not None
+    assert _read_as(er, "writer-b", "vendor-b/model-b", 1).card is not None
+    assert _read_as(er, "writer-b", "vendor-b/model-b", 2).fallback == "reader_budget_spent"
+    assert er.calls == 2
+
+
 def test_a_non_full_text_read_never_reaches_the_reader():
     blocked = FetchedSource(url=URL, error="HTTP 403", outcome=SourceOutcome.BLOCKED)
     handler, session, *_ = _wire(_quoting(FIGURE), page=blocked)
