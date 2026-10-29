@@ -294,8 +294,10 @@ def _sha(text: str) -> str:
 PATCH_CLOSE_SHA = "e43b460cb048d124e5b1f4438366c7a982105c47e08734d61c88e384cce015e5"
 REWRITE_CLOSE_SHA = "442f3a094160a5b4db18a723f286de393713783887458f9345c4f1540550d951"
 PINNED_REPORT = "## Conclusion\n\nWater boils at 100 degrees Celsius [1].\n\n## Sources\n\n[1] A source."
-PATCH_PROMPT_SHA = "12918356f35e046e4adb1aa62798b27cfc74414b61ed296453d32bed662c06e7"
-REWRITE_PROMPT_SHA = "20516e4dacbbea04a5ff1919b5cfdf8870e2a67e2ae3ace4eb73ef49279df4b7"
+#: Re-pinned by D-no-draft-history, whose one sentence enters every arm identically: the
+#: arms still differ only in their close, which the two close pins above hold unchanged.
+PATCH_PROMPT_SHA = "b2be25dc5f8d9ae89bb8b04f1ce6afd028cd6d128017ee8c518996e778501079"
+REWRITE_PROMPT_SHA = "61dc81b14f3b0ac8daeaf0a9724a316e916c365ac1ff9dc1e8458fcd362b7850"
 
 
 def test_the_patch_and_rewrite_arms_are_pinned_byte_for_byte():

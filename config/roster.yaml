@@ -521,6 +521,11 @@ review:
   # is not a way past fetching and claim checking (D-no-address-citation-finding). Print-only sources
   # are included by design. false is the rollback switch.
   no_address_finding: true
+  # A body paragraph that talks about an earlier draft of the report ("removed as unsupported",
+  # "this revision could not verify") gets a repair turn, then a blocking unclear_structure
+  # finding: the reader receives only the final report (D-no-draft-history). false is the
+  # rollback switch; the writer prompt rule stays either way.
+  draft_history_check: true
   shrink_min_overlap: 0.6
   # Which draft a non-accepted terminal ships (D-latest-unblocked-selection). The code
   # default is `fewest_defects`, the rule this system always had: minimal

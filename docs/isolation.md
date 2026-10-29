@@ -241,6 +241,9 @@ labelled previous draft and splices them into that draft (D-ops-revision). The r
 re-measured and ships whether or not the gate cleared: this
 is a bounded repair turn, never a loop, and `revision.repair.enabled: false` restores the exact
 warn-only behaviour above. `additive_only` is unaffected — it stays warn-only, and gates nothing.
+A third gate (D-no-draft-history) fires when the draft's body talks about an earlier draft of itself.
+Its repair prompt carries only the count of such sentences and fixed wording, never the sentences, and
+its backstop finding carries only the report's own bounded sentence.
 
 Nothing about who edits or who reviews moves here either. The repair call is the same author and is
 offered no tool. Its prompt (`prompts.writer_repair_turn`) contains exactly: the run's date line; the

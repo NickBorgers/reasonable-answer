@@ -164,7 +164,12 @@ WRITER_SYSTEM = (
     "the presupposition rather than inheriting it.\n"
     "- On contested questions you draw sources from more than one outlet or "
     "viewpoint cluster where genuine sources exist, and you say so plainly when "
-    "they do not.\n\n"
+    "they do not.\n"
+    "- The report is the only document your reader ever receives. They never see an "
+    "earlier draft, a fix task or a reviewer, so the report never mentions any of them: "
+    "no 'the earlier draft claimed', no 'removed as unsupported', no 'this revision could "
+    "not verify'. A claim you withdraw is deleted without trace. A gap in the evidence "
+    "is stated as a fact about the sources ('no source reviewed here reports ...').\n\n"
     "Output the report body only: no preamble, no meta-commentary about your process."
 )
 
@@ -877,7 +882,9 @@ def writer_revision(
         "Each task names a locus (section/paragraph of the draft), a defect category, and "
         "a concrete instruction. Apply them all. Where a task asks for a citation you "
         "cannot honestly supply, weaken or remove the claim rather than inventing a "
-        f"source.{resolution}{dispute_note}\n\n"
+        "source. Removing a claim means deleting it: the report never says that a claim was "
+        "removed, or that an earlier draft existed, because its reader sees only the "
+        f"finished report.{resolution}{dispute_note}\n\n"
         f"{close}"
     )
 
@@ -903,6 +910,7 @@ def writer_repair_turn(
     body_markers: int,
     cited_sources_dropped: int,
     out_of_scope: int,
+    draft_history: int = 0,
     patch_licence: bool = True,
     ops: bool = False,
     current_date: str | None = None,
@@ -923,7 +931,10 @@ def writer_repair_turn(
     asks for operations on the labelled previous draft — the same output contract the
     drafting call had — never for a whole document; `patch_licence` is ignored, since
     under ops there is no byte-for-byte to ask for. With `ops=False` the prompt is
-    byte-identical to what it was before the flag existed."""
+    byte-identical to what it was before the flag existed.
+
+    `draft_history` is gate 3's count (D-no-draft-history): sentences of the draft that talk
+    about earlier drafts of the report. At 0 the prompt is byte-identical to the two-gate one."""
     if ops:
         tasks = json.dumps(
             [{"task_id": f"T{i}", **_task_dump(d)} for i, d in enumerate(defects, 1)], indent=2
@@ -944,6 +955,14 @@ def writer_repair_turn(
         clauses.append(f"changed {out_of_scope} paragraph(s) that no fix task names")
     if clauses:
         sentences.append("It " + " and ".join(clauses) + ".")
+    if draft_history:
+        # Gate 3 (D-no-draft-history): a count and fixed wording, never the sentences.
+        sentences.append(
+            f"{draft_history} sentence(s) of your draft talk about an earlier draft or revision "
+            "of this report, or about claims removed from it. The reader receives only the "
+            "finished report: delete every such reference, delete withdrawn claims without "
+            "saying they were made, and state gaps as facts about the sources."
+        )
     if ops and previous is not None:
         restore = (
             "Return operations on the labelled PREVIOUS DRAFT below, in the block format "

@@ -108,7 +108,7 @@ no report text (RA-016):
 | field | meaning |
 |---|---|
 | `repair_attempted` | 1 if either gate fired and `revision.repair.enabled`, else absent |
-| `repair_reason` | `markerless`, `out_of_scope`, or `both` |
+| `repair_reason` | `markerless`, `out_of_scope`, or `both`; `draft_history` when only D-no-draft-history's gate 3 fired |
 | `repair_resolved` | 1 if the gate(s) cleared by the time the repair budget was spent, else 0 |
 
 `repair_resolved` means what its name says: a repair that makes gate 1 false by deleting the whole
