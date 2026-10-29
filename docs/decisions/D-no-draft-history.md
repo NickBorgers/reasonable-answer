@@ -1,18 +1,19 @@
 ## D-no-draft-history — the report never talks about earlier drafts of itself
 
-**The finding.** Production run `run-62eba4c35567` (build `25e9609`) shipped a report that narrated
-its own revision history in 40 sentences: "the Ballotpedia page the previous draft cited", "Claims in
-the earlier draft … are removed as unsupported", "No source read for this revision reports …", and
-section bullets titled "Nevada 2024 Measure — Removed". The reader receives only the final report.
-They never saw an earlier draft, so these sentences describe nothing they can see, and they crowd
-out the answer.
+**The finding.** The operator's private audit trail contained a final report that narrated its own
+revision history. That observation is recorded here without identifiers, counts, or examples. It is
+the **motivation and not the warrant** (QP9): the reader receives only the final report, so an earlier
+draft is not an artifact the reader can inspect.
 
-The cause is the fix-task text the recent evidence decisions hand a writer. D-no-shrink-discharge's
-finding says "The previous draft supported this claim with its entry …, which this revision no longer
-cites", and several findings end with "or remove the claim". A writer answered those tasks by
-narrating them into the report. The writer system prompt only said "no meta-commentary about your
-process", which no writer read as forbidding this. No critic flagged it, so the controller and round
-selection treated the draft as an improvement.
+**The warrant is the mechanism, and it is checkable in this repository.** Revision writers receive
+the previous artifact and fix tasks, and existing evidence-task wording in `prompts.py` uses
+draft-relative language such as "previous draft" and permits removing a claim. Before this decision,
+`WRITER_SYSTEM` prohibited only general process meta-commentary; it did not say that the final report
+must omit the revision frame supplied as input. The writer's returned text becomes the report, while
+the ordinary critic contract had no deterministic check for draft-history narration. Thus the prompt
+surface permitted input-only revision context to survive into the reader-facing artifact. The fixed
+prompt rule, mechanical detector, bounded repair, and blocking backstop below close that repository-
+visible path without relying on the private observation as evidence that it occurs at any rate.
 
 **The decision.** Effective while `review.draft_history_check` is true (default).
 

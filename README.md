@@ -420,8 +420,9 @@ record dropped/added sources, removed entries, and the number of findings.
 With verification on, a sentence citing a bibliography entry that has no fetchable address also mints
 a major `uncited_claim` (D-no-address-citation-finding); `review.no_address_finding` (default true) is
 the rollback switch and `no_address_check` events count entries and findings.
-A body paragraph that talks about an earlier draft of the report gets a repair turn and then a
-blocking finding, because the reader receives only the final report (D-no-draft-history);
+A body paragraph that talks about an earlier draft of the report gets a bounded repair opportunity;
+if the reference remains (or repair is unavailable), it gets a blocking finding because the reader
+receives only the final report (D-no-draft-history);
 `review.draft_history_check` (default true) is the rollback switch.
 The evidence critic sees at most `fetch_max_chars` characters selected
 from that body as claim-anchored excerpts. Reading
