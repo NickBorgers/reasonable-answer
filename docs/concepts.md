@@ -250,7 +250,10 @@ it — each one, again, a guard against a known LLM failure mode:
   events record the citation changes and resulting finding count. With verification on, a sentence
   citing an entry that has no fetchable address likewise mints a major `uncited_claim`, so stripping
   URLs from entries evades nothing; print-only sources are included (D-no-address-citation-finding,
-  `review.no_address_finding`, `no_address_check` events). With
+  `review.no_address_finding`, `no_address_check` events). The report is the only document a reader
+  receives, so a body paragraph that talks about an earlier draft of itself ("removed as unsupported",
+  "this revision could not verify") gets a repair turn and then a blocking finding
+  (D-no-draft-history, `review.draft_history_check`, `draft_history_refs` on `generate`). With
   `evidence_reader.enabled` as well, a read returns an evidence card — the passages of the whole
   retained page relevant to the question, each located verbatim in it, plus closed labels — in
   place of the page's opening (D-writer-evidence-card).

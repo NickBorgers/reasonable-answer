@@ -366,8 +366,18 @@ disjoint from the unread row by construction, which lists addressable entries on
 ranks on blocking alone and does not. `review.no_address_finding` configures it; a `no_address_check`
 event records `no_address_entries` and `no_address_findings`.
 
-No category is added to the taxonomy table, and each finding is minted **at** its category's floor,
-so the clamp is a no-op and RC-005's direction is untouched. These are pipeline-authored facts, not
+One row on the completeness lens, gated on `review.draft_history_check` alone (D-no-draft-history): a
+body paragraph that talks about an earlier draft of this report ("the earlier draft claimed", "removed
+as unsupported", "this revision could not verify") mints one `unclear_structure` finding at
+**`blocking`**, anchored on its first such sentence. It is the one row minted above its category's
+floor (`minor`): blocking keeps `latest_unblocked` selection from shipping such a draft over one free
+of it. It is dischargeable in the report (delete the reference, or name the other document the phrase
+means). The same detector is gate 3 of the census-gated repair turn, so most such drafts are repaired
+before any critic reads them.
+
+No category is added to the taxonomy table, and every other finding is minted **at** its category's
+floor; D-no-draft-history's row is minted above it, which is an escalation. Either way the clamp is a
+no-op and RC-005's direction is untouched. These are pipeline-authored facts, not
 critic judgements: like the not-found finding they bypass `validate_issue`, whose subject is
 model-authored fields, and like it they never attach to a failed lens. Every field they carry is
 bounded on construction — a bibliography number of any length is cut to a short label before it is

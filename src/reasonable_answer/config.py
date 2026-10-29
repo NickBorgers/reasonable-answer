@@ -942,6 +942,12 @@ class ReviewConfig(BaseModel):
     #: verification is on. `false` restores the earlier behaviour. Here and not under
     #: `budgets`: `_run_fingerprint` hashes `budgets`.
     no_address_finding: bool = True
+    #: A body sentence that talks about an earlier draft of this report ("the earlier draft
+    #: claimed", "removed as unsupported") mints one blocking `unclear_structure` finding per
+    #: paragraph, and gives the writer a repair turn before any critic reads the draft
+    #: (D-no-draft-history). The reader receives only the final report. `false` restores the
+    #: earlier behaviour. Here and not under `budgets`: `_run_fingerprint` hashes `budgets`.
+    draft_history_check: bool = True
     #: How much of a previous claim's wording (Jaccard overlap of its words, markers
     #: removed) a new sentence must keep for the claim to count as still standing. A
     #: matching heuristic, not a measured value: lower catches more reworded claims and

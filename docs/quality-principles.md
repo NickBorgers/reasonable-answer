@@ -312,6 +312,9 @@ mechanical `uncited_claim` is minted at the category's `major` floor and enters 
 `fewest_defects` tally (QP1); the writer receives bounded entry labels, the current report sentence's
 bounded span, and fixed rationale and instruction, never fetched page text or critic prose (QP5); and
 an entry with no `http://` or `https://` URL establishes no fetched evidence for its claim (QP10).
+D-no-draft-history applies them to the report's own text: its detector is a fixed phrase list and its
+blocking finding enters the deterministic tally and `latest_unblocked` selection (QP1); the writer
+receives the report's own bounded sentence and fixed wording, and the repair turn only a count (QP5).
 D-writer-must-read applies the same boundary before accepting a draft. Its unread predicate and
 retry/accept routing use only the deterministic read outcome and run read log (QP1); the retry adds
 only a fixed nudge to a fresh writer call and carries neither the rejected draft nor another model's

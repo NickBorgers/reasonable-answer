@@ -1013,6 +1013,102 @@ def mechanical_no_address_issues(
     return issues
 
 
+# ------------------------------------------------------------- the report has no history
+#: The words that name a draft of this report. A phrase naming one of them is exempt when the
+#: question itself uses the word (a question about a draft bill gets to say "the draft").
+_HISTORY_NOUNS = ("draft", "revision", "iteration")
+_NOUN = r"(?P<noun>drafts?|revisions?|iterations?)"
+#: "of <something>" after the noun names a document under discussion — "the earlier draft of
+#: the bill" — unless that something is this report. That is the writer's way out of a
+#: false positive: name the document. The determiner is possessive (`?+`) so that "of this
+#: report" cannot backtrack into reading "this" as the name of another document.
+_NOT_OF_ANOTHER = (
+    r"(?!\s+of\s+(?:(?:the|this|a|an|its|their)\s+)?+"
+    r"(?!(?:report|answer|assessment|analysis|review)\b)\w)"
+)
+_DRAFT_HISTORY = (
+    re.compile(
+        rf"\b(?:earlier|previous|prior|preceding|original|initial|last|first|older)\s+{_NOUN}\b"
+        + _NOT_OF_ANOTHER,
+        re.IGNORECASE,
+    ),
+    re.compile(rf"\b(?:this|the\s+present|the\s+current)\s+{_NOUN}\b" + _NOT_OF_ANOTHER, re.IGNORECASE),
+    re.compile(
+        r"\b(?:removed|deleted|withdrawn|dropped)\s+as\s+(?:unsupported|unverified|unverifiable)\b",
+        re.IGNORECASE,
+    ),
+    re.compile(r"\b(?:claims?|figures?|assertions?)\s+(?:removed|withdrawn)\b", re.IGNORECASE),
+    re.compile(r"[—–]\s*removed\b", re.IGNORECASE),
+)
+
+
+def draft_history_sentences(
+    report_text: str, structure: Structure, question: str = ""
+) -> list[tuple[int, int, str]]:
+    """The body sentences that talk about earlier drafts of this report (D-no-draft-history):
+    "the earlier draft claimed", "removed as unsupported", "this revision could not verify".
+
+    The report is the only artifact a reader ever receives; a sentence about a version they
+    never saw is noise to them, and a writer who answers a fix task by narrating it rather
+    than doing it fills the report with a changelog. Returns `(section, paragraph,
+    sentence)` per matching sentence in document order, `## Sources` excluded (a source's
+    title may say "Draft"). Matching is a fixed phrase list, not a judgement.
+    """
+    asked = set(_TOKEN.findall(question.casefold()))
+    exempt = {n for n in _HISTORY_NOUNS if n in asked or f"{n}s" in asked}
+    sources_section = _sources_section(structure)
+    found: list[tuple[int, int, str]] = []
+    for paragraph in structure.paragraphs:
+        if paragraph.section == sources_section:
+            continue
+        for sentence in excerpt._SENTENCE_END.split(paragraph.text):
+            sentence = sentence.strip()
+            if any(
+                (m.groupdict().get("noun") or "").casefold().rstrip("s") not in exempt
+                for pattern in _DRAFT_HISTORY
+                for m in pattern.finditer(sentence)
+            ):
+                found.append((paragraph.section, paragraph.paragraph, sentence[:MAX_SPAN]))
+    return found
+
+
+def mechanical_draft_history_issues(
+    report_text: str, structure: Structure, question: str = ""
+) -> list[RawIssue]:
+    """One `unclear_structure` finding at `blocking` per paragraph that talks about earlier
+    drafts of this report (D-no-draft-history), anchored on its first such sentence.
+
+    Blocking so that `latest_unblocked` selection never ships such a draft over one that is
+    free of it. Fields hold only the report's own sentence and fixed wording.
+    """
+    issues: list[RawIssue] = []
+    seen: set[tuple[int, int]] = set()
+    for section, paragraph_no, span in draft_history_sentences(report_text, structure, question):
+        if (section, paragraph_no) in seen:
+            continue
+        seen.add((section, paragraph_no))
+        issues.append(
+            _minted(
+                category=Category.UNCLEAR_STRUCTURE,
+                severity=Severity.BLOCKING,
+                locus=StructuralRef(section=section, paragraph=paragraph_no),
+                claim_span=span,
+                rationale=(
+                    "This paragraph talks about an earlier draft or revision of this report, or "
+                    "about claims removed from it. The reader receives only this report and "
+                    "never saw any earlier version, so the text describes nothing they can see."
+                ),
+                instruction=(
+                    "Rewrite the paragraph so it states only what the evidence shows. Delete a "
+                    "withdrawn claim outright, without saying it was ever made. State a gap as a "
+                    "fact about the sources ('no source reviewed here reports ...'). If the "
+                    "phrase means a document under discussion, name it ('the draft of the bill')."
+                ),
+            )
+        )
+    return issues
+
+
 def clamp(issues: list[RawIssue]) -> list[RawIssue]:
     """Apply mechanical severity floors — critics may escalate, never downgrade."""
     out: list[RawIssue] = []

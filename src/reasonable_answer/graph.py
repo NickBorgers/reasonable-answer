@@ -1286,8 +1286,15 @@ def _generate(state: State, rt: Runtime) -> dict:
         **scope_fields,
         **citation_fields,
         # Present only when a gate fired (D-census-gated-repair): repair_attempted (0/1),
-        # repair_reason (markerless/out_of_scope/both), repair_resolved (0/1).
+        # repair_reason (markerless/out_of_scope/both/draft_history), repair_resolved (0/1),
+        # and repair_draft_history (1) when gate 3 took part (D-no-draft-history).
         **repair_fields,
+        # Sentences of the shipped draft that talk about earlier drafts (D-no-draft-history).
+        **(
+            {"draft_history_refs": _draft_history_refs(cfg, state["question"], text)}
+            if cfg.review.draft_history_check
+            else {}
+        ),
         # Present only under ops mode (D-ops-revision): what the splice applied and what
         # it refused, integers only — no text, no locus, no task id (RA-016).
         **ops_fields,
@@ -1378,6 +1385,14 @@ def _repair_gates(
     return markerless, scope_gate
 
 
+def _draft_history_refs(cfg: Config, question: str, text: str) -> int:
+    """How many body sentences of `text` talk about earlier drafts of this report — gate 3
+    of the repair turn (D-no-draft-history). Zero when the check is off."""
+    if not cfg.review.draft_history_check:
+        return 0
+    return len(triage.draft_history_sentences(text, report_mod.parse(text), question))
+
+
 def _writer_repair(
     rt: Runtime,
     alias: str,
@@ -1388,6 +1403,7 @@ def _writer_repair(
     defects: list[Defect],
     markerless: bool,
     scope_gate: bool,
+    draft_history: int,
     licence: str | None,
     citation_fields: dict[str, int],
     scope_fields: dict[str, int],
@@ -1424,6 +1440,7 @@ def _writer_repair(
         defects,
         markerless=markerless,
         scope_gate=scope_gate,
+        draft_history=draft_history,
         patch_licence=licence == "patch",
         ops=licence == "ops",
         source_entries=citation_fields.get("source_entries", 0),
@@ -1488,10 +1505,18 @@ def _repair_draft(
         return text, citation_fields, scope_fields, {}
 
     markerless, scope_gate = _repair_gates(cfg, citation_fields, scope_fields)
-    if not (markerless or scope_gate):
+    # Gate 3 (D-no-draft-history): the draft talks about earlier drafts of itself. Kept out
+    # of `repair_reason` when gate 1 or 2 also fired, so that enum keeps its old meaning;
+    # `repair_draft_history` says whether gate 3 took part.
+    history = _draft_history_refs(cfg, question, text)
+    if not (markerless or scope_gate or history):
         return text, citation_fields, scope_fields, {}
 
-    reason = "both" if markerless and scope_gate else ("markerless" if markerless else "out_of_scope")
+    if markerless or scope_gate:
+        reason = "both" if markerless and scope_gate else ("markerless" if markerless else "out_of_scope")
+    else:
+        reason = "draft_history"
+    history_fields = {"repair_draft_history": 1} if history else {}
     # The same condition `_generate` used to choose the close for the drafting call
     # (D-scoped-revision, D-ops-revision): the repair turn asks for byte-for-byte
     # restoration only where the generation was held to the patch close, and for
@@ -1520,6 +1545,7 @@ def _repair_draft(
             defects=defects,
             markerless=markerless,
             scope_gate=scope_gate,
+            draft_history=history,
             licence=licence,
             citation_fields=citation_fields,
             scope_fields=scope_fields,
@@ -1536,7 +1562,8 @@ def _repair_draft(
         citation_fields = _citation_fields(previous, text, polish=polish, warn=False)
         scope_fields = _scope_fields(cfg, previous, text, defects, polish=polish, full_rewrite=full_rewrite)
         markerless, scope_gate = _repair_gates(cfg, citation_fields, scope_fields)
-        if not (markerless or scope_gate):
+        history = _draft_history_refs(cfg, question, text)
+        if not (markerless or scope_gate or history):
             if not (entries_before > 0 and citation_fields["source_entries"] == 0):
                 resolved = 1
             break
@@ -1545,7 +1572,13 @@ def _repair_draft(
         text,
         citation_fields,
         scope_fields,
-        {"repair_attempted": 1, "repair_reason": reason, "repair_resolved": resolved, **repair_ops},
+        {
+            "repair_attempted": 1,
+            "repair_reason": reason,
+            "repair_resolved": resolved,
+            **history_fields,
+            **repair_ops,
+        },
     )
 
 
@@ -2271,6 +2304,15 @@ def _critique_one(
             )
         if mechanical:
             result = result.model_copy(update={"issues": [*mechanical, *result.issues]})
+    # A paragraph that talks about earlier drafts of this report (D-no-draft-history). A fact
+    # about the text alone, so it runs with every evidence setting; completeness owns it
+    # because the defect is what the reader is handed, not what a source says.
+    if lens is Lens.COMPLETENESS and not result.failed and rt.config.review.draft_history_check:
+        history = triage.mechanical_draft_history_issues(
+            report_text, report_mod.parse(report_text), question
+        )
+        if history:
+            result = result.model_copy(update={"issues": [*history, *result.issues]})
     return result
 
 
