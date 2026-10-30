@@ -22,8 +22,8 @@ That is a desktop Chrome user arriving from a Google result — not a citation c
 `proxy` pin and its test were correct about residential-IP rotation and said nothing about this,
 because the identity is the provider's default rather than anything this repository sends.
 
-**What the disguise buys.** Most of the tier. Over 79 cited URLs (38 from production reports, 41
-journal, news and government pages), counting pages that yielded a long article body:
+**Observed coverage.** Over 79 cited URLs (38 from production reports, 41 journal, news and
+government pages), counting pages that yielded a long article body:
 
 | client | long body |
 |---|---|
@@ -36,7 +36,10 @@ Firecrawl accepts a `headers` override, and with `User-Agent` set to `fetch.USER
 `Referer` and client hints were still sent) eight of ten hard walls — NEJM, WSJ, Reuters,
 SAGE, CBO, JAMA, Health Affairs, RAND — failed with a provider HTTP 500; a control run minutes
 later with the default identity read WSJ and CBO. An honest renderer exists and is the third row.
-Choosing it would cost roughly 28 of those 79 bodies.
+The 79-URL comparison changes the provider, network and client as well as the identity, while the
+within-provider header override covers only the ten selected hard walls. The measurements therefore
+show the observed yields and the selected override failures, but do not isolate how much of the
+79-URL difference was caused by identity.
 
 **The decision.** The extraction tier reads cited pages under whatever browser identity its
 provider presents by default. This deployment is one operator collecting information for their own
