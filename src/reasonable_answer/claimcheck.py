@@ -65,7 +65,7 @@ from typing import Any
 
 from . import excerpt, prompts
 from . import report as report_mod
-from .fetch import _SOURCES_HEADING, FetchedSource, SourceOutcome
+from .fetch import _SOURCES_HEADING, FetchedSource, SourceOutcome, _clean_url
 from .llm import (
     LLMClient,
     MalformedOutputError,
@@ -251,6 +251,27 @@ class _Pass:
     failures: int = 0
     aborted: bool = False
     chunk_calls: int = 0
+
+
+def source_standing(verdicts: Iterable[PairVerdict]) -> dict[str, bool]:
+    """Cleaned URL -> whether the pages this check settled are *refuted* for every claim
+    they were checked against (D-no-unread-source-drop).
+
+    `True` when at least one pair citing the URL came back `contradicted` or `absent` from
+    a page shown whole (the two verdicts `issues_from` turns into findings) and none came
+    back `supported`; `False` when any pair came back `supported`. A URL whose pairs were
+    all unsettled (`unreadable`, `absent` from a partial page, unchecked) is left out: the
+    check says nothing about it. URLs and booleans only; no page text, no sentence.
+    """
+    supported: set[str] = set()
+    negative: set[str] = set()
+    for v in verdicts:
+        url = _clean_url(v.pair.url)
+        if v.verdict == "supported":
+            supported.add(url)
+        elif v.verdict == "contradicted" or (v.verdict == "absent" and v.complete):
+            negative.add(url)
+    return {url: url not in supported for url in supported | negative}
 
 
 class VerdictCache:

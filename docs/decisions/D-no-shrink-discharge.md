@@ -1,5 +1,11 @@
 ## D-no-shrink-discharge — removing a cited source is not a way to discharge a finding
 
+> Superseded in part by **D-no-unread-source-drop**: "A claim withdrawn ... mints nothing" still holds
+> for this finding, but withdrawing a claim together with a source some writer read in full text is no
+> longer free. A revision that does it without reading is retried and rotated at the call, and a draft
+> that has lost a large share of the run's peak count of read, cited sources gets a blocking
+> completeness finding.
+
 **The finding.** D-read-before-citing, D-unreadable-citation-finding and D-anchored-unreadable make a
 claim that rests on an unread or unreadable page a major finding. Their instructions offer four
 ways out: read the page, re-source the claim, weaken it, or remove it. Before this decision, deleting

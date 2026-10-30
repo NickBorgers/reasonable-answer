@@ -272,6 +272,21 @@ WRITER_UNREAD_NUDGE = (
 )
 
 
+#: Appended to the writer's user message on the one retry of a writer whose revision stopped
+#: citing a page some writer had read in full text, while it read no page itself
+#: (D-no-unread-source-drop). Fixed text, like `WRITER_UNREAD_NUDGE`: no run material, no
+#: count, no format.
+WRITER_DROP_NUDGE = (
+    "\n\nYour previous attempt at this task removed sources that had been read in full text, "
+    "without reading any page itself, and was set aside. Removing a source is not a way to "
+    "answer a finding. Before you write, read: re-read a cited page to see what it does and "
+    "does not support, or call `web_search` and `read_source` to find and read a page that "
+    "supports the claim, and cite it. Remove a claim only when the pages you have read do "
+    "not support it. Then give your answer in exactly the output format your instructions "
+    "require."
+)
+
+
 #: Appended after the read addenda when `read_source` answers with an evidence card
 #: (D-writer-evidence-card): what a card is, and the `purpose` argument that steers it.
 WRITER_CARD_ADDENDUM = (

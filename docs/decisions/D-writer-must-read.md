@@ -1,5 +1,11 @@
 ## D-writer-must-read — a writer that drafts without reading is retried once, then rotated, then shipped with a warning
 
+> Superseded in part by **D-no-unread-source-drop**: the same retry, rotation and accept-with-warning walk
+> now also holds a revision that read no page yet stops citing a page some writer read in full text
+> (failure class `unread_source_drop`). One nudged retry per writer is shared across both tests, and the
+> residual named under "Cost and residual" for a revision that only keeps already-read entries is
+> narrowed: keeping them still needs no read, dropping one now does.
+
 **The finding.** D-read-before-citing put "search and `read_source` before citing" in the writer
 prompt and checks the result mechanically, but nothing made a writer comply. Production showed a pool
 member that answers immediately whenever tools are optional: every round it authored had zero
