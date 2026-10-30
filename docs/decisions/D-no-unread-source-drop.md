@@ -1,12 +1,8 @@
 ## D-no-unread-source-drop — a revision may not drop a read source without reading, and a report may not shrink its way to acceptance
 
-**The finding.** The operator's production runs showed revisions that answered evidence findings by
-deleting claims together with their cited sources, round after round, until critics had little left to
-object to and the run ended `accepted` on a report that cited half the sources an earlier draft had read.
-Those observations are the **motivation, not the warrant** (QP9); the run identifiers and per-writer
-counts are in the PR that introduced this decision.
-
-**The warrant is the mechanism, and it is checkable in this repository.**
+**The finding.** Before this decision the pipeline let a revision answer an evidence finding by deleting
+the claim together with its cited source, at no cost anywhere in the loop. The argument is the mechanism
+below, every step of which is checkable in this repository.
 
 - D-no-shrink-discharge mints a finding for a dropped source only when the claim it supported
   *survives* (word overlap). Withdrawing the claim with its source is an allowed discharge by design.
@@ -18,8 +14,10 @@ counts are in the PR that introduced this decision.
   (D-latest-unblocked-selection) ranks rounds on blocking counts alone.
 
 So deleting a read source and its claim was free at every stage: no gate at the call, no finding at
-critique, no effect on selection. The cheapest answer to an evidence finding was to remove the
-evidence. That is a property of the code, whatever any one writer does with it.
+critique, no effect on selection. Repeated over rounds, each such revision leaves a shorter report with
+fewer sources and fewer claims for a critic to object to, so the loop can reach acceptance, or ship at
+the cap, on less evidence than an earlier draft carried. That is a property of the code, whatever any
+one writer does with it.
 
 **The decision.** Both parts are effective only where `search.read_sources` and
 `search.verify_sources` are on (the D-read-before-citing posture: without a read log there is no way to
@@ -37,10 +35,16 @@ tell a real source from a fabricated one). Each has its own rollback knob under 
    whole — the two verdicts that mint `misrepresented_source` — and none came back `supported`. A page
    that supports any one of its claims is not refuted; a page whose verdicts are all unsettled
    (`unreadable`, `absent` from a partial page, unchecked) is left as it was. `graph._critique` folds that
-   into `State.claim_refuted`, the most recent settled standing per address winning, so a later check
-   that finds support takes the address out again. Removing a refuted source is the fix its finding asks
-   for, so it is neither a drop (part 2) nor a loss (part 3). With the claim check off the set stays empty
-   and both parts count every read, cited source.
+   into `State.claim_refuted` after that pass's lens work, the most recent settled standing per address
+   winning, so a later check that finds support takes the address out again. Every rule reads the set as
+   it stood **before** the current critique pass: refutations from earlier passes count, and a source
+   refuted in this pass is excluded from the next pass on (the evidence and completeness lenses run
+   concurrently, so the order is not fixed within a pass). For the case this exists for the lag does not
+   matter: the claim check only examines sources the current draft cites, so the refutations a revision
+   acts on were all recorded on the draft before it, and the drop gate in `generate` already sees them.
+   Removing a source refuted on an earlier pass is the fix its finding asks for, so it is neither a drop
+   (part 2) nor a loss (part 3). With the claim check off the set stays empty and both parts count every
+   read, cited source.
 2. **A drop needs a read** (`review.drop_requires_read`, default `true`). After a writer call returns a
    usable revision — not a first draft, not a polish pass — it is set aside when (a) the call completed
    no `read_source` at `full_text` and (b) it stops citing at least one source that the previous draft
@@ -75,7 +79,7 @@ tell a real source from a fabricated one). Each has its own rollback knob under 
    not their number. `incomplete_answer` is the category for an answer that leaves out what it could
    have said from material in reach, and the critic prompt already limits it to fixes available inside
    the report; the peak shows they are.
-5. **Why `blocking`, above the `major` floor.** Production runs `review.selection: latest_unblocked`,
+5. **Why `blocking`, above the `major` floor.** The shipped roster sets `review.selection: latest_unblocked`,
    which ranks on blocking alone (D-latest-unblocked-selection). A `major` would stop acceptance of the
    shrunken draft but, at the hard cap, would not stop it from shipping over the fuller earlier draft —
    which is the outcome this decision exists to prevent. Minting above the floor is an escalation, which
@@ -121,8 +125,11 @@ called misrepresented, still counts toward the peak, and so does every source wh
 off; a report that removes half of such sources must find replacements. The threshold is set so that
 removing one never does this on a bibliography of three or more. A source refuted for one claim and
 supported for another is not refuted: dropping it entirely also drops the supported claim's evidence.
-(3) The backstop can be met by citing read pages that support little;
-claim checking and the evidence critic judge that, not this rule. (4) With reading or verification off,
+(3) A source refuted in the current critique pass still counts toward that pass's
+peak and current count; it leaves both from the next pass on. Such a source is still cited by the draft
+under review, so it raises the current count at least as much as the peak and its floor: the lag can
+delay a finding by one pass, never add one. (4) The backstop can be met by citing read pages that support little;
+claim checking and the evidence critic judge that, not this rule. (5) With reading or verification off,
 neither part runs: there is no read log to tell a fabricated source from a real one.
 
 **Rollback.** `review.drop_requires_read: false` removes the call gate and its event fields;

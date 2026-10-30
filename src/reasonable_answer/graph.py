@@ -114,7 +114,9 @@ class State(TypedDict, total=False):
     cited_read_sets: list[list[str]]
     #: Cleaned addresses the claim check most recently found refuted for every claim it
     #: checked them against (`claimcheck.source_standing`). Set only by `_critique`; a later
-    #: check that finds the page supporting a claim takes it out again. URLs only.
+    #: check that finds the page supporting a claim takes it out again. URLs only. Merged after a
+    #: pass's lens work, so every rule reads the set from earlier passes: a refutation found in
+    #: this pass applies from the next pass on.
     claim_refuted: list[str]
 
     round: int

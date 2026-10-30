@@ -133,7 +133,8 @@ that talks about an earlier draft of this report, since the reader receives only
 With reading and verification on, it also gains one `blocking` `incomplete_answer` finding when the
 draft cites at least `review.source_loss_fraction` fewer read sources than the run's peak, so a report
 that sheds its evidence does not ship over a fuller draft (D-no-unread-source-drop). A source the claim
-check refuted counts neither in the draft nor in the peak, so removing it is never a loss.
+check refuted on an earlier critique pass counts neither in the draft nor in the peak, so removing it is
+never a loss; a refutation from the current pass applies from the next pass on.
 `stylistic` (cosmetic preference, ignored for convergence) is not listed above per lens
 because it attaches to all three — any lens may raise it.
 
