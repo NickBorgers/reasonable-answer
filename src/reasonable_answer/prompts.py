@@ -1151,6 +1151,31 @@ def critic_repair_turn(
     return "\n".join(parts)
 
 
+#: Appended to the completeness brief only when the run's writers can search
+#: (D-verdict-not-restatement). It lives here, not in `taxonomy.LENS_BRIEF`, because it is
+#: conditional on a capability the lens brief cannot see: without a search tool the fix it
+#: asks for does not exist, and the finding would only loop to the round cap. It also
+#: overrides, for this one finding, the instruction rule that a fix needs no new source
+#: material.
+VERDICT_TRIGGER = (
+    "\n\nOne further trigger applies on this run (D-verdict-not-restatement). Where the "
+    "question asks whether, or which of, the claims in a document it names are true, "
+    "supported or backed by fact, each material claim needs a verdict drawn from what was "
+    "checked. A paragraph that restates the claim as the document's and adds that no source "
+    "is cited, identified or confirmed is not a verdict: it hands the question back. Raise "
+    "`incomplete_answer`, quoting that paragraph as `claim_span`, and name the unanswered "
+    "claim in the rationale.\n"
+    "- The writers of this run can search the web. For this finding, and only this one, the "
+    "instruction asks the writer to search for that claim and state what the record shows. "
+    "That replaces, here, the rule that a fix needs no new source material. 'State that it is "
+    "unverified' is still not a fix.\n"
+    "- A claim is answered where its paragraph says what was searched for and that nothing "
+    "was found. A claim no search could settle — a motive, an opinion, a prediction — needs "
+    "no verdict.\n"
+    "- Do not raise it where the question does not ask for verdicts on a document's claims."
+)
+
+
 def critic_user(
     lens: Lens,
     question: str,
@@ -1161,11 +1186,16 @@ def critic_user(
     source_char_budget: int | None = None,
     report_text: str | None = None,
     excerpt_chars: int | None = None,
+    retrieval: bool = False,
 ) -> str:
     """`report_text` is the raw artifact (not the loci rendering) and `excerpt_chars`
     the per-page budget; together they turn each fetched body into claim-anchored
     excerpts (D-claim-anchored-excerpts). Without both, a body is shown from its start
-    as it was before, so every existing caller and the audition hash are unchanged."""
+    as it was before, so every existing caller and the audition hash are unchanged.
+
+    `retrieval` says the writers of this run hold a search tool. It adds the completeness
+    lens's verdict trigger (D-verdict-not-restatement) and nothing else; left off, the
+    prompt is byte-identical to what it was, which keeps the audition hash stable."""
     categories = [c for c in LENS_CATEGORIES[lens]]
     # With the cited pages in hand, two categories stop being judgements about
     # plausibility and become checkable facts. Say so, or the critic keeps applying
@@ -1189,6 +1219,14 @@ def critic_user(
             "population, product, category, system boundary, dose or wavelength band, or "
             "period than the claim (D-source-fidelity-direction-and-scope)"
         )
+    brief = LENS_BRIEF[lens]
+    if retrieval and lens is Lens.COMPLETENESS:
+        brief += VERDICT_TRIGGER
+        meanings[Category.INCOMPLETE_ANSWER] += (
+            "; or, where the question asks which claims of a document are true or "
+            "supported, a claim the report restates with no verdict "
+            "(D-verdict-not-restatement)"
+        )
     table = "\n".join(f"- `{c.value}` — {meanings[c]}" for c in categories)
     pages = (
         fetched_sources_block(
@@ -1203,7 +1241,7 @@ def critic_user(
     return (
         f"{UNTRUSTED_NOTE}\n\n"
         f"{date_line(current_date)}"
-        f"YOUR DIMENSION: {lens.value}\n{LENS_BRIEF[lens]}\n\n"
+        f"YOUR DIMENSION: {lens.value}\n{brief}\n\n"
         f"Raise issues ONLY in these categories. Anything outside them is out of scope "
         f"for you, however tempting:\n{table}\n\n"
         f"QUESTION THE REPORT ANSWERS\n{DATA_FENCE}\n{_neutralized(question)}\n{DATA_END}\n\n"
