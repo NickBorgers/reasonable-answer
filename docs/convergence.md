@@ -162,8 +162,11 @@ a draft for it. See [isolation.md](isolation.md#scoping-the-edit-is-not-narrowin
 No new category and no floor change: a reading of `incomplete_answer`, stated in the open like the
 triggers below it. It applies **only when the run's writers can search** (`Runtime.search_enabled`).
 Without a search tool the fix does not exist, and the finding would only loop to `budgets.hard_cap`.
-With `retrieval` off the completeness prompt is byte-identical to before, so the audition hash does
-not move.
+With `retrieval` off the completeness prompt is byte-identical to before, so the base audition hash
+does not move. The audition measures the trigger through fixtures that set `retrieval: true` in their
+manifest, and `audition.prompt_hash(retrieval=True)` covers its text whenever the corpus carries one.
+An edit to `VERDICT_TRIGGER` therefore invalidates those cached verdicts
+(D-audition-retrieval-variant).
 
 **The trigger.** Where the question asks whether, or which of, the claims in a document it names
 are true, supported or backed by fact, each material claim needs a verdict drawn from what was

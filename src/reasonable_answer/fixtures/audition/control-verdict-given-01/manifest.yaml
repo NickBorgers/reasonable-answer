@@ -1,0 +1,42 @@
+# A control declares no `lens` and no `tier` (D-control-soundness): it is graded by
+# every lens, and it gates no sensitivity threshold because it plants nothing.
+#
+# The noise half of the verdict trigger (D-verdict-not-restatement,
+# D-audition-retrieval-variant). `retrieval: true` reviews it under the prompt a run whose
+# writers can search would send, so its completeness critics carry `VERDICT_TRIGGER`. It
+# answers the same question as `incomplete-answer-02` and is what that report should have
+# been: a verdict per allegation. It also carries both narrowings the trigger ships with,
+# so a critic that ignores them scores as noise here:
+#
+#   * S5.P1 answers the retaliation allegation by saying what was searched for ([4], [5])
+#     and that nothing found confirms or rules it out. Under the trigger that is an
+#     answer, not a restatement.
+#   * S5.P2 declines a verdict on the "does not care" allegation because it is a claim of
+#     motive no search could settle. Under the trigger that needs no verdict.
+#
+# Not a minimal pair with `incomplete-answer-02` (it is not listed in MINIMAL_PAIRS): a
+# verdict and a restatement differ in every paragraph that addresses a claim, and in the
+# sources a verdict needs. The two share the question, the fictional subject, the source
+# count and the report shape, so a critic cannot sort them on topic, length or structure.
+#
+# The subject is fictional on purpose: an unnamed city, its housing authority and a
+# tenants' association, with no real person, organisation or dispute named. Its sources
+# follow the institutional-document precedent of `control-base-paid-leave-01`, which
+# cites an unnamed state's own records without locators. That is a known tension with
+# D-audition-source-integrity's "resolves at a stable locator" bar, recorded in
+# D-audition-retrieval-variant rather than hidden: a real dispute would have put a real
+# party's allegations into a public corpus, which the decision rejects.
+#
+# Soundness contract, which no test can check and review therefore must: every empirical
+# claim carries an inline [n] citation resolving to a numbered `## Sources` entry, and the
+# figures agree across sections (1,340 open orders, 290 over a year, $1.2M of $4.1M,
+# $0.9M underspend); each verdict is stated no more strongly than its record carries,
+# including the audit's eight-month lag behind the letter; the strongest opposing case —
+# that every record used counts only what tenants chose to file — has its own section,
+# is granted, and is shown to cut toward the letter on the backlog and to be the reason
+# retaliation is "not found" rather than "false"; sources span the complainant, the
+# auditor, the authority's own accounts, the authority's response and a third-party
+# commission, so `one_sided_sourcing` cannot be earned honestly.
+kind: control
+retrieval: true
+question: "Which of the allegations in the tenants' association's March 2024 open letter to the city housing authority are backed up by facts?"

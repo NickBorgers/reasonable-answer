@@ -1530,6 +1530,239 @@ def test_audition_measures_the_source_less_prompt_surface():
     assert with_page not in seen
 
 
+# ------------------------------------------- D-audition-retrieval-variant
+
+
+#: The fixtures reviewed under the retrieval prompt variant. Named, so a fixture cannot
+#: join or leave the variant without this list (and review) noticing.
+RETRIEVAL_FIXTURES = {
+    "incomplete-answer-02",
+    "control-verdict-given-01",
+    "control-no-verdict-asked-01",
+}
+
+
+def _write_fixture(root: Path, name: str, manifest: dict, artifact: str = "## S\n\nBody.\n") -> None:
+    d = root / name
+    d.mkdir(parents=True)
+    (d / "artifact.md").write_text(artifact)
+    (d / "manifest.yaml").write_text(yaml.safe_dump(manifest))
+
+
+def test_retrieval_is_a_manifest_field_that_defaults_off(tmp_path):
+    corpus = tmp_path / "corpus"
+    _write_fixture(corpus, "off", {"kind": "control", "question": "q"})
+    _write_fixture(corpus, "on", {"kind": "control", "question": "q", "retrieval": True})
+    loaded = audition.load_fixtures(corpus)
+    by_id = {f.id: f for f in loaded.fixtures}
+
+    assert by_id["off"].retrieval is False
+    # Allowed on a control: it names the prompt surface, not a lens, so it asserts no
+    # scope D-control-soundness forbids.
+    assert by_id["on"].retrieval is True
+    assert loaded.retrieval is True
+
+
+def test_a_corpus_without_retrieval_fixtures_does_not_use_the_variant(tmp_path):
+    corpus = tmp_path / "corpus"
+    _write_fixture(corpus, "off", {"kind": "control", "question": "q"})
+    assert audition.load_fixtures(corpus).retrieval is False
+
+
+def test_a_malformed_retrieval_value_fails_the_corpus(tmp_path):
+    corpus = tmp_path / "corpus"
+    _write_fixture(corpus, "bad", {"kind": "control", "question": "q", "retrieval": "sometimes"})
+    with pytest.raises(audition.FixtureError, match="retrieval"):
+        audition.load_fixtures(corpus)
+
+
+def test_only_the_named_fixtures_use_the_retrieval_variant():
+    """Default off is what keeps every pre-existing fixture on exactly the prompt it was
+    measured under: none of them names the field."""
+    fixtures = audition.load_fixtures(CORPUS)
+    assert {f.id for f in fixtures.fixtures if f.retrieval} == RETRIEVAL_FIXTURES
+    for fixture_dir in CORPUS.iterdir():
+        if fixture_dir.is_dir() and fixture_dir.name not in RETRIEVAL_FIXTURES:
+            assert "retrieval" not in yaml.safe_load((fixture_dir / "manifest.yaml").read_text())
+
+
+@pytest.mark.parametrize("lens", list(Lens))
+def test_run_assignment_sends_each_fixture_the_prompt_its_manifest_names(lens):
+    """`retrieval` reaches the prompt per fixture: a `retrieval: true` fixture is reviewed
+    under the variant prompt and every other fixture under the base prompt, byte for
+    byte. On logic and evidence the two prompts are identical, so the assertion there is
+    that nothing else moved."""
+    from reasonable_answer import report as report_mod
+
+    fixtures = audition.load_fixtures(CORPUS)
+    slot = audition.Assignment(alias="a", identity="p/m", lens=lens, position=0)
+    client = ScriptedClient(lambda alias, user: [])
+    audition.run_assignment(client, slot, fixtures, repetitions=1)
+    seen = [user for _, user in client.prompts]
+
+    owed = fixtures.for_lens(lens)
+    assert len(seen) == len(owed)
+    for fixture, user in zip(owed, seen, strict=True):
+        expected = prompts.critic_user(
+            lens,
+            fixture.question,
+            report_mod.render_with_loci(fixture.artifact),
+            None,
+            retrieval=fixture.retrieval,
+        )
+        assert user == expected, fixture.id
+        triggered = "D-verdict-not-restatement" in user
+        assert triggered == (fixture.retrieval and lens is Lens.COMPLETENESS), fixture.id
+
+
+def test_run_assignment_passes_retrieval_to_critique_once(monkeypatch):
+    """The wiring itself, independent of what the prompt does with it."""
+    fixtures = audition.load_fixtures(CORPUS)
+    received: dict[str, bool] = {}
+    real = audition.critique_once
+
+    def spy(client, alias, identity, lens, question, *args, **kwargs):
+        fixture = next(f for f in fixtures.fixtures if f.question == question and f.artifact == args[0])
+        received[fixture.id] = kwargs["retrieval"]
+        return real(client, alias, identity, lens, question, *args, **kwargs)
+
+    monkeypatch.setattr(audition, "critique_once", spy)
+    slot = audition.Assignment(alias="a", identity="p/m", lens=Lens.COMPLETENESS, position=0)
+    audition.run_assignment(ScriptedClient(lambda a, u: []), slot, fixtures, repetitions=1)
+
+    assert received == {f.id: f.retrieval for f in fixtures.for_lens(Lens.COMPLETENESS)}
+    assert {k for k, v in received.items() if v} == RETRIEVAL_FIXTURES
+
+
+def _pre_variant_prompt_hash() -> str:
+    """`prompt_hash` as it was computed before the retrieval variant existed, restated
+    here so the off path is checked byte for byte rather than against itself."""
+    import hashlib
+
+    digest = hashlib.sha256()
+    digest.update(audition.AUDITION_SOURCE_MODE.encode())
+    digest.update(prompts.CRITIC_SYSTEM.encode())
+    for lens in LENS_CATEGORIES:
+        digest.update(prompts.critic_user(lens, "q", "body", None).encode())
+    digest.update(
+        prompts.critic_repair_turn(
+            user="u", error="e", guidance="g", guidance_excerpt="x", rejected="r",
+            issue_index=0, issue_count=1,
+        ).encode()
+    )
+    return digest.hexdigest()[:16]
+
+
+def test_prompt_hash_with_retrieval_off_is_the_pre_variant_hash():
+    assert audition.prompt_hash() == audition.prompt_hash(retrieval=False)
+    assert audition.prompt_hash(retrieval=False) == _pre_variant_prompt_hash()
+
+
+def test_prompt_hash_distinguishes_the_retrieval_variant():
+    assert audition.prompt_hash(retrieval=True) != audition.prompt_hash(retrieval=False)
+    assert audition.prompt_hash(retrieval=True) == audition.prompt_hash(retrieval=True)
+
+
+def test_editing_the_verdict_trigger_invalidates_only_the_retrieval_identity(monkeypatch):
+    off, on = audition.prompt_hash(retrieval=False), audition.prompt_hash(retrieval=True)
+    monkeypatch.setattr(prompts, "VERDICT_TRIGGER", prompts.VERDICT_TRIGGER + " extra clause")
+    assert audition.prompt_hash(retrieval=True) != on
+    assert audition.prompt_hash(retrieval=False) == off
+
+
+def test_prompt_hash_carries_the_retrieval_tag(monkeypatch):
+    on = audition.prompt_hash(retrieval=True)
+    monkeypatch.setattr(audition, "AUDITION_RETRIEVAL_VARIANT", "retrieval:other")
+    assert audition.prompt_hash(retrieval=True) != on
+
+
+def test_the_gate_reads_the_identity_its_corpus_exercises(tmp_path):
+    """A cache written under the base identity is not about a corpus that sends the
+    trigger, and must read *not audited*, never a verdict."""
+    cfg = AuditionConfig(enforce=True, cache_path=tmp_path / "c.json")
+    silent = metrics(
+        identity="p/good", lens=Lens.LOGIC, planted_total=6, obvious_total=6,
+        control_runs=4, control_clean_runs=4,
+    )
+    entry = audition.CacheEntry(
+        metrics=silent,
+        corpus_hash=audition.load_fixtures().corpus_hash,
+        prompt_hash=audition.prompt_hash(retrieval=False),
+        rubric_hash=audition.rubric_hash(),
+        require_verbatim_spans=True,
+        structured_output_mode="json_schema",
+        repetitions=cfg.repetitions,
+        recorded_at=time.time(),
+    )
+    audition.save_cache(cfg.cache_path, {audition.cache_key("p/good", Lens.LOGIC): entry})
+    assert audition.load_fixtures().retrieval is True
+    assert audition.cached_judgements(cfg, roster(), IDENTITIES, True) == {}
+    audition.enforce_fitness(cfg, roster(), IDENTITIES, True)  # unmeasured: does not raise
+
+
+#: A verbatim phrase from the planted fixture's first restating paragraph (S4.P1).
+_RESTATEMENT_SPAN = "no independent source confirming or refuting it is identified in this report"
+
+
+def test_the_planted_verdict_defect_has_a_present_text_anchor():
+    """D-absence-anchor: an `incomplete_answer` quotes text the report contains, not the
+    missing verdict. The restating paragraph at the planted locus is such text, so a
+    critic following the trigger's own instruction ("quoting that paragraph as
+    `claim_span`") produces an issue triage accepts."""
+    from reasonable_answer import report as report_mod
+    from reasonable_answer import triage
+
+    fixture = next(
+        f for f in audition.load_fixtures(CORPUS).fixtures if f.id == "incomplete-answer-02"
+    )
+    (defect,) = fixture.defects
+    assert defect.category is Category.INCOMPLETE_ANSWER
+    assert defect.anywhere, "a missing verdict has no single honest locus"
+    triage.validate_issue(
+        Lens.COMPLETENESS,
+        issue(
+            Category.INCOMPLETE_ANSWER,
+            defect.locus.section,
+            defect.locus.paragraph,
+            claim_span=_RESTATEMENT_SPAN,
+        ),
+        report_mod.parse(fixture.artifact),
+        require_verbatim_spans=True,
+    )
+
+
+def test_the_verdict_fixtures_share_a_question_and_the_scope_control_does_not():
+    fixtures = {f.id: f for f in audition.load_fixtures(CORPUS).fixtures}
+    planted = fixtures["incomplete-answer-02"]
+    given = fixtures["control-verdict-given-01"]
+    scope = fixtures["control-no-verdict-asked-01"]
+
+    assert planted.lens is Lens.COMPLETENESS and not planted.is_control
+    assert given.is_control and scope.is_control
+    assert planted.question == given.question
+    assert "backed up by facts" in planted.question
+    assert "backed" not in scope.question and "allegation" not in scope.question
+
+
+def test_a_critic_following_the_trigger_scores_the_plant_and_stays_clean_on_controls():
+    """End to end, offline: a completeness critic that raises the verdict finding only
+    where the trigger is in its prompt and a restatement is in the report detects the
+    plant and invents nothing on either verdict control."""
+    fixtures = audition.load_fixtures(CORPUS)
+    slot = audition.Assignment(alias="a", identity="p/m", lens=Lens.COMPLETENESS, position=0)
+
+    def respond(alias, user):
+        if "D-verdict-not-restatement" in user and _RESTATEMENT_SPAN in user:
+            return [issue(Category.INCOMPLETE_ANSWER, 4, 1, claim_span=_RESTATEMENT_SPAN)]
+        return []
+
+    m = audition.run_assignment(ScriptedClient(respond), slot, fixtures, repetitions=1)
+    assert m.schema_failures == 0
+    assert m.strict_hits == 1
+    assert m.control_material_issues == 0
+    assert m.control_runs == sum(1 for f in fixtures.fixtures if f.is_control)
+
+
 def test_failed_lens_counts_as_schema_failure_not_as_silence():
     """Different problems, different fixes: one is a prompt/mode issue, the other means
     replace the model. Conflating them would send an operator down the wrong path."""
@@ -1672,7 +1905,9 @@ def unfit_cache(
             audition.cache_key(identity, lens): audition.CacheEntry(
                 metrics=silent,
                 corpus_hash=audition.load_fixtures().corpus_hash,
-                prompt_hash=audition.prompt_hash(),
+                # The identity the gate computes for the shipped corpus, which carries
+                # retrieval fixtures (D-audition-retrieval-variant).
+                prompt_hash=audition.prompt_hash(retrieval=audition.load_fixtures().retrieval),
                 rubric_hash=audition.rubric_hash(),
                 require_verbatim_spans=require_verbatim_spans,
                 structured_output_mode=structured_output_mode,

@@ -1,0 +1,29 @@
+# A control declares no `lens` and no `tier` (D-control-soundness): it is graded by
+# every lens, and it gates no sensitivity threshold because it plants nothing.
+#
+# The scope half of the verdict trigger (D-verdict-not-restatement,
+# D-audition-retrieval-variant). `retrieval: true` reviews it under the prompt that
+# carries `VERDICT_TRIGGER`, but the question is explanatory: it asks how the housing
+# authority orders repair requests and why some wait, not whether any document's claims
+# are true. The trigger's own last line says not to raise it here, so a completeness
+# critic that files `incomplete_answer` for missing verdicts on this report is reading
+# the trigger as a general demand for verification and scores as noise.
+#
+# Same fictional subject as `incomplete-answer-02` and `control-verdict-given-01` (an
+# unnamed city, its housing authority, no real person or organisation), and figures that
+# agree with them (1,340 open orders, 290 over a year, the $0.9M underspend), so a critic
+# cannot separate the three on topic. Sources follow the institutional-document precedent
+# of `control-base-paid-leave-01`; see D-audition-retrieval-variant on the tension with
+# D-audition-source-integrity.
+#
+# Soundness contract, which no test can check and review therefore must: every empirical
+# claim carries an inline [n] citation resolving to a numbered `## Sources` entry, and the
+# figures agree between the findings and the body (three tiers and their deadlines,
+# $25,000 threshold, 251 of 290 routine, 21 to 34 percent, 18 of 64 vacancies, 94 days);
+# both parts of the question are answered; the strongest opposing case — that the waits
+# are the priority rule working as designed, not a shortage — has its own section, is
+# granted where the manual supports it, and is answered with the underspend the rule does
+# not explain; the one board meeting cited is used only for what one meeting can show.
+kind: control
+retrieval: true
+question: "How does the city housing authority decide which tenant repair requests are handled first, and why do some requests stay open for more than a year?"

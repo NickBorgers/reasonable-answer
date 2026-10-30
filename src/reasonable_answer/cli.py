@@ -517,7 +517,7 @@ def audition(
         raise typer.Exit(code=2) from exc
 
     now = time.time()
-    ph = audition_mod.prompt_hash()
+    ph = audition_mod.prompt_hash(retrieval=fixtures.retrieval)
     rh = audition_mod.rubric_hash()
     spans = config.require_verbatim_spans
     cache = {} if force else audition_mod.load_cache(cfg.cache_path)
@@ -871,11 +871,13 @@ def _audition_cells(config: Config, identities: dict[str, str]) -> dict[str, str
     """
     slots = audition_mod.assignments(config.roster, identities)
     try:
-        corpus_hash = audition_mod.load_fixtures().corpus_hash
+        corpus = audition_mod.load_fixtures()
+        corpus_hash, uses_retrieval = corpus.corpus_hash, corpus.retrieval
     except audition_mod.FixtureError:
-        corpus_hash = None
+        # No corpus, so no entry can match below whatever the prompt hash is.
+        corpus_hash, uses_retrieval = None, False
     cache = audition_mod.load_cache(config.audition.cache_path)
-    ph = audition_mod.prompt_hash()
+    ph = audition_mod.prompt_hash(retrieval=uses_retrieval)
     rh = audition_mod.rubric_hash()
     now = time.time()
 

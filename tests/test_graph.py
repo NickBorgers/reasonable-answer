@@ -686,7 +686,9 @@ def plant_unfit_verdict(config: Config, identity: str, tmp_path: Path) -> None:
             audition.cache_key(identity, Lens.LOGIC): audition.CacheEntry(
                 metrics=silent,
                 corpus_hash=audition.load_fixtures().corpus_hash,
-                prompt_hash=audition.prompt_hash(),
+                # The identity the gate computes for the shipped corpus, which carries
+                # retrieval fixtures (D-audition-retrieval-variant).
+                prompt_hash=audition.prompt_hash(retrieval=audition.load_fixtures().retrieval),
                 rubric_hash=audition.rubric_hash(),
                 require_verbatim_spans=config.require_verbatim_spans,
                 structured_output_mode="json_schema",

@@ -181,6 +181,13 @@ class Fixture(BaseModel):
     defects: tuple[PlantedDefect, ...] = ()
     #: Slot table: name -> candidate surface forms, chosen by seeded substitution.
     slots: dict[str, tuple[str, ...]] = Field(default_factory=dict)
+    #: Review this fixture as a run whose writers can search (D-audition-retrieval-variant).
+    #: `run_assignment` passes it to `critique_once` as `retrieval`, which adds the
+    #: completeness lens's verdict trigger (D-verdict-not-restatement) and changes no other
+    #: lens's prompt. Off by default, so a manifest that does not name it is reviewed under
+    #: exactly the prompt it always was. Allowed on a control: a control is graded by every
+    #: lens, and the field names the prompt surface it is read under, not a lens it belongs to.
+    retrieval: bool = False
 
     @property
     def is_control(self) -> bool:
@@ -235,6 +242,16 @@ class FixtureSet:
         an inventor of defects.
         """
         return tuple(f for f in self.fixtures if f.lens is lens or f.is_control)
+
+    @property
+    def retrieval(self) -> bool:
+        """Whether any fixture is reviewed with the retrieval prompt variant.
+
+        What `prompt_hash` needs to know to cover the surface this corpus exercises, and
+        no more (D-audition-retrieval-variant): a corpus with no retrieval fixture never
+        sends the verdict trigger, so its verdicts do not depend on that text.
+        """
+        return any(f.retrieval for f in self.fixtures)
 
 
 def load_fixtures(directory: Path | None = None) -> FixtureSet:
@@ -746,6 +763,11 @@ AUDITION_AUTHOR = "(audition-fixture)"
 #: own cache line rather than inheriting a verdict measured under this one.
 AUDITION_SOURCE_MODE = "sources:none"
 
+#: Tag mixed into `prompt_hash` ahead of the retrieval-variant prompts, when the corpus
+#: exercises them (D-audition-retrieval-variant). It keeps the variant's bytes from being
+#: read as a continuation of the base surface, the same job `AUDITION_SOURCE_MODE` does.
+AUDITION_RETRIEVAL_VARIANT = "retrieval:on"
+
 
 def run_assignment(
     client: LLMClient,
@@ -786,6 +808,10 @@ def run_assignment(
                 # (AUDITION_SOURCE_MODE, D-audition-source-mode).
                 sources=None,
                 require_verbatim_spans=require_verbatim_spans,
+                # Per fixture, from its manifest: the prompt a run whose writers can
+                # search would send (D-audition-retrieval-variant). `prompt_hash` covers
+                # that surface whenever the corpus carries such a fixture.
+                retrieval=fixture.retrieval,
             )
             latencies.append(time.monotonic() - started)
             metrics.calls += 1
@@ -924,8 +950,12 @@ class CacheEntry(BaseModel):
         )
 
 
-def prompt_hash() -> str:
+def prompt_hash(*, retrieval: bool = False) -> str:
     """Hash of the prompt surface this harness measures, so an edit invalidates the cache.
+
+    Pass `retrieval=fixtures.retrieval` — the corpus under measurement decides it, never a
+    caller's preference. A cache writer and a cache reader that disagree on it compute
+    different hashes, and the entry reads *not audited*, never a pass.
 
     That surface is the source-less one, and only that one. It is not "every prompt
     surface a critic sees": production's evidence critic also sees the sharpened
@@ -944,12 +974,23 @@ def prompt_hash() -> str:
     critic recovers from a quoting slip or fails the lens closed is a measured difference
     in `schema_failures` and in what it is finally graded on. A surface this harness
     exercises belongs in the identity; the sources block, which it never reaches, does not.
+
+    The **retrieval variant** is in by the same criterion, and only when it is exercised
+    (D-audition-retrieval-variant). A corpus carrying a `retrieval: true` fixture sends
+    `prompts.VERDICT_TRIGGER` to its completeness critics, so the variant prompt of every
+    lens is hashed after the base ones, behind its own tag, and an edit to the trigger
+    invalidates those verdicts. With `retrieval` off nothing is added, so the digest is
+    byte-for-byte the one computed before the variant existed.
     """
     digest = hashlib.sha256()
     digest.update(AUDITION_SOURCE_MODE.encode())
     digest.update(prompts.CRITIC_SYSTEM.encode())
     for lens in LENS_CATEGORIES:
         digest.update(prompts.critic_user(lens, "q", "body", None).encode())
+    if retrieval:
+        digest.update(AUDITION_RETRIEVAL_VARIANT.encode())
+        for lens in LENS_CATEGORIES:
+            digest.update(prompts.critic_user(lens, "q", "body", None, retrieval=True).encode())
     digest.update(
         # The production shape: `critique` passes no `instruction`, so hashing one with a
         # value would cover a prompt this system never sends. Every surface production
@@ -1076,11 +1117,12 @@ def cached_judgements(
     callers that have probed anyway.
     """
     try:
-        corpus_hash = load_fixtures().corpus_hash
+        corpus = load_fixtures()
     except FixtureError:
         return {}
+    corpus_hash = corpus.corpus_hash
     cache = load_cache(cfg.cache_path)
-    ph = prompt_hash()
+    ph = prompt_hash(retrieval=corpus.retrieval)
     rh = rubric_hash()
     at = time.time() if now is None else now
 

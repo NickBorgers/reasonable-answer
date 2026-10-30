@@ -36,6 +36,20 @@ cluster; invented publishers would plant fabrication as a second, easier defect.
 citation mechanics and the fixed cluster, while source support remains a fetched-text review
 obligation because a regex cannot establish what a paper says.
 
+A fixture's manifest may set `retrieval: true` (default `false`), and `audition.run_assignment`
+passes that flag to `critique_once` for that fixture alone. The fixture is then reviewed under the
+prompt a run whose writers can search would send, which adds the completeness lens's verdict trigger
+(D-verdict-not-restatement) and leaves the logic and evidence prompts unchanged. The flag is a
+property of the fixture, not of the audition run, and it is allowed on a control, which every lens
+still grades. `audition.prompt_hash` takes the corpus's own flag (`FixtureSet.retrieval`). When no
+fixture sets it, the hash is byte-identical to the pre-variant hash. When any fixture sets it, the
+variant prompts are hashed as well, so editing the trigger invalidates cached verdicts
+(D-audition-retrieval-variant). Every caller that writes or reads the cache passes the same flag.
+A caller that passed the wrong one would compute a different hash and read *not audited*, never a
+pass. The shipped verdict-trigger fixtures use a fictional subject with unlocatable institutional
+sources, the same convention as the paid-leave pair. D-audition-retrieval-variant records how that
+sits against the locator rule above.
+
 Being the instrument rather than test prose is also where the corpus lives:
 `src/reasonable_answer/fixtures/audition/`, inside the package, shipped by every wheel and present
 in the runtime image because it copies `src/`. Until D-packaged-audition-corpus it sat under
