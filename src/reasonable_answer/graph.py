@@ -104,12 +104,18 @@ class State(TypedDict, total=False):
     #: prompt, view or the controller.
     draft_seen: dict[str, str]
     draft_previous: str | None
-    #: The largest number of cited sources read in full text any draft of this run has carried
-    #: (D-no-unread-source-drop). Set only by `_generate`, never lowered; read only by the
-    #: completeness lens's net-loss finding and the `generate` event. A count, never text. A
-    #: run checkpointed before the field existed resumes without it and mints nothing until
-    #: its next draft sets it.
-    cited_read_peak: int
+    #: Per draft, in order: the cleaned addresses of the cited sources a writer had read in
+    #: full text when it shipped (D-no-unread-source-drop). Appended only by `_generate`. The
+    #: run's peak is computed from these at use time, minus `claim_refuted`, so a source the
+    #: claim check later refutes leaves the peak too (`_cited_read_peak`). URLs only, never
+    #: text; read by the net-loss finding, the drop gate and events, never by a prompt, view
+    #: or the controller. A checkpoint from before the field resumes without it: the peak
+    #: restarts at its next draft and nothing is minted until then.
+    cited_read_sets: list[list[str]]
+    #: Cleaned addresses the claim check most recently found refuted for every claim it
+    #: checked them against (`claimcheck.source_standing`). Set only by `_critique`; a later
+    #: check that finds the page supporting a claim takes it out again. URLs only.
+    claim_refuted: list[str]
 
     round: int
     hash_history: list[str]
@@ -1269,15 +1275,19 @@ def _generate(state: State, rt: Runtime) -> dict:
                 text, report_mod.parse(text), read_log, limit=cfg.search.max_source_urls
             )
         )
-        # The run's peak count of cited sources read in full text (D-no-unread-source-drop).
-        # Raised here and never lowered; `.get` because a checkpoint from before the field
-        # existed carries none, and then the peak restarts at this draft.
-        cited_read = len(
+        # This draft's cited sources read in full text, appended to the run's per-draft
+        # record (D-no-unread-source-drop). Stored unfiltered; the claim check's refutations
+        # are subtracted wherever the peak is used, so a later refutation still applies.
+        # `.get` because a checkpoint from before the field carries none; the peak then
+        # restarts at this draft.
+        cited_set = sorted(
             triage.read_cited_sources(text, None, read_log, limit=cfg.search.max_source_urls)
         )
+        sets = [*(state.get("cited_read_sets") or []), cited_set]
+        refuted = _claim_refuted(state)
         peak_fields = {
-            "cited_read": cited_read,
-            "cited_read_peak": max(state.get("cited_read_peak") or 0, cited_read),
+            "cited_read": len(set(cited_set) - refuted),
+            "cited_read_peak": _peak_of(sets, refuted),
         }
 
     h = report_mod.artifact_hash(text)
@@ -1346,7 +1356,7 @@ def _generate(state: State, rt: Runtime) -> dict:
         "author_identity": identity,
         "writer_rotation": rotation + 1,
         "read_log": read_log,
-        **({"cited_read_peak": peak_fields["cited_read_peak"]} if peak_fields else {}),
+        **({"cited_read_sets": sets} if peak_fields else {}),
         "hash_history": history,
         "round": round_no,
         # Every generation resets every per-artifact accumulator — unconditionally,
@@ -1673,6 +1683,38 @@ def _source_loss_finding(rt: Runtime) -> bool:
     return _read_first(rt) and rt.config.review.source_loss_finding
 
 
+def _claim_refuted(state: State) -> set[str]:
+    """The addresses the claim check found refuted (D-no-unread-source-drop); empty when the
+    claim check is off or the checkpoint predates the field."""
+    return set(state.get("claim_refuted") or [])
+
+
+def _peak_of(sets: list[list[str]], refuted: set[str]) -> int:
+    return max((len(set(s) - refuted) for s in sets), default=0)
+
+
+def _cited_read_peak(state: State) -> int | None:
+    """The run's peak count of cited, read, unrefuted sources over every draft so far
+    (D-no-unread-source-drop), or None for a checkpoint from before it was tracked."""
+    sets = state.get("cited_read_sets")
+    if sets is None:
+        return None
+    return _peak_of(sets, _claim_refuted(state))
+
+
+def _merge_refuted(prior: list[str] | None, standing: dict[str, bool]) -> list[str]:
+    """Fold one critique pass's claim-check standing into the run's refuted set: the most
+    recent settled verdict on each address wins, and an address this pass did not settle
+    keeps what it had."""
+    out = set(prior or [])
+    for url, refuted in standing.items():
+        if refuted:
+            out.add(url)
+        else:
+            out.discard(url)
+    return sorted(out)
+
+
 #: The fixed nudge appended on the one retry each set-aside class earns.
 _NUDGES = {
     "unread_draft": prompts.WRITER_UNREAD_NUDGE,
@@ -1719,7 +1761,11 @@ def _unread_drop(cfg: Any, state: State, text: str, session: reading.ReadSession
         return False
     return (
         triage.dropped_read_sources(
-            state.get("report"), text, state.get("read_log"), limit=cfg.search.max_source_urls
+            state.get("report"),
+            text,
+            state.get("read_log"),
+            limit=cfg.search.max_source_urls,
+            exclude=_claim_refuted(state),
         )
         > 0
     )
@@ -2172,6 +2218,8 @@ def _critique_one(
     read_log: dict[str, str] | None = None,
     previous_report: str | None = None,
     cited_read_peak: int | None = None,
+    claim_refuted: set[str] | None = None,
+    verdict_sink: list | None = None,
 ) -> LensResult:
     """One lens, one critic, one fresh context. Failure is recorded as a *failed lens*,
     never as 'no issues found' — a failed review can never manufacture a clean record.
@@ -2312,6 +2360,11 @@ def _critique_one(
                 failure_class=exc.failure_class,
                 attempt=attempt,
             )
+        if verdict_sink is not None:
+            # For the run's refuted-source set (D-no-unread-source-drop); `list.extend` is
+            # atomic, and `_critique` reduces these to URLs and booleans before anything
+            # is stored.
+            verdict_sink.extend(checked.verdicts)
         counts = checked.counts()
         rt.store.claim_check(artifact_hash, identity, attempt, checked.as_record())
         rt.store.event("claim_check", artifact_hash=artifact_hash, critic=identity, **counts)
@@ -2427,6 +2480,7 @@ def _critique_one(
             cited_read_peak,
             fraction=rt.config.review.source_loss_fraction,
             limit=rt.config.search.max_source_urls,
+            exclude=claim_refuted or frozenset(),
         )
         if loss:
             result = result.model_copy(update={"issues": [*loss, *result.issues]})
@@ -2741,14 +2795,19 @@ def _critique(state: State, rt: Runtime) -> dict:
 
     # Once per draft: the counts behind the net-loss finding the completeness lens mints
     # (D-no-unread-source-drop). Integers only (RA-016).
+    refuted = _claim_refuted(state)
+    peak = _cited_read_peak(state)
     if seen.get("hash") != artifact_hash and _source_loss_finding(rt):
-        peak = state.get("cited_read_peak")
         rt.store.event(
             "source_loss_check",
             artifact_hash=artifact_hash,
             cited_read=len(
                 triage.read_cited_sources(
-                    report_text, None, state.get("read_log"), limit=rt.config.search.max_source_urls
+                    report_text,
+                    None,
+                    state.get("read_log"),
+                    limit=rt.config.search.max_source_urls,
+                    exclude=refuted,
                 )
             ),
             cited_read_peak=peak or 0,
@@ -2760,11 +2819,16 @@ def _critique(state: State, rt: Runtime) -> dict:
                     peak,
                     fraction=rt.config.review.source_loss_fraction,
                     limit=rt.config.search.max_source_urls,
+                    exclude=refuted,
                 )
             )
             if _source_loss_issues_apply(rt)
             else 0,
         )
+
+    # Every claim-check verdict this pass produced, reduced after the pool to the run's
+    # refuted-source set (D-no-unread-source-drop).
+    verdicts: list = []
 
     def work(slot: _CritiqueSlot) -> LensResult:
         if slot.unstaffed_reason is not None:
@@ -2796,7 +2860,9 @@ def _critique(state: State, rt: Runtime) -> dict:
                 coverage_sink=coverage_by_artifact,
                 read_log=state.get("read_log"),
                 previous_report=previous_report,
-                cited_read_peak=state.get("cited_read_peak"),
+                cited_read_peak=peak,
+                claim_refuted=refuted,
+                verdict_sink=verdicts,
             )
         return result.model_copy(update={"confirm_state": True}) if confirming else result
 
@@ -2839,6 +2905,7 @@ def _critique(state: State, rt: Runtime) -> dict:
         "source_coverage": coverage_by_artifact,
         "draft_seen": {"hash": artifact_hash, "text": report_text},
         "draft_previous": previous_report,
+        "claim_refuted": _merge_refuted(state.get("claim_refuted"), claimcheck.source_standing(verdicts)),
         "critic_strikes": strikes,
         "sidelined_critics": sidelined,
     }

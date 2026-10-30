@@ -1506,6 +1506,7 @@ def read_cited_sources(
     read_log: dict[str, str] | None,
     *,
     limit: int = DEFAULT_ENTRY_LIMIT,
+    exclude: set[str] | frozenset[str] = frozenset(),
 ) -> set[str]:
     """The cleaned addresses of the bibliography entries the body cites **and** some writer
     has read in full text this run (D-no-unread-source-drop).
@@ -1515,7 +1516,10 @@ def read_cited_sources(
     of the run's peak count of them. An entry nobody read, one whose read failed (`not_found`,
     `paywalled`, ...), and an entry with no address are never counted, so removing a
     fabricated or unreadable citation is never treated as a loss. Two entries with one
-    address count once. Addresses only; never page text.
+    address count once. `exclude` holds cleaned addresses the claim check found refuted for
+    every claim it checked them against (`claimcheck.source_standing`): removing one of
+    those is the fix its finding asks for, so it never counts either. Addresses only; never
+    page text.
     """
     structure = structure if structure is not None else _parse_report(report_text)
     sources_section = _sources_section(structure)
@@ -1530,7 +1534,7 @@ def read_cited_sources(
         if entry.url is None or entry.number not in cited:
             continue
         address = fetch._clean_url(entry.url)
-        if address in read:
+        if address in read and address not in exclude:
             out.add(address)
     return out
 
@@ -1541,12 +1545,14 @@ def dropped_read_sources(
     read_log: dict[str, str] | None,
     *,
     limit: int = DEFAULT_ENTRY_LIMIT,
+    exclude: set[str] | frozenset[str] = frozenset(),
 ) -> int:
-    """How many sources the previous draft cited, that some writer had read in full text, the
-    new draft no longer cites (D-no-unread-source-drop). Zero on a first draft."""
+    """How many sources the previous draft cited, that some writer had read in full text and
+    the claim check has not refuted, the new draft no longer cites (D-no-unread-source-drop).
+    Zero on a first draft."""
     if not previous:
         return 0
-    before = read_cited_sources(previous, None, read_log, limit=limit)
+    before = read_cited_sources(previous, None, read_log, limit=limit, exclude=exclude)
     if not before:
         return 0
     return len(before - read_cited_sources(report_text, None, read_log, limit=limit))
@@ -1571,19 +1577,21 @@ def mechanical_source_loss_issues(
     *,
     fraction: float = 0.5,
     limit: int = DEFAULT_ENTRY_LIMIT,
+    exclude: set[str] | frozenset[str] = frozenset(),
 ) -> list[RawIssue]:
     """At most one `incomplete_answer` finding at `blocking` for a draft that has lost at
     least `fraction` of the run's peak count of read, cited sources (D-no-unread-source-drop).
 
-    `peak` is the largest `read_cited_sources` count any draft of this run reached, carried
-    in graph state; `None` (a run checkpointed before the field existed) mints nothing. The
+    `peak` is the largest `read_cited_sources` count any draft of this run reaches with the
+    same `exclude` applied (`graph._cited_read_peak`); `None` (a run checkpointed before the
+    peak was tracked) mints nothing. The
     finding anchors on the report's first body sentence, because its subject is the report
     as a whole rather than one claim. Fields hold two counts, the floor, and fixed wording;
     never page text, critic prose or earlier-draft text.
     """
     if not peak:
         return []
-    current = len(read_cited_sources(report_text, structure, read_log, limit=limit))
+    current = len(read_cited_sources(report_text, structure, read_log, limit=limit, exclude=exclude))
     floor = source_loss_floor(peak, fraction)
     if current >= floor:
         return []

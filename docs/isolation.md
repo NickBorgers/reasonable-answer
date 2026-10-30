@@ -355,9 +355,10 @@ downstream. Four things bound it, and only the first is new:
 - **Dropping a read source takes a read (D-no-unread-source-drop).** A revision that opened no page in
   full text yet stops citing a page the log holds at `full_text` is set aside the same way, with its own
   fixed nudge (`prompts.WRITER_DROP_NUDGE`, no count, no URL). The net-loss finding on the completeness
-  lens carries two counts, a floor and fixed wording, anchored on the report's own first sentence; the
-  peak it compares against (`State.cited_read_peak`) is an integer that enters no prompt, no
-  `OrchestratorView` and no controller input.
+  lens carries two counts, a floor and fixed wording, anchored on the report's own first sentence. The
+  state behind it — each draft's counted addresses (`State.cited_read_sets`) and the addresses the claim
+  check refuted (`State.claim_refuted`, one boolean per address reduced from the verdicts, no sentence,
+  span or reason) — enters no prompt, no `OrchestratorView` and no controller input.
 - **The output channel is unchanged.** A writer emits free-text markdown with or without the tool,
   so reading adds evidence, not a new way to emit anything — the same argument that bounds the
   evidence critic below. What the writer may be *persuaded* to write is the residual, and it is the

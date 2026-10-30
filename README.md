@@ -429,6 +429,7 @@ read in full text is retried, rotated and, if no writer reads, shipped with `dro
 (D-no-unread-source-drop, `review.drop_requires_read`); and a draft that has lost at least
 `review.source_loss_fraction` (default 0.5) of the run's peak count of read, cited sources gets one
 blocking `incomplete_answer` finding (`review.source_loss_finding`, `source_loss_check` events).
+A source the claim check refuted counts toward neither rule.
 The evidence critic sees at most `fetch_max_chars` characters selected
 from that body as claim-anchored excerpts. Reading
 egresses through the same fetch boundary `verify_sources` uses, so the same network-layer caveat

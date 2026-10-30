@@ -31,10 +31,21 @@ tell a real source from a fabricated one). Each has its own rollback knob under 
    whose read failed (`not_found`, `paywalled`, ...) and an entry with no address never count; two
    entries under one address count once. So removing a fabricated or unreadable citation, which its own
    finding asks for (D-notfound-fabrication, D-read-before-citing), is never treated as a loss.
+   **A source the claim check refuted does not count either.** `claimcheck.source_standing` reduces each
+   critique pass's claim-check verdicts (D-claim-level-verification) to one boolean per cleaned address:
+   *refuted* when at least one pair citing it came back `contradicted`, or `absent` from a page shown
+   whole — the two verdicts that mint `misrepresented_source` — and none came back `supported`. A page
+   that supports any one of its claims is not refuted; a page whose verdicts are all unsettled
+   (`unreadable`, `absent` from a partial page, unchecked) is left as it was. `graph._critique` folds that
+   into `State.claim_refuted`, the most recent settled standing per address winning, so a later check
+   that finds support takes the address out again. Removing a refuted source is the fix its finding asks
+   for, so it is neither a drop (part 2) nor a loss (part 3). With the claim check off the set stays empty
+   and both parts count every read, cited source.
 2. **A drop needs a read** (`review.drop_requires_read`, default `true`). After a writer call returns a
    usable revision — not a first draft, not a polish pass — it is set aside when (a) the call completed
    no `read_source` at `full_text` and (b) it stops citing at least one source that the previous draft
-   cited and the read log holds at `full_text` (`triage.dropped_read_sources`). Re-reading one of the
+   cited, the read log holds at `full_text` and `State.claim_refuted` does not hold
+   (`triage.dropped_read_sources`). Re-reading one of the
    draft's own cited pages counts as reading, so a writer that checks a page before removing it passes.
    The handling is D-writer-must-read's walk, extended rather than copied (`graph._set_aside_class`):
    the same writer once, with the fixed `prompts.WRITER_DROP_NUDGE`; then the next pool member; then
@@ -44,12 +55,19 @@ tell a real source from a fabricated one). Each has its own rollback knob under 
    `unread_source_drop`. The `generate` event gains `drop_retry` and `drop_accepted` (integers, present
    while the gate is in force).
 3. **Backstop: a large net loss is a finding** (`review.source_loss_finding`, default `true`). `generate`
-   records `cited_read` (the count above for the draft it ships) and raises `State.cited_read_peak`, the
-   largest such count of the run; it is never lowered. A completed completeness review of a draft whose
-   count has fallen by at least `review.source_loss_fraction` of the peak (default `0.5`) gains one
+   appends the set of addresses that count for the draft it ships to `State.cited_read_sets`, one list
+   per draft, stored before refutations are subtracted. The run's peak is computed where it is used:
+   the largest count over those sets after removing `State.claim_refuted` (`graph._cited_read_peak`).
+   A source the claim check refutes after it was counted therefore leaves the peak as well, without any
+   stored value being rewritten; the current draft's count subtracts the same set. The event field
+   `cited_read` is the current draft's count and `cited_read_peak` the peak, both computed that way. A
+   completed completeness review of a draft whose count has fallen by at least
+   `review.source_loss_fraction` of the peak (default `0.5`) gains one
    pipeline-minted `incomplete_answer` finding at `blocking`, anchored on the report's first body
    sentence (`triage.mechanical_source_loss_issues`). A `source_loss_check` event records `cited_read`,
-   `cited_read_peak` and `source_loss_findings` once per draft.
+   `cited_read_peak` and `source_loss_findings` once per draft. Example: a draft cites six read sources;
+   the claim check finds three of them contradicted for their claims; the revision removes those three.
+   The peak is three, the draft carries three, and neither the drop gate nor the finding fires.
 4. **Why completeness and `incomplete_answer`.** The defect is how much of the evidence the run found
    the answer still stands on — a property of the report as a whole, not of one claim's support, so
    `uncited_claim` (D-no-shrink-discharge's category, about a specific claim) does not fit and there is
@@ -84,19 +102,26 @@ tell a real source from a fabricated one). Each has its own rollback knob under 
 
 **Isolation (docs/isolation.md).** The nudge is constant text with no count and no URL. The finding
 carries the current count, the peak, the floor and fixed wording, plus the report's own first sentence
-as its anchor — no page text, no critic prose, no previous-draft text. `cited_read_peak` is an integer
-in graph state; it enters no prompt, no `OrchestratorView` and no controller input. Events carry
-integers only (RA-016).
+as its anchor — no page text, no critic prose, no previous-draft text. `cited_read_sets` and
+`claim_refuted` hold cleaned URLs only — addresses already in the read log and the report — and a
+claim-check verdict reaches them only as one boolean per address: no sentence, span or checker reason
+is kept. Neither enters a prompt, `OrchestratorView` or a controller input. The verdicts are read from
+the claim check's in-memory result inside the critique node, the same object `claimcheck.issues_from`
+already reads. Events carry integers only (RA-016).
 
-**Checkpoint compatibility.** `State.cited_read_peak` is read with `.get`. A run checkpointed before
-the field existed resumes without it: the completeness lens mints nothing for the draft in hand, and the
-next `generate` sets the peak from that draft. The run's earlier, larger peak is not reconstructed.
+**Checkpoint compatibility.** `State.cited_read_sets` and `State.claim_refuted` are read with `.get`.
+A run checkpointed before they existed resumes without them: the completeness lens mints nothing for the
+draft in hand, the next `generate` starts the per-draft record at that draft, and the refuted set starts
+empty until the next claim check. The run's earlier, larger peak is not reconstructed.
 
 **Residuals.** (1) A writer can satisfy the drop gate by reading any one page, then drop several; the
-backstop catches it only once the loss reaches the fraction. (2) A source read in full text but
-off-topic, or one a critic showed misrepresented, still counts toward the peak; a report that removes
-half of such sources must find replacements. The threshold is set so that removing one never does this
-on a bibliography of three or more. (3) The backstop can be met by citing read pages that support little;
+backstop catches it only once the loss reaches the fraction. (2) Only the claim check refutes a
+source. A source read in full text but off-topic, or one only the evidence critic (not the claim check)
+called misrepresented, still counts toward the peak, and so does every source when the claim check is
+off; a report that removes half of such sources must find replacements. The threshold is set so that
+removing one never does this on a bibliography of three or more. A source refuted for one claim and
+supported for another is not refuted: dropping it entirely also drops the supported claim's evidence.
+(3) The backstop can be met by citing read pages that support little;
 claim checking and the evidence critic judge that, not this rule. (4) With reading or verification off,
 neither part runs: there is no read log to tell a fabricated source from a real one.
 

@@ -12,9 +12,11 @@ from test_read_before_citing import URL_A, URL_B, _runtime
 from reasonable_answer import graph as graph_mod
 from reasonable_answer import prompts
 from reasonable_answer import report as report_mod
+from reasonable_answer.claimcheck import ClaimPair, PairVerdict, source_standing
 from reasonable_answer.config import ConfigError, ReviewConfig, RevisionConfig
 from reasonable_answer.controller import select_shipped_index
 from reasonable_answer.graph import _critique_one, _generate
+from reasonable_answer.schemas import StructuralRef
 from reasonable_answer.taxonomy import Category, Lens, Severity, clamp_to_floor
 from reasonable_answer.triage import (
     dropped_read_sources,
@@ -297,31 +299,39 @@ def _first(tmp_path, identities, config, draft, read_log, **state):
     return rt, _generate({"question": "q?", "round": 0, "read_log": read_log, **state}, rt)
 
 
-def test_generate_raises_the_peak_and_never_lowers_it(tmp_path, identities, config):
+def _urls(*numbers: int) -> list[str]:
+    return [f"https://example.org/p{i}" for i in numbers]
+
+
+def test_generate_records_each_drafts_set_and_the_peak_never_drops_without_a_refutation(
+    tmp_path, identities, config
+):
     rt, out = _first(tmp_path, identities, config, _report(3), _log(3))
-    assert out["cited_read_peak"] == 3
+    assert out["cited_read_sets"] == [_urls(1, 2, 3)]
     gen = _events(rt, "generate")[-1]
     assert gen["cited_read"] == 3 and gen["cited_read_peak"] == 3
 
-    rt2, out2 = _first(tmp_path / "2", identities, config, _report(1), _log(3), cited_read_peak=5)
-    assert out2["cited_read_peak"] == 5
-    assert _events(rt2, "generate")[-1]["cited_read"] == 1
+    prior = [_urls(1, 2, 3, 4, 5)]
+    rt2, out2 = _first(tmp_path / "2", identities, config, _report(1), _log(5), cited_read_sets=prior)
+    assert out2["cited_read_sets"] == [*prior, _urls(1)]
+    gen2 = _events(rt2, "generate")[-1]
+    assert gen2["cited_read"] == 1 and gen2["cited_read_peak"] == 5
 
 
 def test_a_state_from_before_the_field_restarts_the_peak_at_the_next_draft(tmp_path, identities, config):
     rt, out = _first(tmp_path, identities, config, _report(2), _log(2), report=_report(2), round=3)
-    assert out["cited_read_peak"] == 2
+    assert out["cited_read_sets"] == [_urls(1, 2)]
+    assert graph_mod._cited_read_peak({}) is None
+    assert graph_mod._cited_read_peak(out) == 2
 
 
 def test_peak_tracks_across_a_run_of_drafts(tmp_path, identities, config):
-    state: dict = {"read_log": _log(6)}
+    state: dict = {}
     peaks = []
     for i, n in enumerate([6, 5, 3, 4]):
-        rt, out = _first(tmp_path / str(i), identities, config, _report(n), state["read_log"], **{
-            k: v for k, v in state.items() if k != "read_log"
-        })
-        state["cited_read_peak"] = out["cited_read_peak"]
-        peaks.append(out["cited_read_peak"])
+        rt, out = _first(tmp_path / str(i), identities, config, _report(n), _log(6), **state)
+        state["cited_read_sets"] = out["cited_read_sets"]
+        peaks.append(_events(rt, "generate")[-1]["cited_read_peak"])
     assert peaks == [6, 6, 6, 6]
 
 
@@ -329,13 +339,13 @@ def test_with_reading_off_no_peak_is_carried(tmp_path, identities, config):
     rt, _ = _runtime(tmp_path, identities, config, read=False, verify=True)
     rt.client.report_fn = lambda _n: _report(2)
     out = _generate({"question": "q?", "round": 0}, rt)
-    assert "cited_read_peak" not in out
+    assert "cited_read_sets" not in out
 
 
 # -- wiring into the completeness lens ------------------------------------------------------
 
 
-def _review(rt, lens, text, *, peak, read_log=None):
+def _review(rt, lens, text, *, peak, read_log=None, refuted=None):
     return _critique_one(
         rt,
         lens,
@@ -347,6 +357,7 @@ def _review(rt, lens, text, *, peak, read_log=None):
         1,
         read_log=_log(8) if read_log is None else read_log,
         cited_read_peak=peak,
+        claim_refuted=refuted,
     )
 
 
@@ -380,3 +391,141 @@ def test_the_finding_knob_off_restores_the_earlier_behaviour(tmp_path, identitie
 def test_reading_or_verifying_off_leaves_the_finding_out(tmp_path, identities, config, read, verify):
     rt, _ = _runtime(tmp_path, identities, config, read=read, verify=verify)
     assert _review(rt, Lens.COMPLETENESS, _report(2), peak=6).issues == []
+
+
+# -- sources the claim check refuted --------------------------------------------------------
+
+
+def _verdict(url, verdict, complete=True):
+    pair = ClaimPair(StructuralRef(section=0, paragraph=0), "s", "p", 1, url)
+    return PairVerdict(pair=pair, verdict=verdict, complete=complete)
+
+
+def test_source_standing_marks_only_settled_negative_pages_with_no_support():
+    a, b, c, d, e = _urls(1, 2, 3, 4, 5)
+    standing = source_standing(
+        [
+            _verdict(a, "contradicted"),
+            _verdict(b, "absent", complete=True),
+            _verdict(c, "absent", complete=False),  # a partial page settles nothing
+            _verdict(d, "contradicted"),
+            _verdict(d, "supported"),  # supports one of its claims: not refuted
+            _verdict(e, "unreadable"),
+            _verdict(a + ".", "contradicted"),  # same address after cleaning
+        ]
+    )
+    assert standing == {a: True, b: True, d: False}
+
+
+def test_the_most_recent_settled_verdict_wins():
+    a, b = _urls(1, 2)
+    assert graph_mod._merge_refuted([a], {a: False, b: True}) == [b]
+    assert graph_mod._merge_refuted([a], {}) == [a]
+
+
+def test_a_refuted_source_leaves_the_peak_even_after_it_was_counted():
+    state = {"cited_read_sets": [_urls(1, 2, 3, 4, 5, 6), _urls(1, 2, 3)]}
+    assert graph_mod._cited_read_peak(state) == 6
+    state["claim_refuted"] = _urls(4, 5, 6)
+    assert graph_mod._cited_read_peak(state) == 3
+
+
+def test_removing_three_refuted_sources_of_six_mints_no_finding(tmp_path, identities, config):
+    # Six read sources; the claim check found three of them refuted for their claims; the
+    # revision removes those three. That is the fix, not a loss.
+    refuted = set(_urls(4, 5, 6))
+    state = {"cited_read_sets": [_urls(1, 2, 3, 4, 5, 6)], "claim_refuted": sorted(refuted)}
+    peak = graph_mod._cited_read_peak(state)
+    assert peak == 3
+    text = _report(3)
+    assert mechanical_source_loss_issues(text, report_mod.parse(text), _log(6), peak, exclude=refuted) == []
+    rt, _ = _runtime(tmp_path, identities, config, read=True, verify=True)
+    assert _review(rt, Lens.COMPLETENESS, text, peak=peak, refuted=refuted).issues == []
+    # Without the refutations the same drafts would trip the backstop.
+    assert len(_review(rt, Lens.COMPLETENESS, text, peak=6).issues) == 1
+
+
+def _refuted_revision(tmp_path, identities, config, draft, per_call):
+    rt, _ = _runtime(tmp_path, identities, config, read=True, verify=True)
+    rt.client.report_fn = lambda _n: draft
+    _script(rt, per_call)
+    _generate(
+        {
+            "question": "q?",
+            "round": 1,
+            "report": _report(6),
+            "read_log": _log(6),
+            "cited_read_sets": [_urls(1, 2, 3, 4, 5, 6)],
+            "claim_refuted": _urls(4, 5, 6),
+        },
+        rt,
+    )
+    return rt
+
+
+def test_removing_three_refuted_sources_of_six_without_reading_is_not_retried(
+    tmp_path, identities, config
+):
+    rt = _refuted_revision(tmp_path, identities, config, _report(3), [[]])
+    assert len(_writer_calls(rt)) == 1
+    assert not _events(rt, "generate_failed")
+    gen = _events(rt, "generate")[-1]
+    assert gen["drop_retry"] == 0 and gen["cited_read"] == 3 and gen["cited_read_peak"] == 3
+
+
+def test_an_unread_drop_of_a_supported_source_still_fires_beside_refuted_ones(
+    tmp_path, identities, config
+):
+    # Three refuted sources removed, plus one that was never refuted: that last drop is
+    # still a drop without reading.
+    rt = _refuted_revision(tmp_path, identities, config, _report(2), [[], READ])
+    assert [e["failure_class"] for e in _events(rt, "generate_failed")] == ["unread_source_drop"]
+    assert _events(rt, "generate")[-1]["drop_retry"] == 1
+
+
+def test_a_genuine_net_loss_of_supported_sources_still_fires(tmp_path, identities, config):
+    rt, _ = _runtime(tmp_path, identities, config, read=True, verify=True)
+    refuted = set(_urls(6))
+    state = {"cited_read_sets": [_urls(1, 2, 3, 4, 5, 6)], "claim_refuted": sorted(refuted)}
+    peak = graph_mod._cited_read_peak(state)
+    assert peak == 5
+    [issue] = _review(rt, Lens.COMPLETENESS, _report(2), peak=peak, refuted=refuted).issues
+    assert issue.severity is Severity.BLOCKING
+
+
+def _sinking(contradicted, supported):
+    """`_critique_one` as it is, plus two claim-check verdicts pushed into its sink."""
+    real = graph_mod._critique_one
+
+    def wrapped(*args, verdict_sink=None, **kw):
+        result = real(*args, **kw)
+        if verdict_sink is not None:
+            verdict_sink.extend([_verdict(contradicted, "contradicted"), _verdict(supported, "supported")])
+        return result
+
+    return wrapped
+
+
+def test_critique_folds_claim_check_verdicts_into_the_refuted_set(tmp_path, identities, config, monkeypatch):
+    a, b = _urls(1, 2)
+    rt, _ = _runtime(tmp_path, identities, config, read=True, verify=True)
+    monkeypatch.setattr(graph_mod, "_critique_one", _sinking(a, b))
+    out = graph_mod._critique(
+        {
+            "question": "q?",
+            "report": _report(2),
+            "artifact_hash": "h" * 64,
+            "author_identity": identities["writer-a"],
+            "read_log": _log(2),
+            "cited_read_sets": [_urls(1, 2)],
+            "claim_refuted": [b],
+            "pending_lenses": ["evidence"],
+        },
+        rt,
+    )
+    # b was refuted before and is now supported; a is newly refuted.
+    assert out["claim_refuted"] == [a]
+    # The once-per-draft event used the refuted set as it stood before this pass.
+    check = _events(rt, "source_loss_check")[-1]
+    assert check["cited_read"] == 1 and check["cited_read_peak"] == 1
+    assert "example.org" not in (rt.store.dir / "events.jsonl").read_text()

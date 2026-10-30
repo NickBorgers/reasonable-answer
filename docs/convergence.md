@@ -379,8 +379,11 @@ A second completeness row, gated like the unread row (reading and verification b
 `review.source_loss_finding` (D-no-unread-source-drop): a draft whose count of cited sources read in
 full text has fallen by at least `review.source_loss_fraction` (default one half) of the run's peak of
 that count mints one `incomplete_answer` finding at **`blocking`**, anchored on the report's first body
-sentence. The peak is `State.cited_read_peak`, raised by `generate` and never lowered; a source nobody
-read, or whose read failed, never counts, so removing a fabricated citation cannot trip it. It is
+sentence. The peak is computed from `State.cited_read_sets` (each draft's counted addresses, appended
+by `generate`) minus `State.claim_refuted`; a source nobody read, or whose read failed, never counts, so
+removing a fabricated citation cannot trip it, and a source the claim check refuted for every claim it
+checked (contradicted, or absent from a page shown whole, with no claim supported) counts neither now
+nor at the peak, so removing it cannot trip it either. It is
 minted above its category's floor (`major`) for the reason the draft-history row is: under
 `latest_unblocked` a `major` would let the shrunken draft ship over the fuller one. Its exit is in the
 report — read pages and cite them until the count is back at the floor the instruction names — and

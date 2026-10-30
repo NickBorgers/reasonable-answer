@@ -958,7 +958,8 @@ class ReviewConfig(BaseModel):
     #: A draft that has lost at least `source_loss_fraction` of the run's peak count of cited
     #: sources read in full text mints one blocking `incomplete_answer` finding
     #: (D-no-unread-source-drop). Same gating as `drop_requires_read`; suppressed once the
-    #: read budget is spent. `false` restores the earlier behaviour. Not under `budgets`.
+    #: read budget is spent. A source the claim check refuted counts in neither the draft nor
+    #: the peak. `false` restores the earlier behaviour. Not under `budgets`.
     source_loss_finding: bool = True
     #: The share of the peak a draft must lose for that finding to fire. A heuristic argued
     #: from mechanism, not a measured value: at one half the report has lost as much of its

@@ -247,7 +247,8 @@ it — each one, again, a guard against a known LLM failure mode:
   `unread_source_drop`). Dropping a source nobody read, or one whose read failed, is never held back.
   A draft that has lost at least half (`review.source_loss_fraction`) of the run's peak count of cited
   sources read in full text gets one blocking `incomplete_answer` finding, so a report cannot shrink
-  its way to acceptance (D-no-unread-source-drop, `review.drop_requires_read`,
+  its way to acceptance. A source the claim check refuted (contradicted, or absent from a page shown
+  whole, for every claim it was checked against) counts in neither rule, so removing it is free (D-no-unread-source-drop, `review.drop_requires_read`,
   `review.source_loss_finding`). With
   reading and verification enabled, a revision also cannot discharge a finding merely by dropping
   its citation: when the supported claim remains, the evidence lens mints a major `uncited_claim`
