@@ -58,6 +58,7 @@ from ..fetch import (
     ResolutionTier,
     SourceMetadata,
     SourceOutcome,
+    access_wall,
 )
 from ..search import QueryBudget
 from . import identifiers
@@ -250,6 +251,14 @@ class SourceResolver:
             return resolved
         if not markdown:
             return resolved
+        wall = access_wall("", markdown)
+        if wall is not None:
+            # A renderer can be refused too, and hands the wall back as markdown like any
+            # page. That is no body — and, like a blank render, no evidence the page is
+            # absent either, so the direct verdict stands (D-access-wall-detection).
+            return replace(
+                resolved, error=f"{resolved.error}; the renderer was shown an access wall ({wall})"
+            )
 
         joined = " ".join(markdown.split())
         return FetchedSource(
