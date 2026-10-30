@@ -12,9 +12,11 @@ gap stayed open for a month.
 
 **The measurement.** Rather than extend that search for a new vendor, this round auditioned models
 already present elsewhere in the roster — `gemma4` (the evidence/completeness critic),
-`qwen3.8-27b`, and `nemotron-3-super-120b-a12b` — against the same 22-fixture corpus (hash
-`9c248e1d249ad301`, matching the 2026-08-10/11 measurement identity), at the shipped
-`repetitions: 3`. Full denominators for all three are recorded as a follow-up section in
+`qwen3.8-27b`, and `nemotron-3-super-120b-a12b` — against the 22-fixture corpus shipped at
+measurement time (hash `9c248e1d249ad301`, matching the 2026-08-10/11 historical measurement
+identity), at the shipped `repetitions: 3`. The current shipped 25-fixture corpus has a different
+identity, so these results are not directly comparable to a run on it without a new audition.
+Full denominators for all three are recorded as a follow-up section in
 [model-evaluation-record-2026-08-10.md](../model-evaluation-record-2026-08-10.md), per that page's
 own instruction to extend the record rather than restart the survey. Summary:
 

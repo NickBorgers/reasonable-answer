@@ -12,9 +12,12 @@ and the open item in `docs/decisions.md` track.
 
 - **Dates:** 2026-09-08 and 2026-09-09.
 - **Lenses:** `logic`, `evidence`, `completeness` — every lens `glm-5.2` holds a slot on.
-- **Corpus:** `tests/fixtures/audition` (now `src/reasonable_answer/fixtures/audition`,
-  D-packaged-audition-corpus), corpus hash `9c248e1d249ad301` — the same corpus and hash as the
-  2026-08-10/11 and 2026-09-06/07 records, so these numbers are directly comparable to those.
+- **Corpus:** the 22-fixture corpus shipped at measurement time, then at
+  `tests/fixtures/audition` (now `src/reasonable_answer/fixtures/audition`,
+  D-packaged-audition-corpus), corpus hash `9c248e1d249ad301` — the same historical corpus and hash
+  as the 2026-08-10/11 and 2026-09-06/07 records, so these numbers are directly comparable to
+  those records. The current shipped 25-fixture corpus has a different identity and requires a
+  new audition for comparison.
 - **Repetitions:** shipped `audition.repetitions: 3`.
 - **Thresholds:** shipped `max_schema_failure_rate: 0.2`, `max_control_material_rate: 1.00`,
   `warn_lens_sensitivity: 0.6`.
