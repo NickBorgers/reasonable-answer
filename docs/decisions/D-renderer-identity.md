@@ -6,7 +6,9 @@
 
 **The finding.** D-paid-tier-page drew its line at Firecrawl's `proxy` mode: `basic` was taken to
 be "read it as a normal client" and `stealth` to be the disguise. Measured on 2026-10-29, `basic`
-is itself a disguise. A scrape of a header-echo page shows what the provider sends on our behalf:
+is itself a disguise. A scrape of a header-echo page shows what the provider sends on our behalf.
+The full responses, the classifier and every per-URL result are in the public source record,
+[renderer-identity-record-2026-10-29.md](../renderer-identity-record-2026-10-29.md):
 
 | header | value |
 |---|---|
@@ -30,7 +32,7 @@ journal, news and government pages), counting pages that yielded a long article 
 | direct fetch, then Firecrawl `basic` (the production ladder) | 68 |
 
 Firecrawl accepts a `headers` override, and with `User-Agent` set to `fetch.USER_AGENT` (the
-`Referer` and client hints are not overridable) eight of ten hard walls — NEJM, WSJ, Reuters,
+`Referer` and client hints were still sent) eight of ten hard walls — NEJM, WSJ, Reuters,
 SAGE, CBO, JAMA, Health Affairs, RAND — failed with a provider HTTP 500; a control run minutes
 later with the default identity read WSJ and CBO. An honest renderer exists and is the third row.
 Choosing it would cost roughly 28 of those 79 bodies.
@@ -61,10 +63,9 @@ a code path that composed its own headers would change it unmeasured, in either 
 **For anyone else running this.** The extraction tier ships disabled. Enabling it now means
 accepting this identity, and the roster comment says so.
 
-**Not done.** A bot-challenge or login-wall page that a rung returns is still counted as a body
-read — production critics have described cited sources as "a captcha page" and "a cookie consent
-page", and Firecrawl returned JSTOR's login wall as a long body. Detecting those is independent of
-this decision and is left to its own change.
+**Walls the renderer is shown.** A browser identity does not get past every wall: Firecrawl
+returned JSTOR's login wall as a long body. That page is no body under D-access-wall-detection, on
+either rung, independently of this decision.
 
 **Invariants.** Untouched. This changes what a third-party server is told about the client, not
 what enters any context, who critiques what, or how the controller decides.

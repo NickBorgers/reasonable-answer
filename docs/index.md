@@ -48,6 +48,8 @@ unchanged.
   record for the empirical claims in Model evaluation.
 - **[2026-09-08 glm-5.3 audit record](model-evaluation-record-2026-09-08-glm-5.3.md)** — the public
   source record for why `glm-5.2` stays pinned over `glm-5.3`.
+- **[2026-10-29 rendering-tier identity record](renderer-identity-record-2026-10-29.md)** — the
+  public source record for what the rendering tier tells a site about the client.
 - **[SSRF egress isolation](ssrf-egress-isolation.md)** — the infrastructure half of the fetch
   boundary: what the network must enforce that the application cannot.
 - **[CI and the review pipeline](ci-pipeline.md)** — what runs on a pull request, the agentic
