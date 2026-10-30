@@ -8,7 +8,8 @@
 be "read it as a normal client" and `stealth` to be the disguise. Measured on 2026-10-29, `basic`
 is itself a disguise. A scrape of a header-echo page shows what the provider sends on our behalf.
 The full responses, the classifier and every per-URL result are in the public source record,
-[renderer-identity-record-2026-10-29.md](../renderer-identity-record-2026-10-29.md):
+[renderer-identity-record-2026-10-29.md](../renderer-identity-record-2026-10-29.md) (as committed:
+<https://github.com/NickBorgers/reasonable-answer/blob/78659f4d6bc93ac7cdb13589a117604559eed8f2/docs/renderer-identity-record-2026-10-29.md>):
 
 | header | value |
 |---|---|
