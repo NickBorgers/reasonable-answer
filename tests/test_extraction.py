@@ -5,10 +5,10 @@ the real opener, the real redirect handler and `fetch._request`'s credential han
 stay on the path under test.
 
 The file exists chiefly for one test. `test_the_renderer_is_never_asked_to_disguise_itself`
-is the doctrine of D-existence-vs-body/D-paid-tier-page expressed as something CI fails on
-rather than as a comment
-somebody can delete: rendering a page is in scope, impersonating a browser to defeat a bot
-wall is not, and the difference is one string in a request body.
+is the line D-paid-tier-page drew and D-renderer-identity redrew, expressed as something CI
+fails on rather than as a comment somebody can delete: the provider's default browser
+identity is accepted, stealth mode (borrowed addresses) is not, and the difference is one
+string in a request body.
 """
 
 from __future__ import annotations
@@ -55,9 +55,10 @@ def _capture(monkeypatch, response):
 
 
 def test_the_renderer_is_never_asked_to_disguise_itself(monkeypatch):
-    """`fetch.py` refuses to spoof a browser to get past a 403. Buying that same
-    impersonation by the page from a vendor would be the same act with an invoice
-    attached, so stealth is absent rather than defaulted off — there is no knob.
+    """Stealth mode rotates residential IPs — other people's addresses — so it is absent
+    rather than defaulted off: there is no knob. And the request names no headers, so the
+    identity a site sees is the provider default D-renderer-identity measured and accepted,
+    not one composed here in either direction.
 
     Asserted against the serialised request body, not against the options constant, so
     that a future code path assembling its own payload is caught too.
@@ -67,9 +68,10 @@ def test_the_renderer_is_never_asked_to_disguise_itself(monkeypatch):
 
     body = json.loads(seen[0].data)
     assert body["proxy"] == "basic"
+    assert "headers" not in body, "the accepted identity is the provider's default, unmodified"
     blob = json.dumps(body).lower()
     for mode in FORBIDDEN_PROXY_MODES:
-        assert mode not in blob, f"{mode!r} is impersonation bought by the page"
+        assert mode not in blob, f"{mode!r} is stealth mode bought by the page"
 
 
 def test_no_configuration_can_turn_stealth_on():

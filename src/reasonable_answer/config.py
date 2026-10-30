@@ -419,10 +419,10 @@ class ExtractionTierConfig(BaseModel):
     refuse an unknown client — it does **not** get past a hard paywall, and no
     configuration here pretends otherwise.
 
-    There is deliberately no stealth switch. A rendering provider's stealth mode rotates
-    residential IPs to defeat bot detection, which is the industrial form of the browser
-    impersonation `fetch.py` refuses and D-existence-vs-body records as doctrine. Rendering a page is not
-    disguising who is asking for it, and only the first is in scope.
+    Enabling it accepts the provider's default identity: a desktop Chrome user arriving
+    from Google, not this system's own user agent (D-renderer-identity). There is
+    deliberately no stealth switch. A rendering provider's stealth mode rotates residential
+    IPs to defeat bot detection — borrowed addresses, which stay out of scope.
     """
 
     model_config = ConfigDict(extra="forbid")

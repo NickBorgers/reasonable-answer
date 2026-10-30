@@ -179,7 +179,9 @@ load-bearing rather than incidental:
   strictly (enabled without a provider is fatal) so that it stays inert rather than half-built.
 - **Extraction has no stealth knob.** The provider's proxy mode is pinned to `basic`, and `auto` is
   forbidden because it silently escalates. This is doctrine, and tests assert against the
-  serialized request body so a new code path is caught too.
+  serialized request body so a new code path is caught too. The provider's default browser
+  identity — a desktop Chrome user arriving from Google — is accepted (D-renderer-identity); the
+  request carries no `headers` field, so that identity is the one measured, not one composed here.
 
 ## Revisions are operations in production
 

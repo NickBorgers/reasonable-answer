@@ -1,4 +1,8 @@
-## D-paid-tier-page — the paid tiers render a page, and never disguise who is asking for it
+## D-paid-tier-page — the paid tiers render a page under a bounded provider identity
+
+*(Amended by D-renderer-identity: Firecrawl's `basic` mode presents a desktop Chrome user arriving
+from Google, and that provider-supplied identity is now accepted for the extraction tier. The
+`stealth`/`auto` ban and the remaining implementation constraints below stand.)*
 
 **The problem.** D-existence-vs-body made a citation's *existence* verifiable for free, which stops a paywalled
 paper looking like a fabricated one. It did nothing for the other half: a body that never arrives
@@ -11,15 +15,14 @@ startup. `sources.extraction` sends the cited URL to a rendering service (Firecr
 reference implementation; the registry is open) and takes back markdown. `sources.delivery` is a
 config shape and a registry entry with **no provider behind it**.
 
-**The line, which is the whole decision.** A rendering provider can be pointed at a page in two
-registers: read it as a normal client, or disguise the client to defeat anti-bot defences —
-residential IP rotation, fingerprint randomisation. On the provider integrated here, Firecrawl, the
-second is a `proxy` mode, and `resolve/extraction.py` pins the request to `proxy: "basic"` while
-naming `"stealth"` and `"auto"` in `FORBIDDEN_PROXY_MODES` as values it must never send — `"auto"`
-because it starts basic and escalates into stealth silently when a site refuses. That is the
-industrial form of the browser impersonation `fetch.py` has refused since D-source-verification and D-existence-vs-body records as
-doctrine, bought by the page instead of coded by hand. **Rendering a page is not disguising who is
-asking for it, and only the first is in scope.**
+**The amended line.** This decision originally treated Firecrawl's `basic` mode as an ordinary
+client and reserved “disguise” for its residential-IP and fingerprint-randomisation modes.
+D-renderer-identity supersedes that account: `basic` supplies its own browser identity, which the
+extraction tier accepts, while `stealth` and `auto` remain forbidden. `resolve/extraction.py` pins
+the request to `proxy: "basic"` and names `"stealth"` and `"auto"` in `FORBIDDEN_PROXY_MODES` as
+values it must never send — `"auto"` because it starts basic and escalates into stealth silently
+when a site refuses. Residential-IP rotation and fingerprint randomisation remain the industrial
+form of browser impersonation that is out of scope.
 
 So `proxy` is pinned to `"basic"` in `resolve/extraction.py` and there is no configuration field
 that can change it — absent, not defaulted-off, because a knob makes doctrine an operator

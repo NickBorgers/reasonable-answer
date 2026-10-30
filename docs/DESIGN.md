@@ -214,6 +214,9 @@ and the docs reviewer blocks on the first.
 - **[model-evaluation-record-2026-09-08-glm-5.3.md](./model-evaluation-record-2026-09-08-glm-5.3.md)**
   — the public operator record behind the `glm-5.3` version-bump comments in `config/roster.yaml`:
   why `glm-5.2` stays pinned, measured on every lens it holds a slot on.
+- **[renderer-identity-record-2026-10-29.md](./renderer-identity-record-2026-10-29.md)** — the
+  public source record behind D-renderer-identity: the headers the rendering tier's provider sends,
+  and how many of 79 cited pages each candidate client read.
 - **[decisions.md](./decisions.md)** — the decision-registry index: the slug identifier scheme, the
   old-number mapping, how each adversarial review finding was resolved across the Codex review
   round (`RA-`/`RB-`/`RC-`/`RG-` prefixes) and every round since, the RA-019 test matrix, and the

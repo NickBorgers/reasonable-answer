@@ -7,20 +7,20 @@ away an unknown HTTP client. That is a large share of why citation fetches fail.
 and no setting here changes that. Anyone reading "paid tier" as "universal access" should
 stop at this paragraph.
 
-**Where the line is, and why it is not a config option.** Every provider in this market
-also sells a stealth mode — residential IP rotation, fingerprint randomisation, anti-bot
-defeat — and on Firecrawl it is one string away (`proxy: "stealth"`, or `"auto"`, which
-escalates into it silently on failure). That is the industrial form of the browser
-impersonation `fetch.py` has refused since D-source-verification, and D-existence-vs-body
-records as doctrine: a system
-whose whole claim is that its citations are checkable cannot obtain them by circumventing
-the access controls of the people who published them.
+**Who the site thinks is asking.** Firecrawl's `basic` mode presents a desktop Chrome user
+arriving from a Google result — its default, not anything this module sends — and that is
+most of why it reads pages an honest client cannot. D-renderer-identity accepts that
+identity, and pins it: the request carries no `headers` field, so the identity stays the
+one that decision measured.
 
-So `proxy` is pinned to `"basic"` in `_SCRAPE_OPTIONS` and there is no knob to change it.
-Not defaulted-off — absent. `tests/test_extraction.py` asserts the request body carries
-`basic` and contains no stealth mode anywhere, which turns the doctrine from a comment
-into something CI fails on. Rendering a page is not disguising who is asking for it, and
-only the first is in scope.
+**Where the line still is, and why it is not a config option.** Every provider in this
+market also sells a stealth mode — residential IP rotation, fingerprint randomisation —
+and on Firecrawl it is one string away (`proxy: "stealth"`, or `"auto"`, which escalates
+into it silently on failure). Borrowing other people's addresses is a different act from
+a browser header, and stays out of scope. So `proxy` is pinned to `"basic"` in
+`_SCRAPE_OPTIONS` and there is no knob to change it. Not defaulted-off — absent.
+`tests/test_extraction.py` asserts the request body carries `basic`, no stealth mode and
+no `headers`, which keeps the line something CI fails on.
 
 The body this returns is the cited URL's *own* body, not a copy from somewhere else, so
 it carries no `body_source_url` and may settle a dispute — unlike an open-access mirror
@@ -40,7 +40,7 @@ log = logging.getLogger(__name__)
 #: the caller wants prose for a critic, not a DOM; `onlyMainContent` drops the nav and
 #: cookie banners that would otherwise eat the character budget a critic reads.
 #:
-#: `proxy: "basic"` is the doctrine (see the module docstring). "auto" is specifically
+#: `proxy: "basic"` is the line (see the module docstring). "auto" is specifically
 #: excluded rather than merely not chosen: it *starts* basic and silently escalates to
 #: stealth when a site refuses, which would make the system's behaviour toward a bot wall
 #: depend on whether the bot wall worked.

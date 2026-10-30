@@ -312,11 +312,14 @@ search:
 #   # HTTP client. What it does NOT buy, and no setting here changes: a hard paywall. A
 #   # subscription wall serves a teaser to a real browser too.
 #   #
+#   # Enabling it accepts the provider's default identity: sites see a desktop Chrome
+#   # user arriving from Google, not reasonable-answer (D-renderer-identity).
+#   #
 #   # There is no stealth option, deliberately. Every vendor in this market also sells
 #   # residential-IP rotation and fingerprint randomisation to defeat bot detection —
-#   # the industrial form of the browser impersonation fetch.py has refused since D-source-verification.
-#   # The request is pinned to `proxy: basic` in code and a test asserts no stealth mode
-#   # appears in the body, so this is not a default someone can flip.
+#   # borrowed addresses, which stay out of scope. The request is pinned to `proxy: basic`
+#   # in code and a test asserts no stealth mode appears in the body, so this is not a
+#   # default someone can flip.
 #   #
 #   # Needs FIRECRAWL_API_KEY. Enabled with no key, or with no provider named, is fatal
 #   # at startup rather than a tier that spends its budget on 401s and calls them
