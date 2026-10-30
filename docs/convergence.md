@@ -449,7 +449,11 @@ keeping the citation while labelling the claim unverified.
 TEXT`, `NOT ATTEMPTED`, `COULD NOT RESOLVE`, `FETCHED, TEXT WITHHELD` and registry-metadata-only
 entries say nothing about what the page contains — `BLOCKED` in particular now says so in both
 directions, where it previously said only that the source may still exist. A body that is plainly
-not the article (navigation, a cookie notice, a menu, a paywall teaser) counts as unread. And a
+not the article (navigation, a cookie notice, a menu, a paywall teaser) counts as unread. A
+recognised access wall — a bot challenge, an access-denied page or a login wall, served with a 200 —
+never reaches a critic at all: `fetch.access_wall` makes it `BLOCKED` on the direct fetch and no
+body on the rendering tier, so it counts as blocked in coverage and as an observed non-body in the
+claim check (D-access-wall-detection). And a
 claim carrying a citation marker is never `uncited_claim`: its problem, if any, is what that
 citation supports, and where that cannot be checked the honest finding is none — the alternative
 asks a writer to delete a good citation in order to satisfy "add a citation".

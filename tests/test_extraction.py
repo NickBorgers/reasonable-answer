@@ -188,6 +188,23 @@ def test_an_empty_render_is_no_body_never_an_absent_page(monkeypatch):
     assert not result.unresolvable
 
 
+def test_a_wall_the_renderer_was_shown_is_no_body(monkeypatch):
+    """Firecrawl hands JSTOR's login wall back as a page of markdown. Taking it as the
+    cited body would put a sign-in form in front of the evidence lens (D-access-wall-detection)."""
+    wall = "Log in to a free account - Passed Read 10 articles per month free - Passed"
+    _capture(monkeypatch, lambda: json_stub({"data": {"markdown": wall}}))
+    resolver = SourceResolver(
+        extractor=Firecrawl(api_key="k", timeout=5), extraction_budget=QueryBudget(4)
+    )
+    result = resolver.resolve(URL, BLOCKED, _never_fetched)
+
+    assert result.outcome is SourceOutcome.BLOCKED
+    assert not result.text
+    assert result.tier is not ResolutionTier.EXTRACTION
+    assert "access wall (login_wall)" in result.error
+    assert not result.unresolvable
+
+
 def test_rendered_text_obeys_the_critic_facing_character_cap(monkeypatch):
     """Every other rung is capped by `SourceFetcher`, which reads the body. This one gets
     markdown straight from a provider, so it is the rung that must cap itself."""

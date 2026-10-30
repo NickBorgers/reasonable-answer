@@ -15,7 +15,14 @@ import pytest
 from fakes import http_stub
 
 from reasonable_answer import prompts
-from reasonable_answer.fetch import USER_AGENT, FetchedSource, SourceFetcher, extract_source_urls
+from reasonable_answer.fetch import (
+    USER_AGENT,
+    FetchedSource,
+    SourceFetcher,
+    SourceOutcome,
+    access_wall,
+    extract_source_urls,
+)
 from reasonable_answer.taxonomy import Lens
 
 # ------------------------------------------------------------------- extraction
@@ -132,6 +139,85 @@ def test_results_are_cached_per_url(monkeypatch):
     # The same '## Sources' list is re-verified every round; without the cache a
     # ten-round run re-downloads the same pages ten times.
     assert len(calls) == 1
+
+
+#: A Cloudflare managed challenge as this pipeline's clients were actually served it: a
+#: 200, a title, and a paragraph of perfectly parseable text that is not the cited page.
+CHALLENGE_PAGE = """<html><head><title>Just a moment...</title></head><body>
+<h1>www.nejm.org</h1><p>Performing security verification</p>
+<p>This website uses a security service to protect against malicious bots. This page is
+displayed while the website verifies you are not a bot.</p></body></html>"""
+
+
+def test_a_challenge_page_served_with_a_200_is_a_refusal_not_a_body(monkeypatch):
+    """Without this the wall parses into good text, enters the evidence lens as the cited
+    source and counts as a body read (D-access-wall-detection)."""
+    monkeypatch.setattr(
+        urllib.request.OpenerDirector, "open", lambda self, *a, **k: _stub(CHALLENGE_PAGE)
+    )
+    result = SourceFetcher().fetch("https://doi.org/10.1056/NEJMoa2034577")
+
+    assert result.outcome is SourceOutcome.BLOCKED
+    assert not result.text
+    assert result.error == "access wall (bot_challenge)"
+    # A refusal is evidence about the client, never about whether the page exists.
+    assert not result.unresolvable
+
+
+def test_a_walled_page_goes_on_down_the_resolver_ladder(monkeypatch):
+    """The point of calling it `BLOCKED`: the rendering tier gets its turn, as for a 403."""
+    monkeypatch.setattr(
+        urllib.request.OpenerDirector, "open", lambda self, *a, **k: _stub(CHALLENGE_PAGE)
+    )
+    asked = []
+
+    class Resolver:
+        def resolve(self, url, direct, fetch_body):
+            asked.append(direct.outcome)
+            return direct
+
+    SourceFetcher(resolver=Resolver()).fetch("https://doi.org/10.1056/NEJMoa2034577")
+    assert asked == [SourceOutcome.BLOCKED]
+
+
+@pytest.mark.parametrize(
+    ("title", "text", "kind"),
+    [
+        ("Just a moment...", "apnews.com Performing security verification", "bot_challenge"),
+        ("", "A required part of this site couldn’t load. This may be due to a browser "
+         "extension, network issues, or browser settings.", "bot_challenge"),
+        ("", "Let's confirm you are human Complete the security check before continuing.",
+         "bot_challenge"),
+        ("", "Content Blocked ! We have detected that you may be using an automated script",
+         "bot_challenge"),
+        ("", "403 ERROR The request could not be satisfied. Request blocked.", "bot_challenge"),
+        ("", "There was a problem providing the content you requested", "bot_challenge"),
+        ("Access Denied", "You don't have permission to access this server.", "access_denied"),
+        ("", "Bureau of Labor Statistics Access Denied The BLS is committed to", "access_denied"),
+        ("", "Log in to a free account - Read 10 articles per month free", "login_wall"),
+    ],
+)
+def test_each_wall_this_pipeline_has_been_served_is_recognised(title, text, kind):
+    assert access_wall(title, text) == kind
+
+
+@pytest.mark.parametrize(
+    ("title", "text"),
+    [
+        # A real page with a newsletter pop-up that mentions a captcha.
+        ("Forward Party - Ballotpedia", "Sign up to receive the newsletter. Please complete "
+         "the Captcha above. The Forward Party is a political party in the United States."),
+        # A cookie banner over a real abstract is still the abstract.
+        ("", "This website uses cookies. By clicking Accept you agree. Abstract: We find..."),
+        # "Access denied" in an article's body, not as the page's own heading.
+        ("Data rights", "Patients are often told that records exist, but access denied to "
+         "them is common, a 2019 survey found."),
+        # An article *about* bot walls is long; a sign on a long page is its subject.
+        ("Bot walls explained", "Just a moment... is the title Cloudflare shows. " + "x " * 4000),
+    ],
+)
+def test_a_document_that_merely_mentions_a_wall_is_not_one(title, text):
+    assert access_wall(title, text) is None
 
 
 def test_http_error_is_recorded_not_raised(monkeypatch):

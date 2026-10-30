@@ -327,6 +327,71 @@ def classify_status(status: int | None) -> SourceOutcome:
     return SourceOutcome.ERROR
 
 
+#: What an interstitial says about itself, by kind. Each phrase is one a wall page uses to
+#: describe *itself* — never the topic of an article — and the kind is a closed label safe
+#: for the audit trail (RA-016). Mostly taken from walls actually served to this pipeline's
+#: clients, plus the standard wording of a few bot-defence vendors (D-access-wall-detection).
+_WALL_SIGNS: tuple[tuple[str, re.Pattern[str]], ...] = (
+    (
+        "bot_challenge",
+        re.compile(
+            r"just a moment\.\.\.|performing security verification|"
+            r"verif(?:y|ying) you are (?:a )?human|checking your browser before accessing|"
+            r"checking if the site connection is secure|attention required! \| cloudflare|"
+            r"enable javascript and cookies to continue|"
+            r"please enable js and disable any ad blocker|access to this page has been denied|"
+            r"pardon our interruption|incapsula incident id|"
+            r"there was a problem providing the content you requested|"
+            r"unusual traffic from your computer network|unusual traffic detected|"
+            r"detected unusual activity from your network|are you a robot\?|"
+            r"let's confirm you are human|complete the security check (?:to access|before continuing)|"
+            r"you may be using an automated script|"
+            r"the request could not be satisfied\. request blocked|"
+            r"a required part of this site couldn.t load",
+            re.IGNORECASE,
+        ),
+    ),
+    (
+        "login_wall",
+        re.compile(
+            r"log in to a free account|sign in to (?:continue|keep) reading|"
+            r"log in to continue reading|please (?:log|sign) in to (?:view|access|read) this",
+            re.IGNORECASE,
+        ),
+    ),
+)
+
+#: A wall page is short; a real page that merely *mentions* a CAPTCHA is not. Above this
+#: many characters a sign is read as the page's subject, not as the page.
+WALL_MAX_CHARS = 6_000
+
+#: "Access denied" is ordinary prose too, so it counts only as the page's own heading: the
+#: title, or the opening words of a short page — a site name at most, no sentence before it.
+_DENIED_HEADING = re.compile(r"\A[^.!?]{0,40}\baccess denied\b", re.IGNORECASE)
+_DENIED_MAX_CHARS = 1_500
+
+
+def access_wall(title: str, text: str) -> str | None:
+    """The kind of access wall this page is, or None when it reads as a document.
+
+    A wall served with a 200 parses into perfectly good text, so without this a
+    "Just a moment..." page enters a critic's context as the cited source and counts as
+    a body read. Recognising it turns the page into what it is — the site refusing this
+    client — which is `BLOCKED`, not a document (D-access-wall-detection).
+    """
+    if len(text) > WALL_MAX_CHARS:
+        return None
+    probe = f"{title}\n{text}"
+    for kind, sign in _WALL_SIGNS:
+        if sign.search(probe):
+            return kind
+    if _DENIED_HEADING.search(title) or (
+        len(text) <= _DENIED_MAX_CHARS and _DENIED_HEADING.search(text)
+    ):
+        return "access_denied"
+    return None
+
+
 def sources_section(report: str) -> str:
     """The body of the report's '## Sources' section, or `''` when it has none.
 
@@ -853,6 +918,18 @@ class SourceFetcher:
                 title=parser.title,
                 error="no readable text",
                 outcome=SourceOutcome.EMPTY,
+            )
+        wall = access_wall(parser.title, parser.text)
+        if wall is not None:
+            # A refusal that arrived with a 200 is still a refusal. `BLOCKED` keeps the
+            # page out of every critic's context, and sends the citation on down the
+            # resolver ladder exactly as a 403 would.
+            return FetchedSource(
+                url=url,
+                status=status,
+                title=parser.title,
+                error=f"access wall ({wall})",
+                outcome=SourceOutcome.BLOCKED,
             )
         return FetchedSource(
             url=url,
