@@ -369,15 +369,30 @@ event records `no_address_entries` and `no_address_findings`.
 One row on the completeness lens, gated on `review.draft_history_check` alone (D-no-draft-history): a
 body paragraph that talks about an earlier draft of this report ("the earlier draft claimed", "removed
 as unsupported", "this revision could not verify") mints one `unclear_structure` finding at
-**`blocking`**, anchored on its first such sentence. It is the one row minted above its category's
+**`blocking`**, anchored on its first such sentence. It is minted above its category's
 floor (`minor`): blocking keeps `latest_unblocked` selection from shipping such a draft over one free
 of it. It is dischargeable in the report (delete the reference, or name the other document the phrase
 means). The same detector is gate 3 of the census-gated repair turn, so most such drafts are repaired
 before any critic reads them.
 
+A second completeness row, gated like the unread row (reading and verification both on) plus
+`review.source_loss_finding` (D-no-unread-source-drop): a draft whose count of cited sources read in
+full text has fallen by at least `review.source_loss_fraction` (default one half) of the run's peak of
+that count mints one `incomplete_answer` finding at **`blocking`**, anchored on the report's first body
+sentence. The peak is `State.cited_read_peak`, raised by `generate` and never lowered; a source nobody
+read, or whose read failed, never counts, so removing a fabricated citation cannot trip it. It is
+minted above its category's floor (`major`) for the reason the draft-history row is: under
+`latest_unblocked` a `major` would let the shrunken draft ship over the fuller one. Its exit is in the
+report — read pages and cite them until the count is back at the floor the instruction names — and
+every source behind the peak was read in full text in this run, so the floor never asks for evidence
+the run has not shown exists. It is suppressed once the read budget is spent, when reading could no
+longer discharge it. It adds no rule and no controller input; a draft that still carries it at the hard
+cap ends the run through rule 5 as any blocking finding does. A `source_loss_check` event records
+`cited_read`, `cited_read_peak` and `source_loss_findings`.
+
 No category is added to the taxonomy table, and every other finding is minted **at** its category's
-floor; D-no-draft-history's row is minted above it, which is an escalation. Either way the clamp is a
-no-op and RC-005's direction is untouched. These are pipeline-authored facts, not
+floor; D-no-draft-history's and D-no-unread-source-drop's rows are minted above it, which is an
+escalation. Either way the clamp is a no-op and RC-005's direction is untouched. These are pipeline-authored facts, not
 critic judgements: like the not-found finding they bypass `validate_issue`, whose subject is
 model-authored fields, and like it they never attach to a failed lens. Every field they carry is
 bounded on construction — a bibliography number of any length is cut to a short label before it is

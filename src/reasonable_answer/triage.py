@@ -16,6 +16,7 @@ never mixed into the counts (controller rule 2 re-critiques instead).
 from __future__ import annotations
 
 import hashlib
+import math
 import re
 from dataclasses import dataclass
 from enum import Enum
@@ -1494,3 +1495,135 @@ def mechanical_shrink_issues(
                 )
             )
     return issues
+
+
+# ------------------------------------------------------------- the evidence base does not shrink
+
+
+def read_cited_sources(
+    report_text: str,
+    structure: Structure | None,
+    read_log: dict[str, str] | None,
+    *,
+    limit: int = DEFAULT_ENTRY_LIMIT,
+) -> set[str]:
+    """The cleaned addresses of the bibliography entries the body cites **and** some writer
+    has read in full text this run (D-no-unread-source-drop).
+
+    This is what "a source the report rests on" means for both rules of that decision: a
+    revision that drops one of these without reading, and a draft that has lost a large share
+    of the run's peak count of them. An entry nobody read, one whose read failed (`not_found`,
+    `paywalled`, ...), and an entry with no address are never counted, so removing a
+    fabricated or unreadable citation is never treated as a loss. Two entries with one
+    address count once. Addresses only; never page text.
+    """
+    structure = structure if structure is not None else _parse_report(report_text)
+    sources_section = _sources_section(structure)
+    if sources_section is None:
+        return set()
+    read = {fetch._clean_url(url) for url, outcome in (read_log or {}).items() if outcome == _FULL_TEXT}
+    if not read:
+        return set()
+    cited = _citations(structure, sources_section)
+    out: set[str] = set()
+    for entry in _entries(report_text, limit):
+        if entry.url is None or entry.number not in cited:
+            continue
+        address = fetch._clean_url(entry.url)
+        if address in read:
+            out.add(address)
+    return out
+
+
+def dropped_read_sources(
+    previous: str | None,
+    report_text: str,
+    read_log: dict[str, str] | None,
+    *,
+    limit: int = DEFAULT_ENTRY_LIMIT,
+) -> int:
+    """How many sources the previous draft cited, that some writer had read in full text, the
+    new draft no longer cites (D-no-unread-source-drop). Zero on a first draft."""
+    if not previous:
+        return 0
+    before = read_cited_sources(previous, None, read_log, limit=limit)
+    if not before:
+        return 0
+    return len(before - read_cited_sources(report_text, None, read_log, limit=limit))
+
+
+def source_loss_floor(peak: int, fraction: float) -> int:
+    """The fewest read, cited sources a draft may carry before the net-loss finding fires,
+    given the run's peak (D-no-unread-source-drop): the finding fires when the draft has
+    lost at least `fraction` of the peak, so this is one more than `peak` minus the
+    smallest loss that fires. Zero when the peak is zero."""
+    if peak <= 0:
+        return 0
+    smallest_firing_loss = max(1, math.ceil(fraction * peak - 1e-9))
+    return peak - smallest_firing_loss + 1
+
+
+def mechanical_source_loss_issues(
+    report_text: str,
+    structure: Structure,
+    read_log: dict[str, str] | None,
+    peak: int | None,
+    *,
+    fraction: float = 0.5,
+    limit: int = DEFAULT_ENTRY_LIMIT,
+) -> list[RawIssue]:
+    """At most one `incomplete_answer` finding at `blocking` for a draft that has lost at
+    least `fraction` of the run's peak count of read, cited sources (D-no-unread-source-drop).
+
+    `peak` is the largest `read_cited_sources` count any draft of this run reached, carried
+    in graph state; `None` (a run checkpointed before the field existed) mints nothing. The
+    finding anchors on the report's first body sentence, because its subject is the report
+    as a whole rather than one claim. Fields hold two counts, the floor, and fixed wording;
+    never page text, critic prose or earlier-draft text.
+    """
+    if not peak:
+        return []
+    current = len(read_cited_sources(report_text, structure, read_log, limit=limit))
+    floor = source_loss_floor(peak, fraction)
+    if current >= floor:
+        return []
+    anchor = _first_body_sentence(structure)
+    if anchor is None:
+        return []
+    section, paragraph_no, span = anchor
+    return [
+        _minted(
+            category=Category.INCOMPLETE_ANSWER,
+            severity=Severity.BLOCKING,
+            locus=StructuralRef(section=section, paragraph=paragraph_no),
+            claim_span=span,
+            rationale=(
+                f"This report cites {current} source(s) that a writer has read in full text. "
+                f"Earlier in this run a draft cited {peak}. The answer now stands on much less "
+                "of the evidence this run found and read, so it is less complete than a draft "
+                "this run already produced."
+            ),
+            instruction=(
+                f"Bring the report back to at least {floor} cited source(s) that you have read "
+                "in full text. Use web_search and read_source to read pages that bear on the "
+                "question, then cite each page you read where it supports a claim; reading "
+                "again a page this run already read counts. Do not cite a page you have not "
+                "read, and do not keep a claim that no read page supports. Do not renumber "
+                "entries."
+            ),
+        )
+    ]
+
+
+def _first_body_sentence(structure: Structure) -> tuple[int, int, str] | None:
+    """The first non-empty sentence of the first body paragraph (`## Sources` excluded), as
+    `(section, paragraph, span)`, or None when the report has no body text."""
+    sources_section = _sources_section(structure)
+    for paragraph in structure.paragraphs:
+        if paragraph.section == sources_section:
+            continue
+        for sentence in excerpt._SENTENCE_END.split(paragraph.text):
+            sentence = sentence.strip()
+            if sentence:
+                return paragraph.section, paragraph.paragraph, sentence[:MAX_SPAN]
+    return None

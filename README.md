@@ -424,6 +424,11 @@ A body paragraph that talks about an earlier draft of the report gets a bounded 
 if the reference remains (or repair is unavailable), it gets a blocking finding because the reader
 receives only the final report (D-no-draft-history);
 `review.draft_history_check` (default true) is the rollback switch.
+Under the same read-and-verify gate, a revision that read no page yet stops citing a page some writer
+read in full text is retried, rotated and, if no writer reads, shipped with `drop_accepted: 1`
+(D-no-unread-source-drop, `review.drop_requires_read`); and a draft that has lost at least
+`review.source_loss_fraction` (default 0.5) of the run's peak count of read, cited sources gets one
+blocking `incomplete_answer` finding (`review.source_loss_finding`, `source_loss_check` events).
 The evidence critic sees at most `fetch_max_chars` characters selected
 from that body as claim-anchored excerpts. Reading
 egresses through the same fetch boundary `verify_sources` uses, so the same network-layer caveat

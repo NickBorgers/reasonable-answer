@@ -948,6 +948,23 @@ class ReviewConfig(BaseModel):
     #: (D-no-draft-history). The reader receives only the final report. `false` restores the
     #: earlier behaviour. Here and not under `budgets`: `_run_fingerprint` hashes `budgets`.
     draft_history_check: bool = True
+    #: A revision that stops citing a source some writer has read in full text, while its own
+    #: call read no page, is set aside: retried once with a fixed nudge, then given to the next
+    #: writer, and shipped with a warning only when nothing better came back
+    #: (D-no-unread-source-drop). Reuses the D-writer-must-read walk and its gating
+    #: (reading and verification both on). `false` restores the earlier behaviour. Here and
+    #: not under `budgets`: `_run_fingerprint` hashes `budgets`.
+    drop_requires_read: bool = True
+    #: A draft that has lost at least `source_loss_fraction` of the run's peak count of cited
+    #: sources read in full text mints one blocking `incomplete_answer` finding
+    #: (D-no-unread-source-drop). Same gating as `drop_requires_read`; suppressed once the
+    #: read budget is spent. `false` restores the earlier behaviour. Not under `budgets`.
+    source_loss_finding: bool = True
+    #: The share of the peak a draft must lose for that finding to fire. A heuristic argued
+    #: from mechanism, not a measured value: at one half the report has lost as much of its
+    #: read evidence as it keeps; lower fires on routine one-source swaps in a short
+    #: bibliography, higher lets most of the evidence go before anything notices.
+    source_loss_fraction: float = Field(default=0.5, gt=0.0, le=1.0)
     #: How much of a previous claim's wording (Jaccard overlap of its words, markers
     #: removed) a new sentence must keep for the claim to count as still standing. A
     #: matching heuristic, not a measured value: lower catches more reworded claims and
