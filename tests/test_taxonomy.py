@@ -335,3 +335,83 @@ def test_the_instruction_bullet_says_what_the_weakened_claim_would_be():
         assert "must say what the weakened claim would be" in prompt
         assert "state that this is unverified" in prompt
         assert "Never ask for a caveat to be added to a claim that stands." in prompt
+
+
+# ------------------------------------------------- D-verdict-not-restatement
+
+
+def test_the_verdict_trigger_appears_only_when_writers_can_search():
+    """D-verdict-not-restatement. Without a search tool the fix the trigger asks for does
+    not exist, so the finding would only loop to the round cap. Off, the prompt is
+    byte-identical to what it was, which is also what keeps the audition hash stable."""
+    off = critic_user(Lens.COMPLETENESS, "q", "# r\n\nbody\n")
+    on = critic_user(Lens.COMPLETENESS, "q", "# r\n\nbody\n", retrieval=True)
+
+    assert "D-verdict-not-restatement" not in off
+    assert on.startswith(off.split("YOUR DIMENSION")[0])  # same preamble
+    assert "hands the question back" in on
+    assert "The writers of this run can search the web" in on
+    # Both narrowings ship with the trigger.
+    assert "says what was searched for and that nothing was found" in on
+    assert "a motive, an opinion, a prediction" in on
+    assert "does not ask for verdicts" in on
+
+
+def test_the_verdict_trigger_is_completeness_only_and_adds_no_category():
+    for lens in (Lens.LOGIC, Lens.EVIDENCE):
+        assert critic_user(lens, "q", "# r\n\nbody\n", retrieval=True) == critic_user(
+            lens, "q", "# r\n\nbody\n"
+        )
+    # A reading of `incomplete_answer`, stated in the open: no new category, no new floor.
+    on = critic_user(Lens.COMPLETENESS, "q", "# r\n\nbody\n", retrieval=True)
+    assert "a claim the report restates with no verdict" in on
+    assert SEVERITY_FLOOR[Category.INCOMPLETE_ANSWER] is Severity.MAJOR
+
+
+def test_the_verdict_trigger_overrides_the_no_new_source_rule_for_this_finding_only():
+    on = critic_user(Lens.COMPLETENESS, "q", "# r\n\nbody\n", retrieval=True)
+    assert "without further context or access to new source material" in on
+    assert "For this finding, and only this one" in on
+    assert "'State that it is unverified' is still not a fix" in on
+
+
+def _completeness_prompts(tmp_path, *, searcher) -> list[str]:
+    """What the completeness critics of one real `_critique` pass were actually sent."""
+    from fakes import FakeClient
+    from test_critic_sidelining import IDENTITIES, REPORT, _config, _fresh_draft
+
+    from reasonable_answer.graph import Runtime, _critique
+    from reasonable_answer.schemas import CritiqueOutput
+    from reasonable_answer.store import RunStore
+
+    client = FakeClient(
+        identities=IDENTITIES,
+        critique_fn=lambda a, u: CritiqueOutput(issues=[]),
+        report_fn=lambda n: REPORT,
+    )
+    rt = Runtime(
+        config=_config(tmp_path),
+        client=client,
+        identities=IDENTITIES,
+        store=RunStore(tmp_path, "run-verdict"),
+        searcher=searcher,
+    )
+    _critique(_fresh_draft(), rt)
+    return [
+        c.user
+        for c in client.calls
+        if c.schema == "CritiqueOutput" and "YOUR DIMENSION: completeness" in c.user
+    ]
+
+
+def test_a_run_whose_writers_search_sends_the_verdict_trigger_to_completeness_critics(tmp_path):
+    """The wiring: `Runtime.search_enabled` reaches the prompt the critic is sent."""
+
+    class _Searcher:
+        pass
+
+    on = _completeness_prompts(tmp_path / "on", searcher=_Searcher())
+    off = _completeness_prompts(tmp_path / "off", searcher=None)
+    assert on and off
+    assert all("D-verdict-not-restatement" in p for p in on)
+    assert not any("D-verdict-not-restatement" in p for p in off)

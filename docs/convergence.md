@@ -153,6 +153,38 @@ and states how recent its evidence is.
 The measurement is `additive_only` on the `generate` event, and it is **warn-only**: nothing rejects
 a draft for it. See [isolation.md](isolation.md#scoping-the-edit-is-not-narrowing-the-review-d-scoped-revision).
 
+### A verdict, not a restatement (D-verdict-not-restatement)
+
+> **Normative.** This subsection governs `prompts.VERDICT_TRIGGER`, the `retrieval` argument of
+> `prompts.critic_user` / `critique.critique_once`, and the matching clause appended to the
+> `incomplete_answer` meaning. Changing one side without the other is docs-as-spec drift.
+
+No new category and no floor change: a reading of `incomplete_answer`, stated in the open like the
+triggers below it. It applies **only when the run's writers can search** (`Runtime.search_enabled`).
+Without a search tool the fix does not exist, and the finding would only loop to `budgets.hard_cap`.
+With `retrieval` off the completeness prompt is byte-identical to before, so the audition hash does
+not move.
+
+**The trigger.** Where the question asks whether, or which of, the claims in a document it names
+are true, supported or backed by fact, each material claim needs a verdict drawn from what was
+checked. A paragraph that restates the claim as the document's and adds that no source is cited,
+identified or confirmed hands the question back. That is `incomplete_answer`, with the paragraph
+as `claim_span` and the unanswered claim named in the rationale.
+
+**Why the existing wording let it through.** The completeness brief lists "stating the limitation
+explicitly" as an acceptable resolution and forbids demanding an external document as the only fix.
+A restatement with a disclaimer satisfies both, so a report that answers none of the question can
+clear every lens. The trigger closes that for this one question shape.
+
+**Two narrowings ship with it.** A claim whose paragraph says what was searched for and that
+nothing was found is answered. A claim no search could settle (a motive, an opinion, a prediction)
+needs no verdict. For this finding only, the instruction asks the writer to search and state what
+the record shows; this replaces, here, the rule that a fix needs no new source material. "State
+that it is unverified" is still not a fix.
+
+Every verdict a writer then writes is audited by the evidence lens, and the read-before-citing and
+no-shrink gates apply unchanged.
+
 ### Arithmetic, magnitude and the decisive consideration (D-decisive-quantities)
 
 > **Normative.** This subsection governs the arithmetic, distant-contradiction and

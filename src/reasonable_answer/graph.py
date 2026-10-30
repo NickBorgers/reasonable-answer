@@ -2398,6 +2398,7 @@ def _critique_one(
         current_date=run_date,
         source_char_budget=rt.config.search.source_char_budget,
         excerpt_chars=rt.config.search.fetch_max_chars,
+        retrieval=rt.search_enabled,
         timeout=rt.config.call_timeouts.critic_seconds,
     )
 
