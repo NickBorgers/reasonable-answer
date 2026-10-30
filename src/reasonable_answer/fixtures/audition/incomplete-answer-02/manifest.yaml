@@ -1,0 +1,52 @@
+# The planted half of the verdict trigger (D-verdict-not-restatement,
+# D-audition-retrieval-variant). The question asks which of a named document's
+# allegations are backed by fact; the report restates each allegation as the letter's and
+# adds that no source confirming or refuting it is identified. That is the shape of the
+# report that motivated the trigger, moved to a fictional subject: an unnamed city, its
+# housing authority and a tenants' association, with no real person, organisation or
+# dispute named.
+#
+# `retrieval: true` reviews it under the prompt a run whose writers can search would
+# send, which is the only prompt carrying `VERDICT_TRIGGER`. Without it the completeness
+# brief still lists "stating the limitation explicitly" as an acceptable resolution, and
+# this report does exactly that, so the fixture would measure nothing the trigger added.
+#
+# Paired by question with `control-verdict-given-01`, which answers the same question
+# with a verdict per allegation from the auditor's count, the expenditure report and the
+# commission's complaint record. Not a minimal pair: a verdict and a restatement differ
+# in every paragraph that addresses a claim.
+#
+# Only the declared defect is meant to be present. Every claim is attributed to the
+# document that makes it and cited; the restated allegations are reported as the
+# letter's, never asserted; the strongest opposing reading (the authority's silence on
+# numbers as a concession) has its own section and is declined on stated grounds. The
+# sources share the subject and the institutional-document form of
+# `control-verdict-given-01` and of `control-base-paid-leave-01`; see the tension with
+# D-audition-source-integrity recorded in D-audition-retrieval-variant.
+lens: completeness
+# Moderate, not obvious. Both fail-closed sensitivity gates in `judge` count only
+# obvious-tier defects, and this trigger is new: until it has been measured on the
+# rostered critics, a fixture for it should rank them, not be able to make one unfit.
+# Promoting it is a separate decision, taken on a measurement this change does not make.
+tier: moderate
+retrieval: true
+question: "Which of the allegations in the tenants' association's March 2024 open letter to the city housing authority are backed up by facts?"
+defects:
+  - category: incomplete_answer
+    locus: {section: 4, paragraph: 1}
+    anywhere: true
+    note: >
+      Three of the letter's four allegations can be settled by a record — the backlog
+      count, the use of capital money, the non-renewals — and the report gives none of
+      them a verdict. S4.P1, S4.P2 and S5.P1 each restate an allegation as the letter's
+      and add that no source confirming or refuting it is identified in this report;
+      none says what was searched for. Under the trigger each is `incomplete_answer`,
+      and the instruction is to search for the claim and state what the record shows.
+      S5.P2 is the motive claim ("does not care"), which needs no verdict, so a critic
+      that files only against it has not found the defect, though `anywhere` grading
+      cannot tell. The locus names S4.P1, the first restatement. `anywhere` is set for
+      the reason `incomplete-answer-01` sets it (D-absence-anchor): the missing verdict
+      has no span of its own, and a critic may honestly anchor `claim_span` to any of
+      the three restating paragraphs or to the Conclusion that summarises them. Every
+      one of those anchors is present text, which is what the `incomplete_answer` anchor
+      rule requires.

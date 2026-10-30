@@ -9,10 +9,13 @@ not a shipped roster decision and not a change to an audition threshold or defau
 
 - **Dates:** 2026-08-10 and 2026-08-11.
 - **Lens:** `logic`.
-- **Corpus:** the shipped corpus, loaded by `audition.load_fixtures`; corpus hash
-  `9c248e1d249ad301`. It lived at `tests/fixtures/audition` when this was measured and now lives
+- **Corpus:** the 22-fixture corpus shipped at measurement time, loaded by
+  `audition.load_fixtures`; corpus hash `9c248e1d249ad301`. It lived at
+  `tests/fixtures/audition` when this was measured and now lives
   at `src/reasonable_answer/fixtures/audition` (D-packaged-audition-corpus); the hash is computed
-  over fixture names and bytes, never the path, so it is the same corpus and the same number.
+  over fixture names and bytes, never the path, so that move preserved this historical identity.
+  The current shipped 25-fixture corpus has a different identity and is not directly comparable
+  without a new audition.
 - **Fixture obligation:** 14 fixtures per slot: 6 planted logic fixtures and 8 sound controls.
 - **Repetitions:** the shipped `audition.repetitions: 3`, except the `gpt-5.6-luna` slot, which was
   run at `repetitions: 6` — double the default, chosen deliberately to stabilise that estimate.
@@ -124,8 +127,9 @@ own nominated cheap tool-competent candidate, not previously audited on this len
 
 ### Measurement identity
 
-Identical to the identity stated above, restated because it is what makes this an extension and
-not a new survey: corpus hash `9c248e1d249ad301`, lens `logic`, `repetitions: 3`, 42 attempted
+Identical to the historical identity stated above, restated because it is what made this an
+extension rather than a new survey at measurement time: 22 fixtures, corpus hash
+`9c248e1d249ad301`, lens `logic`, `repetitions: 3`, 42 attempted
 calls per complete slot (24 control calls), `sources=None`, threshold
 `max_control_material_rate: 1.00`, `max_schema_failure_rate: 0.2`.
 
