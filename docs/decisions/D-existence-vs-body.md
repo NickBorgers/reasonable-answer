@@ -17,6 +17,8 @@ carried the reason since D-source-verification — *"pretending to be a browser 
 kind of clever"* — and that comment is doctrine, not decoration: a system whose whole claim is that
 its citations are checkable cannot obtain them by circumventing the access controls of the people
 who published them. Where a body is not lawfully readable, the honest answer is to say so.
+*Amended by D-renderer-identity:* the extraction tier reads under its provider's default browser
+identity; `fetch.py` itself still never presents as a browser, and the other three refusals stand.
 
 **The asymmetry that IS the design.** Citation verification asks two questions, and they are not
 equally expensive:

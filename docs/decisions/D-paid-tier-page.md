@@ -1,5 +1,9 @@
 ## D-paid-tier-page — the paid tiers render a page, and never disguise who is asking for it
 
+*(Amended by D-renderer-identity: measured, Firecrawl's `basic` mode already presents a desktop
+Chrome user arriving from Google, and that disguise is now accepted for the extraction tier. The
+`stealth`/`auto` ban and every other line below stand.)*
+
 **The problem.** D-existence-vs-body made a citation's *existence* verifiable for free, which stops a paywalled
 paper looking like a fabricated one. It did nothing for the other half: a body that never arrives
 because the page needs JavaScript, or because a bot wall refuses an unknown HTTP client. Those are

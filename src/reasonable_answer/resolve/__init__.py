@@ -23,11 +23,10 @@ whose body later arrives: it is what lets a critic check the *title* the report 
 rather than only its prose.
 
 What this package will **not** do is listed in D-existence-vs-body and D-paid-tier-page
-and is not negotiable: no
-browser-user-agent spoofing, no CAPTCHA solving, no archive.org paywall laundering, no
-cookie-jar credential replay — and, for the rendering tier specifically, no stealth mode,
-which is that same impersonation bought by the page. `fetch.py`'s "the wrong kind of
-clever" comment is doctrine.
+and is not negotiable: no CAPTCHA solving, no archive.org paywall laundering, no
+cookie-jar credential replay, and no request this process composes presents as a browser.
+The one exception is the rendering tier, which reads under its provider's default browser
+identity (D-renderer-identity) — and even there, no stealth mode: no borrowed addresses.
 
 **Three caches, three key spaces, one lock.**
 
