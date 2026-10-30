@@ -526,6 +526,19 @@ review:
   # finding: the reader receives only the final report (D-no-draft-history). false is the
   # rollback switch; the writer prompt rule stays either way.
   draft_history_check: true
+  # With reading and verification on, a revision that stops citing a source some writer read
+  # in full text, while its own call read no page, is retried once with a nudge, then given
+  # to the next writer, and ships with a warning only if none reads (D-no-unread-source-drop).
+  # Removing an unread, failed, fabricated or claim-check-refuted source is never caught. false is
+  # the rollback switch.
+  drop_requires_read: true
+  # Same gating: a draft that has lost at least source_loss_fraction of the run's peak count
+  # of cited sources read in full text gets one blocking incomplete_answer finding, so
+  # latest_unblocked selection ships the fuller draft (D-no-unread-source-drop). Off once the
+  # read budget is spent. A source the claim check refuted counts toward neither rule. The
+  # fraction is a heuristic, not a measured value. false is the rollback switch.
+  source_loss_finding: true
+  source_loss_fraction: 0.5
   shrink_min_overlap: 0.6
   # Which draft a non-accepted terminal ships (D-latest-unblocked-selection). The code
   # default is `fewest_defects`, the rule this system always had: minimal

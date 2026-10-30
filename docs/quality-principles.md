@@ -321,6 +321,12 @@ only a fixed nudge to a fresh writer call and carries neither the rejected draft
 prose into that context (QP5). Retry and rotation spend the existing `writer_attempts` walk rather
 than creating an uncapped loop (QP7), and only an observed `full_text` outcome satisfies the
 per-call read test (QP10).
+D-no-unread-source-drop extends both. Its drop test and its net-loss finding are set operations over
+the report's own citations and the run read log, and the blocking finding enters the deterministic
+tally and `latest_unblocked` selection (QP1); the retry adds only a fixed nudge, and the finding carries
+two counts, a floor and fixed wording, never page text, critic prose or earlier-draft text (QP5); and a
+source counts toward either rule only when a fetch returned full text and the claim check has not
+refuted it, so a fabricated, unreadable or refuted citation is never protected (QP10).
 
 ## 3. Refreshing the evidence base
 

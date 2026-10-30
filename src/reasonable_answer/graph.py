@@ -104,6 +104,18 @@ class State(TypedDict, total=False):
     #: prompt, view or the controller.
     draft_seen: dict[str, str]
     draft_previous: str | None
+    #: Per draft, in order: the cleaned addresses of the cited sources a writer had read in
+    #: full text when it shipped (D-no-unread-source-drop). Appended only by `_generate`. The
+    #: run's peak is computed from these at use time, minus `claim_refuted`, so a source the
+    #: claim check later refutes leaves the peak too (`_cited_read_peak`). URLs only, never
+    #: text; read by the net-loss finding, the drop gate and events, never by a prompt, view
+    #: or the controller. A checkpoint from before the field resumes without it: the peak
+    #: restarts at its next draft and nothing is minted until then.
+    cited_read_sets: list[list[str]]
+    #: Cleaned addresses the claim check most recently found refuted for every claim it
+    #: checked them against (`claimcheck.source_standing`). Set only by `_critique`; a later
+    #: check that finds the page supporting a claim takes it out again. URLs only.
+    claim_refuted: list[str]
 
     round: int
     hash_history: list[str]
@@ -1073,12 +1085,17 @@ def _generate(state: State, rt: Runtime) -> dict:
     # nudged retry of the same writer. `held` is the latest draft that came back unread; it
     # is accepted, with a recorded warning, when the walk ends without a better one.
     gate = _must_read(rt)
+    # The drop-without-reading gate (D-no-unread-source-drop) shares that walk: a revision
+    # that stops citing a page some writer read in full text, while this call read none, is
+    # set aside the same way, with its own nudge, counter and failure class. One nudged retry
+    # per writer across both gates. Never on a first draft or a polish pass.
+    drop_gate = _drop_requires_read(rt) and bool(previous) and not polish
     pos = 0
     nudged: set[str] = set()
     tried: set[str] = set()
-    held: tuple[str, Any, ops.Splice | None, reading.ReadSession, int] | None = None
-    unread_retry = 0
-    nudge = False
+    held: tuple[str, Any, ops.Splice | None, reading.ReadSession, int, str] | None = None
+    retries = {"unread_draft": 0, "unread_source_drop": 0}
+    nudge: str | None = None
     for offset in range(attempts):
         if offset > 0:
             rt.client.backoff_between_writer_attempts(offset)
@@ -1106,7 +1123,7 @@ def _generate(state: State, rt: Runtime) -> dict:
                         read_first=_read_first(rt),
                         cards=rt.cards_enabled,
                     ),
-                    user=user + prompts.WRITER_UNREAD_NUDGE if nudge else user,
+                    user=user + _NUDGES[nudge] if nudge else user,
                     max_tokens=32000,
                     # A draft on a slow host can generate for many minutes; cutting it at the
                     # shared default discards the work and bills it anyway (D-role-call-timeouts).
@@ -1132,24 +1149,30 @@ def _generate(state: State, rt: Runtime) -> dict:
                 # (D-ops-revision).
                 last_failure = f"generator {alias} returned no applicable operations"
                 failure_class = "malformed_ops"
-            elif gate and _unread_draft(
-                cfg, state, spliced.text if spliced is not None else reply.text.strip(), session
+            elif set_aside := _set_aside_class(
+                cfg,
+                state,
+                spliced.text if spliced is not None else reply.text.strip(),
+                session,
+                unread_gate=gate,
+                drop_gate=drop_gate,
             ):
-                # The call answered, but wrote from memory: it read no page in full text and
-                # cites a page nobody has read (D-writer-must-read). Not acceptable yet. One
-                # retry of this same writer with a fixed nudge; if that also comes back
-                # unread, the next unseen writer in the pool; if there is none, or the
+                # The call answered, but without reading: it read no page in full text and
+                # either cites a page nobody has read (D-writer-must-read) or stopped citing a
+                # page some writer had read (D-no-unread-source-drop). Not acceptable yet. One
+                # retry of this same writer with that gate's fixed nudge; if that also comes
+                # back unread, the next unseen writer in the pool; if there is none, or the
                 # attempt budget is spent, the held draft ships with a warning.
-                held = (alias, reply, spliced, session, pos)
-                last_failure = f"generator {alias} drafted without reading the pages it cites"
-                failure_class = "unread_draft"
+                held = (alias, reply, spliced, session, pos, set_aside)
+                last_failure = f"generator {alias} {_SET_ASIDE_REASONS[set_aside]}"
+                failure_class = set_aside
                 if alias not in nudged and offset + 1 < attempts:
                     nudged.add(alias)
-                    nudge = True
+                    nudge = set_aside
                     stay = True
-                    unread_retry += 1
+                    retries[set_aside] += 1
                 else:
-                    nudge = False
+                    nudge = None
                     if tried.issuperset(pool):
                         rt.store.event(
                             "generate_failed",
@@ -1178,16 +1201,16 @@ def _generate(state: State, rt: Runtime) -> dict:
         log.warning("writer attempt %d/%d: %s", offset + 1, attempts, last_failure)
         if not stay:
             pos += 1
-            nudge = False
+            nudge = None
 
-    unread_accepted = 0
+    accepted = {"unread_draft": 0, "unread_source_drop": 0}
     if completion is None and held is not None:
-        # Never leave a run without a draft over this gate (D-writer-rotation-pool): ship the
-        # unread one, say so in the event, and let the mechanical read finding discharge it.
-        alias, completion, spliced, session, held_pos = held
+        # Never leave a run without a draft over these gates (D-writer-rotation-pool): ship the
+        # held one, say so in the event, and let the mechanical findings discharge it.
+        alias, completion, spliced, session, held_pos, held_class = held
         rotation += held_pos
-        unread_accepted = 1
-        log.warning("accepting an unread draft from %s: no writer read the pages it cites", alias)
+        accepted[held_class] = 1
+        log.warning("accepting a held draft from %s (%s): no writer read first", alias, held_class)
 
     if completion is None:
         if account_refused:
@@ -1238,14 +1261,34 @@ def _generate(state: State, rt: Runtime) -> dict:
     if gate:
         # Present only when the gate is in force (D-writer-must-read): nudged retries of the
         # same writer, and whether an unread draft shipped because nothing better came back.
-        unread_fields["unread_retry"] = unread_retry
-        unread_fields["unread_accepted"] = unread_accepted
+        unread_fields["unread_retry"] = retries["unread_draft"]
+        unread_fields["unread_accepted"] = accepted["unread_draft"]
+    if _drop_requires_read(rt):
+        # The same pair for the drop gate (D-no-unread-source-drop), present whenever that
+        # gate is in force, first drafts and polish passes included (both read 0 there).
+        unread_fields["drop_retry"] = retries["unread_source_drop"]
+        unread_fields["drop_accepted"] = accepted["unread_source_drop"]
+    peak_fields: dict[str, int] = {}
     if _read_first(rt):
         unread_fields["cited_unread"] = len(
             triage.unread_cited_entries(
                 text, report_mod.parse(text), read_log, limit=cfg.search.max_source_urls
             )
         )
+        # This draft's cited sources read in full text, appended to the run's per-draft
+        # record (D-no-unread-source-drop). Stored unfiltered; the claim check's refutations
+        # are subtracted wherever the peak is used, so a later refutation still applies.
+        # `.get` because a checkpoint from before the field carries none; the peak then
+        # restarts at this draft.
+        cited_set = sorted(
+            triage.read_cited_sources(text, None, read_log, limit=cfg.search.max_source_urls)
+        )
+        sets = [*(state.get("cited_read_sets") or []), cited_set]
+        refuted = _claim_refuted(state)
+        peak_fields = {
+            "cited_read": len(set(cited_set) - refuted),
+            "cited_read_peak": _peak_of(sets, refuted),
+        }
 
     h = report_mod.artifact_hash(text)
     history = [*state.get("hash_history", []), h]
@@ -1277,6 +1320,9 @@ def _generate(state: State, rt: Runtime) -> dict:
         # Present only when reading-before-citing is in force (D-read-before-citing): how
         # many addressable entries the body cites that no writer has read in full text.
         **unread_fields,
+        # Same gating (D-no-unread-source-drop): cited sources read in full text in this
+        # draft, and the run's peak of that count including this draft.
+        **peak_fields,
         # Present only when evidence cards are on (D-writer-evidence-card): cards built,
         # passages kept and dropped, fallbacks by closed reason, cache hits, reader calls
         # and seconds. Counts only (RA-016).
@@ -1310,6 +1356,7 @@ def _generate(state: State, rt: Runtime) -> dict:
         "author_identity": identity,
         "writer_rotation": rotation + 1,
         "read_log": read_log,
+        **({"cited_read_sets": sets} if peak_fields else {}),
         "hash_history": history,
         "round": round_no,
         # Every generation resets every per-artifact accumulator — unconditionally,
@@ -1624,12 +1671,112 @@ def _must_read(rt: Runtime) -> bool:
     return _read_first(rt) and rt.config.search.require_writer_reads
 
 
+def _drop_requires_read(rt: Runtime) -> bool:
+    """Whether a revision may stop citing a read source only after reading this call
+    (D-no-unread-source-drop): the read-before-citing posture plus its rollback knob."""
+    return _read_first(rt) and rt.config.review.drop_requires_read
+
+
+def _source_loss_finding(rt: Runtime) -> bool:
+    """Whether a large net loss of read, cited sources is a finding (D-no-unread-source-drop):
+    the read-before-citing posture plus its rollback knob."""
+    return _read_first(rt) and rt.config.review.source_loss_finding
+
+
+def _claim_refuted(state: State) -> set[str]:
+    """The addresses the claim check found refuted (D-no-unread-source-drop); empty when the
+    claim check is off or the checkpoint predates the field."""
+    return set(state.get("claim_refuted") or [])
+
+
+def _peak_of(sets: list[list[str]], refuted: set[str]) -> int:
+    return max((len(set(s) - refuted) for s in sets), default=0)
+
+
+def _cited_read_peak(state: State) -> int | None:
+    """The run's peak count of cited, read, unrefuted sources over every draft so far
+    (D-no-unread-source-drop), or None for a checkpoint from before it was tracked."""
+    sets = state.get("cited_read_sets")
+    if sets is None:
+        return None
+    return _peak_of(sets, _claim_refuted(state))
+
+
+def _merge_refuted(prior: list[str] | None, standing: dict[str, bool]) -> list[str]:
+    """Fold one critique pass's claim-check standing into the run's refuted set: the most
+    recent settled verdict on each address wins, and an address this pass did not settle
+    keeps what it had."""
+    out = set(prior or [])
+    for url, refuted in standing.items():
+        if refuted:
+            out.add(url)
+        else:
+            out.discard(url)
+    return sorted(out)
+
+
+#: The fixed nudge appended on the one retry each set-aside class earns.
+_NUDGES = {
+    "unread_draft": prompts.WRITER_UNREAD_NUDGE,
+    "unread_source_drop": prompts.WRITER_DROP_NUDGE,
+}
+#: The `generate_failed` reason for each set-aside class, after "generator <alias> ".
+_SET_ASIDE_REASONS = {
+    "unread_draft": "drafted without reading the pages it cites",
+    "unread_source_drop": "dropped sources a writer had read, without reading any page",
+}
+
+
+def _set_aside_class(
+    cfg: Any,
+    state: State,
+    text: str,
+    session: reading.ReadSession,
+    *,
+    unread_gate: bool,
+    drop_gate: bool,
+) -> str | None:
+    """Which reading gate a returned draft fails, or None. The write-before-read check
+    (D-writer-must-read) is tried first, so its behaviour is unchanged; then the
+    drop-without-reading check (D-no-unread-source-drop). Both pass when this call read any
+    page in full text."""
+    if unread_gate and _unread_draft(cfg, state, text, session):
+        return "unread_draft"
+    if drop_gate and _unread_drop(cfg, state, text, session):
+        return "unread_source_drop"
+    return None
+
+
+def _read_this_call(session: reading.ReadSession) -> bool:
+    """Whether this writer call opened any page in full text."""
+    return any(s.outcome is fetch.SourceOutcome.FULL_TEXT for s in session.reads.values())
+
+
+def _unread_drop(cfg: Any, state: State, text: str, session: reading.ReadSession) -> bool:
+    """A revision that stopped citing at least one source some writer had read in full text,
+    while this call opened no page in full text (D-no-unread-source-drop). A dropped source
+    nobody read, or whose read failed, does not count: removing a fabricated or unreadable
+    citation is what its own finding asks for. The caller rules out first drafts and polish."""
+    if _read_this_call(session):
+        return False
+    return (
+        triage.dropped_read_sources(
+            state.get("report"),
+            text,
+            state.get("read_log"),
+            limit=cfg.search.max_source_urls,
+            exclude=_claim_refuted(state),
+        )
+        > 0
+    )
+
+
 def _unread_draft(cfg: Any, state: State, text: str, session: reading.ReadSession) -> bool:
     """A draft written without reading: this call opened no page in full text, and the
     draft cites an addressable entry that is not in the run's read log at all
     (D-writer-must-read). A revision that only keeps entries an earlier writer read, or
     that already failed a read, is not caught: the mechanical finding owns those."""
-    if any(s.outcome is fetch.SourceOutcome.FULL_TEXT for s in session.reads.values()):
+    if _read_this_call(session):
         return False
     log = _merge_read_log(state.get("read_log"), session)
     return any(
@@ -2070,6 +2217,9 @@ def _critique_one(
     coverage_sink: dict[str, dict] | None = None,
     read_log: dict[str, str] | None = None,
     previous_report: str | None = None,
+    cited_read_peak: int | None = None,
+    claim_refuted: set[str] | None = None,
+    verdict_sink: list | None = None,
 ) -> LensResult:
     """One lens, one critic, one fresh context. Failure is recorded as a *failed lens*,
     never as 'no issues found' — a failed review can never manufacture a clean record.
@@ -2210,6 +2360,11 @@ def _critique_one(
                 failure_class=exc.failure_class,
                 attempt=attempt,
             )
+        if verdict_sink is not None:
+            # For the run's refuted-source set (D-no-unread-source-drop); `list.extend` is
+            # atomic, and `_critique` reduces these to URLs and booleans before anything
+            # is stored.
+            verdict_sink.extend(checked.verdicts)
         counts = checked.counts()
         rt.store.claim_check(artifact_hash, identity, attempt, checked.as_record())
         rt.store.event("claim_check", artifact_hash=artifact_hash, critic=identity, **counts)
@@ -2313,7 +2468,27 @@ def _critique_one(
         )
         if history:
             result = result.model_copy(update={"issues": [*history, *result.issues]})
+    # A draft that has lost a large share of the run's peak count of read, cited sources
+    # (D-no-unread-source-drop). Completeness owns it: the defect is how much of the found
+    # evidence the answer still stands on, not one claim's support. Skipped once the read
+    # budget is spent, when reading could no longer restore it.
+    if lens is Lens.COMPLETENESS and not result.failed and _source_loss_issues_apply(rt):
+        loss = triage.mechanical_source_loss_issues(
+            report_text,
+            report_mod.parse(report_text),
+            read_log,
+            cited_read_peak,
+            fraction=rt.config.review.source_loss_fraction,
+            limit=rt.config.search.max_source_urls,
+            exclude=claim_refuted or frozenset(),
+        )
+        if loss:
+            result = result.model_copy(update={"issues": [*loss, *result.issues]})
     return result
+
+
+def _source_loss_issues_apply(rt: Runtime) -> bool:
+    return _source_loss_finding(rt) and not _read_budget_spent(rt)
 
 
 def _read_budget_spent(rt: Runtime) -> bool:
@@ -2618,6 +2793,43 @@ def _critique(state: State, rt: Runtime) -> dict:
             ),
         )
 
+    # Once per draft: the counts behind the net-loss finding the completeness lens mints
+    # (D-no-unread-source-drop). Integers only (RA-016).
+    refuted = _claim_refuted(state)
+    peak = _cited_read_peak(state)
+    if seen.get("hash") != artifact_hash and _source_loss_finding(rt):
+        rt.store.event(
+            "source_loss_check",
+            artifact_hash=artifact_hash,
+            cited_read=len(
+                triage.read_cited_sources(
+                    report_text,
+                    None,
+                    state.get("read_log"),
+                    limit=rt.config.search.max_source_urls,
+                    exclude=refuted,
+                )
+            ),
+            cited_read_peak=peak or 0,
+            source_loss_findings=len(
+                triage.mechanical_source_loss_issues(
+                    report_text,
+                    report_mod.parse(report_text),
+                    state.get("read_log"),
+                    peak,
+                    fraction=rt.config.review.source_loss_fraction,
+                    limit=rt.config.search.max_source_urls,
+                    exclude=refuted,
+                )
+            )
+            if _source_loss_issues_apply(rt)
+            else 0,
+        )
+
+    # Every claim-check verdict this pass produced, reduced after the pool to the run's
+    # refuted-source set (D-no-unread-source-drop).
+    verdicts: list = []
+
     def work(slot: _CritiqueSlot) -> LensResult:
         if slot.unstaffed_reason is not None:
             result = LensResult(
@@ -2648,6 +2860,9 @@ def _critique(state: State, rt: Runtime) -> dict:
                 coverage_sink=coverage_by_artifact,
                 read_log=state.get("read_log"),
                 previous_report=previous_report,
+                cited_read_peak=peak,
+                claim_refuted=refuted,
+                verdict_sink=verdicts,
             )
         return result.model_copy(update={"confirm_state": True}) if confirming else result
 
@@ -2690,6 +2905,7 @@ def _critique(state: State, rt: Runtime) -> dict:
         "source_coverage": coverage_by_artifact,
         "draft_seen": {"hash": artifact_hash, "text": report_text},
         "draft_previous": previous_report,
+        "claim_refuted": _merge_refuted(state.get("claim_refuted"), claimcheck.source_standing(verdicts)),
         "critic_strikes": strikes,
         "sidelined_critics": sidelined,
     }
