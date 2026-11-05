@@ -100,6 +100,12 @@ named checkpoint while preserving QP3's panel composition: those surfaces remain
 the test reviewer remains on `claude-sonnet-5`, and the three Codex reviewer roles are unchanged.
 The existing executable checks continue to require explicit pins and the intended family split.
 
+**Application — same-family checkpoint update (D-claude-sonnet-5-5-pin).** The test reviewer now
+pins `claude-sonnet-5-5`. This changes the named checkpoint while preserving QP3's panel
+composition: the reviewer stays Claude-family and stays on the bounded Sonnet tier, and every other
+assignment is unchanged. The existing executable checks continue to require explicit pins and the
+intended family split.
+
 **Application — bounded claim-check failures
 (D-claim-check-inconclusive-verdicts).** `claimcheck.check` and
 `config.ClaimCheckConfig.max_consecutive_failures` apply QP7 at the per-critic checker entry point:

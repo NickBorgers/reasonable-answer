@@ -121,7 +121,7 @@ that pick their agent at runtime carry an `agent_model()` map inline instead.
 | surface | agent | alias | why this tier |
 |---|---|---|---|
 | `invariant` reviewer | claude | `claude-opus-5-5` | never-abstain backstop on the six invariants and the merge gate |
-| `test` reviewer | claude | `claude-sonnet-5` | bounded, checklist-shaped job against `test.md` |
+| `test` reviewer | claude | `claude-sonnet-5-5` | bounded, checklist-shaped job against `test.md` |
 | `docs` reviewer | codex | `gpt-5.6-luna` | the most mechanical role: text checked against text |
 | `security` reviewer | codex | `gpt-5.6-sol` | guards the egress boundary, where a miss reaches production |
 | `quality` reviewer | codex | `gpt-5.6-sol` | must fetch and read cited sources, not recall them |

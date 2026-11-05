@@ -546,7 +546,7 @@ jobs:
       agent: claude
       # A bounded, checklist-shaped job against the table in test.md — offline markers,
       # weakened assertions, coverage of the diff. Sized to the work, not to the family.
-      model: claude-sonnet-5
+      model: claude-sonnet-5-5
       pr_number: ${{ inputs.pr_number }}
       reviewed_sha: ${{ inputs.reviewed_sha }}
       base_ref: ${{ inputs.base_ref }}
