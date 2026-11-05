@@ -97,14 +97,14 @@ reason runs died.
 **Application — same-family checkpoint update (D-claude-opus-5-5-pin).** The invariant reviewer and
 the Claude branches of the issue-author and fixer maps now pin `claude-opus-5-5`. This changes the
 named checkpoint while preserving QP3's panel composition: those surfaces remain Claude-family,
-the test reviewer remains on `claude-sonnet-5`, and the three Codex reviewer roles are unchanged.
-The existing executable checks continue to require explicit pins and the intended family split.
+and the three Codex reviewer roles are unchanged. At the time of that decision, the test reviewer
+remained on `claude-sonnet-5`; D-claude-sonnet-5-5-pin records its later repin. The existing
+executable checks continue to require explicit pins and the intended family split.
 
 **Application — same-family checkpoint update (D-claude-sonnet-5-5-pin).** The test reviewer now
 pins `claude-sonnet-5-5`. This changes the named checkpoint while preserving QP3's panel
-composition: the reviewer stays Claude-family and stays on the bounded Sonnet tier, and every other
-assignment is unchanged. The existing executable checks continue to require explicit pins and the
-intended family split.
+composition: the reviewer's `agent: claude` assignment and every other assignment are unchanged.
+The existing executable checks continue to require explicit pins and the intended family split.
 
 **Application — bounded claim-check failures
 (D-claim-check-inconclusive-verdicts).** `claimcheck.check` and
