@@ -67,7 +67,7 @@ review-entry            authorize · fork-reject · resolve SHA · prior-GO chec
        ├─ invariant     Claude · claude-opus-5-5 ─┐
        ├─ docs          Codex  · gpt-5.6-luna     │
        ├─ security      Codex  · gpt-5.6-sol      ├─ read-only, each emits a JSON artifact
-       ├─ test          Claude · claude-sonnet-5  │
+       ├─ test          Claude · claude-sonnet-5-5│
        ├─ quality       Codex  · gpt-5.6-sol     ─┘
        ├─ record-cycle  writes review/cycle — only if a reviewer actually ran
        ├─ fix           the ONLY branch-writing stage; syncs with the base branch and

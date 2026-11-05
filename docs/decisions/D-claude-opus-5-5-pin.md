@@ -17,5 +17,6 @@ remain Codex-family; and quality remains cross-family from invariant. The explic
 checks in `tests/test_ci_model_pins.py` continue to enforce those properties. No quality principle
 is weakened and no new empirical claim is introduced.
 
-**Scope.** No other reviewer model changes. In particular, the bounded test reviewer remains on
-`claude-sonnet-5`, and every Codex assignment remains as recorded by D-ci-model-pinning.
+**Scope.** At the time of this decision, no other reviewer model changed: the bounded test reviewer
+remained on `claude-sonnet-5`, and every Codex assignment remained as recorded by
+D-ci-model-pinning. D-claude-sonnet-5-5-pin records the test reviewer's later repin.

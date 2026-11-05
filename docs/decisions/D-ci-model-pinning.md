@@ -44,7 +44,9 @@ missing defects it used to catch — visible as blockers appearing only after a 
 
 The invariant reviewer and the Claude branches of the runtime author/fixer maps were subsequently
 repointed within the same family and tier to `claude-opus-5-5`; D-claude-opus-5-5-pin records that
-checkpoint update. The task-shape rationale and the rest of the panel assignment are unchanged.
+checkpoint update. The `test` reviewer was later repinned to `claude-sonnet-5-5` while its
+`agent: claude` assignment remained unchanged; D-claude-sonnet-5-5-pin records that update. The
+task-shape rationale and the rest of the panel assignment are unchanged.
 
 **Decision — Codex becomes the default author, and the cold fixer.** `CI_AGENT_DEFAULT` defaults
 to `codex`, and the cold fixer is pinned to it. Resolving an issue end to end is the pipeline's
