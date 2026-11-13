@@ -15,7 +15,7 @@ from pathlib import Path
 from typing import Any, Literal
 
 from ..citelinks import VerifiedSpan, select_spans
-from ..store import load_final, read_claim_checks
+from ..store import load_final, read_claim_checks, read_searches
 from ..taxonomy import LENSES
 
 Status = Literal["queued", "running", "interrupted", "abandoned", "accepted",
@@ -310,6 +310,12 @@ class Registry:
         controller rule produced. So the export paths ask this question strictly.
         """
         return load_final(self.dir(run_id) / "final.json")
+
+    def searches(self, run_id: str) -> list[dict[str, Any]]:
+        """The run's writer search trail (D-search-trail): every `web_search` call, its
+        query, outcome and the URLs and titles it returned. Empty for a run with retrieval
+        off or after `purge --content-only`."""
+        return read_searches(self.runs_dir, run_id)
 
     def report(self, run_id: str) -> str | None:
         path = self.dir(run_id) / "final.md"

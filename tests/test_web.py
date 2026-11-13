@@ -605,6 +605,24 @@ def test_audit_json_exposes_the_whole_event_stream(client):
     assert {"startup", "generate", "critique", "triage", "control", "finalize"} <= kinds
 
 
+def test_audit_json_serves_the_search_trail_and_events_never_carry_it(client, config):
+    """D-search-trail: the queries and URLs are served from the purgeable `searches/`
+    directory beside the event stream, which never carries them (RA-016)."""
+    from reasonable_answer.store import RunStore
+
+    response = client.post("/runs", data={"question": "Trail?"}, follow_redirects=False)
+    run_id = response.headers["location"].rsplit("/", 1)[-1]
+    _wait_for_final(client, run_id)
+    assert client.get(f"/runs/{run_id}/audit.json").json()["searches"] == []
+
+    record = {"round": 1, "attempt": 1, "alias": "writer-a", "query": "trail query",
+              "outcome": "ok", "results": [{"url": "https://example.org/t", "title": "T"}]}
+    RunStore(config.runs_dir, run_id).search(1, record)
+    audit = client.get(f"/runs/{run_id}/audit.json").json()
+    assert [r["query"] for r in audit["searches"]] == ["trail query"]
+    assert "trail query" not in json.dumps(audit["events"])
+
+
 def test_audit_json_names_the_build_every_stage_ran_on(client):
     """D-run-build-stamp: the machine-readable surface is what an agent comparing runs
     across a change actually reads, so the stamp has to survive the whole path from

@@ -196,7 +196,8 @@ gets whatever that file says — the `startup` event's `revision` block is the r
 
 There is no metrics or log-shipping stack in this repository — the application logs to stdout via
 the standard library and the container's log driver takes it from there. The real audit surface is
-on disk: per run, `events.jsonl`, `audit.json`, and `owner.txt` under the runs volume, with a
+on disk: per run, `events.jsonl`, `audit.json`, `searches/` (the writers' query text and returned
+URLs, served in `audit.json`; D-search-trail), and `owner.txt` under the runs volume, with a
 startup event recording identities, modes, budgets, which resolve tiers were enabled, and the
 revision settings and build the attempt ran with. A background sweeper enforces `retention_days`.
 
@@ -204,7 +205,8 @@ revision settings and build the attempt ran with. A background sweeper enforces 
 container's CMD is fixed so `--verbose` cannot be passed; at WARNING a deployment records no run
 starts, no controller decisions and no search results, which leaves a failure reconstructable only
 from code. The level is safe to raise because no INFO site emits run material: search logs query
-*lengths* and counts (RA-016), controller decisions derive only from the blind `OrchestratorView`,
+*lengths* and counts (RA-016) — the query text goes to the purgeable `searches/` trail only
+(D-search-trail) — controller decisions derive only from the blind `OrchestratorView`,
 and `structured()`'s schema-violation log names the exception class, never the rejected value.
 
 Every HTTP request writes one access line, and the app writes it, not uvicorn
