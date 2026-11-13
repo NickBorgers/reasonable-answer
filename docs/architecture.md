@@ -409,7 +409,20 @@ D-writer-rereads-cited-sources), and nothing else. The seeded URLs never appear 
 `writer_system(..., reread=True)` and `reading.read_source_tool(True)` only point the writer at the
 fenced draft. Both tools are driven by one
 `(name, arguments) -> text` handler assembled in `graph._retrieval_kwargs`, which is where the
-composition lives so `search` and `reading` need not import each other. The optional whole-run
+composition lives so `search` and `reading` need not import each other.
+
+**The search trail (D-search-trail).** Every `web_search` call a writer makes is appended, as it
+returns, to `runs/<id>/searches/rNN.jsonl`: round, attempt number within the generation, writer
+alias and identity, the query, a closed outcome (`ok`, `budget_exhausted`, `error`) and each
+returned result's URL and title. An attempt that later fails (`tool_loop_no_answer`,
+`unparsed_tool_markup`, a set-aside draft) is on the record too, because the record is written by
+the tool handler's `on_search` callback, not after the call. Query and URLs are content: they live
+in a `CONTENT_DIRS` directory, are purged with the drafts, and are served as `searches` in
+`audit.json` beside the report at the same exposure. `events.jsonl` carries only the integer
+`queries` on `generate` and `generate_failed`; no log line carries query text. Nothing in the
+trail enters any model context, the `OrchestratorView` or the controller.
+
+The optional whole-run
 `read_budget` call cap is unbounded by default; `read_char_budget` remains a mandatory whole-run
 character bound and `read_max_chars` a per-page bound. Bytes off the wire are bounded already by
 `fetch_max_bytes`.

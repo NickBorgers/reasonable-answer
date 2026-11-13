@@ -24,7 +24,7 @@ from pydantic import BaseModel
 #: (D-question-refinement) has to live here rather than as a root-level `refinement.json` because `purge`
 #: (below) only sweeps directories on a content-only purge -- a root file would silently
 #: survive it and outlive the reports/critiques it was meant to retire alongside.
-CONTENT_DIRS = ("reports", "critiques", "disputes", "refinements", "support")
+CONTENT_DIRS = ("reports", "critiques", "disputes", "refinements", "support", "searches")
 
 #: A run id becomes a filesystem path and, via `purge`, an rmtree target. Anything
 #: outside this alphabet — separators, `..`, absolute paths — is rejected outright.
@@ -159,6 +159,18 @@ class RunStore:
         name = f"r{round_no:02d}.json"
         self._write(Path("support") / name, json.dumps(payload, indent=2, default=str))
 
+    def search(self, round_no: int, record: dict[str, Any]) -> None:
+        """One writer `web_search` call: the query, its outcome, the URLs and titles it
+        returned, and which round, writer and attempt asked (D-search-trail).
+
+        The query is composed by a writer looking at the question, the seed and the draft,
+        and the URLs are what a third-party ranking chose, so both are content. They live in
+        the purgeable `searches/` directory and never in events.jsonl, which survives
+        `purge --content-only` and carries only counts (RA-016). One JSON line per call,
+        appended as the call returns, so an attempt that later fails is on the record too.
+        """
+        self._append(f"searches/r{round_no:02d}.jsonl", {"ts": time.time(), **record})
+
     def refinement(self, payload: dict[str, Any]) -> None:
         """The full pre-run refinement record (D-question-refinement): question at offer, suggestions
         offered, chosen text. Content-bearing, so it lives in `refinements/` -- a
@@ -253,6 +265,32 @@ def read_claim_checks(root: Path, run_id: str, artifact_hash: str | None) -> lis
         if isinstance(record, dict):
             found.append((int(match.group(1)), path.name, record))
     return [record for _, _, record in sorted(found, key=lambda t: (t[0], t[1]))]
+
+
+def read_searches(root: Path, run_id: str) -> list[dict[str, Any]]:
+    """Every search-trail record of a run (D-search-trail), in round order, then call order.
+
+    Read back for `audit.json`. Nothing here raises for a missing or unreadable record: a
+    run with retrieval off, a `purge --content-only` that emptied the directory, and a
+    partially-flushed last line all read as fewer records, never as an error.
+    """
+    folder = safe_run_dir(root, run_id) / "searches"
+    if not folder.is_dir():
+        return []
+    out: list[dict[str, Any]] = []
+    for path in sorted(folder.glob("r*.jsonl")):
+        try:
+            lines = path.read_text().splitlines()
+        except OSError:
+            continue
+        for line in lines:
+            try:
+                record = json.loads(line)
+            except ValueError:
+                continue
+            if isinstance(record, dict):
+                out.append(record)
+    return out
 
 
 def load_final(path: Path) -> dict[str, Any] | None:

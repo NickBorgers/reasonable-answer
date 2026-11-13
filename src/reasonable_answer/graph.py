@@ -960,6 +960,7 @@ def _retrieval_kwargs(
     alias: str | None = None,
     question: str = "",
     run_date: str | None = None,
+    on_search: Any = None,
 ) -> dict[str, Any]:
     """The tool half of a writer call: `web_search`, and `read_source` when it is on.
 
@@ -969,6 +970,9 @@ def _retrieval_kwargs(
 
     Returns `{}` when retrieval is off, so a search-less build hands `complete` exactly
     the argument list it always did.
+
+    `on_search` receives every `web_search` call as a `search.SearchRecord`, which is
+    how the run's search trail is kept (D-search-trail).
 
     Both tools go through one handler because `LLMClient.complete` drives a single
     `(name, arguments) -> text` callback. Dispatch lives here rather than in either
@@ -981,7 +985,9 @@ def _retrieval_kwargs(
 
     searcher = rt.searcher
     handlers: dict[str, Any] = {
-        "web_search": search.make_tool_handler(searcher, on_results=session.record_results)
+        "web_search": search.make_tool_handler(
+            searcher, on_results=session.record_results, on_search=on_search
+        )
     }
     tools = [search.SEARCH_TOOL]
     reader = rt.reader
@@ -1021,6 +1027,43 @@ def _retrieval_kwargs(
         "max_tool_rounds": rt.config.search.max_tool_rounds,
         "should_offer_tools": offering,
     }
+
+
+class _SearchTrail:
+    """One writer attempt's half of the search trail (D-search-trail).
+
+    Each `web_search` call is written to `searches/rNN.jsonl` the moment it returns, with
+    the round, the attempt number and the writer that asked, so an attempt that later
+    fails — a tool loop with no answer, unparsed markup, a set-aside draft — leaves its
+    queries and results on the record. `queries` is the integer that enters events.jsonl.
+    The record itself is content and goes only to the purgeable directory (RA-016).
+    """
+
+    def __init__(self, rt: Runtime, round_no: int, attempt: int, alias: str) -> None:
+        self._rt = rt
+        self._round = round_no
+        self._attempt = attempt
+        self._alias = alias
+        self.queries = 0
+
+    def __call__(self, record: search.SearchRecord) -> None:
+        self.queries += 1
+        try:
+            self._rt.store.search(
+                self._round,
+                {
+                    "round": self._round,
+                    "attempt": self._attempt,
+                    "alias": self._alias,
+                    "writer": self._rt.identities.get(self._alias, self._alias),
+                    "query": record.query,
+                    "outcome": record.outcome,
+                    "results": [{"url": r.url, "title": r.title} for r in record.results],
+                },
+            )
+        except OSError as exc:
+            # The trail is an audit aid; a full disk must not fail the writer's call.
+            log.warning("search trail write failed: %s", type(exc).__name__)
 
 
 def _generate(state: State, rt: Runtime) -> dict:
@@ -1093,7 +1136,9 @@ def _generate(state: State, rt: Runtime) -> dict:
     pos = 0
     nudged: set[str] = set()
     tried: set[str] = set()
-    held: tuple[str, Any, ops.Splice | None, reading.ReadSession, int, str] | None = None
+    held: tuple[str, Any, ops.Splice | None, reading.ReadSession, int, str, _SearchTrail] | None = None
+    # The round this generation will produce, for the search trail (D-search-trail).
+    trail_round = state.get("round", 0) + 1
     retries = {"unread_draft": 0, "unread_source_drop": 0}
     nudge: str | None = None
     for offset in range(attempts):
@@ -1109,8 +1154,10 @@ def _generate(state: State, rt: Runtime) -> dict:
         # cross-context affordance the per-call allowlist exists to refuse
         # (D-writer-source-reads, principle #6).
         session = reading.ReadSession(cited=cited_seed)
+        trail = _SearchTrail(rt, trail_round, offset + 1, alias)
         search_kwargs = _retrieval_kwargs(
-            rt, session, alias=alias, question=state["question"], run_date=run_date
+            rt, session, alias=alias, question=state["question"], run_date=run_date,
+            on_search=trail,
         )
         try:
             with call_purpose("writer"):
@@ -1163,7 +1210,7 @@ def _generate(state: State, rt: Runtime) -> dict:
                 # retry of this same writer with that gate's fixed nudge; if that also comes
                 # back unread, the next unseen writer in the pool; if there is none, or the
                 # attempt budget is spent, the held draft ships with a warning.
-                held = (alias, reply, spliced, session, pos, set_aside)
+                held = (alias, reply, spliced, session, pos, set_aside, trail)
                 last_failure = f"generator {alias} {_SET_ASIDE_REASONS[set_aside]}"
                 failure_class = set_aside
                 if alias not in nudged and offset + 1 < attempts:
@@ -1179,6 +1226,7 @@ def _generate(state: State, rt: Runtime) -> dict:
                             author=rt.identities[alias],
                             reason=last_failure,
                             failure_class=failure_class,
+                            queries=trail.queries,
                         )
                         log.warning("writer attempt %d/%d: %s", offset + 1, attempts, last_failure)
                         break
@@ -1197,6 +1245,9 @@ def _generate(state: State, rt: Runtime) -> dict:
             author=rt.identities[alias],
             reason=last_failure,
             failure_class=failure_class,
+            # The `web_search` calls this failed attempt spent, which the run's query
+            # budget has paid for (D-search-trail). The queries are in `searches/`.
+            queries=trail.queries,
         )
         log.warning("writer attempt %d/%d: %s", offset + 1, attempts, last_failure)
         if not stay:
@@ -1207,7 +1258,7 @@ def _generate(state: State, rt: Runtime) -> dict:
     if completion is None and held is not None:
         # Never leave a run without a draft over these gates (D-writer-rotation-pool): ship the
         # held one, say so in the event, and let the mechanical findings discharge it.
-        alias, completion, spliced, session, held_pos, held_class = held
+        alias, completion, spliced, session, held_pos, held_class, trail = held
         rotation += held_pos
         accepted[held_class] = 1
         log.warning("accepting a held draft from %s (%s): no writer read first", alias, held_class)
@@ -1314,6 +1365,9 @@ def _generate(state: State, rt: Runtime) -> dict:
         tokens=completion.completion_tokens,
         # Auditable after the fact: did this draft's citations come from a lookup?
         searches=completion.tool_calls,
+        # Of those, the `web_search` calls (D-search-trail): `searches` counts every tool
+        # call, reads included. The queries themselves are in `searches/rNN.jsonl`.
+        queries=trail.queries,
         # And the deeper version of the same question: did it read any of them?
         # Counts only — a URL is content and events.jsonl outlives a content purge.
         **_read_fields(session),

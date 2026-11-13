@@ -518,13 +518,16 @@ support/              the support manifest per draft — claim/source spans the 
                       `search.support_manifest` is enabled; off by default, and requires
                       `search.read_sources`, so a shipped-config run writes nothing here
 refinements/          the pre-run question-refinement record, when refinement ran
+searches/rNN.jsonl    every writer web_search call in round NN: query, outcome, the URLs and
+                      titles returned, writer and attempt — failed attempts included
+                      (D-search-trail); served as `searches` in `audit.json`
 signals/views.jsonl   what the blind orchestrator saw, per round
 signals/decisions.jsonl  which rule fired, per round
 ```
 
-`reports/`, `critiques/`, `disputes/`, `refinements/` and `support/` are `store.CONTENT_DIRS`: the
-directories that hold sensitive material *when the corresponding feature actually ran* (`support/`
-and `refinements/` can be empty). `ra purge <id> --content-only` drops whatever they hold and keeps
+`reports/`, `critiques/`, `disputes/`, `refinements/`, `support/` and `searches/` are
+`store.CONTENT_DIRS`: the directories that hold sensitive material *when the corresponding feature
+actually ran* (`support/`, `refinements/` and `searches/` can be empty). `ra purge <id> --content-only` drops whatever they hold and keeps
 the decision record — and `owner.txt`, so a purged run stays in its owner's index.
 
 Every run also stamps the commit it ran on, in `final.json` and on each `startup` event, so runs
