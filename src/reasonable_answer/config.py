@@ -187,6 +187,12 @@ class SearchConfig(BaseModel):
     max_tool_rounds: int = Field(default=6, ge=1, le=20)
     #: seconds between requests; the free tier is 1 req/sec.
     min_interval_seconds: float = Field(default=1.1, ge=0.0, le=60.0)
+    #: Most search results a failed writer attempt hands to the next attempt of the same
+    #: generation (D-failed-attempt-search-carry). The run's query budget already paid for
+    #: them; this bounds only how much carried text enters the next writer's context
+    #: (principle #6). 0 turns carrying off and restores per-attempt isolation exactly.
+    #: Kept out of `Budgets`, which `graph._run_fingerprint` hashes.
+    carry_max_results: int = Field(default=20, ge=0, le=100)
 
     #: Fetch the pages the report cites and hand them to the evidence critic, so
     #: `misrepresented_source` and `fabricated_citation` become checkable rather than

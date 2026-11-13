@@ -75,8 +75,8 @@ residual (a bias the rulebook does not describe passes through).
 ```mermaid
 flowchart TB
     subgraph GEN["Writer (next in the writer pool rotation; last writer eligible — D-writer-rotation-pool)"]
-        Gin["SEES: question + latest report + DEFECT LIST (fix-tasks)<br/>+ its OWN search results, and the pages it read from them (D-writer-source-reads) — as evidence cards when on (D-writer-evidence-card)<br/>+ on a revision, pages listed in the draft it revises (D-writer-rereads-cited-sources)"]
-        Gno["NEVER: raw critique prose · other reports' history · who critiqued<br/>· a page another writer's search found that the draft does not cite"]
+        Gin["SEES: question + latest report + DEFECT LIST (fix-tasks)<br/>+ its OWN search results, and the pages it read from them (D-writer-source-reads) — as evidence cards when on (D-writer-evidence-card)<br/>+ result records (no query) a failed attempt at the same draft was given (D-failed-attempt-search-carry)<br/>+ on a revision, pages listed in the draft it revises (D-writer-rereads-cited-sources)"]
+        Gno["NEVER: raw critique prose · other reports' history · who critiqued<br/>· a page another writer's search found in another round that the draft does not cite<br/>· a failed attempt's queries, reads or draft"]
     end
     subgraph RDR["Evidence reader (D-writer-evidence-card, opt-in) — the drafting writer's own model, one fresh context per page chunk"]
         Rin["SEES: the question + the writer's stated purpose (fenced) + ONE part of ONE page this writer call asked to read"]
@@ -331,7 +331,8 @@ of a page it chose enters the **writer's** context, which is the one role that e
 downstream. Four things bound it, and only the first is new:
 
 - **The allowlist is the writer's own search results in the same call, plus — on a revision — the
-  URLs the draft it revises lists.** `read_source` resolves a URL only if a `web_search` result in
+  URLs the draft it revises lists, plus the results a failed attempt at the same draft was handed
+  on (D-failed-attempt-search-carry).** `read_source` resolves a URL only if a `web_search` result in
   that `complete()` call listed it, or, when the call revises a draft and the run both reads and
   verifies sources, the draft's `## Sources` lists it (D-writer-rereads-cited-sources) — the same URL
   set verification fetches for that draft. `reading.ReadSession` is both the allowlist and the read
@@ -340,7 +341,15 @@ downstream. Four things bound it, and only the first is new:
   per-run is a deliberate tightening: a run-wide list would let a later writer open a page an
   earlier one merely found, giving up a fresh-context property (#6) to buy nothing. The cited seed
   does not reopen that: it is a function of the draft the reviser already holds, carries no other
-  writer's searches or reads, and never enters trusted prompt text as a URL list.
+  writer's searches or reads, and never enters trusted prompt text as a URL list. One exception is
+  bounded to a single generation (D-failed-attempt-search-carry): when an attempt does not ship (a
+  call failure, an empty reply, unapplicable operations, a set-aside draft), the result records its
+  own searches returned — title, URL, snippet, date, at most `search.carry_max_results` — are handed
+  to the next attempt of the same draft, fenced by `prompts.carried_results_block` with the same
+  untrusted-data note as a live result, and admitted to that attempt's allowlist as a third,
+  separate set. That attempt's context gains third-party records the run already paid for, never
+  the failed model's queries, reads, draft or failure; bodies are read afresh, so `support.check`
+  still rules only on what the shipping writer read. Nothing carries across rounds.
 - **A writer may cite only what some writer read (D-read-before-citing).** With both reading and
   verification on, the run keeps a `read_log` (URL to `SourceOutcome` value) of every page a
   writer's `read_source` resolved, and the evidence lens mints an `uncited_claim` covering each cited entry

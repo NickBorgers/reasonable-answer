@@ -1,5 +1,9 @@
 ## D-writer-source-reads — the writer reads the page before it cites it, and says where the support is
 
+*(Superseded in part by D-failed-attempt-search-carry: the allowlist is scoped to one generation's
+writer walk rather than to one `complete()` call, because an attempt that does not ship hands its
+search results to the next attempt of the same draft. Bodies, queries and reads remain per call.)*
+
 **The problem.** D-retrieval-opt-in made a citation *real*: a writer holding `web_search` may cite only a
 URL a result returned, so it can no longer invent one. It did not make the citation
 *supported*. A Brave result is a title, a URL and a one-line snippet, and the writer chooses
