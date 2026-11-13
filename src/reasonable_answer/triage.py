@@ -18,6 +18,7 @@ from __future__ import annotations
 import hashlib
 import math
 import re
+from collections.abc import Iterable
 from dataclasses import dataclass
 from enum import Enum
 
@@ -1104,6 +1105,168 @@ def mechanical_draft_history_issues(
                     "withdrawn claim outright, without saying it was ever made. State a gap as a "
                     "fact about the sources ('no source reviewed here reports ...'). If the "
                     "phrase means a document under discussion, name it ('the draft of the bill')."
+                ),
+            )
+        )
+    return issues
+
+
+
+# ------------------------------------------------------------------ absence claims
+#: Nouns that name evidence. "No <noun>" and "none of the <noun>" are absence claims: they
+#: say the evidence does not cover something. Kept to words that are not also common verbs
+#: ("measures", "records" and "estimates" read as verbs after "no longer").
+_EVIDENCE_NOUN = (
+    r"(?:sources?|stud(?:y|ies)|data(?:sets?)?|evidence|research|surveys?|papers?"
+    r"|analys[ie]s|literature|publications?|reports?|experiments?|trials?)"
+)
+#: "no" that does not start a quantity or an idiom: "no fewer than three studies", "by no
+#: means the only study", "no longer reports" are not absence claims.
+_NO = r"(?<!\bby\s)\bno\s+(?!(?:fewer|more|less|longer|matter|doubt|means)\b)"
+_ABSENCE = (
+    # "no source reviewed here measures", "no published study", "there is no evidence that"
+    re.compile(rf"{_NO}(?:[a-z][\w-]*\s+){{0,2}}?{_EVIDENCE_NOUN}\b", re.IGNORECASE),
+    # "none of the sources", "neither of the two studies"
+    re.compile(
+        rf"\b(?:none|neither)\s+of\s+the\s+(?:[a-z][\w-]*\s+){{0,2}}?{_EVIDENCE_NOUN}\b",
+        re.IGNORECASE,
+    ),
+    # "has not been studied", "have never yet been systematically measured"
+    re.compile(
+        r"\b(?:has|have|had)\s+(?:not|never)\s+(?:yet\s+)?been\s+(?:[a-z]+ly\s+)?"
+        r"(?:studied|measured|examined|investigated|quantified|researched|tested|documented"
+        r"|estimated|assessed|evaluated|addressed|reported)\b",
+        re.IGNORECASE,
+    ),
+    # "remains unstudied", "is largely unmeasured"
+    re.compile(
+        r"\b(?:remains?|is|are)\s+(?:largely\s+|entirely\s+|still\s+)?"
+        r"(?:unstudied|unmeasured|unexamined|unresearched|undocumented|unquantified)\b",
+        re.IGNORECASE,
+    ),
+    # "the literature is silent", "data are lacking"
+    re.compile(
+        r"\b(?:literature|evidence|research|data)\s+(?:is|are)\s+(?:silent|lacking|absent"
+        r"|nonexistent|non-existent|unavailable)\b",
+        re.IGNORECASE,
+    ),
+    # "a gap in the literature", "the absence of data", "a lack of research"
+    re.compile(r"\bgap\s+in\s+the\s+(?:literature|evidence|research|data)\b", re.IGNORECASE),
+    re.compile(
+        r"\b(?:lack|absence|dearth)\s+of\s+(?:[a-z][\w-]*\s+){0,2}?(?:data|evidence|research"
+        r"|stud(?:y|ies))\b",
+        re.IGNORECASE,
+    ),
+)
+
+#: Words that say *that* evidence is missing rather than *what* it is missing about. They
+#: are taken off a sentence before its topic is compared with a query, so "no study
+#: measures X" is backed by a search about X, not by any search containing "study".
+_ABSENCE_WORDS = """
+    a an and any are as at be been being but by can could did do does done for from had has
+    have here how if in into is it its itself may might more most much must neither no none
+    nor not of on one only or other our over reviewed so some such than that the their them
+    then there these they this those though to under up upon very was we were what when
+    where whether which while who whom whose why will with within would yet also directly
+    available cited consulted examined found identified located reviewed used
+    source sources study studies data dataset datasets evidence research survey surveys paper
+    papers analysis analyses literature publication publications report reports reported
+    experiment experiments trial trials measure measures measured measuring address addresses
+    addressed addressing cover covers covered exist exists existed examine examines studied
+    investigated quantified researched tested documented estimated assessed evaluated
+    known unknown unstudied unmeasured unexamined unresearched undocumented unquantified
+    silent lacking absent nonexistent unavailable gap lack absence dearth remain remains
+    largely entirely still never yet systematically
+"""
+_ABSENCE_VOCABULARY = frozenset(_ABSENCE_WORDS.split())
+
+
+def _stem(token: str) -> str:
+    """A plural folded to its singular, crudely and deterministically: enough that a query
+    for "tract" backs a sentence about "tracts"."""
+    if len(token) > 4 and token.endswith("ies"):
+        return token[:-3] + "y"
+    if len(token) > 3 and token.endswith("s") and not token.endswith("ss"):
+        return token[:-1]
+    return token
+
+
+def _topic_tokens(text: str) -> frozenset[str]:
+    return frozenset(
+        _stem(t)
+        for t in _claim_tokens(text)
+        if t not in _ABSENCE_VOCABULARY and len(t) > 2 and not t.isdigit()
+    )
+
+
+def absence_key(sentence: str) -> str:
+    """The form an absence sentence is remembered by across drafts: case-folded, citation
+    markers removed, whitespace collapsed. A sentence edited in any word is a new claim."""
+    return " ".join(excerpt._MARKER.sub(" ", sentence).casefold().split())[:MAX_SPAN]
+
+
+def absence_claim_sentences(structure: Structure) -> list[tuple[int, int, str]]:
+    """The body sentences that assert the evidence does not cover something
+    (D-absence-claim-check): "no source reviewed here measures", "has not been studied",
+    "no data exist", "none of the studies", "the literature is silent".
+
+    `(section, paragraph, sentence)` in document order, `## Sources` excluded. Matching is a
+    fixed phrase list, not a judgement.
+    """
+    sources_section = _sources_section(structure)
+    found: list[tuple[int, int, str]] = []
+    for paragraph in structure.paragraphs:
+        if paragraph.section == sources_section:
+            continue
+        for sentence in excerpt._SENTENCE_END.split(paragraph.text):
+            sentence = sentence.strip()
+            if sentence and any(pattern.search(sentence) for pattern in _ABSENCE):
+                found.append((paragraph.section, paragraph.paragraph, sentence[:MAX_SPAN]))
+    return found
+
+
+def absence_backed(sentence: str, queries: Iterable[str], min_overlap: int) -> bool:
+    """Whether one of `queries` searched for the topic of the absence claim `sentence`:
+    it shares at least `min_overlap` topic words with it (fewer when the sentence has fewer
+    topic words, and any query at all when it has none). Deterministic word overlap after
+    the absence vocabulary is removed; no model is asked."""
+    topic = _topic_tokens(sentence)
+    need = min(min_overlap, len(topic))
+    return any(len(topic & _topic_tokens(query)) >= need for query in queries)
+
+
+def mechanical_absence_issues(
+    structure: Structure, backed: frozenset[str] | set[str]
+) -> list[RawIssue]:
+    """One `uncited_claim` at `major` per body paragraph holding an absence claim no writer
+    backed with a search on its topic (D-absence-claim-check), anchored on the first such
+    sentence. `backed` holds the `absence_key` of every sentence that was backed.
+
+    At the category's floor. Fields hold only the report's own sentence and fixed wording.
+    """
+    issues: list[RawIssue] = []
+    seen: set[tuple[int, int]] = set()
+    for section, paragraph_no, span in absence_claim_sentences(structure):
+        if (section, paragraph_no) in seen or absence_key(span) in backed:
+            continue
+        seen.add((section, paragraph_no))
+        issues.append(
+            _minted(
+                category=Category.UNCITED_CLAIM,
+                severity=Severity.MAJOR,
+                locus=StructuralRef(section=section, paragraph=paragraph_no),
+                claim_span=span,
+                rationale=(
+                    "This sentence says the evidence does not cover something. That is a "
+                    "claim too, and no web search on its topic was run by the writer that "
+                    "wrote it. Reviewers cannot search, so the claim cannot be checked as it "
+                    "stands, and evidence that does exist would stay out of the report."
+                ),
+                instruction=(
+                    "Search for the evidence this sentence says is missing, with web_search "
+                    "queries that name its subject. If you find it, read it, use it and cite "
+                    "it. If your searches find nothing, you may keep the claim. Otherwise "
+                    "remove the sentence, or narrow it to the sources this report cites."
                 ),
             )
         )

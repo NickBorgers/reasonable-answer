@@ -529,6 +529,13 @@ review:
   # finding: the reader receives only the final report (D-no-draft-history). false is the
   # rollback switch; the writer prompt rule stays either way.
   draft_history_check: true
+  # With search on, a sentence asserting the evidence does not cover something ("no source
+  # reviewed here measures", "has not been studied") mints a major uncited_claim unless the
+  # writer that wrote it ran a web_search sharing absence_min_overlap topic words with it.
+  # Critics cannot search, so an absence claim is otherwise taken on faith
+  # (D-absence-claim-check). Off once the query budget is spent. false is the rollback switch.
+  absence_check: true
+  absence_min_overlap: 2
   # With reading and verification on, a revision that stops citing a source some writer read
   # in full text, while its own call read no page, is retried once with a nudge, then given
   # to the next writer, and ships with a warning only if none reads (D-no-unread-source-drop).

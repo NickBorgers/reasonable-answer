@@ -262,7 +262,11 @@ it — each one, again, a guard against a known LLM failure mode:
   receives, so a body paragraph that talks about an earlier draft of itself ("removed as unsupported",
   "this revision could not verify") gets a bounded repair opportunity, then a blocking finding only
   if the reference remains (or repair is unavailable)
-  (D-no-draft-history, `review.draft_history_check`, `draft_history_refs` on `generate`). With
+  (D-no-draft-history, `review.draft_history_check`, `draft_history_refs` on `generate`). A
+  sentence saying the evidence does not cover something ("no source reviewed here measures", "has
+  not been studied") mints a major `uncited_claim` unless the writer that wrote it ran a search on
+  its topic — critics cannot search, so an absence claim is never taken on faith
+  (D-absence-claim-check, `review.absence_check`, `absence_check` events). With
   `evidence_reader.enabled` as well, a read returns an evidence card — the passages of the whole
   retained page relevant to the question, each located verbatim in it, plus closed labels — in
   place of the page's opening (D-writer-evidence-card).

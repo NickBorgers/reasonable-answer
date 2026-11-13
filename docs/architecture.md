@@ -89,7 +89,7 @@ Invariants (enforced in code, covered by tests):
 | **adjudicate** *(D-writer-disputes, opt-in)* | pending disputes + finding + one paragraph | `AdjudicationRecord[]` | mechanical fetch-check, else an arbiter ≠ disputer ≠ raiser | mechanical, or LLM inside a closed 2-field schema |
 | **critique** | report + question + **one lens** + taxonomy; the evidence lens also gets the cited pages as claim-anchored excerpts (D-claim-anchored-excerpts), while its mechanical checks read the immediately previous draft and closed-vocabulary read log (D-no-shrink-discharge), and the completeness lens's net-loss check reads that log and the run's peak count (D-no-unread-source-drop) — none of them enters the critic prompt or controller view | `Issue[]` per critic | `review.depth` non-author models per lens, drawn as one slate (`roles.critic_slate`) | LLM (untrusted output) |
 | ↳ **claim check** *(D-claim-level-verification, opt-in)* | one citing sentence + its paragraph + one fetched page, per pair | a closed `ClaimVerdict` per pair, minted into `misrepresented_source` on the evidence critic's `LensResult` (`claimcheck`) | the evidence critic's own model, one fresh context per pair, memoised per resolved identity and complete prompt | LLM inside a closed 4-way schema; `supported` and `contradicted` must quote the shown page verbatim or the pair is unchecked; `absent` and `unreadable` settle nothing and never retire the critic's own finding; a sentence whose every citation is an anchored non-body mints one `uncited_claim`: an `unreadable` verdict is anchored only by a quoted span found verbatim in the shown page, while selected non-body fetch outcomes are anchored mechanically, and an unanchored `unreadable` mints nothing (D-unreadable-citation-finding, D-anchored-unreadable); a pass stops after `claim_check.max_consecutive_failures` unchecked calls in a row (D-claim-check-inconclusive-verdicts); a page longer than `claim_check.page_max_chars` is checked chunk by chunk to its end (`excerpt.chunk_bounds`, most relevant first, early stop), and `absent` from every chunk of an uncut body is settled, capped per pair and per pass (D-whole-page-claim-check) |
-| **triage** | this tick's critic and mechanically authored `Issue[]` (D-bibliography-integrity) (minus **upheld-adjudication suppressions**, D-writer-disputes) | `OrchestratorView` + `DefectList` | none — **mechanical** | deterministic |
+| **triage** | this tick's critic and mechanically authored `Issue[]` (including bibliography checks, D-bibliography-integrity, and absence-claim checks, D-absence-claim-check) (minus **upheld-adjudication suppressions**, D-writer-disputes) | `OrchestratorView` + `DefectList` | none — **mechanical** | deterministic |
 | **orchestrate** | `OrchestratorView` **only** | recommendation (minor-polish judgment) | LLM, blind | LLM inside guardrails |
 | **controller** | `ControllerInput` | decision + terminal status | none | **deterministic — owns termination** |
 | **finalize** | reports + history | selected report + terminal status + audit trail | none | deterministic |
@@ -116,17 +116,23 @@ flowchart TD
 ```
 
 Each lens runs on the head of its assigned pool, in a **fresh context**, blind to the others. They
-emit `Issue[]` against a closed schema. On a completed evidence review, deterministic bibliography
-checks may add mechanically authored findings, including `unclear_structure`, to the evidence
-result (D-bibliography-integrity); the category still describes the defect even though no critic
-minted it. A bibliography the body never cites is one `uncited_claim`, not one finding per entry
-(D-uncited-bibliography). With reading and verification both on, and while the read budget remains, a cited entry no writer has read in full
+emit `Issue[]` against a closed schema. On a completed evidence review, deterministic checks may
+add mechanically authored findings, including bibliography findings (D-bibliography-integrity) and
+absence-claim findings (D-absence-claim-check), to the evidence result; the category still describes
+the defect even though no critic minted it. A bibliography the body never cites is one
+`uncited_claim`, not one finding per entry (D-uncited-bibliography). With reading and verification
+both on, and while the read budget remains, a cited entry no writer has read in full
 text this run is covered by an `uncited_claim` too, minted from the run's read log (D-read-before-citing).
 When a revision drops a cited source while retaining its claim, the evidence result likewise gains
 one `uncited_claim` unless the claim cites a newly added page read in full (D-no-shrink-discharge).
 With verification on, a sentence citing an entry that has no fetchable address is covered by an
 `uncited_claim` as well, so deleting a URL while keeping the entry is not an escape from fetching
 (D-no-address-citation-finding).
+With search on, a body sentence asserting that the evidence does not cover something ("no source
+reviewed here measures", "has not been studied") is covered by an `uncited_claim` unless a query the
+drafting writer ran shared its topic words; backing is remembered in `State.absence_backed` while the
+sentence survives verbatim, and the finding is suppressed once the query budget is spent
+(D-absence-claim-check).
 A completed completeness review gains one `blocking` `unclear_structure` finding per body paragraph
 that talks about an earlier draft of this report, since the reader receives only the final report
 (D-no-draft-history).

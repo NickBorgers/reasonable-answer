@@ -424,6 +424,12 @@ A body paragraph that talks about an earlier draft of the report gets a bounded 
 if the reference remains (or repair is unavailable), it gets a blocking finding because the reader
 receives only the final report (D-no-draft-history);
 `review.draft_history_check` (default true) is the rollback switch.
+With search on, a body sentence asserting that the evidence does not cover something ("no source
+reviewed here measures", "has not been studied", "no data exist") mints a major `uncited_claim`
+unless the writer that wrote it ran a `web_search` sharing its topic words; it is suppressed once
+the query budget is spent (D-absence-claim-check). `review.absence_check` (default true) is the
+rollback switch, `review.absence_min_overlap` (default 2) the topic-word threshold, and
+`absence_check` events count claims, backed claims and findings.
 Under the same read-and-verify gate, a revision that read no page yet stops citing a page some writer
 read in full text is retried, rotated and, if no writer reads, shipped with `drop_accepted: 1`
 (D-no-unread-source-drop, `review.drop_requires_read`); and a draft that has lost at least

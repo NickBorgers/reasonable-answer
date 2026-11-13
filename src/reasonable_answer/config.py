@@ -948,6 +948,17 @@ class ReviewConfig(BaseModel):
     #: (D-no-draft-history). The reader receives only the final report. `false` restores the
     #: earlier behaviour. Here and not under `budgets`: `_run_fingerprint` hashes `budgets`.
     draft_history_check: bool = True
+    #: A body sentence asserting that the evidence does not cover something ("no source
+    #: reviewed here measures", "has not been studied", "no data exist") mints one `major`
+    #: `uncited_claim` per paragraph unless a writer's own `web_search` in the call that
+    #: produced the sentence shared `absence_min_overlap` topic words with it
+    #: (D-absence-claim-check). Effective only with search on, and suppressed once the query
+    #: budget is spent. `false` restores the earlier behaviour. Not under `budgets`.
+    absence_check: bool = True
+    #: Topic words (absence vocabulary and stop words removed, plurals folded) a query must
+    #: share with an absence sentence to back it; fewer when the sentence has fewer. A
+    #: matching heuristic, not a measured value.
+    absence_min_overlap: int = Field(default=2, ge=1, le=10)
     #: A revision that stops citing a source some writer has read in full text, while its own
     #: call read no page, is set aside: retried once with a fixed nudge, then given to the next
     #: writer, and shipped with a warning only when nothing better came back

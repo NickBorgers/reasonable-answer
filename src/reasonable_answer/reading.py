@@ -157,6 +157,9 @@ class ReadSession:
         self._offered: set[str] = set()
         self._cited: frozenset[str] = frozenset(url for url in cited if url)
         self._read: dict[str, FetchedSource] = {}
+        #: The `web_search` queries this call ran that returned results or an empty set,
+        #: never a refused one: what an absence claim may be backed by (D-absence-claim-check).
+        self._queries: list[str] = []
         self._cards: dict[str, Card] = {}
         self._tally = CardTally()
         self._lock = threading.Lock()
@@ -168,6 +171,18 @@ class ReadSession:
                 url = getattr(result, "url", "")
                 if url:
                     self._offered.add(url)
+
+    def record_query(self, query: str) -> None:
+        """A `web_search` query this call ran. Held in memory only, for the absence-claim
+        check; never written anywhere by the session (RA-016)."""
+        if query:
+            with self._lock:
+                self._queries.append(query)
+
+    @property
+    def queries(self) -> list[str]:
+        with self._lock:
+            return list(self._queries)
 
     def offered(self, url: str) -> bool:
         with self._lock:
