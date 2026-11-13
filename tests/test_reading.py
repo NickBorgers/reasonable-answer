@@ -749,7 +749,10 @@ def test_a_writer_cannot_read_a_url_its_own_search_did_not_return(
 
 
 def test_a_retried_writer_starts_with_an_empty_allowlist(tmp_path, identities, config):
-    """The allowlist is per `complete()` call, and a writer *attempt* is a call.
+    """With carrying off (`search.carry_max_results: 0`, the rollback of
+    D-failed-attempt-search-carry), the allowlist is per `complete()` call, and a writer
+    *attempt* is a call. With carrying on, the failed attempt's results are handed on
+    instead — pinned in tests/test_failed_attempt_search_carry.py.
 
     `_generate` rotates through the pool on failure, so attempt two is a **different
     model**. If the session were hoisted out of the retry loop, that model could open a
@@ -763,6 +766,7 @@ def test_a_retried_writer_starts_with_an_empty_allowlist(tmp_path, identities, c
     from reasonable_answer.graph import _generate
     from reasonable_answer.schemas import CritiqueOutput
 
+    config.search.carry_max_results = 0
     reader, fetcher = _reader({READ_URL: _body(READ_URL, PAGE_TEXT)})
     searched: list[str] = []
 
@@ -1361,7 +1365,8 @@ def test_a_retried_reviser_may_read_what_the_draft_cites_but_not_what_its_predec
 ):
     """The companion of `test_a_retried_writer_starts_with_an_empty_allowlist` for a
     revision. The seed is a function of the draft both attempts hold, so attempt two may
-    read the cited page; attempt one's search results still never carry over."""
+    read the cited page; with carrying off (the rollback of D-failed-attempt-search-carry)
+    attempt one's search results never carry over."""
     from reasonable_answer.graph import _generate
 
     reader, fetcher = _reader(
@@ -1381,7 +1386,7 @@ def test_a_retried_reviser_may_read_what_the_draft_cites_but_not_what_its_predec
     rt, client = _reread_runtime(
         tmp_path,
         identities,
-        _reread_config(tmp_path),
+        _reread_config(tmp_path, carry_max_results=0),
         reader,
         fetcher,
         tool_script=script,

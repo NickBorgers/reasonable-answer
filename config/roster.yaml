@@ -148,6 +148,11 @@ search:
   max_tool_rounds: 6
   # The free tier is 1 request/second; requests are throttled to stay under it.
   min_interval_seconds: 1.1
+  # A writer attempt that fails (a tool loop with no answer, unparsed markup, a set-aside
+  # draft) hands up to this many of its search results to the next attempt of the same
+  # draft, fenced as untrusted data and readable, so the queries the run paid for are not
+  # wasted (D-failed-attempt-search-carry). 0 restores per-attempt isolation exactly.
+  carry_max_results: 20
 
   # Attempt EVERY addressable, deduplicated cited URL and hand successful bodies to the
   # evidence critic, so `misrepresented_source` and `fabricated_citation` stop being

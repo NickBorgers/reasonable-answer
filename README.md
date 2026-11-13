@@ -396,7 +396,9 @@ SSRF exposure by construction; it is expected to be constrained at the network l
 page to *check* a claim; it does not let it read one to *make* one. Set `search.read_sources: true`
 (which requires `search.enabled`) and writers also get a `read_source` tool, so a claim can be
 attached to text the writer actually read rather than to a one-line search snippet. A writer may
-open only a URL a `web_search` result **in that same writer call** returned or, when revising with
+open only a URL a `web_search` result **in that same writer call** returned, a result an earlier,
+failed attempt at the same draft was handed on from (`search.carry_max_results`, default 20;
+D-failed-attempt-search-carry), or, when revising with
 `search.verify_sources` also on, a URL the draft's own `## Sources` lists
 (`search.read_cited_sources`, default on; D-writer-rereads-cited-sources) — there is no
 arbitrary-URL reader, and a refused URL never reaches the network or costs budget. Calls are counted
@@ -564,7 +566,7 @@ src/reasonable_answer/
                  extraction, registry lookups (Crossref, OpenAlex, Unpaywall, Europe PMC,
                  arXiv, CORE), and the paid rendering-provider tier
   search.py      writer retrieval: web_search, source reads, support manifest
-  reading.py     the read_source writer tool and its per-call URL allowlist
+  reading.py     the read_source writer tool and its per-generation URL allowlist
   evidence.py    the per-source evidence reader behind read_source: verbatim passages, no prose
   support.py     the support manifest: mechanical claim/source verification, no model
   ingest.py      seed conversion (PDF / docx / HTML / URL → markdown) at the edge
