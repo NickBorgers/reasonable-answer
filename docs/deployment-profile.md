@@ -202,11 +202,12 @@ startup event recording identities, modes, budgets, which resolve tiers were ena
 revision settings and build the attempt ran with. A background sweeper enforces `retention_days`.
 
 `compose.yaml` sets **`RA_LOG_LEVEL: INFO`** (D-provider-retry). The shipped code default is WARNING, and the
-container's CMD is fixed so `--verbose` cannot be passed; at WARNING a deployment records no run
-starts, no controller decisions and no search results, which leaves a failure reconstructable only
-from code. The level is safe to raise because no INFO site emits run material: search logs query
-*lengths* and counts (RA-016) — the query text goes to the purgeable `searches/` trail only
-(D-search-trail) — controller decisions derive only from the blind `OrchestratorView`,
+container's CMD is fixed so `--verbose` cannot be passed; at WARNING stdout records no run starts,
+controller decisions, or search results. The log level does not control the on-disk audit surface:
+the purgeable `searches/` trail still records writer queries and returned results and is served in
+`audit.json` (D-search-trail). The level is safe to raise because no INFO site emits run material:
+search logs contain query *lengths* and counts only (RA-016), controller decisions derive only from
+the blind `OrchestratorView`,
 and `structured()`'s schema-violation log names the exception class, never the rejected value.
 
 Every HTTP request writes one access line, and the app writes it, not uvicorn

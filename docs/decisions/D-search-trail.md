@@ -1,13 +1,12 @@
 ## D-search-trail — every writer search is on the record: query, outcome, URLs, round, writer, attempt
 
-**The finding.** A production run was `accepted` with a report stating that no source it reviewed
-measured the thing the question asked about, while that evidence is easy to find. The audit trail
-could not say why. `search.make_tool_handler` logged the *length* of each query and the number of
-results; `events.jsonl` recorded `searches` (a count of tool calls) on the `generate` event only,
-so the searches spent by writer attempts that later failed were not even counted. Query text and
-returned URLs were recorded nowhere. Whether the searches were poor, or good results were found
-and dropped, was unanswerable. That observation is the motivation; the warrant is the mechanism
-above, which is checkable in this repository.
+**The finding.** The audit trail could not reconstruct a writer's source discovery.
+`search.make_tool_handler` logged the *length* of each query and the number of results;
+`events.jsonl` recorded `searches` (a count of tool calls) on the `generate` event only, so the
+searches spent by writer attempts that later failed were not even counted. Query text and returned
+URLs were recorded nowhere. Whether searches were poor, or useful results were found and dropped,
+was unanswerable. That mechanism is checkable in this repository and is the warrant for this
+decision.
 
 **Why only lengths were recorded, and what that rule actually protects.** RA-016 classifies
 `runs/<id>/` as sensitive and splits it in two: `CONTENT_DIRS` (drafts, critiques, disputes,
