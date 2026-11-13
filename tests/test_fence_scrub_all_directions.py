@@ -196,6 +196,16 @@ def test_search_results_block_scrubs_a_hostile_description():
     assert SCRUBBED in prompt
 
 
+# ----------------------------------------------------------- carried_results_block
+
+
+def test_carried_results_block_scrubs_a_hostile_description():
+    result = SearchResult(title="T", url="https://example.org/a", description=BREAKOUT)
+    prompt = prompts.carried_results_block([result])
+    assert BREAKOUT not in prompt
+    assert SCRUBBED in prompt
+
+
 # ------------------------------------------------------------- source_read_block
 
 

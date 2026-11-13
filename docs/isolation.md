@@ -10,7 +10,7 @@ The system fights **three different biases**, and they have different isolation 
 
 | bias | cause | isolation unit that fixes it | priority |
 |------|-------|------------------------------|----------|
-| **Social / context drift** — sycophancy, contextual drag, anchoring, in-session self-review | **shared context**: a peer's opinion, prior reasoning, or one's own earlier output in the same window | a **fresh, blind context window** per task — with one bounded exception, the in-call repair turn, which covers both halves of a critic's repair budget: a lens rejection is shown its own rejected field, fenced, and asked for a patch, while a schema rejection is shown a fenced, marker-scrubbed, content-free `loc`/`msg`/`type` summary of what failed — either way attributed to the validator, never as "your previous response" (D-repair-turn-context, D-validator-error-hygiene; [details under the threat model](#prompt-injection-threat-model-ra-010)) | **primary** |
+| **Social / context drift** — sycophancy, contextual drag, anchoring, in-session self-review | **shared context**: a peer's opinion, prior reasoning, or one's own earlier output in the same window | a **fresh, blind context window** per task. Two bounded data handoffs do not carry a peer's opinion or reasoning: the in-call critic repair turn returns the critic's own rejected field or a content-free validator summary (D-repair-turn-context, D-validator-error-hygiene), and a writer retry may receive capped, fenced third-party search-result records from an unfinished attempt at the same draft, but never that attempt's query, draft, reads or failure reason (D-failed-attempt-search-carry; [details under the threat model](#prompt-injection-threat-model-ra-010)) | **primary** |
 | **Correlated blind spots** — a model's systematic failure modes | the model itself; the same model repeats/misses the same error even in a fresh context | **model diversity** (distinct model families) | secondary |
 | **Social / content bias** — loaded framing, one-sided source selection, inherited presuppositions | **shared training-corpus and cultural priors** across every model in the roster, plus the question's own framing | **documented observable-text rules** ([bias.md](./bias.md)) enforced as lens categories, on top of decorrelated critic pools | tertiary |
 
@@ -331,11 +331,12 @@ of a page it chose enters the **writer's** context, which is the one role that e
 downstream. Four things bound it, and only the first is new:
 
 - **The allowlist is the writer's own search results in the same call, plus — on a revision — the
-  URLs the draft it revises lists, plus the results a failed attempt at the same draft was handed
-  on (D-failed-attempt-search-carry).** `read_source` resolves a URL only if a `web_search` result in
-  that `complete()` call listed it, or, when the call revises a draft and the run both reads and
-  verifies sources, the draft's `## Sources` lists it (D-writer-rereads-cited-sources) — the same URL
-  set verification fetches for that draft. `reading.ReadSession` is both the allowlist and the read
+  URLs the draft it revises lists, plus result records carried from unfinished attempts at the same
+  draft (D-failed-attempt-search-carry).** `read_source` resolves a URL only if a `web_search` result
+  in that `complete()` call listed it, an unfinished attempt in the same generation returned it, or,
+  when the call revises a draft and the run both reads and verifies sources, the draft's `## Sources`
+  lists it (D-writer-rereads-cited-sources) — the same URL set verification fetches for that draft.
+  `reading.ReadSession` is both the allowlist and the read
   log, holds the two sets separately, and is created and discarded per call. There is no
   arbitrary-URL reader, and a refused URL never reaches the fetch boundary. Per-call rather than
   per-run is a deliberate tightening: a run-wide list would let a later writer open a page an

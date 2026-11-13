@@ -297,7 +297,15 @@ its entries and deterministic verdicts remain audit-only and cannot affect accep
 the fetched body of the cited URL; parametric recollection and empty-string containment establish
 nothing. D-writer-rereads-cited-sources lets a reviser open the pages the draft it revises cites; under
 QP5 those bodies take the same fence, and the seed is the draft's own untrusted text rather than another
-context's retrieval, so no critic output and no other writer's searches or reads cross over.
+context's retrieval, so no critic output and no other writer's reads cross over.
+D-failed-attempt-search-carry adds one generation-scoped exception for search-result metadata: an
+unfinished writer attempt may hand the next attempt capped title, URL, snippet and date records,
+fenced as untrusted data. It hands over no query, draft, read body, reasoning, failure reason or
+critic output, and nothing crosses a round. This narrows the former per-call fresh-context boundary
+to preserve external observations the run already paid for. ReAct shows that interleaving a model's
+reasoning with external search observations can improve evidence-grounded question answering; it
+does not study failed attempts, cross-model handoff or this isolation boundary, so it supports only
+the usefulness of retaining tool observations, not the safety or efficacy of this exact carry.
 D-read-before-citing keeps all three: its mechanical `uncited_claim` (QP1) is minted at its `major`
 floor from a URL-to-outcome read log, not from a model's score; the finding text carries only an entry
 label, address, outcome name and fixed instruction, so no page text or model prose crosses contexts (QP5);
@@ -386,6 +394,7 @@ on without fetching something new.
 | [Kamoi et al. 2024, "When Can LLMs Actually Correct Their Own Mistakes? A Critical Survey of Self-Correction of LLMs" (TACL 12)](https://arxiv.org/abs/2406.01297) | Critical survey: self-correction works well where reliable external feedback is available, and is undemonstrated with feedback from prompted LLMs outside tasks exceptionally suited to it. Relied on as a bound on this pipeline's LLM-critic feedback, whoever the reviser is. | QP4 |
 | [Sharma et al. 2023, "Towards Understanding Sycophancy in Language Models" (ICLR 2024)](https://arxiv.org/abs/2310.13548) | Sycophancy is consistent across RLHF assistants and is triggered by stances visible in context. | QP5 |
 | [Song 2026, "Cross-Context Review"](https://arxiv.org/abs/2603.12123) | Reviewing in a separate session with no access to the production conversation beats same-session self-review; repetition within a session does not. | QP5 |
+| [Yao et al. 2022, "ReAct: Synergizing Reasoning and Acting in Language Models" (ICLR 2023)](https://arxiv.org/abs/2210.03629) | Interleaving reasoning with external actions and their observations improves performance on knowledge-intensive QA. Relied on only for the usefulness of search observations; it does not test failed-attempt carry, cross-model handoff or epistemic isolation. | QP5 |
 | [Smit et al. 2024, "Should we be going MAD?" (ICML)](https://arxiv.org/abs/2311.17371) | Multi-agent debate does not reliably outperform simpler ensembling and is highly hyperparameter-sensitive. | QP6 |
 | [Lorenz et al. 2011, "How social influence can undermine the wisdom of crowd effect" (PNAS)](https://doi.org/10.1073/pnas.1008636108) | Even mild social influence collapses judgment diversity while increasing confidence. | QP6 |
 | [Kim et al. 2025, "Correlated Errors in Large Language Models" (ICML)](https://arxiv.org/abs/2506.07962) | When two capable models both err they frequently agree on the same wrong answer, even across providers; correlation grows with capability. | QP2, QP3 |

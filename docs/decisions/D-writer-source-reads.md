@@ -26,20 +26,23 @@ asked afterwards to record where each cited claim's support actually sits.
 fetcher instance is shared with source verification when both are on, so a page a writer read
 is not downloaded again for the evidence lens, and both see the same bytes.
 
-*The allowlist is the writer's own search results.* This is the part that is not negotiable.
-`read_source` accepts a URL only if a `web_search` result **in the same writer call** listed it;
-`reading.ReadSession` is that allowlist and is created per `LLMClient.complete` call. Per-call
-rather than per-run deliberately: a run-wide list would let round five's writer open a page
-round one's writer found, which trades a fresh-context property (principle #6) for nothing,
-since a writer has to name a URL and can only have learned one by searching. A refused URL never
+*The allowlist was originally the writer's own search results.* The original decision required
+`read_source` to accept a URL only if a `web_search` result in the same writer call listed it, with
+one `reading.ReadSession` per `LLMClient.complete` call. D-failed-attempt-search-carry supersedes
+that scope for unfinished attempts within one generation: their capped result records enter the
+next attempt's separate carried set. The per-round boundary remains. A run-wide list would let
+round five's writer open a page round one's writer found, which trades a fresh-context property
+(principle #6) for nothing, since a writer has to name a URL and can only have learned one by
+searching. A refused URL never
 reaches the fetch boundary and costs no budget — otherwise a writer could exhaust the run's
 reads on addresses it was never offered and arrive at the real ones with nothing to spend.
 
 > Superseded in part by **D-writer-rereads-cited-sources**. A reviser has learned URLs another way:
 > it holds the draft. On a revision, with `verify_sources` also on, the allowlist additionally
 > holds the URLs the draft's `## Sources` lists — exactly the set verification fetches for that
-> draft. Search results still never outlive the call that returned them, and a refused URL still
-> reaches no fetch and spends no budget.
+> draft. D-failed-attempt-search-carry later added the other bounded exception: result records may
+> outlive an unfinished call until the end of that generation. A refused URL still reaches no fetch
+> and spends no budget.
 
 *Bounded three ways.* `search.read_budget` caps reads per run; `search.read_char_budget` caps
 the total page text handed to writers, because a per-page cap cannot see the total and retrieval
@@ -139,8 +142,9 @@ manifest, because its writer has no body to quote from. The record is still comp
 claims it covers — spans are verbatim, so a claim that survives unchanged from the round that
 traced it is traceable through that round's `support/rNN.json` — but "the final draft has no
 manifest" is a legitimate outcome and does not mean its claims went unsupported. Carrying reads
-forward across rounds would fix the shape at the cost of the per-call allowlist, and was not worth
-that trade.
+forward across rounds would fix the shape at the cost of the generation boundary, and was not worth
+that trade. D-failed-attempt-search-carry later relaxed only the within-generation result-record
+boundary; it does not carry reads or manifests across rounds.
 
 > Superseded in part by **D-writer-rereads-cited-sources**: a revision round may now re-read the
 > pages its draft cites, and a manifest from such a round is checked against those re-read bodies.
@@ -164,7 +168,9 @@ findings.
   repeated inside the block, capped per read and per run — and the writer's output channel is
   unchanged, so reading adds evidence rather than a way to emit anything.
 * *A run-wide allowlist would leak one writer's retrieval into another's context.* `ReadSession` is
-  per `complete()` call; the next writer starts with an empty allowlist. The subtle case is the
+  per `complete()` call. As originally decided, the next writer started with an empty allowlist; under
+  D-failed-attempt-search-carry it may instead start with the bounded result-record set accumulated by
+  unfinished attempts in the same generation, while reads and bodies stay per call. The subtle case is the
   **retry loop**, not the next round: `_generate` rotates through the pool on a failed or empty
   completion, so attempt two is a different model, and a session hoisted out of that loop would let
   it open a page attempt one's search found and would let its manifest be checked against bodies it

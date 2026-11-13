@@ -345,6 +345,8 @@ def test_throttle_does_not_wait_when_enough_time_has_passed():
         {"max_results": 21},  # beyond what the API returns
         {"max_tool_rounds": 0},  # a loop that can never call the tool
         {"min_interval_seconds": -1},  # negative wait
+        {"carry_max_results": -1},  # a negative carry cap
+        {"carry_max_results": 101},  # beyond the bounded cross-attempt context
     ],
 )
 def test_out_of_range_search_config_is_rejected_at_load(kwargs):

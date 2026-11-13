@@ -156,7 +156,7 @@ can't game because none can see the whole board.
 | 3 | Authorship blindness | No critic is told who produced the report it evaluates. |
 | 4 | Focused, role-scoped prompts | Each lens gets one job (logic / evidence / completeness), not "review everything." |
 | 5 | Refinement over debate | Each tick improves the report; models never argue with each other. |
-| 6 | Fresh context per agent | Generator sees only {question, latest report, defect list}; critics see only {question, report, lens} — plus, mid-call, the validator's rejection of a field they just emitted (the principle-2 exception). No history accumulation across calls. |
+| 6 | Fresh context per agent | Generator sees only {question, latest report, defect list}; critics see only {question, report, lens}. Two bounded data handoffs are explicit: mid-call, a critic may receive the validator's rejection of a field it just emitted; between attempts at one draft, a writer may receive capped, fenced third-party search-result records, but no earlier writer's query, draft, reads or failure reason (D-failed-attempt-search-carry). No report or reasoning history accumulates across calls. |
 | 7 | Production ≠ review | Guaranteed by `critic(Rₙ) ≠ generator(Rₙ)`. |
 
 Each principle's empirical grounding — and the two places where the evidence bounds the claim
