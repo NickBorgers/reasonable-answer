@@ -366,6 +366,20 @@ disjoint from the unread row by construction, which lists addressable entries on
 ranks on blocking alone and does not. `review.no_address_finding` configures it; a `no_address_check`
 event records `no_address_entries` and `no_address_findings`.
 
+One more evidence row, gated on `search.enabled` and `review.absence_check` (D-absence-claim-check): a
+body paragraph holding a sentence that asserts the evidence does not cover something — a fixed phrase
+list: *no* + evidence noun ("no source reviewed here measures", "no data exist"), *none of the
+sources*, *has not been studied*, *remains unmeasured*, *the literature is silent*, *a gap in the
+literature*, *a lack of data* — mints one `uncited_claim`/`major`, anchored on that sentence, unless
+the sentence is backed. A sentence is backed when a `web_search` the drafting call ran (and that was
+not refused) shares at least `review.absence_min_overlap` topic words with it (stop words and absence
+vocabulary removed, plurals folded), or when it was backed in an earlier draft and survives verbatim
+(`State.absence_backed`). It is dischargeable in the report — search the topic, remove the sentence, or
+narrow it to the sources cited — and is suppressed once the query budget is spent, when searching
+could no longer discharge it. Critics hold no search tool and gain none: the writer that holds one is
+asked to search. `generate` carries `absence_claims` and `absence_unbacked`; an `absence_check` event
+records `absence_claims`, `absence_backed` and `absence_findings` once per draft.
+
 One row on the completeness lens, gated on `review.draft_history_check` alone (D-no-draft-history): a
 body paragraph that talks about an earlier draft of this report ("the earlier draft claimed", "removed
 as unsupported", "this revision could not verify") mints one `unclear_structure` finding at

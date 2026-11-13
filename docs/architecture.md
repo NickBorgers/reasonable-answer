@@ -127,6 +127,11 @@ one `uncited_claim` unless the claim cites a newly added page read in full (D-no
 With verification on, a sentence citing an entry that has no fetchable address is covered by an
 `uncited_claim` as well, so deleting a URL while keeping the entry is not an escape from fetching
 (D-no-address-citation-finding).
+With search on, a body sentence asserting that the evidence does not cover something ("no source
+reviewed here measures", "has not been studied") is covered by an `uncited_claim` unless a query the
+drafting writer ran shared its topic words; backing is remembered in `State.absence_backed` while the
+sentence survives verbatim, and the finding is suppressed once the query budget is spent
+(D-absence-claim-check).
 A completed completeness review gains one `blocking` `unclear_structure` finding per body paragraph
 that talks about an earlier draft of this report, since the reader receives only the final report
 (D-no-draft-history).

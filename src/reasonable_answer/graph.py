@@ -174,6 +174,12 @@ class State(TypedDict, total=False):
     #: added a URL to its own revision could otherwise certify its own dispute at a page
     #: no critic ever had access to.
     defect_citation_scope: list[str]
+    #: `triage.absence_key` of every absence claim in the current report that a writer backed
+    #: with a `web_search` on its topic, in the call that wrote or kept it
+    #: (D-absence-claim-check). Carried forward while the sentence survives verbatim, so a
+    #: later writer need not re-search a claim an earlier one checked. Report-derived like
+    #: `report` itself; enters no prompt, no `OrchestratorView` and no controller input.
+    absence_backed: list[str]
 
     view: dict
     decision: dict
@@ -1003,7 +1009,12 @@ def _retrieval_kwargs(
         handler = handlers.get(name)
         if handler is None:
             return prompts.search_error_block(f"unknown tool {name!r}")
-        return handler(name, raw_arguments)
+        result = handler(name, raw_arguments)
+        if name == "web_search" and not result.startswith(prompts.SEARCH_FAILED):
+            # A query that ran, for the absence-claim check (D-absence-claim-check). A
+            # refused or failed one is not a search for anything.
+            session.record_query(_query_of(raw_arguments))
+        return result
 
     def offering() -> bool:
         # Withdraw the tools the moment their budgets are gone. Otherwise the handlers
@@ -1021,6 +1032,42 @@ def _retrieval_kwargs(
         "max_tool_rounds": rt.config.search.max_tool_rounds,
         "should_offer_tools": offering,
     }
+
+
+def _query_of(raw_arguments: str) -> str:
+    try:
+        return str((json.loads(raw_arguments or "{}") or {}).get("query", "")).strip()
+    except (json.JSONDecodeError, AttributeError, TypeError):
+        return ""
+
+
+def _absence_check(rt: Runtime) -> bool:
+    """Whether absence claims are checked (D-absence-claim-check): search on, knob on."""
+    return rt.search_enabled and rt.config.review.absence_check
+
+
+def _search_budget_spent(rt: Runtime) -> bool:
+    budget = getattr(rt.searcher, "budget", None)
+    return bool(budget is not None and budget.exhausted)
+
+
+def _absence_backing(
+    cfg: Config, text: str, prior: list[str] | None, queries: list[str]
+) -> tuple[list[str], dict[str, int]]:
+    """The absence claims of `text` a writer backed, and the `generate` event's counts
+    (D-absence-claim-check). A sentence is backed when it was backed before and survives
+    verbatim, or when a query the drafting call ran searched its topic."""
+    before = set(prior or [])
+    backed: set[str] = set()
+    sentences = triage.absence_claim_sentences(report_mod.parse(text))
+    for _section, _paragraph, sentence in sentences:
+        key = triage.absence_key(sentence)
+        if key in before or triage.absence_backed(
+            sentence, queries, cfg.review.absence_min_overlap
+        ):
+            backed.add(key)
+    unbacked = sum(1 for *_, s in sentences if triage.absence_key(s) not in backed)
+    return sorted(backed), {"absence_claims": len(sentences), "absence_unbacked": unbacked}
 
 
 def _generate(state: State, rt: Runtime) -> dict:
@@ -1257,6 +1304,11 @@ def _generate(state: State, rt: Runtime) -> dict:
     )
 
     read_log = _merge_read_log(state.get("read_log"), session)
+    absence_fields: dict[str, int] = {}
+    if _absence_check(rt):
+        absence_backed, absence_fields = _absence_backing(
+            cfg, text, state.get("absence_backed"), session.queries
+        )
     unread_fields: dict[str, int] = {}
     if gate:
         # Present only when the gate is in force (D-writer-must-read): nudged retries of the
@@ -1344,6 +1396,9 @@ def _generate(state: State, rt: Runtime) -> dict:
         # Present only under ops mode (D-ops-revision): what the splice applied and what
         # it refused, integers only — no text, no locus, no task id (RA-016).
         **ops_fields,
+        # Present only when absence claims are checked (D-absence-claim-check): sentences
+        # saying the evidence does not cover something, and how many no search backed.
+        **absence_fields,
     )
 
     _record_support(rt, alias, state["question"], text, round_no, session)
@@ -1357,6 +1412,7 @@ def _generate(state: State, rt: Runtime) -> dict:
         "writer_rotation": rotation + 1,
         "read_log": read_log,
         **({"cited_read_sets": sets} if peak_fields else {}),
+        **({"absence_backed": absence_backed} if absence_fields else {}),
         "hash_history": history,
         "round": round_no,
         # Every generation resets every per-artifact accumulator — unconditionally,
@@ -2220,6 +2276,7 @@ def _critique_one(
     cited_read_peak: int | None = None,
     claim_refuted: set[str] | None = None,
     verdict_sink: list | None = None,
+    absence_backed: frozenset[str] = frozenset(),
 ) -> LensResult:
     """One lens, one critic, one fresh context. Failure is recorded as a *failed lens*,
     never as 'no issues found' — a failed review can never manufacture a clean record.
@@ -2457,6 +2514,12 @@ def _critique_one(
                 min_overlap=rt.config.review.shrink_min_overlap,
                 limit=rt.config.search.max_source_urls,
             )
+        # An absence claim no writer backed with a search on its topic
+        # (D-absence-claim-check). Skipped once the query budget is spent: searching could no
+        # longer discharge it, and a finding only deletion can clear is the shrink-to-pass
+        # the read-budget gates above refuse to teach.
+        if _absence_check(rt) and not _search_budget_spent(rt):
+            mechanical += triage.mechanical_absence_issues(structure, absence_backed)
         if mechanical:
             result = result.model_copy(update={"issues": [*mechanical, *result.issues]})
     # A paragraph that talks about earlier drafts of this report (D-no-draft-history). A fact
@@ -2826,6 +2889,22 @@ def _critique(state: State, rt: Runtime) -> dict:
             else 0,
         )
 
+    # Once per draft: the counts behind the absence-claim finding (D-absence-claim-check).
+    # Integers only (RA-016).
+    if seen.get("hash") != artifact_hash and _absence_check(rt):
+        structure = report_mod.parse(report_text)
+        backed = frozenset(state.get("absence_backed") or ())
+        claims = triage.absence_claim_sentences(structure)
+        rt.store.event(
+            "absence_check",
+            artifact_hash=artifact_hash,
+            absence_claims=len(claims),
+            absence_backed=sum(1 for *_, s in claims if triage.absence_key(s) in backed),
+            absence_findings=len(triage.mechanical_absence_issues(structure, backed))
+            if not _search_budget_spent(rt)
+            else 0,
+        )
+
     # Every claim-check verdict this pass produced, reduced after the pool to the run's
     # refuted-source set (D-no-unread-source-drop).
     verdicts: list = []
@@ -2863,6 +2942,7 @@ def _critique(state: State, rt: Runtime) -> dict:
                 cited_read_peak=peak,
                 claim_refuted=refuted,
                 verdict_sink=verdicts,
+                absence_backed=frozenset(state.get("absence_backed") or ()),
             )
         return result.model_copy(update={"confirm_state": True}) if confirming else result
 
