@@ -96,6 +96,10 @@ def test_plurals_are_folded_and_absence_words_do_not_count():
     assert triage.absence_backed(sentence, ["owner occupancy tract"], 2)
     assert not triage.absence_backed(sentence, ["study measures data evidence"], 2)
 
+    ies_sentence = "No study covers rural counties."
+    assert triage.absence_backed(ies_sentence, ["rural county data"], 2)
+    assert not triage.absence_backed(ies_sentence, ["rural countie data"], 2)
+
 
 def test_a_sentence_with_no_topic_words_is_backed_by_any_query():
     assert triage.absence_backed("No data exist.", ["anything"], 2)
