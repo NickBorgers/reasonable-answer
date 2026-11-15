@@ -62,6 +62,11 @@ class SearchError(RuntimeError):
     """Search backend failure. Never fatal to a run — surfaced to the model as text."""
 
 
+class SearchBudgetExhausted(SearchError):
+    """The run's query budget is spent. Its own type so the search trail
+    (D-search-trail) can record the outcome as a closed token rather than a message."""
+
+
 class SearchConfigError(RuntimeError):
     """Missing/unreadable credential. Fatal at startup, before any tokens are spent."""
 
@@ -173,7 +178,7 @@ class BraveSearch:
         if not query:
             raise SearchError("empty query")
         if not self._budget.take():
-            raise SearchError(
+            raise SearchBudgetExhausted(
                 f"search budget exhausted for this run "
                 f"({self._budget.limit} queries). No further searches are possible."
             )
@@ -279,9 +284,25 @@ def _clean(value: str | None, limit: int) -> str:
     return " ".join(text.split())[:limit]
 
 
+@dataclass(frozen=True)
+class SearchRecord:
+    """One `web_search` call as the search trail records it (D-search-trail).
+
+    `outcome` is a closed token: `ok`, `budget_exhausted` or `error`. `results` is empty
+    unless the outcome is `ok`. The query and the URLs are run content — the writer
+    composed the one and the ranking chose the other — so a record goes to the purgeable
+    `searches/` directory and never to `events.jsonl` or a log line (RA-016).
+    """
+
+    query: str
+    outcome: str
+    results: tuple[SearchResult, ...] = ()
+
+
 def make_tool_handler(
     client: BraveSearch,
     on_results: Callable[[list[SearchResult]], None] | None = None,
+    on_search: Callable[[SearchRecord], None] | None = None,
 ) -> Callable[[str, str], str]:
     """Bind a search client into the (name, raw_arguments) -> result-text callback
     that :meth:`LLMClient.complete` drives.
@@ -295,6 +316,10 @@ def make_tool_handler(
     exactly "the URLs this writer was offered" without this module knowing what a reader
     is: a callback keeps `search -> reading` from becoming an import, and leaves the
     search-only build byte-identical (the default is None, and nothing observes).
+
+    `on_search` is notified of every query that reached the client, failed or not, as a
+    :class:`SearchRecord` (D-search-trail). It is how the run's search trail learns the
+    query text and the URLs returned without this module knowing where they are stored.
     """
 
     def handle(name: str, raw_arguments: str) -> str:
@@ -315,9 +340,14 @@ def make_tool_handler(
             # content out of the mode-0700 runs/<id>/ tree into ordinary process
             # logs. Length is enough to debug a malformed query.
             log.warning("search failed (query %d chars): %s", len(query), exc)
+            if on_search is not None:
+                outcome = "budget_exhausted" if isinstance(exc, SearchBudgetExhausted) else "error"
+                on_search(SearchRecord(query=query, outcome=outcome))
             return prompts.search_error_block(str(exc))
         if on_results is not None:
             on_results(results)
+        if on_search is not None:
+            on_search(SearchRecord(query=query, outcome="ok", results=tuple(results)))
         log.info(
             "search returned %d results (query %d chars, %d/%s budget used)",
             len(results), len(query), client.budget.used,
