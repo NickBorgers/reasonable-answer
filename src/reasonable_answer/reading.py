@@ -10,10 +10,11 @@ matching were therefore unavailable at the one moment they decide what the repor
 This module closes that gap and nothing wider. Four properties are load-bearing:
 
 1. **No arbitrary-URL reader.** `read_source` accepts only a URL that a `web_search`
-   result *in the same writer call* listed, or — on a revision — a URL the `## Sources`
-   of the draft being revised lists (D-writer-rereads-cited-sources). The allowlist is the
-   :class:`ReadSession`, which is created per `complete()` call and thrown away with
-   it — see the class docstring for why per-call rather than per-run.
+   result *in the same writer call* listed, a result an earlier failed attempt at the same
+   draft was handed on (D-failed-attempt-search-carry), or — on a revision — a URL the
+   `## Sources` of the draft being revised lists (D-writer-rereads-cited-sources). The
+   allowlist is the :class:`ReadSession`, which is created per `complete()` call and thrown
+   away with it — see the class docstring for why per-call rather than per-run.
 2. **One egress path.** Every byte still leaves through `fetch.SourceFetcher`, hence
    through `fetch.http_get`'s bounded http(s)-only opener, and the run-lifetime fetch
    cache is shared with source verification so a page read here is not downloaded
@@ -130,15 +131,22 @@ class ReadSession:
     by searching. Per-call is the tighter of the two and is the one that matches what
     the tool description promises the model.
 
-    "Per call" is meant literally, and the case that makes it bite is `_generate`'s
-    retry loop rather than the next round: a failed or empty completion rotates to the
-    **next model in the pool**, so a session shared across attempts would hand writer B
-    what writer A's search found, and would have `support.check` rule on bodies B never
-    saw. The construction therefore lives inside that loop.
+    "Per call" is meant literally for bodies: a failed or empty completion rotates to the
+    **next model in the pool**, and a session shared across attempts would have
+    `support.check` rule on bodies B never saw. The construction therefore lives inside
+    `_generate`'s retry loop.
 
     The read log is the other half of the job: :mod:`.support` needs the bodies this
     writer actually saw in order to check its support spans against them, and the
     session is the only place that knows.
+
+    The one thing that does cross attempts is `carried` (D-failed-attempt-search-carry): the
+    search results an earlier attempt of the *same generation* was given and did not turn
+    into a shipped draft. They are third-party result records only, never the earlier
+    model's queries, reads or words, and they are admitted to the allowlist so the next
+    attempt can read what the run already paid to find. Bodies are never carried: a carried
+    URL is read afresh by this session, so `support.check` still rules only on bodies this
+    writer saw.
 
     `cited` seeds a second, separate set: the URLs the draft under revision lists in its
     `## Sources` (D-writer-rereads-cited-sources). It is a function of the draft, which
@@ -153,9 +161,15 @@ class ReadSession:
     `support.check` and the manifest pass work from exactly that.
     """
 
-    def __init__(self, cited: Iterable[str] = ()) -> None:
+    def __init__(self, cited: Iterable[str] = (), carried: Iterable = ()) -> None:
         self._offered: set[str] = set()
+        #: Every result this call's own searches returned, first sighting per URL, in
+        #: order — what a later attempt may be handed (D-failed-attempt-search-carry).
+        self._results: dict[str, object] = {}
         self._cited: frozenset[str] = frozenset(url for url in cited if url)
+        self._carried: frozenset[str] = frozenset(
+            url for url in (getattr(r, "url", "") for r in carried) if url
+        )
         self._read: dict[str, FetchedSource] = {}
         self._cards: dict[str, Card] = {}
         self._tally = CardTally()
@@ -168,6 +182,7 @@ class ReadSession:
                 url = getattr(result, "url", "")
                 if url:
                     self._offered.add(url)
+                    self._results.setdefault(url, result)
 
     def offered(self, url: str) -> bool:
         with self._lock:
@@ -184,7 +199,11 @@ class ReadSession:
         cleaned = _clean_url(url)
         with self._lock:
             for candidate in (url, cleaned):
-                if candidate in self._offered or candidate in self._cited:
+                if (
+                    candidate in self._offered
+                    or candidate in self._cited
+                    or candidate in self._carried
+                ):
                     return candidate
         return None
 
@@ -236,6 +255,17 @@ class ReadSession:
     @property
     def cited_count(self) -> int:
         return len(self._cited)
+
+    @property
+    def results(self) -> list:
+        """This call's own search results, one per URL, in the order first returned."""
+        with self._lock:
+            return list(self._results.values())
+
+    @property
+    def carried_count(self) -> int:
+        """How many result URLs this session was handed from earlier attempts."""
+        return len(self._carried)
 
 
 class SourceReader:
