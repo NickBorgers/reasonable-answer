@@ -253,6 +253,18 @@ def test_shrink_min_overlap_accepts_the_upper_boundary():
     assert ReviewConfig(shrink_min_overlap=1.0).shrink_min_overlap == 1.0
 
 
+@pytest.mark.parametrize("overlap", [0, 11, -1])
+def test_an_out_of_range_absence_min_overlap_fails_closed(overlap):
+    """D-absence-claim-check: 0 would back every absence claim with any query at all."""
+    with pytest.raises(ValidationError):
+        ReviewConfig(absence_min_overlap=overlap)
+
+
+@pytest.mark.parametrize("overlap", [1, 10])
+def test_absence_min_overlap_accepts_both_boundaries(overlap):
+    assert ReviewConfig(absence_min_overlap=overlap).absence_min_overlap == overlap
+
+
 def test_selection_defaults_to_the_rule_the_system_always_had():
     """The code default is `fewest_defects`; `latest_unblocked` is opt-in
     (D-latest-unblocked-selection) because its warrant is operator observation, not a

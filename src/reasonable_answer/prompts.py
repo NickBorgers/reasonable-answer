@@ -374,10 +374,15 @@ def carried_results_block(results: list) -> str:
     )
 
 
+#: How every failed-search tool result begins, so a caller can tell a search that ran from
+#: one that did not without parsing the message (D-absence-claim-check).
+SEARCH_FAILED = "SEARCH FAILED"
+
+
 def search_error_block(message: str) -> str:
     """A failed search, reported to the model as a fact rather than as silence."""
     return (
-        f"SEARCH FAILED: {message}\n\n"
+        f"{SEARCH_FAILED}: {message}\n\n"
         "You did not receive results. Do not invent sources to compensate. Weaken any "
         "claim you cannot support and state plainly that the support is missing."
     )
