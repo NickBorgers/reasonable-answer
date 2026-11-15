@@ -326,8 +326,11 @@ receives the report's own bounded sentence and fixed wording, and the repair tur
 D-absence-claim-check applies them to claims that evidence is missing: its detector is a fixed phrase
 list and its backing test a deterministic word overlap with the queries the drafting call ran, and its
 `uncited_claim` is minted at the category's `major` floor (QP1); the writer receives the report's own
-bounded sentence and fixed wording, never query text or critic prose (QP5); and only a search that
-actually ran — not a refused one, and not the writer's say-so — backs the claim (QP10).
+bounded sentence and fixed wording, never query text or critic prose (QP5). It does not touch QP10:
+backing is procedural — evidence that a search ran, not the writer's say-so and not a refused query —
+and is never treated as verification that the absence is true. No fetched text is read, and an
+absence claim that passes, or is left unchecked once the query budget is spent, has exactly the
+unverified status every absence claim had before.
 D-writer-must-read applies the same boundary before accepting a draft. Its unread predicate and
 retry/accept routing use only the deterministic read outcome and run read log (QP1); the retry adds
 only a fixed nudge to a fresh writer call and carries neither the rejected draft nor another model's

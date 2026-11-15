@@ -1,17 +1,27 @@
 ## D-absence-claim-check — a claim that the evidence is missing must rest on a search for it
 
-**The finding.** A production run was `accepted` with a report saying that "no source reviewed
-here" measured the thing the question asked about. That evidence exists and is easy to find. The
-writers that shipped those drafts ran no search on that topic, and no critic could object: critics
-have no search tool, so to every lens an absence claim looks like a modest, well-hedged sentence.
-That observation is the motivation. The warrant is the mechanism, which is checkable in this
-repository:
+**The gap.** Every premise here is checkable in this repository:
 
-- `WRITER_SEARCH_ADDENDUM` already tells the writer to search before writing "no source addresses
-  this" or "this has not been studied". Nothing enforces it.
+- `WRITER_SEARCH_ADDENDUM` in `prompts.py` tells the writer to search before writing "no source
+  addresses this" or "this has not been studied". No code checks whether it did.
 - D-no-draft-history's instruction tells a writer to state a gap "as a fact about the sources ('no
   source reviewed here reports ...')", which invites exactly this shape of sentence.
-- No mechanical check reads a sentence for what it says is *absent*, and no critic can test one.
+- Critics hold no search tool (docs/isolation.md gives `web_search` to writers only), so no lens can
+  itself test whether a search would have found what a sentence says is missing.
+- Before this decision, no mechanical check read a sentence for what it says is *absent*.
+
+So a writer's instruction to search before asserting absence had no enforcement at any stage.
+
+**What this check establishes, and what it does not.** It establishes one thing: that the writer
+whose call produced (or first kept) an absence sentence ran a search on its topic, which the prompt
+already required. It does **not** establish that the absence is true. No fetched text is read, the
+search results are not inspected, and a search that returned relevant evidence the writer then
+ignored still backs the claim. Verification of what a source says remains, as before, the job of
+fetched text on the evidence lens and the claim check (QP10); an absence claim that passes this
+check is no more verified than any other uncited sentence a critic reads on its face. The check
+adds an obligation the pipeline previously did not enforce at all; it relaxes nothing that was
+enforced before. In particular, its suppression once the query budget is spent (point 4) returns
+an absence claim to exactly the status it had before this decision, not to a verified one.
 
 **Decision.** Effective while `search.enabled` and `review.absence_check` (default true) are both on.
 
@@ -27,7 +37,7 @@ repository:
    - *gap in the literature*, and *lack / absence / dearth of … data / evidence / research*.
 
    It is a matching rule, not a judgement.
-2. **Backing: a search the writer ran on the topic.** Each `ReadSession` keeps, in memory only, the
+2. **Backing: a search the writer ran on the topic (procedural, not evidential).** Each `ReadSession` keeps, in memory only, the
    queries its call ran. A query counts only when the tool result was not a `SEARCH FAILED` block,
    so a refused query does not count. When `generate` ships a draft, an absence sentence is
    *backed* if one of the drafting call's queries shares at least `review.absence_min_overlap`
@@ -38,7 +48,8 @@ repository:
    `State.absence_backed`, and it carries to later drafts while the sentence survives verbatim.
    A later writer need not re-search a claim an earlier one checked. An edited sentence is a new
    claim. The repair turn has no tools, so a sentence the repair introduces is unbacked unless it
-   was backed before.
+   was backed before. A seeded report has no drafting call, so its absence sentences are unbacked
+   on the first review and flagged until a writer revises them: the error is toward the finding.
 3. **The finding.** The evidence result of every completed review gains one pipeline-minted
    `uncited_claim` at its `major` floor per paragraph that holds an unbacked absence sentence. The
    finding is anchored on that sentence. Its rationale and instruction are fixed wording: search for
@@ -49,7 +60,9 @@ repository:
    a no-op.
 4. **Suppressed once the query budget is spent.** Searching could then no longer discharge it, and
    a finding that only deletion can clear is the shrink-to-pass the read-budget gates already
-   refuse to teach.
+   refuse to teach. Suppression is not backing: the claim is simply unchecked by this mechanism, as
+   every absence claim was before it. With the shipped default (`query_budget` unbounded,
+   D-unbounded-evidence) the budget is never spent and this path does not occur.
 5. **Measurement.** `generate` carries `absence_claims` and `absence_unbacked` for the shipped
    draft. Once per draft, an `absence_check` event records `absence_claims`, `absence_backed` and
    `absence_findings`. All are integers (RA-016). The queries themselves are never written by this
@@ -77,9 +90,11 @@ writer's queries are read from its own call's session and never cross to another
 narrowing to "the sources cited here do not measure X" discharges the finding without a search. That
 is an honest, scoped statement and the intended exit. (2) A query that shares two topic words with
 the claim backs it even if it was a poor search. A record of the query text, where one is kept,
-is what lets a human judge that. (3) A source that *reports* an absence ("the review found no
-evidence of harm [3]") matches too. It is usually backed, because the writer searched to find that
-source.
+is what lets a human judge that. (3) A sentence reporting a source's own finding of absence ("the review
+found no evidence of harm [3]") matches too; the writer clears it by the same search, or by
+narrowing. (4) The suppression in point 4 reads the run's live query budget, as the read-budget
+gates read theirs, so two critiques of one draft could in principle disagree if the budget is spent
+between them.
 
 **Rollback.** `review.absence_check: false` removes the finding, the event and the `generate`
 fields.

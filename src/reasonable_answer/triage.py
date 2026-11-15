@@ -1111,7 +1111,6 @@ def mechanical_draft_history_issues(
     return issues
 
 
-
 # ------------------------------------------------------------------ absence claims
 #: Nouns that name evidence. "No <noun>" and "none of the <noun>" are absence claims: they
 #: say the evidence does not cover something. Kept to words that are not also common verbs

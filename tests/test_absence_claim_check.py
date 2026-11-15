@@ -9,7 +9,7 @@ from fakes import FakeClient
 
 from reasonable_answer import report as report_mod
 from reasonable_answer import triage
-from reasonable_answer.graph import Runtime, _critique, _generate
+from reasonable_answer.graph import Runtime, _critique, _generate, _query_of
 from reasonable_answer.schemas import CritiqueOutput
 from reasonable_answer.search import QueryBudget, SearchError, SearchResult
 from reasonable_answer.store import RunStore
@@ -44,6 +44,7 @@ def _body(sentence):
         "There is no evidence that rent control lowers ownership.",
         "No published study has examined this population.",
         "None of the sources reports tract-level figures.",
+        "Neither of the two studies measured rents.",
         "This question has not been studied directly.",
         "The effect has never yet been systematically measured.",
         "Investor ownership remains largely unmeasured.",
@@ -63,6 +64,10 @@ def test_absence_claims_are_detected(sentence):
     [
         "No fewer than three studies report the gap [1].",
         "It is by no means the only study of the question [2].",
+        "No more than two surveys cover the region [1].",
+        "No less than half the data come from one census [1].",
+        "No matter which study is used, the gap persists [1].",
+        "No doubt the report overstates the effect [2].",
         "The bureau no longer reports the series annually [1].",
         "Ownership fell by four points between 2000 and 2020 [1].",
         "No one disputes that incomes matter.",
@@ -196,6 +201,23 @@ def test_backing_carries_forward_while_the_sentence_survives(tmp_path, identitie
     out = _generate({"question": "q?", "round": 1, "report": REPORT, "absence_backed": prior}, rt)
     assert out["absence_backed"] == prior
     assert _events(rt, "generate")[-1]["absence_unbacked"] == 0
+
+
+def test_an_edited_sentence_is_a_new_claim_and_loses_its_backing(tmp_path, identities, config):
+    """Backing is keyed on the sentence's normalised text: a draft that rewords a backed
+    absence claim must back the new wording with a search of its own."""
+    rt = _runtime(tmp_path, identities, config, None)
+    edited = "No source reviewed here measures tract-level ownership by income."
+    rt.client.report_fn = lambda n: REPORT.replace(ABSENT, edited)
+    prior = [triage.absence_key(ABSENT)]
+    out = _generate({"question": "q?", "round": 1, "report": REPORT, "absence_backed": prior}, rt)
+    assert out["absence_backed"] == []
+    assert _events(rt, "generate")[-1]["absence_unbacked"] == 1
+
+
+@pytest.mark.parametrize("raw", ["not json", "[]", "", '{"query": 3}', '{"query": "  x  "}'])
+def test_query_parsing_is_total(raw):
+    assert _query_of(raw) in ("", "3", "x")
 
 
 def test_the_finding_is_suppressed_once_the_query_budget_is_spent(tmp_path, identities, config):

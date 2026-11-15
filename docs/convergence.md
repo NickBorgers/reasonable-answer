@@ -379,7 +379,8 @@ literature*, *a lack of data* — mints one `uncited_claim`/`major`, anchored on
 the sentence is backed. A sentence is backed when a `web_search` the drafting call ran (and that was
 not refused) shares at least `review.absence_min_overlap` topic words with it (stop words and absence
 vocabulary removed, plurals folded), or when it was backed in an earlier draft and survives verbatim
-(`State.absence_backed`). It is dischargeable in the report — search the topic, remove the sentence, or
+(`State.absence_backed`). Backing is procedural: it shows the writer searched the topic, as the prompt
+already required, and never that the absence is true; no fetched text is read. It is dischargeable in the report — search the topic, remove the sentence, or
 narrow it to the sources cited — and is suppressed once the query budget is spent, when searching
 could no longer discharge it. Critics hold no search tool and gain none: the writer that holds one is
 asked to search. `generate` carries `absence_claims` and `absence_unbacked`; an `absence_check` event
