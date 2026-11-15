@@ -335,21 +335,42 @@ def search_results_block(query: str, results: list) -> str:
     attacker-influenceable ranking, entering a writer's context. It gets the same
     fence and the same explicit note as every other untrusted input (RA-010).
     """
-    if not results:
-        body = "(no results)"
-    else:
-        body = "\n\n".join(
-            f"[{i}] {r.title}\n"
-            f"URL: {r.url}\n"
-            + (f"Date: {r.age}\n" if r.age else "")
-            + f"Snippet: {r.description}"
-            for i, r in enumerate(results, 1)
-        )
+    body = _result_lines(results) if results else "(no results)"
     return (
         f"{UNTRUSTED_NOTE}\n\n"
         f"SEARCH RESULTS for query: {query!r}\n"
         f"{DATA_FENCE}\n{_neutralized(body)}\n{DATA_END}\n\n"
         "Cite only URLs listed above, exactly as written."
+    )
+
+
+def _result_lines(results: list) -> str:
+    return "\n\n".join(
+        f"[{i}] {r.title}\n"
+        f"URL: {r.url}\n"
+        + (f"Date: {r.age}\n" if r.age else "")
+        + f"Snippet: {r.description}"
+        for i, r in enumerate(results, 1)
+    )
+
+
+def carried_results_block(results: list) -> str:
+    """Search results an earlier, unfinished attempt at this same draft was given
+    (D-failed-attempt-search-carry), appended to the next attempt's user prompt.
+
+    The same fence and note as a live result (RA-010): these are the same third-party
+    records, merely retrieved one attempt earlier. No query is shown — a query is the
+    earlier model's words — and nothing says which model it was or why it failed. The
+    wording is fixed; only the fenced records vary.
+    """
+    return (
+        f"\n\n{UNTRUSTED_NOTE}\n\n"
+        "SEARCH RESULTS ALREADY RETRIEVED for this draft. An earlier attempt at this draft "
+        "ran these searches and did not finish; the searches are spent. You may read_source "
+        "any URL listed here and cite it exactly as you would a result of your own search. "
+        "Search only for what these do not cover.\n"
+        f"{DATA_FENCE}\n{_neutralized(_result_lines(results))}\n{DATA_END}\n\n"
+        "Cite only URLs listed in search results, exactly as written."
     )
 
 
