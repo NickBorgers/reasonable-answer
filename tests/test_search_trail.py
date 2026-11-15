@@ -173,3 +173,59 @@ def test_an_unreadable_line_is_skipped_not_raised(tmp_path):
         fh.write('{"query": "partial')
     store.search(2, {"query": "b"})
     assert [r["query"] for r in read_searches(tmp_path, "run-x")] == ["a", "b"]
+
+
+# ------------------------------------------------------------------- fail-open and held drafts
+
+
+def test_a_trail_write_failure_never_fails_the_writer_call(
+    tmp_path, identities, config, caplog, monkeypatch
+):
+    """D-search-trail residual (3): a full disk drops the trail line with a WARNING; the
+    attempt completes, its `queries` count still includes the call, nothing aborts."""
+    rt, _ = _runtime(tmp_path, identities, config)
+
+    def full_disk(round_no, record):
+        raise OSError("No space left on device")
+
+    monkeypatch.setattr(rt.store, "search", full_disk)
+    caplog.set_level(logging.WARNING)
+    out = _generate({"question": "q?", "round": 0}, rt)
+
+    assert out["report"] and not out.get("fatal")
+    assert "search trail write failed: OSError" in caplog.text
+    assert QUERY not in caplog.text
+    assert _events(rt, "generate")[-1]["queries"] == 1
+    assert _events(rt, "generate_failed") == []
+
+
+def test_a_held_draft_that_ships_reports_its_own_query_count(tmp_path, identities, config):
+    """The held-draft acceptance path (D-writer-must-read, D-writer-rotation-pool): attempt 1
+    drafts without reading after two searches and is held; attempts 2 and 3 search three
+    times and once and come back empty; the held draft ships. Its `generate` event must
+    carry the held attempt's own count, not the last failed attempt's."""
+    from test_read_before_citing import _runtime as _read_runtime
+
+    rt, draft = _read_runtime(tmp_path, identities, config, read=True, verify=True)
+    scripts = [
+        [("web_search", '{"query": "a"}'), ("web_search", '{"query": "b"}')],
+        [("web_search", '{"query": "c"}')] * 3,
+        [("web_search", '{"query": "d"}')],
+    ]
+    calls = {"n": 0}
+
+    def script(alias):
+        i = min(calls["n"], len(scripts) - 1)
+        calls["n"] += 1
+        return scripts[i]
+
+    rt.client.tool_script = script
+    rt.client.report_fn = lambda n: draft if n == 1 else ""
+    out = _generate({"question": "q?", "round": 0}, rt)
+
+    assert out["report"] and not out.get("fatal")
+    assert [e["queries"] for e in _events(rt, "generate_failed")] == [2, 3, 1]
+    gen = _events(rt, "generate")[-1]
+    assert gen["unread_accepted"] == 1
+    assert gen["queries"] == 2
+    assert [r["attempt"] for r in read_searches(tmp_path, "run-rbc")] == [1, 1, 2, 2, 2, 3]

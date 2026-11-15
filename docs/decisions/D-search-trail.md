@@ -56,8 +56,9 @@ untrusted-text boundary are untouched. The search results a writer sees are unch
 served on a public route; the drafts that revise the seed are, so this is the same material at
 the same credential. An owner who wants seeds strictly private should not share run ids. (2) A
 resumed generation appends a second set of lines for the round it re-runs; `ts` and `attempt` tell
-them apart. (3) A full disk drops a trail line with a WARNING (exception type only) rather than
-failing the writer's call.
+them apart. (3) A full disk, or any other failure to write one line, drops that trail line with a
+WARNING (exception type only) rather than failing the writer's call; the attempt's `queries`
+count still includes it.
 
 **Rollback.** Remove the `searches` key from `audit.json` to stop serving it; the on-disk trail is
 retained under the ordinary content retention.

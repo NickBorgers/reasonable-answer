@@ -1061,8 +1061,9 @@ class _SearchTrail:
                     "results": [{"url": r.url, "title": r.title} for r in record.results],
                 },
             )
-        except OSError as exc:
-            # The trail is an audit aid; a full disk must not fail the writer's call.
+        except Exception as exc:  # noqa: BLE001 - the trail must never fail a writer call
+            # The trail is an audit aid; a full disk, or anything else that stops one line
+            # being written, must not fail the writer's call. Exception type only (RA-016).
             log.warning("search trail write failed: %s", type(exc).__name__)
 
 
