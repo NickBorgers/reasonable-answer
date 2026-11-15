@@ -100,6 +100,8 @@ A run belongs to whoever submitted it, recorded in `runs/<run-id>/owner.txt`.
 - The index lists **only your own** runs.
 - **Anyone** who has a run id can open that run, its report and its `audit.json` —
   signed in or not (D-id-as-credential). Sharing a link is the intended way to show someone a report.
+  `audit.json` includes the writers' search queries and the URLs they returned (D-search-trail):
+  run content at the same exposure as the report, emptied by a content purge.
 - **No public route names a person.** No byline on the run page, no `owner` in
   `audit.json`: a shared link reaches strangers, and the owner's address is not evidence
   about the run.

@@ -824,6 +824,11 @@ def create_app(
         `owner` is the one field held back: it is an email address, it is not evidence
         about the run, and a link shared with a stranger should not hand them the
         sender's address. Nothing else here names a person.
+
+        `searches` is the writer search trail (D-search-trail): query text and the URLs
+        returned. It is content, read from the purgeable `searches/` directory, so it is
+        served at the same exposure as the report this route's siblings already serve, and
+        it empties when the run's content is purged. `events` never carries it (RA-016).
         """
         _require(registry, worker, run_id)
         summary = dict(registry.summary(run_id, worker.active()).__dict__)
@@ -832,6 +837,7 @@ def create_app(
             "summary": summary,
             "final": registry.final(run_id),
             "events": list(registry.events(run_id)),
+            "searches": registry.searches(run_id),
         }
 
     @app.get("/healthz", response_class=PlainTextResponse)

@@ -128,8 +128,10 @@ https://reasonable-answer.nickborgers.net/runs/<run-id>/audit.json
 
 No sign-in, no header, no token — holding the run id is the credential
 ([D-id-as-credential](./authentication.md#sharing-a-run-publicly)). `audit.json` carries
-`summary.status`, the full `events` list, and `summary.build.commit`, the canonical final-build
-attribution. The audit's `final.build` and stamped events also carry build identities; for a run
+`summary.status`, the full `events` list, `summary.build.commit`, the canonical final-build
+attribution, and `searches` — every writer `web_search` call with its query, outcome, returned URLs
+and titles, round, writer alias and attempt, failed attempts included (D-search-trail). `searches`
+is content and empties when the run's content is purged; the event list never carries it. The audit's `final.build` and stamped events also carry build identities; for a run
 resumed across a deploy, use the `startup` event for the attempt in question as described above.
 The logs carry the run id; they do not carry the commit — do not go looking for it there.
 
