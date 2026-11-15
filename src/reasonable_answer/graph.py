@@ -1070,9 +1070,12 @@ def _generate(state: State, rt: Runtime) -> dict:
     # legitimate next writer, and on a roster degraded to one writer it is the only one.
     # The draft's cited URLs, readable on this revision (D-writer-rereads-cited-sources).
     # Computed once, from state, outside the retry loop: it is a function of the draft every
-    # attempt already holds, so it carries nothing from one attempt to another. What must
-    # never carry — one attempt's search results — still lives in the per-attempt session.
+    # attempt already holds, so it carries nothing from one attempt to another.
     cited_seed = _cited_seed(rt, previous)
+    # Search results an unfinished attempt was given, handed to the next attempt of this
+    # generation so a failure does not waste what the run's budget paid for
+    # (D-failed-attempt-search-carry). Result records only — no query, no read, no draft.
+    carried: list = []
 
     attempts = cfg.budgets.writer_attempts
     alias = ""
@@ -1104,11 +1107,12 @@ def _generate(state: State, rt: Runtime) -> dict:
         stay = False
         # A fresh session per `complete()` call, inside the loop rather than outside it,
         # because each attempt is a *different model* from the pool. Hoisting this would
-        # let a retry read a page the failed attempt's search found, and would let the
-        # support manifest be checked against bodies the drafting model never saw — the
-        # cross-context affordance the per-call allowlist exists to refuse
-        # (D-writer-source-reads, principle #6).
-        session = reading.ReadSession(cited=cited_seed)
+        # let the support manifest be checked against bodies the drafting model never saw
+        # (D-writer-source-reads, principle #6). What does cross attempts is `carried`: the
+        # result records earlier attempts were given, never their reads, queries or drafts
+        # (D-failed-attempt-search-carry).
+        session = reading.ReadSession(cited=cited_seed, carried=carried)
+        prompt = user + prompts.carried_results_block(carried) if carried else user
         search_kwargs = _retrieval_kwargs(
             rt, session, alias=alias, question=state["question"], run_date=run_date
         )
@@ -1123,7 +1127,7 @@ def _generate(state: State, rt: Runtime) -> dict:
                         read_first=_read_first(rt),
                         cards=rt.cards_enabled,
                     ),
-                    user=user + _NUDGES[nudge] if nudge else user,
+                    user=prompt + _NUDGES[nudge] if nudge else prompt,
                     max_tokens=32000,
                     # A draft on a slow host can generate for many minutes; cutting it at the
                     # shared default discards the work and bills it anyway (D-role-call-timeouts).
@@ -1199,6 +1203,7 @@ def _generate(state: State, rt: Runtime) -> dict:
             failure_class=failure_class,
         )
         log.warning("writer attempt %d/%d: %s", offset + 1, attempts, last_failure)
+        carried = _carry(carried, session, cfg.search.carry_max_results)
         if not stay:
             pos += 1
             nudge = None
@@ -1314,6 +1319,9 @@ def _generate(state: State, rt: Runtime) -> dict:
         tokens=completion.completion_tokens,
         # Auditable after the fact: did this draft's citations come from a lookup?
         searches=completion.tool_calls,
+        # Search results this draft's call was handed from unfinished attempts of the same
+        # generation (D-failed-attempt-search-carry). An integer; the URLs are content.
+        carried_results=session.carried_count,
         # And the deeper version of the same question: did it read any of them?
         # Counts only — a URL is content and events.jsonl outlives a content purge.
         **_read_fields(session),
@@ -1374,6 +1382,27 @@ def _generate(state: State, rt: Runtime) -> dict:
         "confirming": False,
         "pending_disputes": pending_disputes,
     }
+
+
+def _carry(carried: list, session: reading.ReadSession, limit: int) -> list:
+    """`carried` plus the results `session`'s own searches returned, one per URL, earliest
+    first, at most `limit` (D-failed-attempt-search-carry).
+
+    Earliest first because the cap has to drop something and the first attempt's results
+    answered the first, broadest searches. Called after every attempt that did not ship,
+    so a chain of failures accumulates rather than each forgetting the last.
+    """
+    if limit <= 0:
+        return []
+    out = list(carried)
+    seen = {r.url for r in out}
+    for result in session.results:
+        if len(out) >= limit:
+            break
+        if result.url not in seen:
+            seen.add(result.url)
+            out.append(result)
+    return out[:limit]
 
 
 def _citation_fields(

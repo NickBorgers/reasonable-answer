@@ -270,7 +270,9 @@ well-formed/resolvable in format.
   memory — and no downstream check distinguishes that from a retrieved citation.
 
 * **`search.read_sources: true`** (D-writer-source-reads, requires `enabled`) — the writer also
-  holds `read_source` and may open a page **its own** searches returned, so a citation can be
+  holds `read_source` and may open a page its own searches returned, or a page whose result record
+  was carried from an unfinished attempt of the same generation (D-failed-attempt-search-carry),
+  so a citation can be
   attached to text the writer read rather than to a snippet. This does **not** move the label: a
   read page shows what a page says, not that the page is right, so the output stays
   *consensus-reviewed with retrieved sourcing*. What it changes is what the writer is entitled to
@@ -278,6 +280,9 @@ well-formed/resolvable in format.
   where `verify_sources` is also on, the writer may also open the pages the draft it revises lists
   (`search.read_cited_sources`, default on; D-writer-rereads-cited-sources), so a fix task about a
   cited claim can be worked against the page rather than the draft's paraphrase of it.
+  Carried records contain title, URL, snippet and date but no failed writer's query, draft, read or
+  failure reason; they are capped by `search.carry_max_results` and discarded when the generation
+  ends.
   With `evidence_reader.enabled` as well (D-writer-evidence-card), a read answers with an evidence
   card — passages of the page's whole retained body, each located verbatim in it — instead of the
   page's first `read_max_chars` characters. That changes what the writer sees, not the label, any

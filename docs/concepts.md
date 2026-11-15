@@ -230,7 +230,8 @@ it — each one, again, a guard against a known LLM failure mode:
 - **Reading the page, not just the snippet.** Search fixes *where* a citation came from; it does
   not fix what the writer knew when it chose the claim, because a result is a title, a URL and one
   line. `search.read_sources` gives writers a `read_source` tool bounded to URLs their own search
-  returned in the same call — or, when revising with verification on, that the draft they revise
+  returned in the same call, results an earlier failed attempt at the same draft handed on
+  (D-failed-attempt-search-carry) — or, when revising with verification on, that the draft they revise
   cites (D-writer-rereads-cited-sources) — so a claim can rest on text they read — with an optional per-run call
   cap (`search.read_budget`) and mandatory character bounds (`search.read_char_budget`,
   `search.read_max_chars`). Calls are unbounded by default; characters are not. With

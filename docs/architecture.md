@@ -387,7 +387,7 @@ Retrieval reaches the writer in two steps, each its own opt-in switch and each o
 ```mermaid
 flowchart LR
     W["writer call (one fresh context)"] --> S["web_search<br/>title · URL · snippet"]
-    S --> SES["ReadSession — the URLs THIS call was offered<br/>+ on a revision, the URLs the draft cites"]
+    S --> SES["ReadSession — the URLs THIS call was offered<br/>+ on a revision, the URLs the draft cites<br/>+ results a failed attempt at this draft was handed on"]
     SES --> R["read_source<br/>only a URL in the session"]
     R --> F["fetch.SourceFetcher → fetch.http_get<br/>(the one egress point; cache shared with verification)"]
     F --> P["prompts.source_read_block<br/>fenced untrusted page text"]
@@ -405,7 +405,10 @@ flowchart LR
 `search.read_sources` adds `read_source`, whose allowlist is `reading.ReadSession` — the URLs that
 writer call's own searches returned and, on a revision where `verify_sources` is also on, the URLs the
 draft under revision lists (`graph._cited_seed`, the same set `graph._verified_urls` hands verification;
-D-writer-rereads-cited-sources), and nothing else. The seeded URLs never appear in trusted prompt text:
+D-writer-rereads-cited-sources), plus the results an earlier attempt of the same generation was given
+and did not ship (`graph._carry`, at most `search.carry_max_results`, appended to the next attempt's
+user prompt by `prompts.carried_results_block` without the queries that found them; `generate` records
+`carried_results`; D-failed-attempt-search-carry), and nothing else. The seeded URLs never appear in trusted prompt text:
 `writer_system(..., reread=True)` and `reading.read_source_tool(True)` only point the writer at the
 fenced draft. Both tools are driven by one
 `(name, arguments) -> text` handler assembled in `graph._retrieval_kwargs`, which is where the
